@@ -898,7 +898,7 @@ export const DnsToolsPage: React.FC = () => {
                                                     : allDomains.length.toLocaleString()})
                                         </option>
                                         <option value="block">
-                                            <FontAwesomeIcon icon={faBan} /> Block Lists ({typeCounts.block.toLocaleString()})
+                                            🚫 Block Lists ({typeCounts.block.toLocaleString()})
                                         </option>
                                         <option value="allow">
                                             ✓ Allow Lists ({typeCounts.allow.toLocaleString()})

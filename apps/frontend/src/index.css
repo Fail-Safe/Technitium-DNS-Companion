@@ -7,7 +7,8 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-/* Light Mode Colors */
+
+  /* Light Mode Colors */
   --color-text-primary: #1a1f2d;
   --color-text-secondary: #5a6e8b;
   --color-text-tertiary: #8896aa;
@@ -59,12 +60,12 @@
   --color-success: #34d399;
   --color-success-bg: #064e3b;
   --color-success-text: #6ee7b7;
-    --color-warning: #fbbf24;
+  --color-warning: #fbbf24;
   --color-warning-bg: #78350f;
   --color-danger: #f87171;
   --color-danger-bg: #7f1d1d;
   --color-danger-text: #fca5a5;
-    --color-info: #60a5fa;
+  --color-info: #60a5fa;
   --color-info-bg: #1e3a8a;
 
   /* Shadows - More pronounced for dark mode */

@@ -12,14 +12,14 @@
     align-content: center;
     font-weight: 600;
     font-size: 0.9rem;
-    color: #1a1f2d;
+    color: var(--color-text-primary);
 }
 
 .domain-type-button {
     padding: 0.6rem 0.5rem;
     border-radius: 0.5rem;
-    border: 1px solid #dce3ee;
-    background: #ffffff;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-secondary);
     color: #5d6786;
     font-weight: 600;
     font-size: 0.85rem;
@@ -74,7 +74,7 @@
     margin-bottom: 0.5rem;
     font-weight: 600;
     font-size: 0.9rem;
-    color: #1a1f2d;
+    color: var(--color-text-primary);
 }
 
 .form-label--flex {
@@ -164,16 +164,16 @@
 
 /* === Domain List Card === */
 .domain-list-card {
-    background: #ffffff;
-    border: 1px solid #dce3ee;
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
     border-radius: 0.75rem;
     overflow: hidden;
 }
 
 .domain-list-card__header {
     padding: 0.75rem 1rem;
-    background: #f6f8fb;
-    border-bottom: 1px solid #dce3ee;
+    background: var(--color-bg-primary);
+    border-bottom: 1px solid var(--color-border);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -182,7 +182,7 @@
 .domain-list-card__title {
     font-weight: 600;
     font-size: 0.9rem;
-    color: #1a1f2d;
+    color: var(--color-text-primary);
 }
 
 .domain-list-card__body {
@@ -278,9 +278,9 @@
 /* === Drop Zone Container === */
 .drop-zone-container {
     padding: 0.75rem;
-    background: #f6f8fb;
+    background: var(--color-bg-primary);
     border-radius: 0.75rem;
-    border: 1px solid #dce3ee;
+    border: 1px solid var(--color-border);
 }
 
 .drop-zone-hint {
@@ -295,7 +295,7 @@
     padding: 0.25rem;
     border: 2px dashed #cfd6e4;
     border-radius: 0.75rem;
-    background: #f6f8fb;
+    background: var(--color-bg-primary);
     text-align: center;
     margin-bottom: 1rem;
     transition: all 0.2s ease;
@@ -316,7 +316,7 @@
 
 .all-groups-drop-zone__title {
     font-weight: 600;
-    color: #1a1f2d;
+    color: var(--color-text-primary);
     font-size: 0.9rem;
 }
 
@@ -341,7 +341,7 @@
     padding: 0.55rem;
     border: 1px solid #cfd6e4;
     border-radius: 0.5rem;
-    background: #ffffff;
+    background: var(--color-bg-secondary);
     transition: all 0.2s ease;
     cursor: pointer;
 }
@@ -367,7 +367,7 @@
 .group-drop-zone__name {
     font-weight: 600;
     font-size: 0.9rem;
-    color: #1a1f2d;
+    color: var(--color-text-primary);
 }
 
 .group-drop-zone__name--active {
@@ -633,7 +633,7 @@
     width: 100%;
     padding: 0.75rem;
     border-radius: 0.5rem;
-    border: 1px solid #dce3ee;
+    border: 1px solid var(--color-border);
     font-size: 1rem;
     font-family: monospace;
     margin-bottom: 1rem;

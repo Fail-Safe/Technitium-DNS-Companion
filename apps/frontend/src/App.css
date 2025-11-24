@@ -477,7 +477,7 @@ html {
   gap: 0.5rem;
   padding: 0.6rem 1rem;
   border-radius: 0.75rem;
-  color: #3a445c;
+  color: #ffffff;
   text-decoration: none;
   font-weight: 500;
   font-size: 0.95rem;
@@ -815,7 +815,7 @@ html {
 .logs-page__card {
   position: relative;
   background: var(--color-bg-secondary);
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-radius: 0.75rem;
   padding: 1.25rem;
   /* Increased padding for better mobile readability */
@@ -4850,7 +4850,7 @@ button.danger:disabled {
   margin-top: 0.25rem;
   white-space: nowrap;
   z-index: 10;
-  background: white;
+  background: var(--color-bg-secondary);
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
   box-shadow: 0 2px 4px rgba(220, 53, 69, 0.2);
@@ -4978,13 +4978,13 @@ button.danger:disabled {
 }
 
 .mapping-editor__view-btn--active {
-  background: white;
+  background: var(--color-bg-secondary);
   color: #6366f1;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .mapping-editor__view-btn--active:hover {
-  background: white;
+  background: var(--color-bg-secondary);
   color: #6366f1;
 }
 
@@ -5448,7 +5448,7 @@ button.danger:disabled {
   justify-content: space-between;
   gap: 1rem;
   align-items: center;
-  background: white;
+  background: var(--color-bg-secondary);
   border-top: 1px solid var(--color-border);
   padding: 1rem 2rem;
   margin-top: 2rem;
@@ -5502,7 +5502,7 @@ button.danger:disabled {
   justify-content: space-between;
   gap: 1rem;
   align-items: center;
-  background: white;
+  background: var(--color-bg-secondary);
   border-top: 1px solid var(--color-border);
   padding: 1rem 2rem;
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
@@ -5587,7 +5587,7 @@ button.danger:disabled {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background: white;
+  background: var(--color-bg-secondary);
   border-radius: 0.375rem;
   font-size: 0.875rem;
   border-left: 3px solid transparent;
@@ -7725,7 +7725,7 @@ button.danger:disabled {
 .multi-group-editor__dialog-url-item {
   padding: 0.5rem;
   background: #f8f9fb;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
   border-radius: 0.375rem;
   margin-bottom: 0.5rem;
   font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
@@ -8629,7 +8629,7 @@ button.danger:disabled {
   padding: 0.5rem;
   background: #f9fafb;
   border-radius: 0.375rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--color-border);
 }
 
 .sync-view__setting-label {
@@ -9708,7 +9708,7 @@ button.danger:disabled {
 .dhcp-bulk-sync-inline__preview-item {
   display: flex;
   flex-direction: column;
-  background: white;
+  background: var(--color-bg-secondary);
   border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 6px;
   overflow: hidden;
@@ -9865,7 +9865,7 @@ button.danger:disabled {
 
 .dhcp-bulk-sync-inline__preview-expanded-note {
   padding: 0.5rem 0.75rem;
-  background: white;
+  background: var(--color-bg-secondary);
   border-radius: 4px;
   font-size: 0.8125rem;
 }
@@ -10136,7 +10136,7 @@ button.danger:disabled {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background: white;
+  background: var(--color-bg-secondary);
   border: 1px solid #e9ecef;
   border-radius: 0.375rem;
   font-size: 0.875rem;
