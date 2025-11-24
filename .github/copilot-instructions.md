@@ -232,7 +232,7 @@ npm run preview       # Preview production build
 
 ## Non-negotiables
 
-- Must be mobile-friendly and responsive. I want to be able to manage my Technitium DNS servers from my phone.
+- Must be mobile-friendly and responsive. Users should be able to manage their Technitium DNS servers from their phones.
 - Must support multiple Technitium DNS servers.
 - Must be able to show domain queries and statuses per Technitium DNS server and in aggregate (if possible, as an option)
 - Must be able to choose to which Advanced Blocking groups a domain is added when blacklisting a domain.

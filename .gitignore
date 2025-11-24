@@ -48,6 +48,7 @@ reports/*.json
 
 # Personal development files
 scripts/remote-dev.sh
+NEXT_STEPS.md
 docker-compose.dev.yml
 docker-entrypoint-dev.sh
 Dockerfile.dev
