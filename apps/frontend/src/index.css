@@ -23,10 +23,12 @@
   --color-primary-light: #e8edff;
   --color-success: #10b981;
   --color-success-bg: #d1fae5;
+  --color-success-text: #166534;
   --color-warning: #f59e0b;
   --color-warning-bg: #fef3c7;
   --color-danger: #ef4444;
   --color-danger-bg: #fee2e2;
+  --color-danger-text: #991b1b;
   --color-info: #3b82f6;
   --color-info-bg: #dbeafe;
 
@@ -54,13 +56,15 @@
   --color-primary: #4f6bff;
   --color-primary-hover: #6b82ff;
   --color-primary-light: #1e293b;
-  --color-success: #10b981;
+  --color-success: #34d399;
   --color-success-bg: #064e3b;
-  --color-warning: #f59e0b;
+  --color-success-text: #6ee7b7;
+    --color-warning: #fbbf24;
   --color-warning-bg: #78350f;
-  --color-danger: #ef4444;
+  --color-danger: #f87171;
   --color-danger-bg: #7f1d1d;
-  --color-info: #3b82f6;
+  --color-danger-text: #fca5a5;
+    --color-info: #60a5fa;
   --color-info-bg: #1e3a8a;
 
   /* Shadows - More pronounced for dark mode */

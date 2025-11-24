@@ -31,27 +31,27 @@
 }
 
 .domain-type-button--blocked.domain-type-button--active {
-    border-color: #f2dede;
-    background: #f2dede;
-    color: #a94442;
+    border-color: var(--color-danger);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
 }
 
 .domain-type-button--allowed.domain-type-button--active {
-    border-color: #dff0d8;
-    background: #dff0d8;
-    color: #3c763d;
+    border-color: var(--color-success);
+    background: var(--color-success-bg);
+    color: var(--color-success);
 }
 
 .domain-type-button--blocked-regex.domain-type-button--active {
-    border-color: #f2dede;
-    background: #f2dede;
-    color: #a94442;
+    border-color: var(--color-danger);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
 }
 
 .domain-type-button--allowed-regex.domain-type-button--active {
-    border-color: #dff0d8;
-    background: #dff0d8;
-    color: #3c763d;
+    border-color: var(--color-success);
+    background: var(--color-success-bg);
+    color: var(--color-success);
 }
 
 /* === Domain Management Layout === */
@@ -134,15 +134,15 @@
 }
 
 .domain-pill--blocked {
-    background: #f2dede;
-    color: #a94442;
-    border-color: #a94442;
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    border-color: var(--color-danger);
 }
 
 .domain-pill--allowed {
-    background: #dff0d8;
-    color: #3c763d;
-    border-color: #3c763d;
+    background: var(--color-success-bg);
+    color: var(--color-success);
+    border-color: var(--color-success);
 }
 
 .domain-pill--dragging {
@@ -155,11 +155,11 @@
 }
 
 .domain-pill--blocked:hover {
-    background: #ffcdcd;
+    filter: brightness(0.9);
 }
 
 .domain-pill--allowed:hover {
-    background: #c8e6c9;
+    filter: brightness(0.9);
 }
 
 /* === Domain List Card === */
@@ -244,13 +244,13 @@
 }
 
 .domain-table__domain-pill--blocked {
-    background-color: #f2dede;
-    color: #a94442;
+    background-color: var(--color-danger-bg);
+    color: var(--color-danger);
 }
 
 .domain-table__domain-pill--allowed {
-    background-color: #dff0d8;
-    color: #3c763d;
+    background-color: var(--color-success-bg);
+    color: var(--color-success);
 }
 
 /* === Icon Buttons === */
@@ -474,13 +474,13 @@
 }
 
 .group-domain-list__item--blocked {
-    color: #a94442;
-    background-color: #f2dede;
+    color: var(--color-danger);
+    background-color: var(--color-danger-bg);
 }
 
 .group-domain-list__item--allowed {
-    color: #3c763d;
-    background-color: #dff0d8;
+    color: var(--color-success);
+    background-color: var(--color-success-bg);
 }
 
 .group-domain-list__item--dragging {
@@ -494,11 +494,11 @@
 }
 
 .group-domain-list__item--blocked:hover {
-    background: #ffcdcd;
+    filter: brightness(0.9);
 }
 
 .group-domain-list__item--allowed:hover {
-    background: #c8e6c9;
+    filter: brightness(0.9);
 }
 
 /* === Status Icons === */

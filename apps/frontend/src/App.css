@@ -182,32 +182,32 @@ html {
 }
 
 .badge--success {
-  background: linear-gradient(135deg, #e8f5ee 0%, #d4eedd 100%);
-  color: #2f6f2f;
-  border: 1px solid #b8ddc4;
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border: 1px solid var(--color-success);
 }
 
 .badge--error {
-  background: linear-gradient(135deg, #fff4f4 0%, #ffe6e6 100%);
-  color: #992929;
-  border: 1px solid #f1c0c0;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
 }
 
 .badge--warning {
-  background: linear-gradient(135deg, #fff9ed 0%, #fff4e5 100%);
-  color: #8b5c00;
-  border: 1px solid #ffd9a0;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning);
 }
 
 .badge--info {
-  background: linear-gradient(135deg, #eef2fa 0%, #dce7ff 100%);
-  color: #365df3;
-  border: 1px solid #b5c1ec;
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border: 1px solid var(--color-info);
 }
 
 .badge--muted {
-  background: linear-gradient(135deg, #f6f8fb 0%, #eef1f5 100%);
-  color: #5d6786;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
 }
 
@@ -827,8 +827,9 @@ html {
 }
 
 .logs-page__card--blocked {
-  background: #fef2f2;
-  border-color: #fecaca;
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 /* Selected card color variants (10 colors for cycling) */
@@ -1039,15 +1040,15 @@ html {
 }
 
 .logs-page__card-status--logs-page__response-badge--blocked {
-  background: #fecaca;
-  border-color: #fca5a5;
-  color: #b91c1c;
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger);
+  color: var(--color-danger-text);
 }
 
 .logs-page__card-status--logs-page__response-badge--upstream-blocked {
-  background: #fed7aa;
-  border-color: #fdba74;
-  color: #9a3412;
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning);
+  color: var(--color-danger-text);
 }
 
 .logs-page__card-status--logs-page__response-badge--cache-blocked {
@@ -3337,11 +3338,21 @@ button.secondary:disabled {
 
 /* Blocked rows */
 .logs-page__row--blocked {
-  background: #fdeff1;
+  background: var(--color-danger-bg);
+}
+
+.logs-page__row--blocked td {
+  color: var(--color-danger-text) !important;
 }
 
 .logs-page__row--blocked:hover {
-  background: #f9dce3;
+  background: var(--color-danger-bg);
+  opacity: 0.9;
+}
+
+[data-theme="dark"] .logs-page__row--blocked:hover {
+  filter: brightness(1.2);
+  opacity: 1;
 }
 
 /* Selected domain rows - 10 color palette for visual differentiation */

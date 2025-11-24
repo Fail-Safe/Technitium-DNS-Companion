@@ -241,13 +241,13 @@
 }
 
 .dns-tools__badge--blocked {
-    background-color: #f2dede;
-        color: #a94442;
+    background-color: var(--color-danger-bg);
+        color: var(--color-danger);
 }
 
 .dns-tools__badge--allowed {
-    background-color: #dff0d8;
-        color: #3c763d;
+    background-color: var(--color-success-bg);
+        color: var(--color-success);
 }
 
 .dns-tools__badge--none {
