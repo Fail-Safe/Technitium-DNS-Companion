@@ -347,17 +347,17 @@ html {
   align-items: center;
   justify-content: space-between;
   padding: 1rem 2rem;
-  background: #ffffff;
-  border-bottom: 1px solid #dce3ee;
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
   position: sticky;
   top: 0;
   z-index: 100;
-  box-shadow: 0 2px 8px rgba(26, 31, 45, 0.04);
+  box-shadow: var(--shadow-sm);
   transition: box-shadow 0.3s ease;
 }
 
 .app-header:hover {
-  box-shadow: 0 4px 12px rgba(26, 31, 45, 0.08);
+  box-shadow: var(--shadow-md);
 }
 
 .app-header__brand {
@@ -366,7 +366,7 @@ html {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  color: #1a1f2d;
+  color: var(--color-text-primary);
   user-select: none;
 }
 
@@ -394,6 +394,38 @@ html {
   }
 }
 
+.app-header__controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.app-header__theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 1.1rem;
+}
+
+.app-header__theme-toggle:hover {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+  transform: scale(1.05);
+}
+
+.app-header__theme-toggle:active {
+  transform: scale(0.95);
+}
+
 .app-header__mobile-toggle {
   display: none;
   background: transparent;
@@ -413,7 +445,7 @@ html {
 .hamburger span {
   display: block;
   height: 2px;
-  background: #3a445c;
+  background: var(--color-text-secondary);
   border-radius: 2px;
   transition: all 0.3s ease;
 }
@@ -10331,36 +10363,37 @@ button.danger:disabled {
     flex-direction: column;
     align-items: stretch;
   }
-/* Fix cluster banner positioning on mobile */
-.configuration__header>div {
-  padding-right: 0;
-  /* Remove right padding on mobile */
-}
 
-/* Position badge inline with heading on mobile to save space */
-.configuration__header h1 {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
-}
+  /* Fix cluster banner positioning on mobile */
+  .configuration__header>div {
+    padding-right: 0;
+    /* Remove right padding on mobile */
+  }
 
-.configuration__header .cluster-info-badge,
-.configuration__header .cluster-info-badge-container {
-  position: static;
-  /* Remove absolute positioning on mobile */
-  margin: 0;
-  /* No extra margin - inline with heading */
-  flex-shrink: 0;
-  /* Don't shrink the badge */
-}
+  /* Position badge inline with heading on mobile to save space */
+  .configuration__header h1 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+  }
 
-/* Full banner (non-badge) should still stack below */
-.configuration__header .cluster-info-banner:not(.cluster-info-banner--dropdown) {
-  position: static;
-  margin-top: 1rem;
-  max-width: 100%;
-}
+  .configuration__header .cluster-info-badge,
+  .configuration__header .cluster-info-badge-container {
+    position: static;
+    /* Remove absolute positioning on mobile */
+    margin: 0;
+    /* No extra margin - inline with heading */
+    flex-shrink: 0;
+    /* Don't shrink the badge */
+  }
 
-/* Mobile dropdown banner positioning is handled in ClusterInfoBanner.css */
+  /* Full banner (non-badge) should still stack below */
+  .configuration__header .cluster-info-banner:not(.cluster-info-banner--dropdown) {
+    position: static;
+    margin-top: 1rem;
+    max-width: 100%;
+  }
+
+  /* Mobile dropdown banner positioning is handled in ClusterInfoBanner.css */
 }

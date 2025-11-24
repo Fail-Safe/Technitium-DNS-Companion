@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChartLine, faFileLines, faShield, faWrench, faGlobe, faPlug, faBolt } from '@fortawesome/free-solid-svg-icons';
+import { faChartLine, faFileLines, faShield, faWrench, faGlobe, faPlug, faBolt, faSun, faMoon } from '@fortawesome/free-solid-svg-icons';
+import { useTheme } from '../../context/ThemeContext';
 
 export function Header() {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const { theme, toggleTheme } = useTheme();
 
     const links = [
         { to: '/', label: 'Overview', end: true, icon: faChartLine },
@@ -21,18 +23,28 @@ export function Header() {
                 <span className="app-header__brand-icon"><FontAwesomeIcon icon={faBolt} /></span>
                 <span className="app-header__brand-text">{__APP_NAME__}</span>
             </div>
-            <button
-                className="app-header__mobile-toggle"
-                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                aria-label="Toggle navigation"
-                aria-expanded={mobileMenuOpen}
-            >
-                <span className={`hamburger ${mobileMenuOpen ? 'hamburger--open' : ''}`}>
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </span>
-            </button>
+            <div className="app-header__controls">
+                <button
+                    className="app-header__theme-toggle"
+                    onClick={toggleTheme}
+                    aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+                    title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+                >
+                    <FontAwesomeIcon icon={theme === 'light' ? faMoon : faSun} />
+                </button>
+                <button
+                    className="app-header__mobile-toggle"
+                    onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                    aria-label="Toggle navigation"
+                    aria-expanded={mobileMenuOpen}
+                >
+                    <span className={`hamburger ${mobileMenuOpen ? 'hamburger--open' : ''}`}>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </span>
+                </button>
+            </div>
             <nav className={`app-header__nav ${mobileMenuOpen ? 'app-header__nav--open' : ''}`}>
                 {links.map((link) => (
                     <NavLink
