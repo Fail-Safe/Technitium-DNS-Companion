@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+
+  <!-- Performance: Preconnect to API server -->
+  <link rel="preconnect" href="https://eq12.home-dns.com:3443" crossorigin />
+  <link rel="dns-prefetch" href="https://eq12.home-dns.com:3443" />
+
+  <!-- PWA Icons -->
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+
+  <!-- Viewport -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+
+  <!-- Theme Colors -->
+  <meta name="theme-color" content="#4F46E5" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0f172a" />
+
+  <!-- iOS Specific -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="TechSync" />
+
+  <!-- Android/Chrome -->
+  <meta name="mobile-web-app-capable" content="yes" />
+
+  <!-- App Description -->
+  <meta name="description" content="Companion for Technitium DNS Servers from your mobile device" />
+  <meta name="author" content="Technitium DNS Companion" />
+
+  <!-- Disable tap highlight on mobile -->
+  <meta name="msapplication-tap-highlight" content="no" />
+
+  <title>Technitium DNS Companion</title>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>

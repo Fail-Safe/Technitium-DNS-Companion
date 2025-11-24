@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		}
+	],
+	"settings": {
+		"sshfs.configs": [],
+		"python.analysis.include": [
+			"**/*.py"
+		],
+		"python.analysis.diagnosticMode": "openFilesOnly"
+	}
+}

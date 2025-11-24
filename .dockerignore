@@ -1,0 +1,81 @@
+# Dependencies
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Testing
+coverage
+.nyc_output
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+test/
+tests/
+__tests__/
+e2e/
+playwright-report/
+
+# Build outputs
+dist
+build
+.next
+out
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Logs
+logs
+*.log
+
+# Temporary files
+tmp/
+temp/
+.cache
+
+# Backups
+backups/
+
+# Scripts not needed in container
+scripts/
+*.sh
+!docker-entrypoint-dev.sh
+
+# Docker files (don't need inside image)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Misc
+.prettierrc
+.eslintrc*
+eslint.config.*
+.editorconfig
+.nvmrc
+tsconfig.tsbuildinfo

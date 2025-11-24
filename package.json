@@ -1,0 +1,15 @@
+{
+    "name": "technitium-dns-companion",
+    "private": true,
+    "version": "1.0.0",
+    "workspaces": [
+        "apps/backend",
+        "apps/frontend"
+    ],
+    "scripts": {
+        "lint": "npm run lint --workspaces --if-present"
+    },
+    "dependencies": {
+        "cap": "^0.2.1"
+    }
+}

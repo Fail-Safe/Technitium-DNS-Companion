@@ -1,0 +1,53 @@
+# Node.js dependencies
+node_modules
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example  # Track example files
+
+# SSL/TLS Certificates (NEVER commit certificates or private keys)
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+certs/
+ssl/
+
+# Per-workspace lockfiles (root lockfile only)
+apps/*/package-lock.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.log
+
+# Build output
+/dist
+/build
+coverage
+
+# Test output
+test-results
+playwright-report
+
+# macOS metadata
+.DS_Store
+
+# Local backups
+/backups
+
+# Browser Profiling Data
+**/profiling-data*.json
+reports/*.json
+*.har
+
+# Personal development files
+scripts/remote-dev.sh
+docker-compose.dev.yml
+docker-entrypoint-dev.sh
+Dockerfile.dev

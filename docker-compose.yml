@@ -1,0 +1,72 @@
+services:
+  technitium-dns-companion:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: technitium-dns-companion
+    restart: unless-stopped
+
+    ports:
+      # HTTP (default)
+      - "3000:3000"
+      # HTTPS (if enabled)
+      - "3443:3443"
+
+    environment:
+      # Node environment
+      NODE_ENV: production
+
+      # Server configuration
+      PORT: 3000
+      HTTPS_ENABLED: "false" # Set to "true" to enable HTTPS
+      # HTTPS_PORT: 3443
+      # HTTPS_CERT_PATH: /app/certs/fullchain.pem
+      # HTTPS_KEY_PATH: /app/certs/privkey.pem
+      # HTTPS_CA_PATH: /app/certs/chain.pem  # Optional
+
+      # Timezone
+      TZ: America/New_York
+
+      # CORS (optional, for development)
+      # CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+
+      # Technitium DNS Nodes Configuration
+      # List of node IDs (comma-separated)
+      TECHNITIUM_NODES: node1,node2
+
+      # Cluster token (for clustered nodes - recommended)
+      TECHNITIUM_CLUSTER_TOKEN: ${TECHNITIUM_CLUSTER_TOKEN}
+
+      # Node 1 Configuration
+      TECHNITIUM_NODE1_NAME: "DNS Primary"
+      TECHNITIUM_NODE1_BASE_URL: https://dns-primary.example.com:53443
+
+      # Node 2 Configuration
+      TECHNITIUM_NODE2_NAME: "DNS Secondary"
+      TECHNITIUM_NODE2_BASE_URL: https://dns-secondary.example.com:53443
+
+      # Legacy per-node tokens (optional - only if not using TECHNITIUM_CLUSTER_TOKEN)
+      # TECHNITIUM_NODE1_TOKEN: ${TECHNITIUM_NODE1_TOKEN:-}
+      # TECHNITIUM_NODE2_TOKEN: ${TECHNITIUM_NODE2_TOKEN:-}
+
+    volumes:
+      # Mount SSL certificates (if using HTTPS)
+      # - ./certs:/app/certs:ro
+
+      # Optional: Mount config directory
+      # - ./config:/app/config
+
+    networks:
+      - technitium-dns-companion-network
+
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+networks:
+  technitium-dns-companion-network:
+    driver: bridge

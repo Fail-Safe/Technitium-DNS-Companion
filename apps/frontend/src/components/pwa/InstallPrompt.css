@@ -1,0 +1,236 @@
+/* Install Prompt Container */
+.install-prompt {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 1000;
+    animation: slideInUp 0.5s ease;
+}
+
+/* Install Prompt Button */
+.install-prompt__button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
+    color: white;
+    border: none;
+    border-radius: 50px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.4);
+    transition: all 0.3s ease;
+}
+
+.install-prompt__button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(79, 70, 229, 0.6);
+}
+
+.install-prompt__button:active {
+    transform: translateY(0);
+}
+
+.install-prompt__icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.install-prompt__text {
+    white-space: nowrap;
+}
+
+.install-prompt__close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: rgba(79, 70, 229, 0.2);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(79, 70, 229, 0.3);
+    border-radius: 50%;
+    color: #4F46E5;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.install-prompt__close:hover {
+    background: rgba(79, 70, 229, 0.3);
+    border-color: rgba(79, 70, 229, 0.5);
+    transform: scale(1.1);
+}
+
+/* iOS Installation Modal */
+.install-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    padding: 20px;
+    animation: fadeIn 0.3s ease;
+}
+
+.install-modal__content {
+    background: var(--color-bg-primary, #1e293b);
+    border-radius: 16px;
+    max-width: 400px;
+    width: 100%;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    animation: slideInUp 0.3s ease;
+    overflow: hidden;
+}
+
+.install-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px;
+    border-bottom: 1px solid var(--color-border, #334155);
+}
+
+.install-modal__header h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--color-text-primary, #f1f5f9);
+}
+
+.install-modal__close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: var(--color-text-secondary, #94a3b8);
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.install-modal__close:hover {
+    background: var(--color-bg-secondary, #334155);
+    color: var(--color-text-primary, #f1f5f9);
+}
+
+.install-modal__body {
+    padding: 20px;
+    color: var(--color-text-secondary, #94a3b8);
+    line-height: 1.6;
+}
+
+.install-modal__body p {
+    margin: 0 0 16px 0;
+}
+
+.install-modal__body ol {
+    margin: 0 0 16px 0;
+    padding-left: 20px;
+}
+
+.install-modal__body li {
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.install-modal__body strong {
+    color: var(--color-text-primary, #f1f5f9);
+    font-weight: 600;
+}
+
+.install-modal__ios-icon {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    vertical-align: middle;
+    margin: 0 4px;
+    color: #4F46E5;
+}
+
+.install-modal__note {
+    margin-top: 16px;
+    padding: 12px;
+    background: rgba(79, 70, 229, 0.1);
+    border-left: 3px solid #4F46E5;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+/* Mobile Adjustments */
+@media (max-width: 768px) {
+    .install-prompt {
+        bottom: 80px;
+        /* Above mobile nav if present */
+        right: 16px;
+        padding: 10px 16px;
+        font-size: 13px;
+    }
+
+    .install-prompt__icon {
+        width: 18px;
+        height: 18px;
+    }
+
+    .install-prompt__text {
+        display: none;
+        /* Show icon only on small screens */
+    }
+
+    .install-prompt__close {
+        margin-left: 0;
+    }
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideInUp {
+    from {
+        transform: translateY(100px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Dark Mode (explicit) */
+@media (prefers-color-scheme: dark) {
+    .install-modal__content {
+        background: #1e293b;
+    }
+
+    .install-modal__header {
+        border-bottom-color: #334155;
+    }
+}

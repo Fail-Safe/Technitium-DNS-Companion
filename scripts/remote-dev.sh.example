@@ -1,0 +1,419 @@
+#!/bin/bash
+
+###############################################################################
+# Technitium-DNS-Companion: Remote Development with Hot-Reload
+#
+# Usage:
+#   ./scripts/remote-dev.sh start    # Start remote dev environment
+#   ./scripts/remote-dev.sh stop     # Stop remote dev environment
+#   ./scripts/remote-dev.sh logs     # View remote logs
+#   ./scripts/remote-dev.sh sync     # Manually sync files
+#   ./scripts/remote-dev.sh shell    # SSH into remote container
+#   ./scripts/remote-dev.sh restart  # Restart remote container
+#
+# Description:
+# Runs the Docker hot-reload development container on a remote server while
+# keeping your code synced from your local machine. This gives you:
+#   - Edit files locally (VS Code, etc.)
+#   - Files auto-sync to remote server via rsync/fswatch
+#   - Docker container hot-reloads on remote server
+#   - Access frontend/backend via remote URLs
+#
+# Setup:
+#   1. Copy this file to remote-dev.sh: cp remote-dev.sh.example remote-dev.sh
+#   2. Edit remote-dev.sh and update the Configuration section below
+#   3. Ensure SSH access is configured (ssh <your-host> should work)
+#   4. Run: ./scripts/remote-dev.sh start
+#
+# Requirements:
+#   - SSH access to remote server configured
+#   - Docker installed on remote server
+#   - rsync installed locally and on remote
+#   - fswatch installed locally (for auto-sync): brew install fswatch
+#
+###############################################################################
+
+set -e
+
+# Configuration - EDIT THESE VALUES FOR YOUR SETUP
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+REMOTE_HOST="${REMOTE_HOST:-your-server}"              # Your SSH hostname (e.g., "devserver" or "192.168.1.100")
+REMOTE_USER="${REMOTE_USER:-root}"                     # SSH user (e.g., "root", "ubuntu", "your-username")
+REMOTE_PATH="${REMOTE_PATH:-/opt/technitium-dns-companion}"  # Remote project directory
+
+# Your domain/hostname for accessing the app (edit these URLs)
+REMOTE_DOMAIN="your-server.example.com"  # e.g., "devserver.local" or "dev.example.com"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Function to print colored output
+log_info() {
+	echo -e "${BLUE}ℹ${NC} $1"
+}
+
+log_success() {
+	echo -e "${GREEN}✓${NC} $1"
+}
+
+log_warning() {
+	echo -e "${YELLOW}⚠${NC} $1"
+}
+
+log_error() {
+	echo -e "${RED}✗${NC} $1"
+}
+
+# Check dependencies
+check_dependencies() {
+	local missing=()
+
+	if ! command -v rsync &>/dev/null; then
+		missing+=("rsync")
+	fi
+
+	if ! command -v fswatch &>/dev/null; then
+		missing+=("fswatch (for auto-sync)")
+	fi
+
+	# Test SSH connectivity with timeout
+	# Note: Using 'true' command instead of 'exit' to work around terminal issues
+	if command -v timeout &>/dev/null; then
+		if ! timeout 2 ssh -o ConnectTimeout=2 "$REMOTE_HOST" "true" 2>/dev/null; then
+			log_warning "Cannot verify SSH connection to $REMOTE_HOST"
+			log_info "Ensure 'ssh $REMOTE_HOST' works before continuing"
+			log_info "Will attempt to proceed anyway..."
+		fi
+	else
+		log_info "Skipping SSH check (install 'timeout' command for verification)"
+	fi
+
+	if [ ${#missing[@]} -gt 0 ]; then
+		log_warning "Missing dependencies: ${missing[*]}"
+		if [[ " ${missing[*]} " =~ " fswatch " ]]; then
+			log_info "Install fswatch: brew install fswatch"
+		fi
+	fi
+}
+
+# Sync files to remote
+sync_files() {
+	local description="${1:-Syncing}"
+	log_info "$description files to $REMOTE_HOST:$REMOTE_PATH"
+
+	rsync -avz --delete \
+		--exclude 'node_modules' \
+		--exclude '.git' \
+		--exclude 'dist' \
+		--exclude 'build' \
+		--exclude '.env.local' \
+		--exclude '.env.*.local' \
+		--exclude 'coverage' \
+		--exclude 'playwright-report' \
+		--exclude '*.log' \
+		--exclude '.DS_Store' \
+		--exclude 'certs' \
+		"$PROJECT_ROOT/" \
+		"$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH/"
+
+	log_success "Sync complete"
+}
+
+# Start remote development environment
+start_remote_dev() {
+	log_info "Starting remote development environment on $REMOTE_HOST"
+
+	# Initial sync
+	sync_files "Initial sync"
+
+	# Start Docker container on remote
+	log_info "Starting Docker container..."
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml up -d --remove-orphans"
+
+	# Wait for container to be ready
+	log_info "Waiting for services to start..."
+	sleep 5
+
+	# Check if container is running
+	# shellcheck disable=SC2029
+	if ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml ps --services --filter 'status=running'" | grep -q technitium-dns-companion-dev; then
+		log_success "Remote development environment started!"
+		echo ""
+		echo -e "${CYAN}Access Points:${NC}"
+		echo "  Frontend (HTTP):  http://${REMOTE_DOMAIN}:5173"
+		echo "  Frontend (HTTPS): https://${REMOTE_DOMAIN}:5174"
+		echo "  Backend (HTTP):   http://${REMOTE_DOMAIN}:3000/api"
+		echo "  Backend (HTTPS):  https://${REMOTE_DOMAIN}:3443/api"
+		echo ""
+		echo -e "${CYAN}Commands:${NC}"
+		echo "  Watch & sync:  ./scripts/remote-dev.sh watch"
+		echo "  View logs:     ./scripts/remote-dev.sh logs"
+		echo "  Restart:       ./scripts/remote-dev.sh restart"
+		echo "  Stop:          ./scripts/remote-dev.sh stop"
+		echo ""
+	else
+		log_error "Failed to start container"
+		ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml logs --tail=50"
+		exit 1
+	fi
+}
+
+# Stop remote development environment
+stop_remote_dev() {
+	log_info "Stopping remote development environment on $REMOTE_HOST"
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml down --remove-orphans"
+	log_success "Remote development environment stopped"
+}
+
+# View remote logs
+view_logs() {
+	log_info "Viewing logs from $REMOTE_HOST (Ctrl+C to exit)"
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml logs -f"
+}
+
+# Restart remote container
+restart_remote() {
+	log_info "Restarting remote development environment"
+	sync_files "Syncing before restart"
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml restart"
+	log_success "Remote development environment restarted"
+}
+
+# Rebuild remote container (useful after package.json changes)
+rebuild_remote() {
+	log_info "Rebuilding remote development environment on $REMOTE_HOST"
+	log_warning "This will stop the container, remove volumes, rebuild, and restart"
+
+	# Sync files first
+	sync_files "Syncing before rebuild"
+
+	# Stop and remove volumes
+	log_info "Stopping container and removing volumes..."
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml down -v"
+
+	# Rebuild using BuildKit with layer caching
+	log_info "Rebuilding container (this may take a few minutes)..."
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && DOCKER_BUILDKIT=1 docker buildx build \
+		--cache-from type=local,src=/tmp/docker-cache \
+		--cache-to type=local,dest=/tmp/docker-cache,mode=max \
+		--progress=plain \
+		--load \
+		-t technitium-dns-companion-dev:latest \
+		-f Dockerfile.dev ."
+
+	# Start container
+	log_info "Starting rebuilt container..."
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml up -d"
+
+	# Wait for container to be ready
+	log_info "Waiting for services to start..."
+	sleep 10
+
+	# Install npm dependencies in the volumes
+	log_info "Installing npm dependencies in container volumes..."
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml exec -T technitium-dns-companion-dev sh -c 'cd /app && npm install'"
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml exec -T technitium-dns-companion-dev sh -c 'cd /app/apps/backend && npm install'"
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml exec -T technitium-dns-companion-dev sh -c 'cd /app/apps/frontend && npm install'"
+
+	# Restart to apply the newly installed dependencies
+	log_info "Restarting container to apply dependencies..."
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml restart"
+
+	# Wait for services to come back up
+	log_info "Waiting for services to restart..."
+	sleep 10
+
+	log_success "Remote development environment rebuilt!"
+	echo ""
+	echo -e "${CYAN}Access Points:${NC}"
+	echo "  Frontend (HTTP):  http://${REMOTE_DOMAIN}:5173"
+	echo "  Frontend (HTTPS): https://${REMOTE_DOMAIN}:5174"
+	echo "  Backend (HTTP):   http://${REMOTE_DOMAIN}:3000/api"
+	echo "  Backend (HTTPS):  https://${REMOTE_DOMAIN}:3443/api"
+	echo ""
+}
+
+# Shell into remote container
+remote_shell() {
+	log_info "Opening shell on $REMOTE_HOST container"
+	ssh -t "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml exec technitium-dns-companion-dev sh"
+}
+
+# Check remote status
+check_status() {
+	log_info "Checking status on $REMOTE_HOST"
+	# shellcheck disable=SC2029
+	ssh "$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml ps"
+}
+
+# Watch for changes and auto-sync
+watch_and_sync() {
+	log_info "Watching for file changes and auto-syncing to $REMOTE_HOST"
+	log_info "Press Ctrl+C to stop watching"
+	echo ""
+
+	# Sync once immediately
+	sync_files "Initial sync"
+
+	log_info "Starting file watcher (apps/ directory)..."
+
+	# Watch for changes
+	# -r = recursive, -l 2 = 2 second latency for batching
+	fswatch -r -l 2 "$PROJECT_ROOT/apps" | while read -r filename; do
+		# Skip excluded files/directories
+		if [[ $filename == *"node_modules"* ]] ||
+			[[ $filename == *"dist"* ]] ||
+			[[ $filename == *"build"* ]] ||
+			[[ $filename == *".git"* ]] ||
+			[[ $filename == *"coverage"* ]] ||
+			[[ $filename == *"playwright-report"* ]] ||
+			[[ $filename == *".DS_Store"* ]] ||
+			[[ $filename == *".log"* ]]; then
+			continue
+		fi
+
+		log_info "Changes detected: $filename"
+
+		# Check if the change is in backend code
+		if [[ "$filename" == *"/apps/backend/"* ]]; then
+			log_info "Backend change detected, syncing..."
+			rsync -az --delete \
+				--exclude 'node_modules' \
+				--exclude '.git' \
+				--exclude 'dist' \
+				--exclude 'build' \
+				--exclude 'coverage' \
+				"$PROJECT_ROOT/apps/" \
+				"$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH/apps/"
+			if [[ $filename != *"test"* ]]; then
+				log_info "Restarting due to backend change..."
+				# shellcheck disable=SC2029
+				ssh "$REMOTE_USER@$REMOTE_HOST" "cd $REMOTE_PATH && docker compose -f docker-compose.dev-hotreload.yml restart" && log_success "Backend restarted at $(date +%H:%M:%S)"
+			fi
+		else
+			log_info "Frontend change detected, syncing..."
+			rsync -az --delete \
+				--exclude 'node_modules' \
+				--exclude '.git' \
+				--exclude 'dist' \
+				--exclude 'build' \
+				--exclude 'coverage' \
+				"$PROJECT_ROOT/apps/" \
+				"$REMOTE_USER@$REMOTE_HOST:$REMOTE_PATH/apps/" &&
+				log_success "Synced at $(date +%H:%M:%S)"
+		fi
+	done
+}
+
+# SSH port forward (alternative access method)
+port_forward() {
+	log_info "Setting up SSH port forwarding from $REMOTE_HOST"
+	log_info "You can access services at localhost:"
+	echo "  Frontend:  http://localhost:5173"
+	echo "  Backend:   http://localhost:3000"
+	echo ""
+	log_info "Press Ctrl+C to stop port forwarding"
+	ssh -L 5173:localhost:5173 \
+		-L 5174:localhost:5174 \
+		-L 3000:localhost:3000 \
+		-L 3443:localhost:3443 \
+		-N "$REMOTE_HOST"
+}
+
+# Display usage
+usage() {
+	echo -e "${BLUE}Technitium-DNS-Companion Remote Development${NC}"
+	echo ""
+	echo "Usage: $0 <command>"
+	echo ""
+	echo "Commands:"
+	echo "  start       Start remote dev environment on $REMOTE_HOST"
+	echo "  stop        Stop remote dev environment"
+	echo "  restart     Restart remote dev environment"
+	echo "  rebuild     Rebuild container with fresh volumes (use after package.json changes)"
+	echo "  logs        View remote container logs (follow mode)"
+	echo "  sync        Manually sync files to remote"
+	echo "  watch       Watch for changes and auto-sync (recommended)"
+	echo "  shell       Open shell in remote container"
+	echo "  status      Check remote container status"
+	echo "  forward     Setup SSH port forwarding for local access"
+	echo ""
+	echo "Environment Variables:"
+	echo "  REMOTE_HOST=${REMOTE_HOST}  (SSH hostname)"
+	echo "  REMOTE_USER=${REMOTE_USER}  (SSH user)"
+	echo "  REMOTE_PATH=${REMOTE_PATH}  (Remote directory)"
+	echo ""
+	echo "Typical Workflow:"
+	echo "  1. ./scripts/remote-dev.sh start    # Start on remote server"
+	echo "  2. ./scripts/remote-dev.sh watch    # Auto-sync changes"
+	echo "  3. Edit files locally in VS Code"
+	echo "  4. Access at http://${REMOTE_DOMAIN}:5173"
+	echo ""
+	echo "After adding npm packages:"
+	echo "  ./scripts/remote-dev.sh rebuild     # Rebuild with new dependencies"
+	echo ""
+	exit 1
+}
+
+# Main command router
+main() {
+	case "${1:-}" in
+	start)
+		check_dependencies
+		start_remote_dev
+		;;
+	stop)
+		stop_remote_dev
+		;;
+	restart)
+		check_dependencies
+		restart_remote
+		;;
+	rebuild)
+		check_dependencies
+		rebuild_remote
+		;;
+	logs)
+		view_logs
+		;;
+	sync)
+		check_dependencies
+		sync_files "Manual sync"
+		;;
+	watch)
+		check_dependencies
+		watch_and_sync
+		;;
+	shell)
+		remote_shell
+		;;
+	status)
+		check_status
+		;;
+	forward)
+		port_forward
+		;;
+	*)
+		usage
+		;;
+	esac
+}
+
+main "$@"

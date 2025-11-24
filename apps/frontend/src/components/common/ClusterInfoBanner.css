@@ -1,0 +1,280 @@
+.cluster-info-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+    border-left: 4px solid #2196f3;
+    border-radius: 8px;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    position: relative;
+}
+
+/* Loading state variant - subtle animation */
+.cluster-info-banner--loading {
+    background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%);
+    border-left-color: #9e9e9e;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.cluster-info-banner--loading .cluster-info-banner__title {
+    color: #757575;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.7;
+    }
+}
+.cluster-info-banner__icon {
+    font-size: 24px;
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+.cluster-info-banner__content {
+    flex: 1;
+}
+
+.cluster-info-banner__title {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1565c0;
+}
+
+.cluster-info-banner__message {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #424242;
+}
+
+.cluster-info-banner__message strong {
+    color: #0d47a1;
+    font-weight: 600;
+}
+
+.cluster-info-banner__dismiss {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 20px;
+    color: #757575;
+    padding: 4px 8px;
+    line-height: 1;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+.cluster-info-banner__dismiss:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: #424242;
+}
+
+.cluster-info-banner__dismiss:focus {
+    outline: 2px solid #2196f3;
+    outline-offset: 2px;
+}
+
+/* Badge container for dropdown positioning */
+.cluster-info-badge-container {
+    position: relative;
+    display: inline-block;
+    /* Changed from inline-flex to prevent height issues */
+    vertical-align: top;
+    /* Align to top to prevent baseline issues */
+}
+
+/* Persistent badge when dismissed */
+.cluster-info-badge {
+    display: inline-flex;
+    margin-bottom: 0;
+    /* Remove margin - parent controls spacing */
+}
+
+.cluster-info-badge__button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+    border: 1px solid #90caf9;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: #1565c0;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.cluster-info-badge__button:hover {
+    background: linear-gradient(135deg, #bbdefb 0%, #90caf9 100%);
+    border-color: #64b5f6;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.12);
+    transform: translateY(-1px);
+}
+
+.cluster-info-badge__button:focus {
+    outline: 2px solid #2196f3;
+    outline-offset: 2px;
+}
+
+.cluster-info-badge__button[aria-expanded="true"] {
+    background: linear-gradient(135deg, #bbdefb 0%, #90caf9 100%);
+    border-color: #64b5f6;
+}
+
+/* Dropdown banner */
+.cluster-info-banner--dropdown {
+    position: absolute;
+    top: calc(100% + 3.3rem);
+    right: 0;
+    width: max-content;
+    min-width: 400px;
+    max-width: 600px;
+    z-index: 1000;
+    margin-bottom: 0;
+    animation: slideDown 0.7s ease-out;
+    /* Prevent layout shift */
+    pointer-events: auto;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.cluster-info-badge__icon {
+    font-size: 14px;
+    line-height: 1;
+}
+
+.cluster-info-badge__text {
+    line-height: 1;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .cluster-info-banner {
+        background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%);
+        border-left-color: #4a90e2;
+    }
+
+    .cluster-info-banner__title {
+        color: #90caf9;
+    }
+
+    .cluster-info-banner__message {
+        color: #e0e0e0;
+    }
+
+    .cluster-info-banner__message strong {
+        color: #bbdefb;
+    }
+
+    .cluster-info-banner__dismiss {
+        color: #b0b0b0;
+    }
+
+    .cluster-info-banner__dismiss:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: #e0e0e0;
+    }
+
+    .cluster-info-banner__dismiss:focus {
+        outline-color: #4a90e2;
+    }
+
+    .cluster-info-badge__button {
+        background: linear-gradient(135deg, #1e3a5f 0%, #2c5282 100%);
+        border-color: #4a90e2;
+        color: #90caf9;
+    }
+
+    .cluster-info-badge__button:hover {
+        background: linear-gradient(135deg, #2c5282 0%, #3d5a99 100%);
+        border-color: #5ba3f5;
+    }
+
+    .cluster-info-badge__button:focus {
+        outline-color: #4a90e2;
+    }
+
+    .cluster-info-badge__button[aria-expanded="true"] {
+        background: linear-gradient(135deg, #2c5282 0%, #3d5a99 100%);
+        border-color: #5ba3f5;
+    }
+}
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+    .cluster-info-banner {
+        padding: 12px 16px;
+        gap: 12px;
+        margin-bottom: 16px;
+        border-radius: 6px;
+    }
+
+    .cluster-info-banner__icon {
+        font-size: 20px;
+    }
+
+    .cluster-info-banner__title {
+        font-size: 14px;
+        margin-bottom: 6px;
+    }
+
+    .cluster-info-banner__message {
+        font-size: 13px;
+        line-height: 1.5;
+    }
+
+    .cluster-info-banner__dismiss {
+        top: 8px;
+        right: 8px;
+        font-size: 18px;
+        padding: 2px 6px;
+    }
+
+    /* Dropdown banner on mobile - full width with better positioning */
+    .cluster-info-banner--dropdown {
+        position: fixed;
+        top: auto;
+        right: 8px;
+        left: 8px;
+        width: auto;
+        min-width: unset;
+        max-width: unset;
+        margin-top: 8px;
+        z-index: 9999;
+    }
+
+    /* Badge on mobile - slightly smaller */
+    .cluster-info-badge__button {
+        padding: 5px 10px;
+        font-size: 12px;
+        gap: 5px;
+    }
+
+    .cluster-info-badge__icon {
+        font-size: 13px;
+    }
+}

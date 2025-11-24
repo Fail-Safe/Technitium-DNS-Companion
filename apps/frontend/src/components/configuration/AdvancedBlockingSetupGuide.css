@@ -1,0 +1,334 @@
+/* Setup Guide - Full page guide when no nodes have Advanced Blocking */
+.ab-setup-guide {
+    max-width: 800px;
+    margin: 2rem auto;
+    padding: 2rem;
+    background: var(--card-background, #ffffff);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.ab-setup-guide__icon {
+    font-size: 3rem;
+    text-align: center;
+    margin-bottom: 1rem;
+}
+
+.ab-setup-guide__title {
+    font-size: 1.75rem;
+    font-weight: 600;
+    text-align: center;
+    margin-bottom: 1rem;
+    color: var(--text-primary, #1a1a1a);
+}
+
+.ab-setup-guide__intro {
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-bottom: 2rem;
+    text-align: center;
+    color: var(--text-secondary, #4a4a4a);
+}
+
+.ab-setup-guide__section {
+    margin-bottom: 2rem;
+}
+
+.ab-setup-guide__section-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--text-primary, #1a1a1a);
+}
+
+.ab-setup-guide__steps {
+    list-style: decimal;
+    padding-left: 1.5rem;
+}
+
+.ab-setup-guide__steps>li {
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+}
+
+.ab-setup-guide__steps>li>strong {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary, #1a1a1a);
+}
+
+.ab-setup-guide__steps>li>p {
+    margin: 0.5rem 0;
+    color: var(--text-secondary, #4a4a4a);
+}
+
+.ab-setup-guide__steps>li>ul {
+    list-style: disc;
+    padding-left: 1.5rem;
+    margin-top: 0.5rem;
+}
+
+.ab-setup-guide__steps code {
+    background: var(--code-background, #f5f5f5);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+}
+
+.ab-setup-guide__links {
+    list-style: none;
+    padding-left: 0;
+}
+
+.ab-setup-guide__links>li {
+    margin-bottom: 0.75rem;
+}
+
+.ab-setup-guide__link {
+    color: var(--link-color, #0066cc);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.ab-setup-guide__link:hover {
+    text-decoration: underline;
+}
+
+.ab-setup-guide__external-icon {
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+.ab-setup-guide__note {
+    padding: 1rem;
+    background: var(--info-background, #e8f4fd);
+    border-left: 4px solid var(--info-border, #0066cc);
+    border-radius: 4px;
+    margin-top: 2rem;
+    color: var(--text-secondary, #4a4a4a);
+}
+
+.ab-setup-guide__note strong {
+    color: var(--text-primary, #1a1a1a);
+}
+
+/* Warning Banner - Shown when some nodes have it, others don't */
+.ab-setup-warning {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem 1.5rem;
+    background: var(--warning-background, #fff4e5);
+    border: 1px solid var(--warning-border, #ffb74d);
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+}
+
+.ab-setup-warning__icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.ab-setup-warning__content {
+    flex: 1;
+}
+
+.ab-setup-warning__title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem 0;
+    color: var(--warning-text, #f57c00);
+}
+
+.ab-setup-warning__message {
+    margin: 0.5rem 0;
+    line-height: 1.5;
+    color: var(--text-secondary, #4a4a4a);
+}
+
+.ab-setup-warning__nodes {
+    list-style: disc;
+    padding-left: 1.5rem;
+    margin: 0.5rem 0;
+}
+
+.ab-setup-warning__nodes code {
+    background: rgba(0, 0, 0, 0.05);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+}
+
+.ab-setup-warning__link {
+    color: var(--link-color, #0066cc);
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.ab-setup-warning__link:hover {
+    text-decoration: underline;
+}
+
+.ab-setup-warning__toggle-button {
+    background: none;
+    border: none;
+    color: var(--link-color, #0066cc);
+    font-weight: 500;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: none;
+    font-size: inherit;
+    font-family: inherit;
+}
+
+.ab-setup-warning__toggle-button:hover {
+    text-decoration: underline;
+}
+
+.ab-setup-warning__instructions {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 6px;
+}
+
+.ab-setup-warning__instructions-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0 0 0.75rem 0;
+    color: var(--text-primary, #1a1a1a);
+}
+
+.ab-setup-warning__steps {
+    list-style: decimal;
+    padding-left: 1.5rem;
+    margin: 0.5rem 0;
+}
+
+.ab-setup-warning__steps>li {
+    margin-bottom: 0.75rem;
+}
+
+.ab-setup-warning__steps>li>strong {
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--text-primary, #1a1a1a);
+}
+
+.ab-setup-warning__steps>li>p {
+    margin: 0.25rem 0;
+    color: var(--text-secondary, #4a4a4a);
+}
+
+.ab-setup-warning__steps ul {
+    list-style: disc;
+    padding-left: 1.5rem;
+    margin: 0.25rem 0;
+}
+
+.ab-setup-warning__steps code {
+    background: rgba(0, 0, 0, 0.05);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+}
+
+.ab-setup-warning__docs-link {
+    margin-top: 1rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary, #4a4a4a);
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+    .ab-setup-guide {
+        background: var(--card-background-dark, #2a2a2a);
+    }
+
+    .ab-setup-guide__title,
+    .ab-setup-guide__section-title,
+    .ab-setup-guide__steps>li>strong,
+    .ab-setup-guide__note strong {
+        color: var(--text-primary-dark, #f0f0f0);
+    }
+
+    .ab-setup-guide__intro,
+    .ab-setup-guide__steps>li>p,
+    .ab-setup-guide__note {
+        color: var(--text-secondary-dark, #cccccc);
+    }
+
+    .ab-setup-guide__steps code,
+    .ab-setup-warning__nodes code {
+        background: var(--code-background-dark, #1a1a1a);
+    }
+
+    .ab-setup-guide__note {
+        background: var(--info-background-dark, #1a3a52);
+        border-left-color: var(--info-border-dark, #4a90e2);
+    }
+
+    .ab-setup-warning {
+        background: var(--warning-background-dark, #4a3a1a);
+        border-color: var(--warning-border-dark, #ff9800);
+    }
+
+    .ab-setup-warning__title {
+        color: var(--warning-text-dark, #ffb74d);
+    }
+
+    .ab-setup-warning__message {
+        color: var(--text-secondary-dark, #cccccc);
+    }
+
+    .ab-setup-warning__toggle-button {
+        color: var(--link-color-dark, #4a90e2);
+    }
+
+    .ab-setup-warning__instructions {
+        background: rgba(255, 255, 255, 0.05);
+    }
+
+    .ab-setup-warning__instructions-title,
+    .ab-setup-warning__steps>li>strong {
+        color: var(--text-primary-dark, #f0f0f0);
+    }
+
+    .ab-setup-warning__steps>li>p,
+    .ab-setup-warning__docs-link {
+        color: var(--text-secondary-dark, #cccccc);
+    }
+
+    .ab-setup-warning__steps code {
+        background: var(--code-background-dark, #1a1a1a);
+    }
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .ab-setup-guide {
+        padding: 1.5rem 1rem;
+        margin: 1rem;
+    }
+
+    .ab-setup-guide__title {
+        font-size: 1.5rem;
+    }
+
+    .ab-setup-guide__icon {
+        font-size: 2.5rem;
+    }
+
+    .ab-setup-warning {
+        flex-direction: column;
+        padding: 1rem;
+    }
+
+    .ab-setup-warning__icon {
+        font-size: 1.25rem;
+    }
+}
