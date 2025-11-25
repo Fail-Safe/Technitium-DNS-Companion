@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faMinus, faPencil, faTrash, faExclamationTriangle, faCheck } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faMinus, faPencil } from '@fortawesome/free-solid-svg-icons';
 import type {
     AdvancedBlockingConfig,
     AdvancedBlockingGroup,
