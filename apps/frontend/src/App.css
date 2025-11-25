@@ -3979,7 +3979,7 @@ button.danger:disabled {
 
 .node-card__version {
   font-size: 0.875rem;
-  color: #5d6786;
+  color: var(--color-text-secondary);
   font-weight: 500;
 }
 
@@ -3994,7 +3994,8 @@ button.danger:disabled {
   font-weight: 600;
   padding: 0.25rem 0.75rem;
   border-radius: 999px;
-  background: #eef2fa;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
   font-size: 0.875rem;
 }
 
@@ -4071,7 +4072,7 @@ button.danger:disabled {
   grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
   gap: 1rem;
   padding: 1rem;
-  background: #f8fafc;
+  background: var(--color-bg-primary);
   border-radius: 0.5rem;
 }
 
@@ -4085,14 +4086,14 @@ button.danger:disabled {
 .node-card__stat-value {
   font-size: 1.5rem;
   font-weight: 700;
-  color: #1e2a40;
+  color: var(--color-text-primary);
 }
 
 .node-card__stat-label {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #5d6786;
+  color: var(--color-text-secondary);
   margin-top: 0.25rem;
 }
 
@@ -4105,7 +4106,7 @@ button.danger:disabled {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #5d6786;
+  color: var(--color-text-secondary);
 }
 
 .node-card__details dd {

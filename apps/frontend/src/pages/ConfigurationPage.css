@@ -193,7 +193,7 @@
 .domain-list-card__empty {
     padding: 2rem;
     text-align: center;
-    color: #9ca3af;
+    color: var(--color-text-tertiary);
 }
 
 .domain-list-card__empty-text {
@@ -339,7 +339,7 @@
 
 .group-drop-zone {
     padding: 0.55rem;
-    border: 1px solid #cfd6e4;
+    border: 2px dashed var(--color-border);
     border-radius: 0.5rem;
     background: var(--color-bg-secondary);
     transition: all 0.2s ease;
@@ -347,8 +347,8 @@
 }
 
 .group-drop-zone--dragging-over {
-    border: 2px solid #365df3;
-    background: #d9edf7;
+    border: 2px solid var(--color-primary);
+    background: var(--color-primary-light);
 }
 
 .group-drop-zone__header {
@@ -371,13 +371,13 @@
 }
 
 .group-drop-zone__name--active {
-    color: #365df3;
+    color: var(--color-primary);
 }
 
 .group-drop-zone__count {
     font-size: 0.9rem;
     font-weight: 600;
-    color: #ffffff;
+    color: var(--color-bg-secondary);
     background: #5bc0de;
     padding: 2px 6px;
     border-radius: 3px;

@@ -44,22 +44,22 @@
 
 /* Dark Mode Colors */
 [data-theme="dark"] {
-  --color-text-primary: #e2e8f0;
-  --color-text-secondary: #94a3b8;
-  --color-text-tertiary: #64748b;
+  --color-text-primary: #f1f5f9;
+  --color-text-secondary: #cbd5e1;
+  --color-text-tertiary: #94a3b8;
   --color-bg-primary: #0f172a;
   --color-bg-secondary: #1e293b;
   --color-bg-tertiary: #334155;
-  --color-border: #334155;
-  --color-border-light: #475569;
+  --color-border: #475569;
+  --color-border-light: #64748b;
 
-  /* Interactive Colors - Adjusted for dark mode */
-  --color-primary: #4f6bff;
-  --color-primary-hover: #6b82ff;
-  --color-primary-light: #1e293b;
-  --color-success: #34d399;
-  --color-success-bg: #064e3b;
-  --color-success-text: #6ee7b7;
+  /* Interactive Colors - Adjusted for dark mode with better contrast */
+  --color-primary: #6366f1;
+  --color-primary-hover: #818cf8;
+  --color-primary-light: #312e81;
+  --color-success: #4ade80;
+  --color-success-bg: #14532d;
+  --color-success-text: #86efac;
   --color-warning: #fbbf24;
   --color-warning-bg: #78350f;
   --color-danger: #f87171;
