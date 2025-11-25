@@ -7,8 +7,83 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  color: #1a1f2d;
-  background-color: #f6f8fb;
+
+  /* Light Mode Colors */
+  --color-text-primary: #1a1f2d;
+  --color-text-secondary: #5a6e8b;
+  --color-text-tertiary: #8896aa;
+  --color-bg-primary: #f6f8fb;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #f0f4f8;
+  --color-border: #dce3ee;
+  --color-border-light: #e8eef5;
+
+  /* Interactive Colors */
+  --color-primary: #365df3;
+  --color-primary-hover: #2546c4;
+  --color-primary-light: #e8edff;
+  --color-success: #10b981;
+  --color-success-bg: #d1fae5;
+  --color-success-light: #c8e6c9;
+  --color-success-text: #166534;
+  --color-warning: #f59e0b;
+  --color-warning-bg: #fef3c7;
+  --color-danger: #ef4444;
+  --color-danger-bg: #fee2e2;
+  --color-danger-light: #ffcdcd;
+  --color-danger-text: #991b1b;
+  --color-info: #3b82f6;
+  --color-info-bg: #dbeafe;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+
+  /* Tooltips */
+  --tooltip-bg: #1a1f2d;
+  --tooltip-color: #f1f5f9;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-primary);
+}
+
+/* Dark Mode Colors */
+[data-theme="dark"] {
+  --color-text-primary: #f1f5f9;
+  --color-text-secondary: #cbd5e1;
+  --color-text-tertiary: #94a3b8;
+  --color-bg-primary: #0f172a;
+  --color-bg-secondary: #1e293b;
+  --color-bg-tertiary: #334155;
+  --color-border: #475569;
+  --color-border-light: #64748b;
+
+  /* Interactive Colors - Adjusted for dark mode with better contrast */
+  --color-primary: #6366f1;
+  --color-primary-hover: #818cf8;
+  --color-primary-light: #312e81;
+  --color-success: #4ade80;
+  --color-success-bg: #14532d;
+  --color-success-light: #1e6f3a;
+  --color-success-text: #86efac;
+  --color-warning: #fbbf24;
+  --color-warning-bg: #78350f;
+  --color-danger: #f87171;
+  --color-danger-bg: #7f1d1d;
+  --color-danger-light: #991b1b;
+  --color-danger-text: #fca5a5;
+  --color-info: #60a5fa;
+  --color-info-bg: #1e3a8a;
+
+  /* Shadows - More pronounced for dark mode */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+
+  /* Tooltips */
+  --tooltip-bg: #0f172a;
+  --tooltip-color: #f1f5f9;
+  color-scheme: dark;
 }
 
 * {
@@ -22,7 +97,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  background: #f6f8fb;
+  background: var(--color-bg-primary);
   overflow-x: hidden;
 }
 

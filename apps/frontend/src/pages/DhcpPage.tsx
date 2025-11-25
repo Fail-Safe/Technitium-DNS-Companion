@@ -4100,7 +4100,7 @@ export function DhcpPage() {
                                 {nodes.length < 2 ? (
                                     <div className="dhcp-page__placeholder">
                                         <p>⚠️ At least 2 nodes are required to perform bulk sync operations.</p>
-                                        <p style={{ fontSize: '0.9rem', marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
+                                        <p style={{ fontSize: '0.9rem', marginTop: '0.5rem', color: 'var(--color-text-secondary)' }}>
                                             Configure additional nodes in your setup to enable this feature.
                                         </p>
                                     </div>
@@ -4490,7 +4490,7 @@ export function DhcpPage() {
                                                 <div className="dhcp-bulk-sync-inline__status-spinner">⏳</div>
                                                 <div>
                                                     <p><strong>Sync in progress...</strong></p>
-                                                    <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                                                        <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)' }}>
                                                         Copying scopes from {nodes.find(n => n.id === bulkSyncSourceNodeId)?.name} to {bulkSyncTargetNodeIds.length} target node{bulkSyncTargetNodeIds.length !== 1 ? 's' : ''}.
                                                     </p>
                                                 </div>

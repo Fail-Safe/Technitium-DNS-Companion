@@ -12,14 +12,14 @@
     align-content: center;
     font-weight: 600;
     font-size: 0.9rem;
-    color: #1a1f2d;
+    color: var(--color-text-primary);
 }
 
 .domain-type-button {
     padding: 0.6rem 0.5rem;
     border-radius: 0.5rem;
-    border: 1px solid #dce3ee;
-    background: #ffffff;
+    border: 1px solid var(--color-border);
+    background: var(--color-bg-secondary);
     color: #5d6786;
     font-weight: 600;
     font-size: 0.85rem;
@@ -31,27 +31,27 @@
 }
 
 .domain-type-button--blocked.domain-type-button--active {
-    border-color: #f2dede;
-    background: #f2dede;
-    color: #a94442;
+    border-color: var(--color-danger);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
 }
 
 .domain-type-button--allowed.domain-type-button--active {
-    border-color: #dff0d8;
-    background: #dff0d8;
-    color: #3c763d;
+    border-color: var(--color-success);
+    background: var(--color-success-bg);
+    color: var(--color-success);
 }
 
 .domain-type-button--blocked-regex.domain-type-button--active {
-    border-color: #f2dede;
-    background: #f2dede;
-    color: #a94442;
+    border-color: var(--color-danger);
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
 }
 
 .domain-type-button--allowed-regex.domain-type-button--active {
-    border-color: #dff0d8;
-    background: #dff0d8;
-    color: #3c763d;
+    border-color: var(--color-success);
+    background: var(--color-success-bg);
+    color: var(--color-success);
 }
 
 /* === Domain Management Layout === */
@@ -74,7 +74,7 @@
     margin-bottom: 0.5rem;
     font-weight: 600;
     font-size: 0.9rem;
-    color: #1a1f2d;
+    color: var(--color-text-primary);
 }
 
 .form-label--flex {
@@ -91,18 +91,21 @@
 }
 
 .alert-box--info {
-    background: #d9edf7;
-    border-color: #365df3;
+    background: var(--color-info-bg);
+        border-color: var(--color-info);
+        color: var(--color-text-primary);
 }
 
 .alert-box--danger {
-    background: #f8d7da;
-    border-color: #f5c6cb;
+    background: var(--color-danger-bg);
+        border-color: var(--color-danger);
+        color: var(--color-text-primary);
 }
 
 .alert-box--success {
-    background: #d4edda;
-    border-color: #28a745;
+    background: var(--color-success-bg);
+        border-color: var(--color-success);
+        color: var(--color-text-primary);
 }
 
 .alert-box__title {
@@ -134,15 +137,15 @@
 }
 
 .domain-pill--blocked {
-    background: #f2dede;
-    color: #a94442;
-    border-color: #a94442;
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    border-color: var(--color-danger);
 }
 
 .domain-pill--allowed {
-    background: #dff0d8;
-    color: #3c763d;
-    border-color: #3c763d;
+    background: var(--color-success-bg);
+    color: var(--color-success);
+    border-color: var(--color-success);
 }
 
 .domain-pill--dragging {
@@ -155,25 +158,25 @@
 }
 
 .domain-pill--blocked:hover {
-    background: #ffcdcd;
+    filter: brightness(0.9);
 }
 
 .domain-pill--allowed:hover {
-    background: #c8e6c9;
+    filter: brightness(0.9);
 }
 
 /* === Domain List Card === */
 .domain-list-card {
-    background: #ffffff;
-    border: 1px solid #dce3ee;
+    background: var(--color-bg-secondary);
+    border: 1px solid var(--color-border);
     border-radius: 0.75rem;
     overflow: hidden;
 }
 
 .domain-list-card__header {
     padding: 0.75rem 1rem;
-    background: #f6f8fb;
-    border-bottom: 1px solid #dce3ee;
+    background: var(--color-bg-primary);
+    border-bottom: 1px solid var(--color-border);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -182,7 +185,7 @@
 .domain-list-card__title {
     font-weight: 600;
     font-size: 0.9rem;
-    color: #1a1f2d;
+    color: var(--color-text-primary);
 }
 
 .domain-list-card__body {
@@ -193,7 +196,7 @@
 .domain-list-card__empty {
     padding: 2rem;
     text-align: center;
-    color: #9ca3af;
+    color: var(--color-text-tertiary);
 }
 
 .domain-list-card__empty-text {
@@ -244,13 +247,13 @@
 }
 
 .domain-table__domain-pill--blocked {
-    background-color: #f2dede;
-    color: #a94442;
+    background-color: var(--color-danger-bg);
+    color: var(--color-danger);
 }
 
 .domain-table__domain-pill--allowed {
-    background-color: #dff0d8;
-    color: #3c763d;
+    background-color: var(--color-success-bg);
+    color: var(--color-success);
 }
 
 /* === Icon Buttons === */
@@ -278,9 +281,9 @@
 /* === Drop Zone Container === */
 .drop-zone-container {
     padding: 0.75rem;
-    background: #f6f8fb;
+    background: var(--color-bg-primary);
     border-radius: 0.75rem;
-    border: 1px solid #dce3ee;
+    border: 1px solid var(--color-border);
 }
 
 .drop-zone-hint {
@@ -295,7 +298,7 @@
     padding: 0.25rem;
     border: 2px dashed #cfd6e4;
     border-radius: 0.75rem;
-    background: #f6f8fb;
+    background: var(--color-bg-primary);
     text-align: center;
     margin-bottom: 1rem;
     transition: all 0.2s ease;
@@ -316,7 +319,7 @@
 
 .all-groups-drop-zone__title {
     font-weight: 600;
-    color: #1a1f2d;
+    color: var(--color-text-primary);
     font-size: 0.9rem;
 }
 
@@ -339,16 +342,16 @@
 
 .group-drop-zone {
     padding: 0.55rem;
-    border: 1px solid #cfd6e4;
+    border: 2px dashed var(--color-border);
     border-radius: 0.5rem;
-    background: #ffffff;
+    background: var(--color-bg-secondary);
     transition: all 0.2s ease;
     cursor: pointer;
 }
 
 .group-drop-zone--dragging-over {
-    border: 2px solid #365df3;
-    background: #d9edf7;
+    border: 2px solid var(--color-primary);
+    background: var(--color-primary-light);
 }
 
 .group-drop-zone__header {
@@ -367,17 +370,17 @@
 .group-drop-zone__name {
     font-weight: 600;
     font-size: 0.9rem;
-    color: #1a1f2d;
+    color: var(--color-text-primary);
 }
 
 .group-drop-zone__name--active {
-    color: #365df3;
+    color: var(--color-primary);
 }
 
 .group-drop-zone__count {
     font-size: 0.9rem;
     font-weight: 600;
-    color: #ffffff;
+    color: var(--color-bg-secondary);
     background: #5bc0de;
     padding: 2px 6px;
     border-radius: 3px;
@@ -474,13 +477,13 @@
 }
 
 .group-domain-list__item--blocked {
-    color: #a94442;
-    background-color: #f2dede;
+    color: var(--color-danger);
+    background-color: var(--color-danger-bg);
 }
 
 .group-domain-list__item--allowed {
-    color: #3c763d;
-    background-color: #dff0d8;
+    color: var(--color-success);
+    background-color: var(--color-success-bg);
 }
 
 .group-domain-list__item--dragging {
@@ -494,11 +497,11 @@
 }
 
 .group-domain-list__item--blocked:hover {
-    background: #ffcdcd;
+    filter: brightness(0.9);
 }
 
 .group-domain-list__item--allowed:hover {
-    background: #c8e6c9;
+    filter: brightness(0.9);
 }
 
 /* === Status Icons === */
@@ -633,7 +636,7 @@
     width: 100%;
     padding: 0.75rem;
     border-radius: 0.5rem;
-    border: 1px solid #dce3ee;
+    border: 1px solid var(--color-border);
     font-size: 1rem;
     font-family: monospace;
     margin-bottom: 1rem;

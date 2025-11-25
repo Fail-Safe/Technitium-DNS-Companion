@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faBan, faCheck, faFileLines, faFile, faTowerBroadcast, faRotate, faSquare, faSquareCheck } from '@fortawesome/free-solid-svg-icons';
+import { faBan, faCheck, faFile, faTowerBroadcast, faRotate, faSquare, faSquareCheck } from '@fortawesome/free-solid-svg-icons';
+import { Tooltip } from 'react-tooltip';
+import 'react-tooltip/dist/react-tooltip.css';
 import { useTechnitiumState } from '../context/TechnitiumContext';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { PullToRefreshIndicator } from '../components/common/PullToRefreshIndicator';
@@ -636,52 +638,47 @@ const buildTableColumns = (
 
                 // Build comprehensive tooltip with entry and block/allow information
                 const groupDetails = domainGroupDetailsMap.get(domain);
-                const tooltipParts: string[] = [];
 
-                // Basic domain info
-                tooltipParts.push(`Domain: ${domain}`);
-                tooltipParts.push(`Type: ${entry.qtype ?? 'Unknown'}`);
+                // Build HTML string for tooltip content
+                // let tooltipHtml = `<div style="font-family: 'Menlo, Monaco, Consolas, monospace'; line-height: 1.5;">`;
+                let tooltipHtml = `<div><strong>Domain:</strong> ${domain}</div>`;
+                tooltipHtml += `<div><strong>Type:</strong> ${entry.qtype ?? 'Unknown'}</div>`;
 
-                // Response status
                 if (entry.responseType) {
-                    const statusIcon = entry.responseType === 'Blocked' ? faBan :
-                        entry.responseType === 'Allowed' ? faCheck : faFileLines;
-                    tooltipParts.push(`Status: ${entry.responseType}`);
+                    const iconChar = entry.responseType === 'Blocked' ? '🚫' : entry.responseType === 'Allowed' ? '✅' : '📄';
+                    tooltipHtml += `<div style="margin-top: 8px;"><strong>Status:</strong> ${iconChar} ${entry.responseType}</div>`;
                 }
 
-                // Advanced Blocking group info
                 if (groupDetails) {
-                    tooltipParts.push(`\nGroup: ${groupDetails.groupName}`);
-
+                    tooltipHtml += `<div style="margin-top: 8px;"><div><strong>Group:</strong> ${groupDetails.groupName}</div>`;
                     if (groupDetails.blockedExact) {
-                        tooltipParts.push('  → Blocked (Exact Match)');
-                    } else if (groupDetails.blockedRegexMatches.length > 0) {
-                        tooltipParts.push('  → Blocked by Regex:');
+                        tooltipHtml += `<div style="margin-left: 12px; color: #ef4444;">→ Blocked (Exact Match)</div>`;
+                    }
+                    if (groupDetails.blockedRegexMatches.length > 0) {
+                        tooltipHtml += `<div style="margin-left: 12px;"><div style="color: #ef4444;">→ Blocked by Regex:</div>`;
                         groupDetails.blockedRegexMatches.forEach(pattern => {
-                            tooltipParts.push(`     ${pattern}`);
+                            tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${pattern}</div>`;
                         });
+                        tooltipHtml += `</div>`;
                     }
-
                     if (groupDetails.allowedExact) {
-                        tooltipParts.push('  → Allowed (Exact Match)');
-                    } else if (groupDetails.allowedRegexMatches.length > 0) {
-                        tooltipParts.push('  → Allowed by Regex:');
-                        groupDetails.allowedRegexMatches.forEach(pattern => {
-                            tooltipParts.push(`     ${pattern}`);
-                        });
+                        tooltipHtml += `<div style="margin-left: 12px; color: #22c55e;">→ Allowed (Exact Match)</div>`;
                     }
+                    if (groupDetails.allowedRegexMatches.length > 0) {
+                        tooltipHtml += `<div style="margin-left: 12px;"><div style="color: #22c55e;">→ Allowed by Regex:</div>`;
+                        groupDetails.allowedRegexMatches.forEach(pattern => {
+                            tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${pattern}</div>`;
+                        });
+                        tooltipHtml += `</div>`;
+                    }
+                    tooltipHtml += `</div>`;
                 }
 
-                // Answer/result - show as a tree for CNAME/DNAME/SRV/MX chains
                 if (entry.answer) {
                     const answers = entry.answer.split(',').map(a => a.trim());
+                    tooltipHtml += `<div style="margin-top: 8px;"><div><strong>Answer:</strong></div>`;
 
                     if (answers.length > 1) {
-                        // Multi-part answer - show as a tree structure with box-drawing characters
-                        // Records that can chain: CNAME, DNAME, SRV, MX
-                        // Multiple A/AAAA records without chaining records are peers (no arrows)
-                        tooltipParts.push('\nAnswer:');
-
                         // Helper to check if a record type can chain to other records
                         const isChainableRecord = (answer: string): boolean => {
                             const upper = answer.toUpperCase();
@@ -738,18 +735,19 @@ const buildTableColumns = (
                                 branch = hasMoreAtSameLevel ? '├─→ ' : '└─→ ';
                             }
 
-                            const indent = '    '.repeat(level);
-                            tooltipParts.push(`${indent}${branch}${answer}`);
+                            const indent = '&nbsp;&nbsp;&nbsp;&nbsp;'.repeat(level);
+                            tooltipHtml += `<div style="margin-left: 12px; font-size: 12px;">${indent}${branch}${answer}</div>`;
                         });
                     } else {
                         // Single answer
-                        tooltipParts.push(`\nAnswer: ${answers[0]}`);
+                        tooltipHtml += `<div style="margin-left: 12px; font-size: 12px;">${answers[0]}</div>`;
                     }
+
+                    tooltipHtml += `</div>`;
                 }
 
-                tooltipParts.push('\n💡 Click to filter logs by this domain');
-
-                const tooltipText = tooltipParts.join('\n');
+                tooltipHtml += `<div style="margin-top: 12px; font-size: 12px; opacity: 0.8;">💡 Click to filter logs by this domain</div>`;
+                tooltipHtml += `</div>`;
 
                 return (
                     <span
@@ -762,7 +760,8 @@ const buildTableColumns = (
                                 onDomainClick(entry, e.shiftKey);
                             }
                         }}
-                        title={tooltipText}
+                        data-tooltip-id="domain-tooltip-shared"
+                        data-tooltip-html={tooltipHtml}
                     >
                         {domain}
                     </span>
@@ -1596,6 +1595,7 @@ export function LogsPage() {
     }, [selectedDomains]);
 
     // Create detailed group information for each domain (for tooltips)
+    // This is separate from domainToGroupMap - it shows Advanced Blocking rules for ANY domain (not just selected)
     const domainGroupDetailsMap = useMemo(() => {
         const map = new Map<string, DomainGroupDetails>();
 
@@ -1611,31 +1611,45 @@ export function LogsPage() {
             return map;
         }
 
-        const selectedDomainsList = Array.from(selectedDomains);
-        selectedDomainsList.forEach((domain, index) => {
-            // Find which group(s) this domain belongs to
-            // Check all groups and use the first match
-            for (const group of groups) {
+        // Build a helper function to check a domain against all groups
+        const checkDomainInGroups = (domain: string) => {
+            for (let i = 0; i < groups.length; i++) {
+                const group = groups[i];
                 const overrides = extractGroupOverrides(group, domain);
 
                 // If this group has any rules for this domain, record it
                 if (overrides.blockedExact || overrides.blockedRegexMatches.length > 0 ||
                     overrides.allowedExact || overrides.allowedRegexMatches.length > 0) {
                     map.set(domain, {
-                        groupNumber: index + 1,
+                        groupNumber: i + 1, // Use actual group index, not selection index
                         groupName: group.name,
                         blockedExact: overrides.blockedExact,
                         blockedRegexMatches: overrides.blockedRegexMatches,
                         allowedExact: overrides.allowedExact,
                         allowedRegexMatches: overrides.allowedRegexMatches,
                     });
-                    break; // Use first matching group
+                    return; // Use first matching group
                 }
             }
-        });
+        };
+
+        // Get all visible domains from current logs
+        const visibleDomains = new Set<string>();
+        if (displayMode === 'tail') {
+            tailBuffer.forEach(entry => {
+                if (entry.qname) visibleDomains.add(entry.qname);
+            });
+        } else {
+            (mode === 'combined' ? combinedPage?.entries : nodeSnapshot?.data.entries)?.forEach(entry => {
+                if (entry.qname) visibleDomains.add(entry.qname);
+            });
+        }
+
+        // Check each visible domain
+        visibleDomains.forEach(domain => checkDomainInGroups(domain));
 
         return map;
-    }, [selectedDomains, advancedBlocking]);
+    }, [advancedBlocking, displayMode, tailBuffer, combinedPage, nodeSnapshot, mode]);
 
     const baseColumns = useMemo(
         () => buildTableColumns(handleStatusClick, handleClientClick, handleDomainClick, selectedDomains, toggleDomainSelection, domainToGroupMap, domainGroupDetailsMap),
@@ -2898,6 +2912,12 @@ export function LogsPage() {
                 pullDistance={pullToRefresh.pullDistance}
                 threshold={pullToRefresh.threshold}
                 isRefreshing={pullToRefresh.isRefreshing}
+            />
+            {/* Single shared tooltip for all domain cells */}
+            <Tooltip
+                id="domain-tooltip-shared"
+                place="top"
+                className="domain-tooltip"
             />
             <section ref={pullToRefresh.containerRef} className="logs-page">
                 <header className="logs-page__header">
