@@ -269,6 +269,11 @@
     margin-bottom: 2rem;
 }
 
+.dns-tools__result-section--separator {
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 2px solid var(--color-border);
+}
 .dns-tools__result-section h3 {
     margin: 0 0 1rem 0;
     font-size: 1.1rem;
@@ -456,24 +461,22 @@
 }
 
 /* Dark mode support for allowed indicator */
-@media (prefers-color-scheme: dark) {
-    .dns-tools__result-section--allowed-default {
-        background: linear-gradient(135deg, #0d2818 0%, #14402d 100%);
-        border-color: #16a34a;
-    }
+[data-theme="dark"] .dns-tools__result-section--allowed-default {
+    background: linear-gradient(135deg, #0d2818 0%, #14402d 100%);
+    border-color: #16a34a;
+}
 
-    .dns-tools__allowed-icon {
-        color: #22c55e;
-        background-color: #14402d;
-    }
+[data-theme="dark"] .dns-tools__allowed-icon {
+    color: #22c55e;
+    background-color: #14402d;
+}
 
-    .dns-tools__allowed-indicator strong {
-        color: #4ade80;
-    }
+[data-theme="dark"] .dns-tools__allowed-indicator strong {
+    color: #4ade80;
+}
 
-    .dns-tools__no-matches {
-        color: #86efac;
-    }
+[data-theme="dark"] .dns-tools__no-matches {
+    color: #86efac;
 }
 
 /* Domain Lists Tab Styles */
@@ -1065,15 +1068,15 @@
 }
 
 .dns-tools__icon-button--copy:hover {
-    background: #d4edda;
-    border-color: #28a745;
-    color: #155724;
+    background: var(--color-success-bg);
+        border-color: var(--color-success);
+        color: var(--color-success-text);
 }
 
 .dns-tools__icon-button--clear:hover {
-    background: #f8d7da;
-    border-color: #dc3545;
-    color: #721c24;
+    background: var(--color-danger-bg);
+        border-color: var(--color-danger);
+        color: var(--color-danger-text);
 }
 
 .dns-tools__icon-button:active {
@@ -1203,172 +1206,151 @@
 }
 
 /* Dark Mode Support */
-@media (prefers-color-scheme: dark) {
-    /* Badge updates for dark mode */
-        .dns-tools__badge--none,
-        .dns-tools__badge--not-found {
-            background-color: var(--color-bg-tertiary);
-            color: var(--color-text-secondary);
-        }
-    
-        .dns-tools__badge--found {
-            background-color: var(--color-info-bg);
-            color: var(--color-info);
-        }
-    
-        /* Action badge dark mode */
-        .dns-tools__action-badge--block,
-        .dns-tools__type-badge--block {
-            background-color: var(--color-danger-bg);
-            color: var(--color-danger-text);
-        }
-    
-        .dns-tools__action-badge--allow,
-        .dns-tools__type-badge--allow {
-            background-color: var(--color-success-bg);
-            color: var(--color-success-text);
-        }
-    
-        /* General badges */
-        .dns-tools__type-badge {
-            background-color: var(--color-info-bg);
-            color: var(--color-info);
-        }
-    
-        .dns-tools__group-badge,
-        .dns-tools__group-badge-small {
-            background-color: var(--color-warning-bg);
-            color: var(--color-warning);
-        }
-    
-        /* Allowed by default indicator dark mode */
-        .dns-tools__result-section--allowed-default {
-            background: linear-gradient(135deg, #0d2818 0%, #14402d 100%);
-            border-color: var(--color-success);
-        }
-    
-        .dns-tools__allowed-icon {
-            color: var(--color-success);
-            background-color: var(--color-success-bg);
-        }
-    
-        .dns-tools__allowed-indicator strong {
-            color: var(--color-success-text);
-        }
-    
-        .dns-tools__no-matches {
-            color: var(--color-success-text);
-        }
-    
-        /* Info box dark mode */
-    .dns-tools__info-box {
-        background-color: var(--color-bg-secondary);
-            border-color: var(--color-border);
-    }
+[data-theme="dark"] .dns-tools__badge--none,
+[data-theme="dark"] .dns-tools__badge--not-found {
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-secondary);
+}
+[data-theme="dark"] .dns-tools__badge--found {
+    background-color: var(--color-info-bg);
+    color: var(--color-info);
+}
+[data-theme="dark"] .dns-tools__action-badge--block,
+[data-theme="dark"] .dns-tools__type-badge--block {
+    background-color: var(--color-danger-bg);
+    color: var(--color-danger-text);
+}
+[data-theme="dark"] .dns-tools__action-badge--allow,
+[data-theme="dark"] .dns-tools__type-badge--allow {
+    background-color: var(--color-success-bg);
+    color: var(--color-success-text);
+}
+[data-theme="dark"] .dns-tools__type-badge {
+    background-color: var(--color-info-bg);
+    color: var(--color-info);
+}
+[data-theme="dark"] .dns-tools__group-badge,
+[data-theme="dark"] .dns-tools__group-badge-small {
+    background-color: var(--color-warning-bg);
+    color: var(--color-warning);
+}
+[data-theme="dark"] .dns-tools__result-section--allowed-default {
+    background: linear-gradient(135deg, #0d2818 0%, #14402d 100%);
+    border-color: var(--color-success);
+}
+[data-theme="dark"] .dns-tools__allowed-icon {
+    color: var(--color-success);
+    background-color: var(--color-success-bg);
+}
+[data-theme="dark"] .dns-tools__allowed-indicator strong {
+    color: var(--color-success-text);
+}
+[data-theme="dark"] .dns-tools__no-matches {
+    color: var(--color-success-text);
+}
+[data-theme="dark"] .dns-tools__info-box {
+    background-color: var(--color-bg-secondary);
+    border-color: var(--color-border);
+}
 
-    .dns-tools__info-box-dismiss:hover {
-        background-color: var(--color-bg-tertiary);
-    }
+[data-theme="dark"] .dns-tools__info-box-dismiss:hover {
+    background-color: var(--color-bg-tertiary);
+}
 
-    .dns-tools__info-box-examples code {
-        background-color: var(--color-bg-tertiary);
-            color: var(--color-danger);
-    }
+[data-theme="dark"] .dns-tools__info-box-examples code {
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-danger);
+}
 
-    .dns-tools__search-pending {
-        color: var(--color-warning);
-    }
+[data-theme="dark"] .dns-tools__search-pending {
+    color: var(--color-warning);
+}
 
-    .dns-tools__regex-valid {
-        color: var(--color-success);
-    }
+[data-theme="dark"] .dns-tools__regex-valid {
+    color: var(--color-success);
+}
 
-    .dns-tools__regex-invalid {
-        color: var(--color-danger);
-    }
+[data-theme="dark"] .dns-tools__regex-invalid {
+    color: var(--color-danger);
+}
 
-    .dns-tools__loading-overlay {
-        background-color: rgba(15, 23, 42, 0.85);
-    }
+[data-theme="dark"] .dns-tools__loading-overlay {
+    background-color: rgba(15, 23, 42, 0.85);
+}
 
-    .dns-tools__loading-spinner {
-        background-color: var(--color-bg-secondary);
-    }
+[data-theme="dark"] .dns-tools__loading-spinner {
+    background-color: var(--color-bg-secondary);
+}
 
-    .dns-tools__spinner {
-        border-color: var(--color-border);
-            border-top-color: var(--color-primary);
-    }
+[data-theme="dark"] .dns-tools__spinner {
+    border-color: var(--color-border);
+    border-top-color: var(--color-primary);
+}
 
-    .dns-tools__icon-button {
-        background: var(--color-bg-tertiary);
-            border-color: var(--color-border);
-            color: var(--color-text-primary);
-    }
+[data-theme="dark"] .dns-tools__icon-button {
+    background: var(--color-bg-tertiary);
+    border-color: var(--color-border);
+    color: var(--color-text-primary);
+}
 
-    .dns-tools__icon-button:hover {
-        background: var(--color-bg-secondary);
-            border-color: var(--color-border-light);
-    }
+[data-theme="dark"] .dns-tools__icon-button:hover {
+    background: var(--color-bg-secondary);
+    border-color: var(--color-border-light);
+}
 
-    .dns-tools__icon-button--copy:hover {
-        background: var(--color-success-bg);
-            border-color: var(--color-success);
-            color: var(--color-success-text);
-    }
+[data-theme="dark"] .dns-tools__icon-button--copy:hover {
+    background: var(--color-success-bg);
+    border-color: var(--color-success);
+    color: var(--color-success-text);
+}
 
-    .dns-tools__icon-button--clear:hover {
-        background: var(--color-danger-bg);
-            border-color: var(--color-danger);
-            color: var(--color-danger-text);
-    }
+[data-theme="dark"] .dns-tools__icon-button--clear:hover {
+    background: var(--color-danger-bg);
+    border-color: var(--color-danger);
+    color: var(--color-danger-text);
+}
 
-    .dns-tools__regex-highlight {
-        background-color: var(--color-warning);
-            color: var(--color-bg-primary);
-    }
+[data-theme="dark"] .dns-tools__regex-highlight {
+    background-color: var(--color-warning);
+    color: var(--color-bg-primary);
+}
 
-    .dns-tools__source-group {
-        background-color: var(--color-bg-tertiary);
-    }
+[data-theme="dark"] .dns-tools__source-group {
+    background-color: var(--color-bg-tertiary);
+}
 
-    .dns-tools__regex-preview--valid {
-        background-color: var(--color-success-bg);
-            border-left-color: var(--color-success);
-    }
+[data-theme="dark"] .dns-tools__regex-preview--valid {
+    background-color: var(--color-success-bg);
+    border-left-color: var(--color-success);
+}
 
-    .dns-tools__regex-preview--invalid {
-        background-color: var(--color-danger-bg);
-            border-left-color: var(--color-danger);
-    }
+[data-theme="dark"] .dns-tools__regex-preview--invalid {
+    background-color: var(--color-danger-bg);
+    border-left-color: var(--color-danger);
+}
 
-    .dns-tools__regex-preview-count--success {
-        color: var(--color-success-text);
-    }
+[data-theme="dark"] .dns-tools__regex-preview-count--success {
+    color: var(--color-success-text);
+}
 
-    .dns-tools__regex-preview-count--error {
-        color: var(--color-danger-text);
-    }
+[data-theme="dark"] .dns-tools__regex-preview-count--error {
+    color: var(--color-danger-text);
+}
 
-    .dns-tools__regex-preview-item {
-        background-color: var(--color-bg-secondary);
-            border-color: var(--color-border);
-    }
+[data-theme="dark"] .dns-tools__regex-preview-item {
+    background-color: var(--color-bg-secondary);
+    border-color: var(--color-border);
+}
 
-    .dns-tools__regex-preview-error {
-        background-color: rgba(0, 0, 0, 0.3);
-        color: var(--color-danger-text);
-        }
-        
-        /* Table styling for dark mode */
-        .dns-tools__table-row:hover {
-            background-color: var(--color-bg-tertiary);
-        }
-        
-        /* Pattern code styling */
-        .dns-tools__pattern code {
-            color: var(--color-danger);
-    }
+[data-theme="dark"] .dns-tools__regex-preview-error {
+    background-color: rgba(0, 0, 0, 0.3);
+    color: var(--color-danger-text);
+}
+[data-theme="dark"] .dns-tools__table-row:hover {
+    background-color: var(--color-bg-tertiary);
+}
+[data-theme="dark"] .dns-tools__pattern code {
+    color: var(--color-danger);
 }
 
 /* Mobile Responsiveness for New Features */

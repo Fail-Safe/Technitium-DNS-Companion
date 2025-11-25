@@ -27,15 +27,15 @@
   --color-primary-bg: #eef2fa;
   --color-success: #10b981;
   --color-success-hover: #059669;
-    --color-success-active: #047857;
-    --color-success-dark: #059669;
+  --color-success-active: #047857;
+  --color-success-dark: #059669;
   --color-success-bg: #d1fae5;
   --color-success-light: #c8e6c9;
   --color-success-text: #166534;
   --color-warning: #f59e0b;
   --color-warning-hover: #d97706;
-    --color-warning-active: #b45309;
-    --color-warning-dark: #92400e;
+  --color-warning-active: #b45309;
+  --color-warning-dark: #92400e;
   --color-warning-bg: #fef3c7;
   --color-warning-light: #fde68a;
   --color-danger: #ef4444;
@@ -55,7 +55,7 @@
   /* Tooltips */
   --tooltip-bg: #1a1f2d;
   --tooltip-color: #f1f5f9;
-/* Selection Palette (10 colors for domain grouping) */
+  /* Selection Palette (10 colors for domain grouping) */
   --color-select-0-bg: #e8f0fe;
   --color-select-0-border: #4285f4;
   --color-select-0-gradient-from: #2563eb;
@@ -184,15 +184,15 @@
   --color-primary-bg: #1e1b4b;
   --color-success: #4ade80;
   --color-success-hover: #22c55e;
-    --color-success-active: #16a34a;
-    --color-success-dark: #22c55e;
+  --color-success-active: #16a34a;
+  --color-success-dark: #22c55e;
   --color-success-bg: #14532d;
   --color-success-light: #1e6f3a;
   --color-success-text: #86efac;
   --color-warning: #fbbf24;
   --color-warning-hover: #f59e0b;
-    --color-warning-active: #d97706;
-    --color-warning-dark: #fbbf24;
+  --color-warning-active: #d97706;
+  --color-warning-dark: #fbbf24;
   --color-warning-bg: #78350f;
   --color-warning-light: #92400e;
   --color-danger: #f87171;
@@ -212,7 +212,7 @@
   /* Tooltips */
   --tooltip-bg: #0f172a;
   --tooltip-color: #f1f5f9;
-/* Selection Palette (10 colors for domain grouping) - Dark mode */
+  /* Selection Palette (10 colors for domain grouping) - Dark mode */
   --color-select-0-bg: #1e3a5f;
   --color-select-0-border: #60a5fa;
   --color-select-0-gradient-from: #3b82f6;
@@ -321,12 +321,34 @@
   color-scheme: dark;
 }
 
-* {
-  box-sizing: border-box;
-}
-
+/* Theme transition animation - targeted to key elements only for performance */
 html {
   scroll-behavior: smooth;
+}
+
+html.theme-transitioning body,
+html.theme-transitioning .app-header,
+html.theme-transitioning .mobile-nav,
+html.theme-transitioning .logs-page,
+html.theme-transitioning .overview-page,
+html.theme-transitioning .configuration,
+html.theme-transitioning .dhcp-page,
+html.theme-transitioning .zones-page,
+html.theme-transitioning .dns-tools,
+html.theme-transitioning .card,
+html.theme-transitioning .modal,
+html.theme-transitioning .modal__backdrop,
+html.theme-transitioning button,
+html.theme-transitioning input,
+html.theme-transitioning select,
+html.theme-transitioning textarea {
+  transition: background-color 0.3s ease,
+    border-color 0.3s ease,
+    color 0.3s ease !important;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {

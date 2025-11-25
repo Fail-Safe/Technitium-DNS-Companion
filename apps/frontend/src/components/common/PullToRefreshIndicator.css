@@ -61,20 +61,18 @@
     white-space: nowrap;
 }
 
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-    .pull-to-refresh-indicator__spinner {
-        background: #1e293b;
-        color: #818cf8;
-    }
+/* Dark mode support - using theme selector */
+[data-theme="dark"] .pull-to-refresh-indicator__spinner {
+    background: var(--color-bg-secondary);
+    color: var(--color-primary);
+}
 
-    .pull-to-refresh-indicator__loader {
-        border-color: #334155;
-        border-top-color: #818cf8;
-    }
+[data-theme="dark"] .pull-to-refresh-indicator__loader {
+    border-color: var(--color-border);
+    border-top-color: var(--color-primary);
+}
 
-    .pull-to-refresh-indicator__text {
-        background: #1e293b;
-        color: #e2e8f0;
-    }
+[data-theme="dark"] .pull-to-refresh-indicator__text {
+    background: var(--color-bg-secondary);
+    color: var(--color-text-primary);
 }

@@ -696,7 +696,7 @@ export const DnsToolsPage: React.FC = () => {
                                     )}
 
                                     {globalCheckResult && globalCheckResult.found && globalCheckResult.foundIn && globalCheckResult.foundIn.length > 0 && (
-                                        <div className="dns-tools__result-section" style={{ marginTop: '24px', paddingTop: '24px', borderTop: '2px solid #e0e0e0' }}>
+                                        <div className="dns-tools__result-section dns-tools__result-section--separator">
                                             <h3>All Matching Lists ({globalCheckResult.foundIn.length})</h3>
                                             <p className="dns-tools__section-description">
                                                 Complete list of all allow/block lists containing this domain across all groups

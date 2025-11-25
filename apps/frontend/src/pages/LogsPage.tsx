@@ -678,20 +678,20 @@ const buildTableColumns = (
                 if (groupDetails) {
                     tooltipHtml += `<div style="margin-top: 8px;"><div><strong>Group:</strong> ${groupDetails.groupName}</div>`;
                     if (groupDetails.blockedExact) {
-                        tooltipHtml += `<div style="margin-left: 12px; color: #ef4444;">→ Blocked (Exact Match)</div>`;
+                        tooltipHtml += `<div class="tooltip-blocked" style="margin-left: 12px;">→ Blocked (Exact Match)</div>`;
                     }
                     if (groupDetails.blockedRegexMatches.length > 0) {
-                        tooltipHtml += `<div style="margin-left: 12px;"><div style="color: #ef4444;">→ Blocked by Regex:</div>`;
+                        tooltipHtml += `<div style="margin-left: 12px;"><div class="tooltip-blocked">→ Blocked by Regex:</div>`;
                         groupDetails.blockedRegexMatches.forEach(pattern => {
                             tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${pattern}</div>`;
                         });
                         tooltipHtml += `</div>`;
                     }
                     if (groupDetails.allowedExact) {
-                        tooltipHtml += `<div style="margin-left: 12px; color: #22c55e;">→ Allowed (Exact Match)</div>`;
+                        tooltipHtml += `<div class="tooltip-allowed" style="margin-left: 12px;">→ Allowed (Exact Match)</div>`;
                     }
                     if (groupDetails.allowedRegexMatches.length > 0) {
-                        tooltipHtml += `<div style="margin-left: 12px;"><div style="color: #22c55e;">→ Allowed by Regex:</div>`;
+                        tooltipHtml += `<div style="margin-left: 12px;"><div class="tooltip-allowed">→ Allowed by Regex:</div>`;
                         groupDetails.allowedRegexMatches.forEach(pattern => {
                             tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${pattern}</div>`;
                         });
@@ -3411,7 +3411,7 @@ export function LogsPage() {
                                             <span>
                                                 {pageNumber} / {totalPages}
                                                 {hasMorePages && (
-                                                    <span style={{ marginLeft: '0.5rem', color: '#f59e0b', fontSize: '0.9em' }} title="Fetch limit reached. Use more specific filters to see additional results.">
+                                                    <span className="logs-page__more-results-warning" title="Fetch limit reached. Use more specific filters to see additional results.">
                                                         ⚠️ More results may exist
                                                     </span>
                                                 )}

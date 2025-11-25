@@ -63,11 +63,23 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const toggleTheme = () => {
+        // Add transition class for smooth animation
+        document.documentElement.classList.add('theme-transitioning');
         setThemeState(prev => prev === 'light' ? 'dark' : 'light');
+        // Remove transition class after animation completes
+        setTimeout(() => {
+            document.documentElement.classList.remove('theme-transitioning');
+        }, 300);
     };
 
     const setTheme = (newTheme: Theme) => {
+        // Add transition class for smooth animation
+        document.documentElement.classList.add('theme-transitioning');
         setThemeState(newTheme);
+        // Remove transition class after animation completes
+        setTimeout(() => {
+            document.documentElement.classList.remove('theme-transitioning');
+        }, 300);
     };
 
     return (

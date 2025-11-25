@@ -6,11 +6,9 @@
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-@media (prefers-color-scheme: dark) {
-    .node-card-skeleton {
-        background: var(--card-background, #1f2937);
-        border-color: var(--border-color, #374151);
-    }
+[data-theme="dark"] .node-card-skeleton {
+    background: var(--color-bg-secondary);
+    border-color: var(--color-border);
 }
 
 .node-card-skeleton__header {
@@ -64,14 +62,12 @@
     border-radius: 4px;
 }
 
-@media (prefers-color-scheme: dark) {
-    .skeleton {
-        background: linear-gradient(90deg,
-                rgba(55, 65, 81, 0.4) 25%,
-                rgba(75, 85, 99, 0.5) 50%,
-                rgba(55, 65, 81, 0.4) 75%);
-        background-size: 200% 100%;
-    }
+[data-theme="dark"] .skeleton {
+    background: linear-gradient(90deg,
+            rgba(55, 65, 81, 0.4) 25%,
+            rgba(75, 85, 99, 0.5) 50%,
+            rgba(55, 65, 81, 0.4) 75%);
+    background-size: 200% 100%;
 }
 
 @keyframes skeleton-loading {

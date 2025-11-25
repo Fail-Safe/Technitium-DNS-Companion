@@ -20,7 +20,7 @@
     border-radius: 0.5rem;
     border: 1px solid var(--color-border);
     background: var(--color-bg-secondary);
-    color: #5d6786;
+    color: var(--color-text-secondary);
     font-weight: 600;
     font-size: 0.85rem;
     cursor: pointer;
@@ -33,25 +33,25 @@
 .domain-type-button--blocked.domain-type-button--active {
     border-color: var(--color-danger);
     background: var(--color-danger-bg);
-    color: var(--color-danger);
+    color: var(--color-danger-text);
 }
 
 .domain-type-button--allowed.domain-type-button--active {
     border-color: var(--color-success);
     background: var(--color-success-bg);
-    color: var(--color-success);
+    color: var(--color-success-text);
 }
 
 .domain-type-button--blocked-regex.domain-type-button--active {
     border-color: var(--color-danger);
     background: var(--color-danger-bg);
-    color: var(--color-danger);
+    color: var(--color-danger-text);
 }
 
 .domain-type-button--allowed-regex.domain-type-button--active {
     border-color: var(--color-success);
     background: var(--color-success-bg);
-    color: var(--color-success);
+    color: var(--color-success-text);
 }
 
 /* === Domain Management Layout === */
@@ -231,8 +231,8 @@
     font-size: 0.70rem;
     font-weight: 500;
     border-radius: 3px;
-    background: #e0e0e0;
-    color: #333;
+    background: var(--color-bg-tertiary);
+        color: var(--color-text-primary);
 }
 
 .domain-table__domain-pill {
@@ -248,12 +248,12 @@
 
 .domain-table__domain-pill--blocked {
     background-color: var(--color-danger-bg);
-    color: var(--color-danger);
+    color: var(--color-danger-text);
 }
 
 .domain-table__domain-pill--allowed {
     background-color: var(--color-success-bg);
-    color: var(--color-success);
+    color: var(--color-success-text);
 }
 
 /* === Icon Buttons === */
@@ -271,11 +271,11 @@
 }
 
 .icon-button--edit {
-    color: #5d6786;
+    color: var(--color-text-secondary);
 }
 
 .icon-button--delete {
-    color: #dc3545;
+    color: var(--color-danger);
 }
 
 /* === Drop Zone Container === */
@@ -289,14 +289,14 @@
 .drop-zone-hint {
     margin: 0 0 0.75rem 0;
     font-size: 0.8rem;
-    color: #5d6786;
+    color: var(--color-text-secondary);
     font-style: italic;
 }
 
 /* === All Groups Drop Zone === */
 .all-groups-drop-zone {
     padding: 0.25rem;
-    border: 2px dashed #cfd6e4;
+    border: 2px dashed var(--color-border);
     border-radius: 0.75rem;
     background: var(--color-bg-primary);
     text-align: center;
@@ -307,8 +307,8 @@
 }
 
 .all-groups-drop-zone--dragging-over {
-    border-color: #365df3;
-    background: #d9edf7;
+    border-color: var(--color-primary);
+        background: var(--color-info-bg);
     transform: scale(1.02);
 }
 
@@ -324,12 +324,12 @@
 }
 
 .all-groups-drop-zone__title--active {
-    color: #365df3;
+    color: var(--color-primary);
 }
 
 .all-groups-drop-zone__hint {
     font-size: 0.75rem;
-    color: #5d6786;
+    color: var(--color-text-secondary);
     margin-top: 0.25rem;
 }
 
@@ -391,7 +391,7 @@
     border: none;
     padding: 0;
     cursor: pointer;
-    color: #5d6786;
+    color: var(--color-text-secondary);
     font-size: 0.9rem;
     display: flex;
     align-items: center;
@@ -408,11 +408,11 @@
 }
 
 .group-drop-zone__action-icon--remove {
-    color: #dc3545;
+    color: var(--color-danger);
 }
 
 .group-drop-zone__action-icon--add {
-    color: #28a745;
+    color: var(--color-success);
 }
 
 /* === Expanded Group Domain List === */
@@ -420,7 +420,7 @@
     margin-left: 0.55rem;
     margin-right: 0.55rem;
     padding: 0;
-    background: #f9fafb;
+    background: var(--color-bg-primary);
     border-radius: 0.5rem;
     border-top-left-radius: 0;
     border-top-right-radius: 0;
@@ -444,16 +444,16 @@
 }
 
 .group-domain-list--dragging-over {
-    background: #d9edf7;
-    border-right: 1px dashed #365df3;
-    border-bottom: 1px dashed #365df3;
-    border-left: 1px dashed #365df3;
+    background: var(--color-info-bg);
+        border-right: 1px dashed var(--color-primary);
+        border-bottom: 1px dashed var(--color-primary);
+        border-left: 1px dashed var(--color-primary);
 }
 
 .group-domain-list__empty {
     margin: 0;
     font-size: 0.8rem;
-    color: #9ca3af;
+    color: var(--color-text-tertiary);
     font-style: italic;
     text-align: center;
 }
@@ -618,7 +618,7 @@
 }
 
 .modal__title--danger {
-    color: #dc3545;
+    color: var(--color-danger);
 }
 
 .modal__description {
@@ -629,7 +629,7 @@
 .modal__subdescription {
     margin-bottom: 1.5rem;
     font-size: 0.85rem;
-    color: #5d6786;
+    color: var(--color-text-secondary);
 }
 
 .modal__input {

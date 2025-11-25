@@ -243,69 +243,67 @@
     color: var(--text-secondary, #4a4a4a);
 }
 
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-    .ab-setup-guide {
-        background: var(--card-background-dark, #2a2a2a);
-    }
+/* Dark mode support - using theme selector */
+[data-theme="dark"] .ab-setup-guide {
+    background: var(--color-bg-secondary);
+}
 
-    .ab-setup-guide__title,
-    .ab-setup-guide__section-title,
-    .ab-setup-guide__steps>li>strong,
-    .ab-setup-guide__note strong {
-        color: var(--text-primary-dark, #f0f0f0);
-    }
+[data-theme="dark"] .ab-setup-guide__title,
+[data-theme="dark"] .ab-setup-guide__section-title,
+[data-theme="dark"] .ab-setup-guide__steps>li>strong,
+[data-theme="dark"] .ab-setup-guide__note strong {
+    color: var(--color-text-primary);
+}
 
-    .ab-setup-guide__intro,
-    .ab-setup-guide__steps>li>p,
-    .ab-setup-guide__note {
-        color: var(--text-secondary-dark, #cccccc);
-    }
+[data-theme="dark"] .ab-setup-guide__intro,
+[data-theme="dark"] .ab-setup-guide__steps>li>p,
+[data-theme="dark"] .ab-setup-guide__note {
+    color: var(--color-text-secondary);
+}
 
-    .ab-setup-guide__steps code,
-    .ab-setup-warning__nodes code {
-        background: var(--code-background-dark, #1a1a1a);
-    }
+[data-theme="dark"] .ab-setup-guide__steps code,
+[data-theme="dark"] .ab-setup-warning__nodes code {
+    background: var(--color-bg-tertiary);
+}
 
-    .ab-setup-guide__note {
-        background: var(--info-background-dark, #1a3a52);
-        border-left-color: var(--info-border-dark, #4a90e2);
-    }
+[data-theme="dark"] .ab-setup-guide__note {
+    background: var(--color-info-bg);
+    border-left-color: var(--color-info);
+}
 
-    .ab-setup-warning {
-        background: var(--warning-background-dark, #4a3a1a);
-        border-color: var(--warning-border-dark, #ff9800);
-    }
+[data-theme="dark"] .ab-setup-warning {
+    background: var(--color-warning-bg);
+    border-color: var(--color-warning);
+}
 
-    .ab-setup-warning__title {
-        color: var(--warning-text-dark, #ffb74d);
-    }
+[data-theme="dark"] .ab-setup-warning__title {
+    color: var(--color-warning);
+}
 
-    .ab-setup-warning__message {
-        color: var(--text-secondary-dark, #cccccc);
-    }
+[data-theme="dark"] .ab-setup-warning__message {
+    color: var(--color-text-secondary);
+}
 
-    .ab-setup-warning__toggle-button {
-        color: var(--link-color-dark, #4a90e2);
-    }
+[data-theme="dark"] .ab-setup-warning__toggle-button {
+    color: var(--color-primary);
+}
 
-    .ab-setup-warning__instructions {
-        background: rgba(255, 255, 255, 0.05);
-    }
+[data-theme="dark"] .ab-setup-warning__instructions {
+    background: rgba(255, 255, 255, 0.05);
+}
 
-    .ab-setup-warning__instructions-title,
-    .ab-setup-warning__steps>li>strong {
-        color: var(--text-primary-dark, #f0f0f0);
-    }
+[data-theme="dark"] .ab-setup-warning__instructions-title,
+[data-theme="dark"] .ab-setup-warning__steps>li>strong {
+    color: var(--color-text-primary);
+}
 
-    .ab-setup-warning__steps>li>p,
-    .ab-setup-warning__docs-link {
-        color: var(--text-secondary-dark, #cccccc);
-    }
+[data-theme="dark"] .ab-setup-warning__steps>li>p,
+[data-theme="dark"] .ab-setup-warning__docs-link {
+    color: var(--color-text-secondary);
+}
 
-    .ab-setup-warning__steps code {
-        background: var(--code-background-dark, #1a1a1a);
-    }
+[data-theme="dark"] .ab-setup-warning__steps code {
+    background: var(--color-bg-tertiary);
 }
 
 /* Mobile responsive */
