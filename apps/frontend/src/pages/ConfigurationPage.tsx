@@ -433,7 +433,7 @@ export function ConfigurationPage() {
             <>
                 {parts.map((part, i) =>
                     part.toLowerCase() === search.toLowerCase() ?
-                        <mark key={i} style={{ backgroundColor: '#fff3cd', padding: '0', fontWeight: 600 }}>{part}</mark> :
+                        <mark key={i} style={{ backgroundColor: 'var(--color-warning-bg)', padding: '0', fontWeight: 600 }}>{part}</mark> :
                         part
                 )}
             </>
@@ -995,7 +995,7 @@ export function ConfigurationPage() {
                                                 className={`domain-type-button domain-type-button--blocked-regex ${activeDomainType === 'blockedRegex' ? 'domain-type-button--active' : ''}`}
                                             >
                                                 <LayeredIcon backgroundIcon={faCode} foregroundIcon={faBan}
-                                                    bgColor="#5d6786" fgColor={activeDomainType === 'blockedRegex' ? '#a94442' : '#5d6786'}
+                                                    bgColor="var(--color-text-secondary)" fgColor={activeDomainType === 'blockedRegex' ? 'var(--color-danger)' : 'var(--color-text-secondary)'}
                                                     bgFontSize='0.85em' fgFontSize='1.5em' /> Blocked Regex
                                             </button>
                                             <button
@@ -1063,7 +1063,7 @@ export function ConfigurationPage() {
                                                     </div>
                                                     <div className="domain-list-card__body">
                                                         {filteredDomains.length === 0 ? (
-                                                            <div style={{ padding: '2rem', textAlign: 'center', color: '#9ca3af' }}>
+                                                            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-tertiary)' }}>
                                                                 <p style={{ margin: 0, fontSize: '0.9rem', fontStyle: 'italic' }}>
                                                                     {searchInput.trim() ? 'No matching domains found' : 'No domains in any group for this type'}
                                                                 </p>
@@ -1156,12 +1156,12 @@ export function ConfigurationPage() {
                                                                 <div className={`alert-box__title ${isBlocked ? 'alert-box__title--danger' : 'alert-box__title--success'}`} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                                     {isBlocked ? (
                                                                         <div className="status-icon">
-                                                                            <FontAwesomeIcon icon={faCircle} className="status-icon__bg" style={{ color: '#a94442' }} />
+                                                                                <FontAwesomeIcon icon={faCircle} className="status-icon__bg" style={{ color: 'var(--color-danger)' }} />
                                                                             <FontAwesomeIcon icon={faBan} className="status-icon__fg" />
                                                                         </div>
                                                                     ) : (
                                                                         <div className="status-icon">
-                                                                            <FontAwesomeIcon icon={faCircle} className="status-icon__bg" style={{ color: '#28a745' }} />
+                                                                                    <FontAwesomeIcon icon={faCircle} className="status-icon__bg" style={{ color: 'var(--color-success)' }} />
                                                                             <FontAwesomeIcon icon={faCheck} className="status-icon__fg" />
                                                                         </div>
                                                                     )}
@@ -1224,7 +1224,7 @@ export function ConfigurationPage() {
 
                                                                         if (manuallyAllowedGroups.length > 0) {
                                                                             return (
-                                                                                <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: '#155724' }}>
+                                                                                <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: 'var(--color-success-text)' }}>
                                                                                     <p style={{ margin: '0 0 0.5rem 0', fontWeight: 600 }}>Manual Overrides:</p>
                                                                                     <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
                                                                                         {manuallyAllowedGroups.map((groupName, idx) => (
@@ -1241,8 +1241,8 @@ export function ConfigurationPage() {
                                                                         return null;
                                                                     })()}
                                                                     {isBlocked && (
-                                                                        <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(169, 68, 66, 0.2)' }}>
-                                                                            <p style={{ margin: '0 0 0.5rem 0', fontWeight: 600, fontSize: '0.8rem' }}>
+                                                                        <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--color-border)' }}>
+                                                                            <p style={{ margin: '0 0 0.5rem 0', fontWeight: 600, fontSize: '0.8rem', color: 'var(--color-text-primary)' }}>
                                                                                 Quick {activeDomainType.includes('blocked') ? 'Block' : 'Allow'}:
                                                                             </p>
                                                                             <div
@@ -1255,10 +1255,10 @@ export function ConfigurationPage() {
                                                                                 style={{
                                                                                     display: 'inline-block',
                                                                                     padding: '0.5rem 1rem',
-                                                                                    background: activeDomainType.includes('blocked') ? '#f2dede' : '#dff0d8',
+                                                                                    background: activeDomainType.includes('blocked') ? 'var(--color-danger-bg)' : 'var(--color-success-bg)',
                                                                                     borderRadius: '0.5rem',
-                                                                                    color: activeDomainType.includes('blocked') ? '#a94442' : '#3c763d',
-                                                                                    border: `1px solid ${activeDomainType.includes('blocked') ? '#a94442' : '#3c763d'}`,
+                                                                                    color: activeDomainType.includes('blocked') ? 'var(--color-danger)' : 'var(--color-success)',
+                                                                                    border: `1px solid ${activeDomainType.includes('blocked') ? 'var(--color-danger)' : 'var(--color-success)'}`,
                                                                                     fontWeight: 600,
                                                                                     fontSize: '0.85rem',
                                                                                     cursor: 'grab',
@@ -1267,12 +1267,12 @@ export function ConfigurationPage() {
                                                                                     transform: 'translate(0, 0)'
                                                                                 }}
                                                                                 onMouseEnter={(e) => {
-                                                                                    e.currentTarget.style.background = activeDomainType.includes('blocked') ? '#ffcdcd' : '#c8e6c9';
+                                                                                    e.currentTarget.style.background = activeDomainType.includes('blocked') ? 'var(--color-danger-light)' : 'var(--color-success-light)';
                                                                                     e.currentTarget.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.15)';
                                                                                     e.currentTarget.style.transform = 'translate(0, -2px)';
                                                                                 }}
                                                                                 onMouseLeave={(e) => {
-                                                                                    e.currentTarget.style.background = activeDomainType.includes('blocked') ? '#f2dede' : '#dff0d8';
+                                                                                    e.currentTarget.style.background = activeDomainType.includes('blocked') ? 'var(--color-danger-bg)' : 'var(--color-success-bg)';
                                                                                     e.currentTarget.style.boxShadow = 'none';
                                                                                     e.currentTarget.style.transform = 'translate(0, 0)';
                                                                                 }}
@@ -1280,7 +1280,7 @@ export function ConfigurationPage() {
                                                                                 <FontAwesomeIcon icon={faCheck} style={{ marginRight: '0.5rem' }} />
                                                                                 {searchedDomain}
                                                                             </div>
-                                                                            <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.75rem', opacity: 0.8 }}>
+                                                                            <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
                                                                                 Drag into groups to {activeDomainType.includes('blocked') ? 'block' : 'allow'} this domain
                                                                             </p>
                                                                         </div>
@@ -1326,7 +1326,7 @@ export function ConfigurationPage() {
                                                         <div className="all-groups-drop-zone__icon">
                                                             <FontAwesomeIcon
                                                                 icon={dragOverGroup === 'ALL_GROUPS' && dragSourceGroup ? faPlus : faUsers}
-                                                                style={{ color: dragOverGroup === 'ALL_GROUPS' && dragSourceGroup ? '#28a745' : 'inherit' }}
+                                                                style={{ color: dragOverGroup === 'ALL_GROUPS' && dragSourceGroup ? 'var(--color-success)' : 'inherit' }}
                                                             />
                                                         </div>
                                                         <div className={`all-groups-drop-zone__title ${dragOverGroup === 'ALL_GROUPS' ? 'all-groups-drop-zone__title--active' : ''}`}>
@@ -1357,15 +1357,15 @@ export function ConfigurationPage() {
                                                                             <span style={{
                                                                                 fontWeight: 600,
                                                                                 fontSize: '0.9rem',
-                                                                                color: dragOverGroup === groupName ? '#365df3' : '#1a1f2d',
+                                                                                color: dragOverGroup === groupName ? 'var(--color-primary)' : 'var(--color-text-primary)',
                                                                             }}>
                                                                                 {groupName}
                                                                             </span>
                                                                             <span style={{
                                                                                 fontSize: '0.9rem',
                                                                                 fontWeight: 600,
-                                                                                color: '#ffffff',
-                                                                                background: '#5bc0de',
+                                                                                color: 'var(--color-bg-secondary)',
+                                                                                background: 'var(--color-info)',
                                                                                 padding: '2px 6px',
                                                                                 borderRadius: '3px',
                                                                             }}>
@@ -1378,7 +1378,7 @@ export function ConfigurationPage() {
                                                                                     border: 'none',
                                                                                     padding: '0',
                                                                                     cursor: 'pointer',
-                                                                                    color: '#5d6786',
+                                                                                    color: 'var(--color-text-secondary)',
                                                                                     fontSize: '0.9rem',
                                                                                     display: 'flex',
                                                                                     alignItems: 'center',
@@ -1411,14 +1411,14 @@ export function ConfigurationPage() {
                                                                         marginLeft: '0.55rem',
                                                                         marginRight: '0.55rem',
                                                                         padding: isExpanded ? '0.75rem' : '0 0.75rem',
-                                                                        background: dragOverGroup === groupName ? '#d9edf7' : '#f9fafb',
+                                                                        background: dragOverGroup === groupName ? 'var(--color-info-bg)' : 'var(--color-bg-tertiary)',
                                                                         borderRadius: '0.5rem',
                                                                         borderTopLeftRadius: '0',
                                                                         borderTopRightRadius: '0',
                                                                         borderTop: '0',
-                                                                        borderRight: dragOverGroup === groupName ? '1px dashed #365df3' : '1px solid #e5e7eb',
-                                                                        borderBottom: dragOverGroup === groupName ? '1px dashed #365df3' : '1px solid #e5e7eb',
-                                                                        borderLeft: dragOverGroup === groupName ? '1px dashed #365df3' : '1px solid #e5e7eb',
+                                                                        borderRight: dragOverGroup === groupName ? '1px dashed var(--color-primary)' : '1px solid var(--color-border-light)',
+                                                                        borderBottom: dragOverGroup === groupName ? '1px dashed var(--color-primary)' : '1px solid var(--color-border-light)',
+                                                                        borderLeft: dragOverGroup === groupName ? '1px dashed var(--color-primary)' : '1px solid var(--color-border-light)',
                                                                         maxHeight: isExpanded ? '200px' : '0',
                                                                         overflow: isExpanded ? 'auto' : 'hidden',
                                                                         transition: 'max-height 0.3s ease, padding 0.3s ease, background 0.2s ease, opacity 0.2s ease',
@@ -1427,7 +1427,7 @@ export function ConfigurationPage() {
                                                                     }}
                                                                 >
                                                                     {domains.length === 0 ? (
-                                                                        <p style={{ margin: 0, fontSize: '0.8rem', color: '#9ca3af', fontStyle: 'italic', textAlign: 'center' }}>
+                                                                        <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-tertiary)', fontStyle: 'italic', textAlign: 'center' }}>
                                                                             No domains - drop here to add
                                                                         </p>
                                                                     ) : (
@@ -1486,9 +1486,9 @@ export function ConfigurationPage() {
                                                         {testPendingChanges.map((change, idx) => (
                                                             <li key={idx} className={`change-item change-item--${change.type}`}>
                                                                 <span className="change-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '1.5rem', height: '1.5rem' }}>
-                                                                    {change.type === 'added' && <FontAwesomeIcon icon={faPlus} style={{ color: '#28a745' }} />}
-                                                                    {change.type === 'removed' && <FontAwesomeIcon icon={faMinus} style={{ color: '#dc3545' }} />}
-                                                                    {change.type === 'modified' && <FontAwesomeIcon icon={faPencil} style={{ color: '#ffc107' }} />}
+                                                                    {change.type === 'added' && <FontAwesomeIcon icon={faPlus} style={{ color: 'var(--color-success)' }} />}
+                                                                    {change.type === 'removed' && <FontAwesomeIcon icon={faMinus} style={{ color: 'var(--color-danger)' }} />}
+                                                                    {change.type === 'modified' && <FontAwesomeIcon icon={faPencil} style={{ color: 'var(--color-warning)' }} />}
                                                                 </span>
                                                                 <span className="change-type">{change.category}</span>
                                                                 <span className="change-group" style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>
@@ -1609,7 +1609,7 @@ export function ConfigurationPage() {
                                 type="button"
                                 className="primary"
                                 onClick={handleConfirmDelete}
-                                style={{ background: '#dc3545', borderColor: '#dc3545' }}
+                                style={{ background: 'var(--color-danger)', borderColor: 'var(--color-danger)' }}
                             >
                                 Delete
                             </button>

@@ -25,8 +25,8 @@
     display: flex;
     gap: 1rem;
     padding: 1rem;
-    background: var(--card-background, #fff);
-    border: 1px solid var(--border-color, #e5e7eb);
+    background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border);
     border-radius: 8px;
     flex: 1;
     min-width: 200px;
@@ -34,8 +34,8 @@
 
 @media (prefers-color-scheme: dark) {
     .dhcp-page-skeleton__node-card {
-        background: var(--card-background, #1f2937);
-        border-color: var(--border-color, #374151);
+        background: var(--color-bg-secondary);
+            border-color: var(--color-border);
     }
 }
 
@@ -54,15 +54,15 @@
 
 .dhcp-page-skeleton__card {
     padding: 1.5rem;
-    background: var(--card-background, #fff);
-    border: 1px solid var(--border-color, #e5e7eb);
+    background: var(--color-bg-secondary);
+        border: 1px solid var(--color-border);
     border-radius: 8px;
 }
 
 @media (prefers-color-scheme: dark) {
     .dhcp-page-skeleton__card {
-        background: var(--card-background, #1f2937);
-        border-color: var(--border-color, #374151);
+        background: var(--color-bg-secondary);
+            border-color: var(--color-border);
     }
 }
 

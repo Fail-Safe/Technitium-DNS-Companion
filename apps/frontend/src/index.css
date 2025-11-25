@@ -24,11 +24,13 @@
   --color-primary-light: #e8edff;
   --color-success: #10b981;
   --color-success-bg: #d1fae5;
+  --color-success-light: #c8e6c9;
   --color-success-text: #166534;
   --color-warning: #f59e0b;
   --color-warning-bg: #fef3c7;
   --color-danger: #ef4444;
   --color-danger-bg: #fee2e2;
+  --color-danger-light: #ffcdcd;
   --color-danger-text: #991b1b;
   --color-info: #3b82f6;
   --color-info-bg: #dbeafe;
@@ -38,6 +40,9 @@
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
 
+  /* Tooltips */
+  --tooltip-bg: #1a1f2d;
+  --tooltip-color: #f1f5f9;
   color: var(--color-text-primary);
   background-color: var(--color-bg-primary);
 }
@@ -59,11 +64,13 @@
   --color-primary-light: #312e81;
   --color-success: #4ade80;
   --color-success-bg: #14532d;
+  --color-success-light: #1e6f3a;
   --color-success-text: #86efac;
   --color-warning: #fbbf24;
   --color-warning-bg: #78350f;
   --color-danger: #f87171;
   --color-danger-bg: #7f1d1d;
+  --color-danger-light: #991b1b;
   --color-danger-text: #fca5a5;
   --color-info: #60a5fa;
   --color-info-bg: #1e3a8a;
@@ -73,6 +80,9 @@
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
 
+  /* Tooltips */
+  --tooltip-bg: #0f172a;
+  --tooltip-color: #f1f5f9;
   color-scheme: dark;
 }
 

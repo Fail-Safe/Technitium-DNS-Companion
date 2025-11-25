@@ -139,14 +139,14 @@
 /* Dropdown banner */
 .cluster-info-banner--dropdown {
     position: absolute;
-    top: calc(100% + 3.3rem);
+    top: calc(100% + 3.8rem);
     right: 0;
     width: max-content;
     min-width: 400px;
     max-width: 600px;
     z-index: 1000;
     margin-bottom: 0;
-    animation: slideDown 0.7s ease-out;
+    animation: slideDown 0.35s ease-out;
     /* Prevent layout shift */
     pointer-events: auto;
 }

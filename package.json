@@ -1,7 +1,7 @@
 {
     "name": "technitium-dns-companion",
     "private": true,
-    "version": "1.0.0",
+    "version": "1.0.1",
     "workspaces": [
         "apps/backend",
         "apps/frontend"
@@ -12,4 +12,4 @@
     "dependencies": {
         "cap": "^0.2.1"
     }
-}
+}x

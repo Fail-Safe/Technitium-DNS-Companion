@@ -23,6 +23,22 @@ export function Header() {
                 <span className="app-header__brand-icon"><FontAwesomeIcon icon={faBolt} /></span>
                 <span className="app-header__brand-text">{__APP_NAME__}</span>
             </div>
+            <nav className={`app-header__nav ${mobileMenuOpen ? 'app-header__nav--open' : ''}`}>
+                {links.map((link) => (
+                    <NavLink
+                        key={link.to}
+                        to={link.to}
+                        end={link.end}
+                        className={({ isActive }: { isActive: boolean }) =>
+                            isActive ? 'nav-link active' : 'nav-link'
+                        }
+                        onClick={() => setMobileMenuOpen(false)}
+                    >
+                        <span className="nav-link__icon"><FontAwesomeIcon icon={link.icon} /></span>
+                        <span className="nav-link__label">{link.label}</span>
+                    </NavLink>
+                ))}
+            </nav>
             <div className="app-header__controls">
                 <button
                     className="app-header__theme-toggle"
@@ -45,22 +61,6 @@ export function Header() {
                     </span>
                 </button>
             </div>
-            <nav className={`app-header__nav ${mobileMenuOpen ? 'app-header__nav--open' : ''}`}>
-                {links.map((link) => (
-                    <NavLink
-                        key={link.to}
-                        to={link.to}
-                        end={link.end}
-                        className={({ isActive }: { isActive: boolean }) =>
-                            isActive ? 'nav-link active' : 'nav-link'
-                        }
-                        onClick={() => setMobileMenuOpen(false)}
-                    >
-                        <span className="nav-link__icon"><FontAwesomeIcon icon={link.icon} /></span>
-                        <span className="nav-link__label">{link.label}</span>
-                    </NavLink>
-                ))}
-            </nav>
             {mobileMenuOpen && (
                 <div
                     className="app-header__overlay"

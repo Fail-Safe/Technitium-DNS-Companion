@@ -91,18 +91,21 @@
 }
 
 .alert-box--info {
-    background: #d9edf7;
-    border-color: #365df3;
+    background: var(--color-info-bg);
+        border-color: var(--color-info);
+        color: var(--color-text-primary);
 }
 
 .alert-box--danger {
-    background: #f8d7da;
-    border-color: #f5c6cb;
+    background: var(--color-danger-bg);
+        border-color: var(--color-danger);
+        color: var(--color-text-primary);
 }
 
 .alert-box--success {
-    background: #d4edda;
-    border-color: #28a745;
+    background: var(--color-success-bg);
+        border-color: var(--color-success);
+        color: var(--color-text-primary);
 }
 
 .alert-box__title {
