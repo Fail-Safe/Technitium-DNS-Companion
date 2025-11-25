@@ -29,7 +29,7 @@ export function NodeSelector({
                 <strong>Working on Node:</strong>
                 <span className="node-selector__hint">
                     {hasUnsavedChanges ? (
-                        <span style={{ color: '#e63946', fontWeight: 600 }}>⚠ Unsaved changes</span>
+                        <span className="node-selector__unsaved-warning">⚠ Unsaved changes</span>
                     ) : isClusterEnabled ? (
                         'Only the Primary node can be modified'
                     ) : (

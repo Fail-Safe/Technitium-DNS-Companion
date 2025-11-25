@@ -224,13 +224,11 @@
     }
 }
 
-/* Dark Mode (explicit) */
-@media (prefers-color-scheme: dark) {
-    .install-modal__content {
-        background: #1e293b;
-    }
+/* Dark Mode - using theme selector */
+[data-theme="dark"] .install-modal__content {
+    background: var(--color-bg-secondary);
+}
 
-    .install-modal__header {
-        border-bottom-color: #334155;
-    }
+[data-theme="dark"] .install-modal__header {
+    border-bottom-color: var(--color-border);
 }

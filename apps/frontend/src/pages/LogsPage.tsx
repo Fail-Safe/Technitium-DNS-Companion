@@ -218,6 +218,16 @@ const formatResponseRtt = (value?: number): string => {
     return `${value.toFixed(2)} ms`;
 };
 
+const getResponseTimeTooltip = (entry: TechnitiumCombinedQueryLogEntry): string | undefined => {
+    // Only show tooltip when there's no RTT data
+    if (entry.responseRtt !== undefined && entry.responseRtt !== null && !Number.isNaN(entry.responseRtt)) {
+        return undefined;
+    }
+
+    const responseType = entry.responseType ?? 'this response type';
+    return `Response time not measured for ${responseType} responses`;
+};
+
 const buildEntryDedupKey = (entry: TechnitiumCombinedQueryLogEntry): string => {
     const nodeId = entry.nodeId ?? 'unknown';
     const rowNumber = entry.rowNumber ?? 0;
@@ -569,7 +579,23 @@ const buildTableColumns = (
             label: 'Response time',
             className: 'logs-page__col--response-time',
             optionalKey: 'responseTime',
-            render: (entry) => formatResponseRtt(entry.responseRtt),
+            render: (entry) => {
+                const formattedTime = formatResponseRtt(entry.responseRtt);
+                const tooltip = getResponseTimeTooltip(entry);
+
+                if (tooltip) {
+                    return (
+                        <span
+                            data-tooltip-id="response-time-tooltip"
+                            data-tooltip-content={tooltip}
+                        >
+                            {formattedTime}
+                        </span>
+                    );
+                }
+
+                return formattedTime;
+            },
         },
         {
             id: 'status',
@@ -652,20 +678,20 @@ const buildTableColumns = (
                 if (groupDetails) {
                     tooltipHtml += `<div style="margin-top: 8px;"><div><strong>Group:</strong> ${groupDetails.groupName}</div>`;
                     if (groupDetails.blockedExact) {
-                        tooltipHtml += `<div style="margin-left: 12px; color: #ef4444;">→ Blocked (Exact Match)</div>`;
+                        tooltipHtml += `<div class="tooltip-blocked" style="margin-left: 12px;">→ Blocked (Exact Match)</div>`;
                     }
                     if (groupDetails.blockedRegexMatches.length > 0) {
-                        tooltipHtml += `<div style="margin-left: 12px;"><div style="color: #ef4444;">→ Blocked by Regex:</div>`;
+                        tooltipHtml += `<div style="margin-left: 12px;"><div class="tooltip-blocked">→ Blocked by Regex:</div>`;
                         groupDetails.blockedRegexMatches.forEach(pattern => {
                             tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${pattern}</div>`;
                         });
                         tooltipHtml += `</div>`;
                     }
                     if (groupDetails.allowedExact) {
-                        tooltipHtml += `<div style="margin-left: 12px; color: #22c55e;">→ Allowed (Exact Match)</div>`;
+                        tooltipHtml += `<div class="tooltip-allowed" style="margin-left: 12px;">→ Allowed (Exact Match)</div>`;
                     }
                     if (groupDetails.allowedRegexMatches.length > 0) {
-                        tooltipHtml += `<div style="margin-left: 12px;"><div style="color: #22c55e;">→ Allowed by Regex:</div>`;
+                        tooltipHtml += `<div style="margin-left: 12px;"><div class="tooltip-allowed">→ Allowed by Regex:</div>`;
                         groupDetails.allowedRegexMatches.forEach(pattern => {
                             tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${pattern}</div>`;
                         });
@@ -2919,6 +2945,12 @@ export function LogsPage() {
                 place="top"
                 className="domain-tooltip"
             />
+            {/* Tooltip for response time cells */}
+            <Tooltip
+                id="response-time-tooltip"
+                place="top"
+                className="domain-tooltip"
+            />
             <section ref={pullToRefresh.containerRef} className="logs-page">
                 <header className="logs-page__header">
                     <div className="logs-page__header-title">
@@ -3026,7 +3058,7 @@ export function LogsPage() {
                                 )}
                                 {duplicatesRemoved > 0 && (
                                     <div className="logs-page__duplicate-info">
-                                            <strong><FontAwesomeIcon icon={faRotate} /> Duplicates removed:</strong>{' '}
+                                        <strong><FontAwesomeIcon icon={faRotate} /> Duplicates removed:</strong>{' '}
                                         <span className="logs-page__duplicate-count">
                                             {duplicatesRemoved.toLocaleString()}
                                         </span>
@@ -3058,7 +3090,7 @@ export function LogsPage() {
                                 )}
                                 {duplicatesRemoved > 0 && (
                                     <div className="logs-page__duplicate-info">
-                                                <strong><FontAwesomeIcon icon={faRotate} /> Duplicates removed:</strong>{' '}
+                                        <strong><FontAwesomeIcon icon={faRotate} /> Duplicates removed:</strong>{' '}
                                         <span className="logs-page__duplicate-count">
                                             {duplicatesRemoved.toLocaleString()}
                                         </span>
@@ -3379,7 +3411,7 @@ export function LogsPage() {
                                             <span>
                                                 {pageNumber} / {totalPages}
                                                 {hasMorePages && (
-                                                    <span style={{ marginLeft: '0.5rem', color: '#f59e0b', fontSize: '0.9em' }} title="Fetch limit reached. Use more specific filters to see additional results.">
+                                                    <span className="logs-page__more-results-warning" title="Fetch limit reached. Use more specific filters to see additional results.">
                                                         ⚠️ More results may exist
                                                     </span>
                                                 )}
@@ -3440,7 +3472,7 @@ export function LogsPage() {
                                         refreshSeconds === 0 ? (
                                             <>⏸️ Paused</>
                                         ) : (
-                                                    <><FontAwesomeIcon icon={faRotate} /> Auto-refresh</>
+                                            <><FontAwesomeIcon icon={faRotate} /> Auto-refresh</>
                                         )
                                     )}
                                 </button>
