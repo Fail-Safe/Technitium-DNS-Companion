@@ -218,6 +218,16 @@ const formatResponseRtt = (value?: number): string => {
     return `${value.toFixed(2)} ms`;
 };
 
+const getResponseTimeTooltip = (entry: TechnitiumCombinedQueryLogEntry): string | undefined => {
+    // Only show tooltip when there's no RTT data
+    if (entry.responseRtt !== undefined && entry.responseRtt !== null && !Number.isNaN(entry.responseRtt)) {
+        return undefined;
+    }
+
+    const responseType = entry.responseType ?? 'this response type';
+    return `Response time not measured for ${responseType} responses`;
+};
+
 const buildEntryDedupKey = (entry: TechnitiumCombinedQueryLogEntry): string => {
     const nodeId = entry.nodeId ?? 'unknown';
     const rowNumber = entry.rowNumber ?? 0;
@@ -569,7 +579,23 @@ const buildTableColumns = (
             label: 'Response time',
             className: 'logs-page__col--response-time',
             optionalKey: 'responseTime',
-            render: (entry) => formatResponseRtt(entry.responseRtt),
+            render: (entry) => {
+                const formattedTime = formatResponseRtt(entry.responseRtt);
+                const tooltip = getResponseTimeTooltip(entry);
+
+                if (tooltip) {
+                    return (
+                        <span
+                            data-tooltip-id="response-time-tooltip"
+                            data-tooltip-content={tooltip}
+                        >
+                            {formattedTime}
+                        </span>
+                    );
+                }
+
+                return formattedTime;
+            },
         },
         {
             id: 'status',
@@ -2919,6 +2945,12 @@ export function LogsPage() {
                 place="top"
                 className="domain-tooltip"
             />
+            {/* Tooltip for response time cells */}
+            <Tooltip
+                id="response-time-tooltip"
+                place="top"
+                className="domain-tooltip"
+            />
             <section ref={pullToRefresh.containerRef} className="logs-page">
                 <header className="logs-page__header">
                     <div className="logs-page__header-title">
@@ -3026,7 +3058,7 @@ export function LogsPage() {
                                 )}
                                 {duplicatesRemoved > 0 && (
                                     <div className="logs-page__duplicate-info">
-                                            <strong><FontAwesomeIcon icon={faRotate} /> Duplicates removed:</strong>{' '}
+                                        <strong><FontAwesomeIcon icon={faRotate} /> Duplicates removed:</strong>{' '}
                                         <span className="logs-page__duplicate-count">
                                             {duplicatesRemoved.toLocaleString()}
                                         </span>
@@ -3058,7 +3090,7 @@ export function LogsPage() {
                                 )}
                                 {duplicatesRemoved > 0 && (
                                     <div className="logs-page__duplicate-info">
-                                                <strong><FontAwesomeIcon icon={faRotate} /> Duplicates removed:</strong>{' '}
+                                        <strong><FontAwesomeIcon icon={faRotate} /> Duplicates removed:</strong>{' '}
                                         <span className="logs-page__duplicate-count">
                                             {duplicatesRemoved.toLocaleString()}
                                         </span>
@@ -3440,7 +3472,7 @@ export function LogsPage() {
                                         refreshSeconds === 0 ? (
                                             <>⏸️ Paused</>
                                         ) : (
-                                                    <><FontAwesomeIcon icon={faRotate} /> Auto-refresh</>
+                                            <><FontAwesomeIcon icon={faRotate} /> Auto-refresh</>
                                         )
                                     )}
                                 </button>
