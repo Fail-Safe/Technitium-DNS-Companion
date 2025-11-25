@@ -1,5 +1,3 @@
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
 import type { AdvancedBlockingSnapshot } from '../../types/advancedBlocking';
 
 interface NodeSelectorProps {

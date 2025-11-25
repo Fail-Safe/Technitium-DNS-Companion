@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faGear, faClipboard, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
+import { faGear, faClipboard } from '@fortawesome/free-solid-svg-icons';
 import './AdvancedBlockingSetupGuide.css';
 
 export interface AdvancedBlockingSetupGuideProps {

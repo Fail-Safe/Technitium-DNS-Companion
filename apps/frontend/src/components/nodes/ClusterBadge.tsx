@@ -1,6 +1,4 @@
 import type { TechnitiumClusterState } from '../../context/TechnitiumContext';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
 
 interface ClusterBadgeProps {
     clusterState?: TechnitiumClusterState;

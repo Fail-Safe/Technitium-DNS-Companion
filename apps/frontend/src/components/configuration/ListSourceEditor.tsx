@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faMinus, faPencil, faExclamationTriangle, faGear, faTrash } from '@fortawesome/free-solid-svg-icons';
+import { faPlus, faMinus, faPencil } from '@fortawesome/free-solid-svg-icons';
 import type { AdvancedBlockingConfig, AdvancedBlockingUrlEntry } from '../../types/advancedBlocking';
 
 interface ListSourceEditorProps {
