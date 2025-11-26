@@ -428,9 +428,10 @@ html {
 .app-header__controls {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem;
 }
 
+.app-header__info-toggle,
 .app-header__theme-toggle {
   display: flex;
   align-items: center;
@@ -446,6 +447,7 @@ html {
   font-size: 1.1rem;
 }
 
+.app-header__info-toggle:hover,
 .app-header__theme-toggle:hover {
   background: var(--color-primary-light);
   color: var(--color-primary);
@@ -453,6 +455,7 @@ html {
   transform: scale(1.05);
 }
 
+.app-header__info-toggle:active,
 .app-header__theme-toggle:active {
   transform: scale(0.95);
 }

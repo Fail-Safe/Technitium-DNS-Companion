@@ -1,6 +1,6 @@
 {
-  "name": "backend",
-  "version": "1.0.0",
+  "name": "technitium-dns-companion-backend",
+  "version": "0.0.0",
   "description": "Backend API server for Technitium DNS Companion - A companion tool for managing Technitium DNS clusters",
   "author": "",
   "private": true,
