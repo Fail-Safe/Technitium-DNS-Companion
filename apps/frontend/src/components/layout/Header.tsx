@@ -43,20 +43,20 @@ export function Header() {
             </nav>
             <div className="app-header__controls">
                 <button
-                    className="app-header__info-toggle"
-                    onClick={() => setAboutOpen(true)}
-                    aria-label="About this application"
-                    title="About"
-                >
-                    <FontAwesomeIcon icon={faCircleInfo} />
-                </button>
-                <button
                     className="app-header__theme-toggle"
                     onClick={toggleTheme}
                     aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
                     title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
                 >
                     <FontAwesomeIcon icon={theme === 'light' ? faMoon : faSun} />
+                </button>
+                <button
+                    className="app-header__info-toggle"
+                    onClick={() => setAboutOpen(true)}
+                    aria-label="About this application"
+                    title="About"
+                >
+                    <FontAwesomeIcon icon={faCircleInfo} />
                 </button>
                 <button
                     className="app-header__mobile-toggle"
