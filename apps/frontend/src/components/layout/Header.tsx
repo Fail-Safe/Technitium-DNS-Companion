@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChartLine, faFileLines, faShield, faWrench, faGlobe, faPlug, faBolt, faSun, faMoon } from '@fortawesome/free-solid-svg-icons';
+import { faChartLine, faFileLines, faShield, faWrench, faGlobe, faPlug, faBolt, faSun, faMoon, faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import { useTheme } from '../../context/ThemeContext';
+import { AboutModal } from '../common/AboutModal';
 
 export function Header() {
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+    const [aboutOpen, setAboutOpen] = useState(false);
     const { theme, toggleTheme } = useTheme();
 
     const links = [
@@ -41,6 +43,14 @@ export function Header() {
             </nav>
             <div className="app-header__controls">
                 <button
+                    className="app-header__info-toggle"
+                    onClick={() => setAboutOpen(true)}
+                    aria-label="About this application"
+                    title="About"
+                >
+                    <FontAwesomeIcon icon={faCircleInfo} />
+                </button>
+                <button
                     className="app-header__theme-toggle"
                     onClick={toggleTheme}
                     aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
@@ -67,6 +77,7 @@ export function Header() {
                     onClick={() => setMobileMenuOpen(false)}
                 />
             )}
+            <AboutModal isOpen={aboutOpen} onClose={() => setAboutOpen(false)} />
         </header>
     );
 }
