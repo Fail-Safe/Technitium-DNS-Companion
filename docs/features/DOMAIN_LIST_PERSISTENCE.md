@@ -277,11 +277,11 @@ Allow configuring gzip compression level (1-9) to balance speed vs. disk space.
 ### Verify persistence is working
 
 1. Start the backend
-2. Load DNS Tools → Domain Lists (triggers list download)
+2. Load DNS Lookup → Domain Lists (triggers list download)
 3. Wait for all lists to load
 4. Restart the container
 5. Check logs: Should see "Loaded N cached lists from disk"
-6. Load DNS Tools → Domain Lists again (should be instant)
+6. Load DNS Lookup → Domain Lists again (should be instant)
 
 ### Monitor cache size
 

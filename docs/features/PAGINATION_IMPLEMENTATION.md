@@ -60,7 +60,7 @@ async getAllDomains(
 
 ### Frontend Changes
 
-**State Management** (`apps/frontend/src/pages/DnsToolsPage.tsx`):
+**State Management** (`apps/frontend/src/pages/DnsLookupPage.tsx`):
 ```typescript
 const [currentPage, setCurrentPage] = useState(1);
 const [totalPages, setTotalPages] = useState(0);
@@ -94,11 +94,11 @@ React.useEffect(() => {
 - Buttons disabled when at boundaries or loading
 - Mobile-responsive layout (stacks vertically)
 
-**CSS Additions** (`apps/frontend/src/pages/DnsToolsPage.css`):
-- `.dns-tools__pagination` - flex container
-- `.dns-tools__pagination-info` - domain count display
-- `.dns-tools__pagination-controls` - button group
-- `.dns-tools__pagination-button` - individual buttons with hover states
+**CSS Additions** (`apps/frontend/src/pages/DnsLookupPage.css`):
+- `.dns-lookup__pagination` - flex container
+- `.dns-lookup__pagination-info` - domain count display
+- `.dns-lookup__pagination-controls` - button group
+- `.dns-lookup__pagination-button` - individual buttons with hover states
 - Dark mode support
 - Mobile responsive (< 768px width)
 

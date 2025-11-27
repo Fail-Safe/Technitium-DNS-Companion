@@ -2,7 +2,7 @@
 
 ## Overview
 
-A new "Domain Lists" tab has been added to the DNS Tools page, providing a comprehensive view of all domains from Advanced Blocking lists with powerful filtering and regex testing capabilities.
+A new "Domain Lists" tab has been added to the DNS Lookup page, providing a comprehensive view of all domains from Advanced Blocking lists with powerful filtering and regex testing capabilities.
 
 ## Features
 
@@ -104,7 +104,7 @@ Test if your domain filtering expressions work as expected before deploying.
   - Added `/all-domains` endpoint
 
 ### Frontend Changes
-- **DnsToolsPage**:
+- **DnsLookupPage**:
   - Added new "Domain Lists" tab
   - Added state for domain data, filters, and validation
   - Added `loadAllDomains()` and `handleRefreshDomains()` functions

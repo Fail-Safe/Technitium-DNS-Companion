@@ -23,6 +23,11 @@ export function NodeSelector({
         return null;
     }
 
+    // Separate primary and secondary nodes for different rendering
+    const primaryNode = isClusterEnabled ? nodes.find(n => n.nodeId === primaryNodeId) : null;
+    const secondaryNodes = isClusterEnabled ? nodes.filter(n => n.nodeId !== primaryNodeId) : [];
+    const nonClusterNodes = !isClusterEnabled ? nodes : [];
+
     return (
         <div className="node-selector">
             <div className="node-selector__label">
@@ -38,22 +43,20 @@ export function NodeSelector({
                 </span>
             </div>
             <div className="node-selector__cards">
-                {nodes.map((node) => {
+                {/* Non-cluster mode: show all nodes with full details */}
+                {nonClusterNodes.map((node) => {
                     const isSelected = node.nodeId === selectedNodeId;
                     const groupCount = node.config?.groups?.length ?? 0;
                     const hasConfig = !!node.config;
-                    const isPrimary = node.nodeId === primaryNodeId;
-                    const isSecondary = isClusterEnabled && !isPrimary;
-                    const isDisabled = loading || !hasConfig || isSecondary;
+                    const isDisabled = loading || !hasConfig;
 
                     return (
                         <button
                             key={node.nodeId}
                             type="button"
-                            className={`node-selector__card ${isSelected ? 'node-selector__card--selected' : ''} ${!hasConfig ? 'node-selector__card--no-config' : ''} ${isSecondary ? 'node-selector__card--secondary' : ''}`}
+                            className={`node-selector__card ${isSelected ? 'node-selector__card--selected' : ''} ${!hasConfig ? 'node-selector__card--no-config' : ''}`}
                             onClick={() => onSelectNode(node.nodeId)}
                             disabled={isDisabled}
-                            title={isSecondary ? 'Secondary node - read-only in cluster mode' : undefined}
                         >
                             <div className="node-selector__card-radio">
                                 <input
@@ -66,15 +69,7 @@ export function NodeSelector({
                                 />
                             </div>
                             <div className="node-selector__card-content">
-                                <h3 className="node-selector__card-title">
-                                    {node.nodeId}
-                                    {isPrimary && isClusterEnabled && (
-                                        <span className="node-selector__card-badge node-selector__card-badge--primary">Primary</span>
-                                    )}
-                                    {isSecondary && (
-                                        <span className="node-selector__card-badge node-selector__card-badge--secondary">Secondary</span>
-                                    )}
-                                </h3>
+                                <h3 className="node-selector__card-title">{node.nodeId}</h3>
                                 <div className="node-selector__card-stats">
                                     {hasConfig ? (
                                         <>
@@ -116,6 +111,91 @@ export function NodeSelector({
                         </button>
                     );
                 })}
+
+                {/* Cluster mode: Primary node with full details */}
+                {primaryNode && (() => {
+                    const isSelected = primaryNode.nodeId === selectedNodeId;
+                    const groupCount = primaryNode.config?.groups?.length ?? 0;
+                    const hasConfig = !!primaryNode.config;
+                    const isDisabled = loading || !hasConfig;
+
+                    return (
+                        <button
+                            key={primaryNode.nodeId}
+                            type="button"
+                            className={`node-selector__card ${isSelected ? 'node-selector__card--selected' : ''} ${!hasConfig ? 'node-selector__card--no-config' : ''}`}
+                            onClick={() => onSelectNode(primaryNode.nodeId)}
+                            disabled={isDisabled}
+                        >
+                            <div className="node-selector__card-radio">
+                                <input
+                                    type="radio"
+                                    name="selected-node"
+                                    checked={isSelected}
+                                    onChange={() => onSelectNode(primaryNode.nodeId)}
+                                    disabled={isDisabled}
+                                    aria-label={`Select ${primaryNode.nodeId}`}
+                                />
+                            </div>
+                            <div className="node-selector__card-content">
+                                <h3 className="node-selector__card-title">
+                                    {primaryNode.nodeId}
+                                    <span className="node-selector__card-badge node-selector__card-badge--primary">Primary</span>
+                                </h3>
+                                <div className="node-selector__card-stats">
+                                    {hasConfig ? (
+                                        <>
+                                            <span>{groupCount} group{groupCount !== 1 ? 's' : ''}</span>
+                                            {primaryNode.metrics && (
+                                                <>
+                                                    <span> · {
+                                                        primaryNode.metrics.blockListUrlCount +
+                                                        primaryNode.metrics.allowListUrlCount +
+                                                        primaryNode.metrics.adblockListUrlCount +
+                                                        primaryNode.metrics.regexBlockListUrlCount +
+                                                        primaryNode.metrics.regexAllowListUrlCount
+                                                    } list entr{(
+                                                        primaryNode.metrics.blockListUrlCount +
+                                                        primaryNode.metrics.allowListUrlCount +
+                                                        primaryNode.metrics.adblockListUrlCount +
+                                                        primaryNode.metrics.regexBlockListUrlCount +
+                                                        primaryNode.metrics.regexAllowListUrlCount
+                                                    ) !== 1 ? 'ies' : 'y'}</span>
+                                                    <span> · {
+                                                        primaryNode.metrics.blockedDomainCount +
+                                                        primaryNode.metrics.allowedDomainCount +
+                                                        primaryNode.metrics.blockedRegexCount +
+                                                        primaryNode.metrics.allowedRegexCount
+                                                    } domain rule{(
+                                                        primaryNode.metrics.blockedDomainCount +
+                                                        primaryNode.metrics.allowedDomainCount +
+                                                        primaryNode.metrics.blockedRegexCount +
+                                                        primaryNode.metrics.allowedRegexCount
+                                                    ) !== 1 ? 's' : ''}</span>
+                                                </>
+                                            )}
+                                        </>
+                                    ) : (
+                                        <span className="node-selector__card-no-config">No configuration</span>
+                                    )}
+                                </div>
+                            </div>
+                        </button>
+                    );
+                })()}
+
+                {/* Cluster mode: Secondary nodes - compact single row */}
+                {secondaryNodes.length > 0 && (
+                    <div className="node-selector__secondaries">
+                        <span className="node-selector__secondaries-label">Secondary nodes:</span>
+                        {secondaryNodes.map((node) => (
+                            <span key={node.nodeId} className="node-selector__secondary-chip">
+                                {node.nodeId}
+                                <span className="node-selector__secondary-status" title="In sync with Primary">✓</span>
+                            </span>
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     );

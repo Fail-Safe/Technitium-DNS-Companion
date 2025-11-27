@@ -1,7 +1,7 @@
 /**
  * URL Parsing Utilities
  *
- * Used by DNS Tools (Policy Simulator, Global Lookup) to extract domains
+ * Used by DNS Lookup (Policy Simulator, Global Lookup) to extract domains
  * from various input formats including full URLs, paths, and plain domains.
  *
  * This allows users to paste full URLs and automatically extract just the

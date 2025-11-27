@@ -13,7 +13,7 @@ const ConfigurationPage = lazy(() => import('./pages/ConfigurationPage'));
 const LogsPage = lazy(() => import('./pages/LogsPage'));
 const DhcpPage = lazy(() => import('./pages/DhcpPage'));
 const ZonesPage = lazy(() => import('./pages/ZonesPage'));
-const DnsToolsPage = lazy(() => import('./pages/DnsToolsPage'));
+const DnsLookupPage = lazy(() => import('./pages/DnsLookupPage'));
 
 // Loading fallback component
 const PageLoader = () => (
@@ -39,7 +39,7 @@ export default function App() {
                 <Route path="/dhcp" element={<DhcpPage />} />
                 <Route path="/logs" element={<LogsPage />} />
                 <Route path="/zones" element={<ZonesPage />} />
-                <Route path="/dns-tools" element={<DnsToolsPage />} />
+                <Route path="/dns-lookup" element={<DnsLookupPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Suspense>

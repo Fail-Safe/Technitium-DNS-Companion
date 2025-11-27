@@ -71,11 +71,11 @@ Refactored the Domain Lists tab to use a single unified search box with a Text/R
 - Placeholder text changes based on mode
 
 ### CSS Additions
-- `.dns-tools__search-container`: Flexbox layout for input + toggle
-- `.dns-tools__search-input`: Flexible input that takes available space
-- `.dns-tools__search-mode-toggle`: Container for toggle buttons
-- `.dns-tools__toggle-button`: Individual toggle button styling
-- `.dns-tools__toggle-button--active`: Active state (blue background)
+- `.dns-lookup__search-container`: Flexbox layout for input + toggle
+- `.dns-lookup__search-input`: Flexible input that takes available space
+- `.dns-lookup__search-mode-toggle`: Container for toggle buttons
+- `.dns-lookup__toggle-button`: Individual toggle button styling
+- `.dns-lookup__toggle-button--active`: Active state (blue background)
 - Mobile responsive: Toggle buttons stack below input on small screens
 
 ## User Workflow
