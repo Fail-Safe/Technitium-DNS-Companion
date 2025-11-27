@@ -146,16 +146,6 @@ export function ListSourceEditor({ config, onSave, onDirtyChange, disabled }: Li
         }> = [];
 
         // Check for global setting changes
-        if (config.blockingAnswerTtl !== draftConfig.blockingAnswerTtl) {
-            changes.push({
-                type: 'modified',
-                listType: 'Global Settings',
-                field: 'Blocking answer TTL',
-                oldValue: config.blockingAnswerTtl ?? 'not set',
-                newValue: draftConfig.blockingAnswerTtl ?? 'not set',
-            });
-        }
-
         if (config.blockListUrlUpdateIntervalHours !== draftConfig.blockListUrlUpdateIntervalHours) {
             changes.push({
                 type: 'modified',
@@ -639,35 +629,6 @@ export function ListSourceEditor({ config, onSave, onDirtyChange, disabled }: Li
                         <h3>Global Settings</h3>
                         <div className="field-group">
                             <div className="field-group__control" style={{ maxWidth: '300px' }}>
-                                    <label htmlFor="blockingAnswerTtl">Blocking answer TTL (seconds)</label>
-                                    <input
-                                        id="blockingAnswerTtl"
-                                        name="blockingAnswerTtl"
-                                        type="number"
-                                        min="0"
-                                        style={{ width: '100px' }}
-                                        placeholder="10"
-                                        value={draftConfig?.blockingAnswerTtl ?? ''}
-                                        onChange={(event) => {
-                                            const raw = event.target.value.trim();
-                                            setDraftConfig((prev) => {
-                                                if (!prev) {
-                                                    return prev;
-                                                }
-
-                                                return {
-                                                    ...prev,
-                                                    blockingAnswerTtl: raw ? Number(raw) : undefined,
-                                                };
-                                            });
-                                        }}
-                                        disabled={disabled || saving}
-                                    />
-                                    <small className="field-hint">
-                                        TTL value used in blocked DNS responses (default: 10 seconds)
-                                    </small>
-                                </div>
-                                <div className="field-group__control" style={{ maxWidth: '300px' }}>
                                 <label htmlFor={refreshIntervalId}>List source refresh interval (hours)</label>
                                 <input
                                     id={refreshIntervalId}
