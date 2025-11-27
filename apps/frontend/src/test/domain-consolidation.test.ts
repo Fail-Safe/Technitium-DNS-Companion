@@ -1,7 +1,7 @@
 /**
  * Domain Consolidation Logic Test Suite
  *
- * Tests for the domain consolidation logic in DnsToolsPage.tsx that merges
+ * Tests for the domain consolidation logic in DnsLookupPage.tsx that merges
  * group assignments when displaying domains from multiple Advanced Blocking groups.
  *
  * This ensures that domains appearing in multiple groups are correctly consolidated

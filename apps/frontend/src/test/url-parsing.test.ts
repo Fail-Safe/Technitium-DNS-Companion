@@ -3,7 +3,7 @@
  *
  * Tests for extractDomainFromInput() function extracted to utils/urlParsing.ts.
  *
- * Used in DnsToolsPage.tsx for the Policy Simulator and Global Lookup features.
+ * Used in DnsLookupPage.tsx for the Policy Simulator and Global Lookup features.
  * This ensures that URL parsing works correctly for various input formats
  * and can extract domains from full URLs while preserving plain domain inputs.
  */

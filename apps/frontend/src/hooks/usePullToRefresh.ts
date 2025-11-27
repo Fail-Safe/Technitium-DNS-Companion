@@ -33,6 +33,7 @@ export function usePullToRefresh({
 
     const startY = useRef(0);
     const currentY = useRef(0);
+    const touchStartedAtTop = useRef(false);
 
     useEffect(() => {
         if (disabled) return;
@@ -43,27 +44,52 @@ export function usePullToRefresh({
         let rafId: number | null = null;
 
         const isAtTop = () => {
-            // Check if we're at the top, with a small tolerance for edge cases
-            return container.scrollTop <= 1;
+            // Check BOTH window scroll and any scrollable parent
+            // The page scrolls on window, not on the container element
+            const windowAtTop = window.scrollY <= 1;
+
+            // Also check if there's a scrollable parent (like main or app-content)
+            let parent = container.parentElement;
+            while (parent && parent !== document.body) {
+                if (parent.scrollTop > 1) {
+                    return false; // A parent is scrolled down
+                }
+                parent = parent.parentElement;
+            }
+
+            return windowAtTop;
         };
 
         const handleTouchStart = (e: TouchEvent) => {
-            // Only start if we're at the top of the scroll container
-            if (isAtTop() && !isRefreshing) {
-                startY.current = e.touches[0].clientY;
-                currentY.current = startY.current;
-                setIsPulling(true);
-            }
+            // Record starting position and whether we're at top
+            // Don't set isPulling yet - wait to see the direction
+            startY.current = e.touches[0].clientY;
+            currentY.current = startY.current;
+            touchStartedAtTop.current = isAtTop() && !isRefreshing;
         };
 
         const handleTouchMove = (e: TouchEvent) => {
-            if (!isPulling || isRefreshing) return;
+            if (isRefreshing) return;
+
+            // Must have started touch while at top
+            if (!touchStartedAtTop.current) return;
 
             currentY.current = e.touches[0].clientY;
             const distance = currentY.current - startY.current;
 
-            // Only allow pulling down when at the top
-            if (distance > 0 && isAtTop()) {
+            // Re-check if we're still at top (user might have scrolled)
+            const stillAtTop = isAtTop();
+
+            // Only activate pull-to-refresh if:
+            // 1. We're pulling DOWN (distance > 0)
+            // 2. We're still at the top
+            // 3. The pull distance is meaningful (> 10px to avoid accidental triggers)
+            if (distance > 10 && stillAtTop) {
+                // Now we know user is intentionally pulling down at the top
+                if (!isPulling) {
+                    setIsPulling(true);
+                }
+
                 // Prevent default scroll behavior when pulling
                 e.preventDefault();
 
@@ -75,17 +101,26 @@ export function usePullToRefresh({
                 rafId = requestAnimationFrame(() => {
                     setPullDistance(Math.min(adjustedDistance, threshold * 1.5));
                 });
-            } else if (distance <= 0 || !isAtTop()) {
-                // If scrolling up or not at top, cancel the pull
+            } else if (distance <= 0 || !stillAtTop) {
+                // User is scrolling UP or page has scrolled - cancel pull
                 if (isPulling) {
                     setIsPulling(false);
                     setPullDistance(0);
                 }
+                // Allow normal scrolling - don't prevent default
+                touchStartedAtTop.current = false;
             }
         };
 
         const handleTouchEnd = async () => {
-            if (!isPulling || isRefreshing) return;
+            // Reset touch tracking
+            touchStartedAtTop.current = false;
+
+            if (!isPulling || isRefreshing) {
+                setIsPulling(false);
+                setPullDistance(0);
+                return;
+            }
 
             setIsPulling(false);
 
@@ -107,15 +142,16 @@ export function usePullToRefresh({
             }
         };
 
-        container.addEventListener('touchstart', handleTouchStart, { passive: true });
-        container.addEventListener('touchmove', handleTouchMove, { passive: false });
-        container.addEventListener('touchend', handleTouchEnd);
+        // Listen on document to catch all touch events, not just on container
+        document.addEventListener('touchstart', handleTouchStart, { passive: true });
+        document.addEventListener('touchmove', handleTouchMove, { passive: false });
+        document.addEventListener('touchend', handleTouchEnd);
 
         return () => {
             if (rafId) cancelAnimationFrame(rafId);
-            container.removeEventListener('touchstart', handleTouchStart);
-            container.removeEventListener('touchmove', handleTouchMove);
-            container.removeEventListener('touchend', handleTouchEnd);
+            document.removeEventListener('touchstart', handleTouchStart);
+            document.removeEventListener('touchmove', handleTouchMove);
+            document.removeEventListener('touchend', handleTouchEnd);
         };
     }, [disabled, isPulling, isRefreshing, pullDistance, threshold, onRefresh]);
 

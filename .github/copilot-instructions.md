@@ -26,7 +26,7 @@ Docker environment variables: https://github.com/TechnitiumSoftware/DnsServer/bl
 
 This project is designed to work with multiple Technitium DNS servers in various configurations:
 
-- **Supported Versions**: Technitium DNS v14.0.0+
+- **Supported Versions**: Technitium DNS v13.6.0+
 - **Deployment**: Docker or standalone installations
 - **Clustering**: Full support for Technitium DNS cluster configurations
     - Automatically detects Primary/Secondary node roles

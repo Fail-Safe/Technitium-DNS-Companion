@@ -1,7 +1,7 @@
 /**
  * Domain Consolidation Utilities
  *
- * Used by DNS Tools to consolidate domain entries when displaying domains from
+ * Used by DNS Lookup to consolidate domain entries when displaying domains from
  * multiple Advanced Blocking groups. Ensures that domains appearing in multiple
  * groups or lists are properly merged for cleaner display.
  */
@@ -82,7 +82,7 @@ export function consolidateDomainsByGroups(
 /**
  * Consolidate domain entries by domain and type
  *
- * Used in DNS Tools "All Domains" view to merge sources for the same domain+type
+ * Used in DNS Lookup "All Domains" view to merge sources for the same domain+type
  * combination. Each unique domain+type gets one row with all sources listed.
  *
  * @param domains - Array of domain entries with sources

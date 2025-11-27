@@ -12,7 +12,7 @@ export class AdvancedBlockingController {
 
   /**
    * Get Advanced Blocking configuration for a specific node
-   * Used by DNS Tools page to fetch groups for the Policy Simulator
+   * Used by DNS Lookup page to fetch groups for the Policy Simulator
    */
   @Get(':nodeId')
   async getNodeConfig(@Param('nodeId') nodeId: string): Promise<AdvancedBlockingSnapshot> {

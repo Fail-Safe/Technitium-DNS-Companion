@@ -6,7 +6,7 @@
 
 ## Overview
 
-This document describes the 6 UI/UX enhancements made to the Domain Lists tab in the DNS Tools page based on user feedback from screenshot review.
+This document describes the 6 UI/UX enhancements made to the Domain Lists tab in the DNS Lookup page based on user feedback from screenshot review.
 
 ## Summary
 
@@ -26,10 +26,10 @@ This document describes the 6 UI/UX enhancements made to the Domain Lists tab in
 - Displays helpful examples for both text and regex search modes
 
 **Location in Code:**
-- State: `DnsToolsPage.tsx` line 24-26
+- State: `DnsLookupPage.tsx` line 24-26
 - Handler: `dismissSearchHelp()` function
 - JSX: After description section, before actions
-- CSS: `.dns-tools__info-box` and related styles
+- CSS: `.dns-lookup__info-box` and related styles
 
 **Examples Shown:**
 - **Text Mode:**
@@ -48,14 +48,14 @@ This document describes the 6 UI/UX enhancements made to the Domain Lists tab in
 
 **Implementation:**
 - Created `highlightRegexMatch()` helper function
-- Uses `<mark>` tag with `.dns-tools__regex-highlight` class
+- Uses `<mark>` tag with `.dns-lookup__regex-highlight` class
 - Only active in regex mode when pattern is valid
 - Handles multiple matches per domain and zero-width matches
 
 **Location in Code:**
-- Function: `highlightRegexMatch()` in `DnsToolsPage.tsx`
+- Function: `highlightRegexMatch()` in `DnsLookupPage.tsx`
 - Used in: Domain table rows (replaced plain `<code>` tags)
-- CSS: `.dns-tools__regex-highlight` (yellow background, bold text)
+- CSS: `.dns-lookup__regex-highlight` (yellow background, bold text)
 
 **Features:**
 - Bright yellow highlight for matched portions
@@ -75,9 +75,9 @@ This document describes the 6 UI/UX enhancements made to the Domain Lists tab in
 
 **Location in Code:**
 - Functions: `copySearchText()` and `clearSearch()`
-- JSX: Wrapped input in `.dns-tools__search-input-wrapper`
-- Buttons: `.dns-tools__search-buttons` (absolute positioned)
-- CSS: `.dns-tools__icon-button` styles
+- JSX: Wrapped input in `.dns-lookup__search-input-wrapper`
+- Buttons: `.dns-lookup__search-buttons` (absolute positioned)
+- CSS: `.dns-lookup__icon-button` styles
 
 **UI Details:**
 - 📋 Copy icon button
@@ -98,8 +98,8 @@ This document describes the 6 UI/UX enhancements made to the Domain Lists tab in
 **Location in Code:**
 - Calculation: `typeCounts` useMemo
 - Dropdown: Enhanced with emojis (🚫 Block, ✓ Allow)
-- Breakdown: `.dns-tools__filter-breakdown` section
-- CSS: `.dns-tools__filter-stat` with color-coded counts
+- Breakdown: `.dns-lookup__filter-breakdown` section
+- CSS: `.dns-lookup__filter-stat` with color-coded counts
 
 **Display Format:**
 ```
@@ -130,17 +130,17 @@ This feature was redundant - it showed the same information (first 3 matches) th
 
 **Refresh Button:**
 - Changed to outline variant (transparent background, colored border)
-- Added `.dns-tools__button--outline` class
+- Added `.dns-lookup__button--outline` class
 - Hover effect fills with color
 
 **Timestamp:**
 - Reduced font size (0.75rem)
 - Changed color to tertiary gray
-- Added `.dns-tools__last-refresh--small` class
+- Added `.dns-lookup__last-refresh--small` class
 
 **Location in Code:**
-- Button: Added `dns-tools__button--outline` class
-- Timestamp: Added `dns-tools__last-refresh--small` class
+- Button: Added `dns-lookup__button--outline` class
+- Timestamp: Added `dns-lookup__last-refresh--small` class
 - CSS: New modifier classes in stylesheet
 
 ## Technical Details
@@ -191,7 +191,7 @@ const clearSearch = () => {
 };
 
 const highlightRegexMatch = (domain: string): React.ReactNode => {
-    // Full implementation in DnsToolsPage.tsx
+    // Full implementation in DnsLookupPage.tsx
     // Handles regex matching with <mark> tags
 };
 ```
@@ -200,18 +200,18 @@ const highlightRegexMatch = (domain: string): React.ReactNode => {
 
 ### New Classes Added
 
-- `.dns-tools__info-box` - Info box container
-- `.dns-tools__info-box-*` - Info box sub-components
-- `.dns-tools__button--outline` - Outline button variant
-- `.dns-tools__last-refresh--small` - Smaller timestamp
-- `.dns-tools__search-input-wrapper` - Input wrapper for buttons
-- `.dns-tools__search-buttons` - Copy/clear button container
-- `.dns-tools__icon-button` - Icon button styles
-- `.dns-tools__filter-breakdown` - Type count breakdown
-- `.dns-tools__filter-stat` - Individual stat display
-- `.dns-tools__regex-highlight` - Match highlighting
-- `.dns-tools__regex-preview` - Preview container
-- `.dns-tools__regex-preview-*` - Preview sub-components
+- `.dns-lookup__info-box` - Info box container
+- `.dns-lookup__info-box-*` - Info box sub-components
+- `.dns-lookup__button--outline` - Outline button variant
+- `.dns-lookup__last-refresh--small` - Smaller timestamp
+- `.dns-lookup__search-input-wrapper` - Input wrapper for buttons
+- `.dns-lookup__search-buttons` - Copy/clear button container
+- `.dns-lookup__icon-button` - Icon button styles
+- `.dns-lookup__filter-breakdown` - Type count breakdown
+- `.dns-lookup__filter-stat` - Individual stat display
+- `.dns-lookup__regex-highlight` - Match highlighting
+- `.dns-lookup__regex-preview` - Preview container
+- `.dns-lookup__regex-preview-*` - Preview sub-components
 
 ### Dark Mode Support
 
@@ -233,14 +233,14 @@ Mobile breakpoint (`@media (max-width: 768px)`) adjustments:
 ## Files Modified
 
 ### Frontend TypeScript
-- `apps/frontend/src/pages/DnsToolsPage.tsx`
+- `apps/frontend/src/pages/DnsLookupPage.tsx`
   - Added 3 new state variables
   - Added 4 helper functions
   - Added 2 useMemo computations
   - Updated JSX structure for all 6 features
 
 ### Frontend CSS
-- `apps/frontend/src/pages/DnsToolsPage.css`
+- `apps/frontend/src/pages/DnsLookupPage.css`
   - Added ~300 lines of new styles
   - Full dark mode support
   - Mobile responsive styles
@@ -288,7 +288,7 @@ Potential future improvements mentioned in original feedback:
 ## Related Documentation
 
 - [UI Quick Reference](../ui/UI_QUICK_REFERENCE.md)
-- [DNS Tools Architecture](../architecture.md)
+- [DNS Lookup Architecture](../architecture.md)
 - [Test Overview](../TEST_OVERVIEW.md)
 
 ## Deployment

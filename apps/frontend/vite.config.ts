@@ -266,8 +266,8 @@ export default defineConfig({
           if (id.includes('DhcpPage')) {
             return 'page-dhcp'
           }
-          if (id.includes('DnsToolsPage')) {
-            return 'page-dns-tools'
+          if (id.includes('DnsLookupPage')) {
+            return 'page-dns-lookup'
           }
         },
       },

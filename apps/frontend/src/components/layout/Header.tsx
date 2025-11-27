@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faChartLine, faFileLines, faShield, faWrench, faGlobe, faPlug, faBolt, faSun, faMoon, faCircleInfo } from '@fortawesome/free-solid-svg-icons';
+import { faChartLine, faFileLines, faShield, faMagnifyingGlass, faGlobe, faPlug, faBolt, faSun, faMoon, faCircleInfo } from '@fortawesome/free-solid-svg-icons';
 import { useTheme } from '../../context/ThemeContext';
 import { AboutModal } from '../common/AboutModal';
 
@@ -14,7 +14,7 @@ export function Header() {
         { to: '/', label: 'Overview', end: true, icon: faChartLine },
         { to: '/logs', label: 'DNS Logs', icon: faFileLines },
         { to: '/configuration', label: 'DNS Filtering', icon: faShield },
-        { to: '/dns-tools', label: 'DNS Tools', icon: faWrench },
+        { to: '/dns-lookup', label: 'DNS Lookup', icon: faMagnifyingGlass },
         { to: '/zones', label: 'DNS Zones', icon: faGlobe },
         { to: '/dhcp', label: 'DHCP Scopes', icon: faPlug },
     ];

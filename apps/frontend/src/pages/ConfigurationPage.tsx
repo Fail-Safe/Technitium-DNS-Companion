@@ -866,213 +866,213 @@ export function ConfigurationPage() {
                             <div className="configuration__tab-switcher">
                                 <button
                                     type="button"
-                                        className={`configuration__tab ${activeTab === 'domain-management' ? 'configuration__tab--active' : ''}`}
-                                        onClick={() => handleTabChange('domain-management')}
-                                    >
-                                        <span>Domains</span>
-                                    </button>
+                                    className={`configuration__tab ${activeTab === 'domain-management' ? 'configuration__tab--active' : ''}`}
+                                    onClick={() => handleTabChange('domain-management')}
+                                >
+                                    <span>Domains</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`configuration__tab ${activeTab === 'group-management' ? 'configuration__tab--active' : ''}`}
+                                    onClick={() => handleTabChange('group-management')}
+                                >
+                                    <span>Groups</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`configuration__tab ${activeTab === 'list-management' ? 'configuration__tab--active' : ''}`}
+                                    onClick={() => handleTabChange('list-management')}
+                                >
+                                    <span>Lists</span>
+                                </button>
+                                {/* Hide Sync tab in cluster mode - Primary automatically syncs to Secondaries */}
+                                {!isClusterEnabled && (
                                     <button
                                         type="button"
-                                        className={`configuration__tab ${activeTab === 'group-management' ? 'configuration__tab--active' : ''}`}
-                                        onClick={() => handleTabChange('group-management')}
+                                        className={`configuration__tab ${activeTab === 'sync' ? 'configuration__tab--active' : ''}`}
+                                        onClick={() => handleTabChange('sync')}
                                     >
-                                        <span>Groups</span>
+                                        Sync
+                                        {syncChangeCount > 0 && (
+                                            <span className="configuration__tab-badge">{syncChangeCount}</span>
+                                        )}
                                     </button>
-                                    <button
-                                        type="button"
-                                        className={`configuration__tab ${activeTab === 'list-management' ? 'configuration__tab--active' : ''}`}
-                                        onClick={() => handleTabChange('list-management')}
-                                    >
-                                        <span>Lists</span>
-                                    </button>
-                                    {/* Hide Sync tab in cluster mode - Primary automatically syncs to Secondaries */}
-                                    {!isClusterEnabled && (
+                                )}
+                            </div>
+                        )}
+
+                        {/* Global Node Selector - applies to all tabs except Sync */}
+                        {availableNodes.length > 0 && activeTab !== 'sync' && (
+                            <NodeSelector
+                                nodes={availableNodes}
+                                selectedNodeId={selectedNodeId}
+                                onSelectNode={handleNodeSelect}
+                                loading={loadingAdvancedBlocking}
+                                hasUnsavedChanges={hasAnyUnsavedChanges}
+                                primaryNodeId={primary?.id}
+                                isClusterEnabled={isClusterEnabled}
+                            />
+                        )}
+
+                        {/* Group Management Tab */}
+                        {activeTab === 'group-management' && (
+                            <section className="configuration-editor configuration-editor--stacked">
+                                <header className="configuration-editor__header advanced-blocking-summary__actions">
+                                    <div>
+                                        <h2>Group Management</h2>
+                                        <p>
+                                            Create and manage filtering groups. Configure global settings, network mappings, and group-specific blocking behavior.
+                                        </p>
+                                    </div>
+                                </header>
+                                <AdvancedBlockingEditor
+                                    overview={advancedBlocking}
+                                    loading={loadingAdvancedBlocking}
+                                    error={advancedBlockingError}
+                                    onSave={handleSaveAdvancedBlocking}
+                                    onDirtyChange={setHasUnsavedGroupChanges}
+                                    selectedNodeId={selectedNodeId}
+                                    onNodeChange={handleNodeSelect}
+                                />
+                            </section>
+                        )}
+
+                        {/* List Management Tab */}
+                        {activeTab === 'list-management' && availableNodes.length > 0 && (
+                            <section className="configuration-editor configuration-editor--stacked">
+                                <header className="configuration-editor__header">
+                                    <div>
+                                        <h2>List Management</h2>
+                                        <p>
+                                            Manage blocklist URLs, allowlist URLs, and filter lists across multiple groups.
+                                        </p>
+                                    </div>
+                                </header>
+                                <ListSourceEditor
+                                    config={selectedNodeConfig}
+                                    onSave={handleSaveMultiGroupConfig}
+                                    onDirtyChange={setHasUnsavedListSourcesChanges}
+                                    disabled={loadingAdvancedBlocking || !selectedNodeConfig}
+                                />
+                            </section>
+                        )}
+
+                        {/* Domain Management Tab */}
+                        {activeTab === 'domain-management' && availableNodes.length > 0 && (
+                            <section className="configuration-editor configuration-editor--stacked">
+                                <header className="configuration-editor__header">
+                                    <div>
+                                        <h2>Domain Management</h2>
+                                        <p>
+                                            Search for domains or add new ones with drag & drop to groups.
+                                        </p>
+                                    </div>
+                                </header>
+
+                                <div style={{ padding: '15px', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                                    {/* Action Type Selector */}
+                                    <div className="domain-type-selector">
+                                        <label className="domain-type-selector__label">
+                                            Domain Action Type:
+                                        </label>
                                         <button
                                             type="button"
-                                            className={`configuration__tab ${activeTab === 'sync' ? 'configuration__tab--active' : ''}`}
-                                            onClick={() => handleTabChange('sync')}
+                                            onClick={() => setActiveDomainType('blocked')}
+                                            className={`domain-type-button domain-type-button--blocked ${activeDomainType === 'blocked' ? 'domain-type-button--active' : ''}`}
                                         >
-                                            Sync
-                                            {syncChangeCount > 0 && (
-                                                <span className="configuration__tab-badge">{syncChangeCount}</span>
-                                            )}
+                                            <FontAwesomeIcon icon={faSquareMinus} style={{ fontSize: '1.25em' }} /> Blocked
                                         </button>
-                                    )}
-                                </div>
-                            )}
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveDomainType('allowed')}
+                                            className={`domain-type-button domain-type-button--allowed ${activeDomainType === 'allowed' ? 'domain-type-button--active' : ''}`}
+                                        >
+                                            <FontAwesomeIcon icon={faSquareCheck} style={{ fontSize: '1.25em' }} /> Allowed
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveDomainType('blockedRegex')}
+                                            className={`domain-type-button domain-type-button--blocked-regex ${activeDomainType === 'blockedRegex' ? 'domain-type-button--active' : ''}`}
+                                        >
+                                            <LayeredIcon backgroundIcon={faCode} foregroundIcon={faBan}
+                                                bgColor="var(--color-text-secondary)" fgColor={activeDomainType === 'blockedRegex' ? 'var(--color-danger)' : 'var(--color-text-secondary)'}
+                                                bgFontSize='0.85em' fgFontSize='1.5em' /> Blocked Regex
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveDomainType('allowedRegex')}
+                                            className={`domain-type-button domain-type-button--allowed-regex ${activeDomainType === 'allowedRegex' ? 'domain-type-button--active' : ''}`}
+                                        >
+                                            <FontAwesomeIcon icon={faCode} style={{ fontSize: '1.25em' }} /> Allowed Regex
+                                        </button>
+                                    </div>
 
-                            {/* Global Node Selector - applies to all tabs except Sync */}
-                            {availableNodes.length > 0 && activeTab !== 'sync' && (
-                                <NodeSelector
-                                    nodes={availableNodes}
-                                    selectedNodeId={selectedNodeId}
-                                    onSelectNode={handleNodeSelect}
-                                    loading={loadingAdvancedBlocking}
-                                    hasUnsavedChanges={hasAnyUnsavedChanges}
-                                    primaryNodeId={primary?.id}
-                                    isClusterEnabled={isClusterEnabled}
-                                />
-                            )}
+                                    <div className="domain-management-grid">
+                                        {/* Left: Search and Domain List */}
+                                        <div className="domain-management-left">
+                                            {/* Unified Search or Add Domain */}
+                                            <div>
+                                                <label className="form-label">
+                                                    <FontAwesomeIcon icon={faSearch} /> Search or Add Domain
+                                                </label>
+                                                <div className="configuration-editor__list-form">
+                                                    <input
+                                                        type="text"
+                                                        value={searchInput}
+                                                        onChange={(e) => setSearchInput(e.target.value)}
+                                                        onKeyDown={(e) => e.key === 'Enter' && handleCheckDomain()}
+                                                        placeholder="Enter domain or URL to search or add..."
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void handleCheckDomain()}
+                                                        disabled={!searchInput.trim() || !selectedNodeId || checking}
+                                                        className="button button--primary"
+                                                    >
+                                                        {checking ? 'Checking...' : 'Search'}
+                                                    </button>
+                                                </div>
+                                            </div>
 
-                            {/* Group Management Tab */}
-                            {activeTab === 'group-management' && (
-                                <section className="configuration-editor configuration-editor--stacked">
-                                    <header className="configuration-editor__header advanced-blocking-summary__actions">
-                                        <div>
-                                            <h2>Group Management</h2>
-                                            <p>
-                                                Create and manage filtering groups. Configure global settings, network mappings, and group-specific blocking behavior.
-                                            </p>
-                                        </div>
-                                    </header>
-                                    <AdvancedBlockingEditor
-                                        overview={advancedBlocking}
-                                        loading={loadingAdvancedBlocking}
-                                        error={advancedBlockingError}
-                                        onSave={handleSaveAdvancedBlocking}
-                                        onDirtyChange={setHasUnsavedGroupChanges}
-                                        selectedNodeId={selectedNodeId}
-                                        onNodeChange={handleNodeSelect}
-                                    />
-                                </section>
-                            )}
-
-                            {/* List Management Tab */}
-                            {activeTab === 'list-management' && availableNodes.length > 0 && (
-                                <section className="configuration-editor configuration-editor--stacked">
-                                    <header className="configuration-editor__header">
-                                        <div>
-                                            <h2>List Management</h2>
-                                            <p>
-                                                Manage blocklist URLs, allowlist URLs, and filter lists across multiple groups.
-                                            </p>
-                                        </div>
-                                    </header>
-                                    <ListSourceEditor
-                                        config={selectedNodeConfig}
-                                        onSave={handleSaveMultiGroupConfig}
-                                        onDirtyChange={setHasUnsavedListSourcesChanges}
-                                        disabled={loadingAdvancedBlocking || !selectedNodeConfig}
-                                    />
-                                </section>
-                            )}
-
-                            {/* Domain Management Tab */}
-                            {activeTab === 'domain-management' && availableNodes.length > 0 && (
-                                <section className="configuration-editor configuration-editor--stacked">
-                                    <header className="configuration-editor__header">
-                                        <div>
-                                            <h2>Domain Management</h2>
-                                            <p>
-                                                Search for domains or add new ones with drag & drop to groups.
-                                            </p>
-                                        </div>
-                                    </header>
-
-                                    <div style={{ padding: '15px', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                                        {/* Action Type Selector */}
-                                        <div className="domain-type-selector">
-                                            <label className="domain-type-selector__label">
-                                                Domain Action Type:
-                                            </label>
-                                            <button
-                                                type="button"
-                                                onClick={() => setActiveDomainType('blocked')}
-                                                className={`domain-type-button domain-type-button--blocked ${activeDomainType === 'blocked' ? 'domain-type-button--active' : ''}`}
-                                            >
-                                                <FontAwesomeIcon icon={faSquareMinus} style={{ fontSize: '1.25em' }} /> Blocked
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setActiveDomainType('allowed')}
-                                                className={`domain-type-button domain-type-button--allowed ${activeDomainType === 'allowed' ? 'domain-type-button--active' : ''}`}
-                                            >
-                                                <FontAwesomeIcon icon={faSquareCheck} style={{ fontSize: '1.25em' }} /> Allowed
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setActiveDomainType('blockedRegex')}
-                                                className={`domain-type-button domain-type-button--blocked-regex ${activeDomainType === 'blockedRegex' ? 'domain-type-button--active' : ''}`}
-                                            >
-                                                <LayeredIcon backgroundIcon={faCode} foregroundIcon={faBan}
-                                                    bgColor="var(--color-text-secondary)" fgColor={activeDomainType === 'blockedRegex' ? 'var(--color-danger)' : 'var(--color-text-secondary)'}
-                                                    bgFontSize='0.85em' fgFontSize='1.5em' /> Blocked Regex
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setActiveDomainType('allowedRegex')}
-                                                className={`domain-type-button domain-type-button--allowed-regex ${activeDomainType === 'allowedRegex' ? 'domain-type-button--active' : ''}`}
-                                            >
-                                                <FontAwesomeIcon icon={faCode} style={{ fontSize: '1.25em' }} /> Allowed Regex
-                                            </button>
-                                        </div>
-
-                                        <div className="domain-management-grid">
-                                            {/* Left: Search and Domain List */}
-                                            <div className="domain-management-left">
-                                                {/* Unified Search or Add Domain */}
-                                                <div>
-                                                    <label className="form-label">
-                                                        <FontAwesomeIcon icon={faSearch} /> Search or Add Domain
-                                                    </label>
-                                                    <div className="configuration-editor__list-form">
-                                                        <input
-                                                            type="text"
-                                                            value={searchInput}
-                                                            onChange={(e) => setSearchInput(e.target.value)}
-                                                            onKeyDown={(e) => e.key === 'Enter' && handleCheckDomain()}
-                                                            placeholder="Enter domain or URL to search or add..."
-                                                        />
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => void handleCheckDomain()}
-                                                            disabled={!searchInput.trim() || !selectedNodeId || checking}
-                                                            className="button button--primary"
-                                                        >
-                                                            {checking ? 'Checking...' : 'Search'}
-                                                        </button>
+                                            {/* Draggable Domain Preview */}
+                                            {searchedDomain && !domainExists && (
+                                                <div className="alert-box alert-box--info">
+                                                    <p className="alert-box__title">
+                                                        Domain not found. Drag to a group to add:
+                                                    </p>
+                                                    <div
+                                                        draggable="true"
+                                                        onDragStart={(e) => {
+                                                            e.currentTarget.style.boxShadow = 'none';
+                                                            handleDragStart(e, searchedDomain)
+                                                        }}
+                                                        onDragEnd={handleDragEnd}
+                                                        className={`domain-pill ${activeDomainType.includes('blocked') ? 'domain-pill--blocked' : 'domain-pill--allowed'} ${isDragging ? 'domain-pill--dragging' : ''}`}
+                                                    >
+                                                        {searchedDomain}
                                                     </div>
                                                 </div>
+                                            )}
 
-                                                {/* Draggable Domain Preview */}
-                                                {searchedDomain && !domainExists && (
-                                                    <div className="alert-box alert-box--info">
-                                                        <p className="alert-box__title">
-                                                            Domain not found. Drag to a group to add:
-                                                        </p>
-                                                        <div
-                                                            draggable="true"
-                                                            onDragStart={(e) => {
-                                                                e.currentTarget.style.boxShadow = 'none';
-                                                                handleDragStart(e, searchedDomain)
-                                                            }}
-                                                            onDragEnd={handleDragEnd}
-                                                            className={`domain-pill ${activeDomainType.includes('blocked') ? 'domain-pill--blocked' : 'domain-pill--allowed'} ${isDragging ? 'domain-pill--dragging' : ''}`}
-                                                        >
-                                                            {searchedDomain}
+                                            {/* Domain List Table */}
+                                            <div className="domain-list-card">
+                                                <div className="domain-list-card__header">
+                                                    <span className="domain-list-card__title">
+                                                        <FontAwesomeIcon icon={faList} /> Domains ({filteredDomains.length}{searchInput.trim() && `/${allDomainsForType.length}`})
+                                                    </span>
+                                                </div>
+                                                <div className="domain-list-card__body">
+                                                    {filteredDomains.length === 0 ? (
+                                                        <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-tertiary)' }}>
+                                                            <p style={{ margin: 0, fontSize: '0.9rem', fontStyle: 'italic' }}>
+                                                                {searchInput.trim() ? 'No matching domains found' : 'No domains in any group for this type'}
+                                                            </p>
                                                         </div>
-                                                    </div>
-                                                )}
-
-                                                {/* Domain List Table */}
-                                                <div className="domain-list-card">
-                                                    <div className="domain-list-card__header">
-                                                        <span className="domain-list-card__title">
-                                                            <FontAwesomeIcon icon={faList} /> Domains ({filteredDomains.length}{searchInput.trim() && `/${allDomainsForType.length}`})
-                                                        </span>
-                                                    </div>
-                                                    <div className="domain-list-card__body">
-                                                        {filteredDomains.length === 0 ? (
-                                                            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--color-text-tertiary)' }}>
-                                                                <p style={{ margin: 0, fontSize: '0.9rem', fontStyle: 'italic' }}>
-                                                                    {searchInput.trim() ? 'No matching domains found' : 'No domains in any group for this type'}
-                                                                </p>
-                                                            </div>
-                                                        ) : (
-                                                                <table className="domain-table">
-                                                                    <tbody>
-                                                                        {filteredDomains.map((domain) => {
-                                                                            const domainGroups = getGroupsForDomain(domain);
+                                                    ) : (
+                                                        <table className="domain-table">
+                                                            <tbody>
+                                                                {filteredDomains.map((domain) => {
+                                                                    const domainGroups = getGroupsForDomain(domain);
 
                                                                     return (
                                                                         <tr
@@ -1125,53 +1125,50 @@ export function ConfigurationPage() {
                                                                         </tr>
                                                                     );
                                                                 })}
-                                                                </tbody>
-                                                            </table>
-                                                        )}
-                                                    </div>
+                                                            </tbody>
+                                                        </table>
+                                                    )}
                                                 </div>
+                                            </div>
 
-                                                {/* Domain Found Results */}
-                                                {searchedDomain && domainExists && (
-                                                    <>
-                                                        {/* Compute effective groups after considering staged config */}
-                                                        {(() => {
-                                                            // Get groups where domain is blocked (from API)
-                                                            const blockedInGroups = new Set(domainInGroups);
+                                            {/* Domain Found Results */}
+                                            {searchedDomain && domainExists && (
+                                                <>
+                                                    {/* Compute effective groups after considering staged config */}
+                                                    {(() => {
+                                                        // Get groups where domain is blocked (from API)
+                                                        const blockedInGroups = new Set(domainInGroups);
 
-                                                            // Filter out groups where domain was manually allowed in staged config
-                                                            if (testStagedConfig?.groups) {
-                                                                testStagedConfig.groups.forEach((group) => {
-                                                                    if (group.allowed?.includes(searchedDomain)) {
-                                                                        blockedInGroups.delete(group.name);
-                                                                    }
-                                                                });
-                                                            }
+                                                        // Filter out groups where domain was manually allowed in staged config
+                                                        if (testStagedConfig?.groups) {
+                                                            testStagedConfig.groups.forEach((group) => {
+                                                                if (group.allowed?.includes(searchedDomain)) {
+                                                                    blockedInGroups.delete(group.name);
+                                                                }
+                                                            });
+                                                        }
 
-                                                            const effectiveBlockedGroups = Array.from(blockedInGroups);
-                                                            const isBlocked = effectiveBlockedGroups.length > 0;
+                                                        const effectiveBlockedGroups = Array.from(blockedInGroups);
+                                                        const isBlocked = effectiveBlockedGroups.length > 0;
 
-                                                            return (
+                                                        return (
                                                             <div className={`alert-box ${isBlocked ? 'alert-box--danger' : 'alert-box--success'}`}>
                                                                 <div className={`alert-box__title ${isBlocked ? 'alert-box__title--danger' : 'alert-box__title--success'}`} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                                     {isBlocked ? (
                                                                         <div className="status-icon">
-                                                                                <FontAwesomeIcon icon={faCircle} className="status-icon__bg" style={{ color: 'var(--color-danger)' }} />
+                                                                            <FontAwesomeIcon icon={faCircle} className="status-icon__bg" style={{ color: 'var(--color-danger)' }} />
                                                                             <FontAwesomeIcon icon={faBan} className="status-icon__fg" />
                                                                         </div>
                                                                     ) : (
                                                                         <div className="status-icon">
-                                                                                    <FontAwesomeIcon icon={faCircle} className="status-icon__bg" style={{ color: 'var(--color-success)' }} />
+                                                                            <FontAwesomeIcon icon={faCircle} className="status-icon__bg" style={{ color: 'var(--color-success)' }} />
                                                                             <FontAwesomeIcon icon={faCheck} className="status-icon__fg" />
                                                                         </div>
                                                                     )}
-                                                                    {isBlocked ? 'Domain blocked in: ' : 'Domain allowed in: '}
+                                                                    {isBlocked ? 'Domain blocked in:' : 'Domain allowed in:'}
                                                                     {effectiveBlockedGroups.length > 0 ? (
-                                                                        effectiveBlockedGroups.map((g, i) => (
-                                                                            <span key={g}>
-                                                                                {i > 0 && ', '}
-                                                                                <strong className="modal__code">{g}</strong>
-                                                                            </span>
+                                                                        effectiveBlockedGroups.map((g) => (
+                                                                            <strong key={g} className="modal__code">{g}</strong>
                                                                         ))
                                                                     ) : (
                                                                         <strong className="modal__code">All (allowed)</strong>
@@ -1222,126 +1219,126 @@ export function ConfigurationPage() {
                                                                         });
                                                                     }
 
-                                                                        if (manuallyAllowedGroups.length > 0) {
-                                                                            return (
-                                                                                <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: 'var(--color-success-text)' }}>
-                                                                                    <p style={{ margin: '0 0 0.5rem 0', fontWeight: 600 }}>Manual Overrides:</p>
-                                                                                    <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
-                                                                                        {manuallyAllowedGroups.map((groupName, idx) => (
-                                                                                            <li key={idx} style={{ marginBottom: '0.25rem' }}>
-                                                                                                <div style={{ fontStyle: 'italic' }}>
-                                                                                                    Allowed in <strong>{groupName}</strong> group
-                                                                                                </div>
-                                                                                            </li>
-                                                                                        ))}
-                                                                                    </ul>
-                                                                                </div>
-                                                                            );
-                                                                        }
-                                                                        return null;
-                                                                    })()}
-                                                                    {isBlocked && (
-                                                                        <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--color-border)' }}>
-                                                                            <p style={{ margin: '0 0 0.5rem 0', fontWeight: 600, fontSize: '0.8rem', color: 'var(--color-text-primary)' }}>
-                                                                                Quick {activeDomainType.includes('blocked') ? 'Block' : 'Allow'}:
-                                                                            </p>
-                                                                            <div
-                                                                                draggable="true"
-                                                                                onDragStart={(e) => {
-                                                                                    e.currentTarget.style.boxShadow = 'none';
-                                                                                    e.dataTransfer.effectAllowed = 'copy';
-                                                                                    e.dataTransfer.setData('text/plain', searchedDomain);
-                                                                                }}
-                                                                                style={{
-                                                                                    display: 'inline-block',
-                                                                                    padding: '0.5rem 1rem',
-                                                                                    background: activeDomainType.includes('blocked') ? 'var(--color-danger-bg)' : 'var(--color-success-bg)',
-                                                                                    borderRadius: '0.5rem',
-                                                                                    color: activeDomainType.includes('blocked') ? 'var(--color-danger)' : 'var(--color-success)',
-                                                                                    border: `1px solid ${activeDomainType.includes('blocked') ? 'var(--color-danger)' : 'var(--color-success)'}`,
-                                                                                    fontWeight: 600,
-                                                                                    fontSize: '0.85rem',
-                                                                                    cursor: 'grab',
-                                                                                    userSelect: 'none',
-                                                                                    transition: 'all 0.2s ease',
-                                                                                    transform: 'translate(0, 0)'
-                                                                                }}
-                                                                                onMouseEnter={(e) => {
-                                                                                    e.currentTarget.style.background = activeDomainType.includes('blocked') ? 'var(--color-danger-light)' : 'var(--color-success-light)';
-                                                                                    e.currentTarget.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.15)';
-                                                                                    e.currentTarget.style.transform = 'translate(0, -2px)';
-                                                                                }}
-                                                                                onMouseLeave={(e) => {
-                                                                                    e.currentTarget.style.background = activeDomainType.includes('blocked') ? 'var(--color-danger-bg)' : 'var(--color-success-bg)';
-                                                                                    e.currentTarget.style.boxShadow = 'none';
-                                                                                    e.currentTarget.style.transform = 'translate(0, 0)';
-                                                                                }}
-                                                                            >
-                                                                                <FontAwesomeIcon icon={faCheck} style={{ marginRight: '0.5rem' }} />
-                                                                                {searchedDomain}
+                                                                    if (manuallyAllowedGroups.length > 0) {
+                                                                        return (
+                                                                            <div style={{ marginTop: '0.75rem', fontSize: '0.8rem', color: 'var(--color-success-text)' }}>
+                                                                                <p style={{ margin: '0 0 0.5rem 0', fontWeight: 600 }}>Manual Overrides:</p>
+                                                                                <ul style={{ margin: 0, paddingLeft: '1.5rem' }}>
+                                                                                    {manuallyAllowedGroups.map((groupName, idx) => (
+                                                                                        <li key={idx} style={{ marginBottom: '0.25rem' }}>
+                                                                                            <div style={{ fontStyle: 'italic' }}>
+                                                                                                Allowed in <strong>{groupName}</strong> group
+                                                                                            </div>
+                                                                                        </li>
+                                                                                    ))}
+                                                                                </ul>
                                                                             </div>
-                                                                            <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
-                                                                                Drag into groups to {activeDomainType.includes('blocked') ? 'block' : 'allow'} this domain
-                                                                            </p>
+                                                                        );
+                                                                    }
+                                                                    return null;
+                                                                })()}
+                                                                {isBlocked && (
+                                                                    <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--color-border)' }}>
+                                                                        <p style={{ margin: '0 0 0.5rem 0', fontWeight: 600, fontSize: '0.8rem', color: 'var(--color-text-primary)' }}>
+                                                                            Quick {activeDomainType.includes('blocked') ? 'Block' : 'Allow'}:
+                                                                        </p>
+                                                                        <div
+                                                                            draggable="true"
+                                                                            onDragStart={(e) => {
+                                                                                e.currentTarget.style.boxShadow = 'none';
+                                                                                e.dataTransfer.effectAllowed = 'copy';
+                                                                                e.dataTransfer.setData('text/plain', searchedDomain);
+                                                                            }}
+                                                                            style={{
+                                                                                display: 'inline-block',
+                                                                                padding: '0.5rem 1rem',
+                                                                                background: activeDomainType.includes('blocked') ? 'var(--color-danger-bg)' : 'var(--color-success-bg)',
+                                                                                borderRadius: '0.5rem',
+                                                                                color: activeDomainType.includes('blocked') ? 'var(--color-danger)' : 'var(--color-success)',
+                                                                                border: `1px solid ${activeDomainType.includes('blocked') ? 'var(--color-danger)' : 'var(--color-success)'}`,
+                                                                                fontWeight: 600,
+                                                                                fontSize: '0.85rem',
+                                                                                cursor: 'grab',
+                                                                                userSelect: 'none',
+                                                                                transition: 'all 0.2s ease',
+                                                                                transform: 'translate(0, 0)'
+                                                                            }}
+                                                                            onMouseEnter={(e) => {
+                                                                                e.currentTarget.style.background = activeDomainType.includes('blocked') ? 'var(--color-danger-light)' : 'var(--color-success-light)';
+                                                                                e.currentTarget.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.15)';
+                                                                                e.currentTarget.style.transform = 'translate(0, -2px)';
+                                                                            }}
+                                                                            onMouseLeave={(e) => {
+                                                                                e.currentTarget.style.background = activeDomainType.includes('blocked') ? 'var(--color-danger-bg)' : 'var(--color-success-bg)';
+                                                                                e.currentTarget.style.boxShadow = 'none';
+                                                                                e.currentTarget.style.transform = 'translate(0, 0)';
+                                                                            }}
+                                                                        >
+                                                                            <FontAwesomeIcon icon={faCheck} style={{ marginRight: '0.5rem' }} />
+                                                                            {searchedDomain}
                                                                         </div>
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        })()}
-                                                    </>
-                                                )}
-                                            </div>
+                                                                        <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.75rem', color: 'var(--color-text-secondary)' }}>
+                                                                            Drag into groups to {activeDomainType.includes('blocked') ? 'block' : 'allow'} this domain
+                                                                        </p>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })()}
+                                                </>
+                                            )}
+                                        </div>
 
-                                            {/* Right: Groups Drag & Drop */}
-                                            <div className="domain-management-right">
-                                                <label className="form-label form-label--flex">
-                                                    <FontAwesomeIcon icon={faGripVertical} style={{ fontSize: '0.95em' }} />
-                                                    Groups - Drag & Drop
-                                                </label>
+                                        {/* Right: Groups Drag & Drop */}
+                                        <div className="domain-management-right">
+                                            <label className="form-label form-label--flex">
+                                                <FontAwesomeIcon icon={faGripVertical} style={{ fontSize: '0.95em' }} />
+                                                Groups - Drag & Drop
+                                            </label>
+                                            <div
+                                                onDragOver={(e) => {
+                                                    // Allow drop anywhere in this container
+                                                    e.preventDefault();
+                                                }}
+                                                onDrop={(e) => {
+                                                    e.preventDefault();
+                                                    // If dropped in the container but not on a specific group, remove from source group
+                                                    if (dragSourceGroup && draggedDomain && !dragOverGroup) {
+                                                        handleRemoveFromGroup(draggedDomain, dragSourceGroup);
+                                                    }
+                                                }}
+                                                className="drop-zone-container">
+                                                <p className="drop-zone-hint">
+                                                    <FontAwesomeIcon icon={faInfoCircle} style={{ marginRight: '0.25rem' }} />
+                                                    Drag domains to groups to add them, or drag from expanded groups to remove.
+                                                </p>
+
+                                                {/* All Groups Drop Zone */}
                                                 <div
-                                                    onDragOver={(e) => {
-                                                        // Allow drop anywhere in this container
-                                                        e.preventDefault();
-                                                    }}
-                                                    onDrop={(e) => {
-                                                        e.preventDefault();
-                                                        // If dropped in the container but not on a specific group, remove from source group
-                                                        if (dragSourceGroup && draggedDomain && !dragOverGroup) {
-                                                            handleRemoveFromGroup(draggedDomain, dragSourceGroup);
-                                                        }
-                                                    }}
-                                                    className="drop-zone-container">
-                                                    <p className="drop-zone-hint">
-                                                        <FontAwesomeIcon icon={faInfoCircle} style={{ marginRight: '0.25rem' }} />
-                                                        Drag domains to groups to add them, or drag from expanded groups to remove.
-                                                    </p>
-
-                                                    {/* All Groups Drop Zone */}
-                                                    <div
-                                                        onDragOver={(e) => handleDragOver(e, 'ALL_GROUPS')}
-                                                        onDragLeave={handleDragLeave}
-                                                        onDrop={(e) => handleDrop(e, 'ALL_GROUPS')}
-                                                        className={`all-groups-drop-zone ${dragOverGroup === 'ALL_GROUPS' ? 'all-groups-drop-zone--dragging-over' : ''}`}
-                                                    >
-                                                        <div className="all-groups-drop-zone__icon">
-                                                            <FontAwesomeIcon
-                                                                icon={dragOverGroup === 'ALL_GROUPS' && dragSourceGroup ? faPlus : faUsers}
-                                                                style={{ color: dragOverGroup === 'ALL_GROUPS' && dragSourceGroup ? 'var(--color-success)' : 'inherit' }}
-                                                            />
-                                                        </div>
-                                                        <div className={`all-groups-drop-zone__title ${dragOverGroup === 'ALL_GROUPS' ? 'all-groups-drop-zone__title--active' : ''}`}>
-                                                            All Groups
-                                                        </div>
-                                                        <div className="all-groups-drop-zone__hint">
-                                                            {dragOverGroup === 'ALL_GROUPS' && dragSourceGroup ? 'Add to missing groups' : 'Drop here to add to all groups'}
-                                                        </div>
+                                                    onDragOver={(e) => handleDragOver(e, 'ALL_GROUPS')}
+                                                    onDragLeave={handleDragLeave}
+                                                    onDrop={(e) => handleDrop(e, 'ALL_GROUPS')}
+                                                    className={`all-groups-drop-zone ${dragOverGroup === 'ALL_GROUPS' ? 'all-groups-drop-zone--dragging-over' : ''}`}
+                                                >
+                                                    <div className="all-groups-drop-zone__icon">
+                                                        <FontAwesomeIcon
+                                                            icon={dragOverGroup === 'ALL_GROUPS' && dragSourceGroup ? faPlus : faUsers}
+                                                            style={{ color: dragOverGroup === 'ALL_GROUPS' && dragSourceGroup ? 'var(--color-success)' : 'inherit' }}
+                                                        />
                                                     </div>
+                                                    <div className={`all-groups-drop-zone__title ${dragOverGroup === 'ALL_GROUPS' ? 'all-groups-drop-zone__title--active' : ''}`}>
+                                                        All Groups
+                                                    </div>
+                                                    <div className="all-groups-drop-zone__hint">
+                                                        {dragOverGroup === 'ALL_GROUPS' && dragSourceGroup ? 'Add to missing groups' : 'Drop here to add to all groups'}
+                                                    </div>
+                                                </div>
 
-                                                    <div className="group-drop-zones">
-                                                        {groups.map((groupName) => {
-                                                            const isExpanded = expandedGroups.has(groupName);
-                                                            const domains = getDomainsForGroupByType(groupName);
-                                                            const domainCount = domains.length;
+                                                <div className="group-drop-zones">
+                                                    {groups.map((groupName) => {
+                                                        const isExpanded = expandedGroups.has(groupName);
+                                                        const domains = getDomainsForGroupByType(groupName);
+                                                        const domainCount = domains.length;
 
                                                         return (
                                                             <div key={groupName}>
@@ -1457,70 +1454,70 @@ export function ConfigurationPage() {
                                                             </div>
                                                         );
                                                     })}
-                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
-                                </section>
-                            )}
+                                </div>
+                            </section>
+                        )}
 
-                            {/* Domain Management Tab Footer */}
-                            {activeTab === 'domain-management' && testStagedConfig && (
-                                <footer className="multi-group-editor__footer">
-                                    {hasUnsavedDomainChanges && (
-                                        <>
-                                            <button
-                                                type="button"
-                                                className="multi-group-editor__footer-hint multi-group-editor__footer-hint--clickable"
-                                                onClick={() => setShowTestChangesSummary(!showTestChangesSummary)}
-                                                title="Click to see what will be saved"
-                                            >
-                                                You have unsaved changes ({testPendingChanges.length}) {showTestChangesSummary ? '▼' : '▲'}
-                                            </button>
-
-                                            {showTestChangesSummary && testPendingChanges.length > 0 && (
-                                                <div className="multi-group-editor__changes-summary">
-                                                    <h4>Pending Changes:</h4>
-                                                    <ul className="multi-group-editor__changes-list">
-                                                        {testPendingChanges.map((change, idx) => (
-                                                            <li key={idx} className={`change-item change-item--${change.type}`}>
-                                                                <span className="change-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '1.5rem', height: '1.5rem' }}>
-                                                                    {change.type === 'added' && <FontAwesomeIcon icon={faPlus} style={{ color: 'var(--color-success)' }} />}
-                                                                    {change.type === 'removed' && <FontAwesomeIcon icon={faMinus} style={{ color: 'var(--color-danger)' }} />}
-                                                                    {change.type === 'modified' && <FontAwesomeIcon icon={faPencil} style={{ color: 'var(--color-warning)' }} />}
-                                                                </span>
-                                                                <span className="change-type">{change.category}</span>
-                                                                <span className="change-group" style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>
-                                                                    {change.description}
-                                                                </span>
-                                                            </li>
-                                                        ))}
-                                                    </ul>
-                                                </div>
-                                            )}
-                                        </>
-                                    )}
-                                    <div className="multi-group-editor__footer-actions">
+                        {/* Domain Management Tab Footer */}
+                        {activeTab === 'domain-management' && testStagedConfig && (
+                            <footer className="multi-group-editor__footer">
+                                {hasUnsavedDomainChanges && (
+                                    <>
                                         <button
                                             type="button"
-                                            className="secondary"
-                                            onClick={handleTestReset}
-                                            disabled={!hasUnsavedDomainChanges}
+                                            className="multi-group-editor__footer-hint multi-group-editor__footer-hint--clickable"
+                                            onClick={() => setShowTestChangesSummary(!showTestChangesSummary)}
+                                            title="Click to see what will be saved"
                                         >
-                                            Reset
+                                            You have unsaved changes ({testPendingChanges.length}) {showTestChangesSummary ? '▼' : '▲'}
                                         </button>
-                                        <button
-                                            type="button"
-                                            className="primary"
-                                            onClick={() => void handleTestSave()}
-                                            disabled={!hasUnsavedDomainChanges || !testStagedConfig}
-                                        >
-                                            Save Changes
-                                        </button>
-                                    </div>
-                                </footer>
-                            )}
+
+                                        {showTestChangesSummary && testPendingChanges.length > 0 && (
+                                            <div className="multi-group-editor__changes-summary">
+                                                <h4>Pending Changes:</h4>
+                                                <ul className="multi-group-editor__changes-list">
+                                                    {testPendingChanges.map((change, idx) => (
+                                                        <li key={idx} className={`change-item change-item--${change.type}`}>
+                                                            <span className="change-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '1.5rem', height: '1.5rem' }}>
+                                                                {change.type === 'added' && <FontAwesomeIcon icon={faPlus} style={{ color: 'var(--color-success)' }} />}
+                                                                {change.type === 'removed' && <FontAwesomeIcon icon={faMinus} style={{ color: 'var(--color-danger)' }} />}
+                                                                {change.type === 'modified' && <FontAwesomeIcon icon={faPencil} style={{ color: 'var(--color-warning)' }} />}
+                                                            </span>
+                                                            <span className="change-type">{change.category}</span>
+                                                            <span className="change-group" style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>
+                                                                {change.description}
+                                                            </span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                                <div className="multi-group-editor__footer-actions">
+                                    <button
+                                        type="button"
+                                        className="secondary"
+                                        onClick={handleTestReset}
+                                        disabled={!hasUnsavedDomainChanges}
+                                    >
+                                        Reset
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="primary"
+                                        onClick={() => void handleTestSave()}
+                                        disabled={!hasUnsavedDomainChanges || !testStagedConfig}
+                                    >
+                                        Save Changes
+                                    </button>
+                                </div>
+                            </footer>
+                        )}
 
                         {/* Sync Tab */}
                         {activeTab === 'sync' && availableNodes.length > 0 && (

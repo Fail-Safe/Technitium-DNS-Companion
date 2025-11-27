@@ -43,7 +43,7 @@ POST /api/dhcp/:nodeId/scopes/clone      - Clone scope to another node
 - **DHCP** - Scope viewer with cross-node cloning
 - **Zones Management** - Zone comparison with sync detection
 - **Logs** - Combined query logs with filtering and search
-- **DNS Tools** - Query testing against nodes
+- **DNS Lookup** - Query testing against nodes
 
 ### Tech Stack
 - React 18 + TypeScript

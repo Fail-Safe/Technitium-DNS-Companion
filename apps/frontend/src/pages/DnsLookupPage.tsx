@@ -11,9 +11,9 @@ import { apiFetch } from '../config';
 import { extractDomainFromInput } from '../utils/urlParsing';
 import { consolidateDomainsByType } from '../utils/domainConsolidation';
 import type { GroupPolicyResult, DomainCheckResult, AllDomainsResponse, AllDomainEntry, DomainSource } from '../types/technitium';
-import './DnsToolsPage.css';
+import './DnsLookupPage.css';
 
-export const DnsToolsPage: React.FC = () => {
+export const DnsLookupPage: React.FC = () => {
     const { nodes } = useTechnitiumState();
     const { pushToast } = useToast();
     const primaryNode = usePrimaryNode(nodes);
@@ -355,11 +355,11 @@ export const DnsToolsPage: React.FC = () => {
     const getActionBadgeClass = (action: string): string => {
         switch (action) {
             case 'blocked':
-                return 'dns-tools__badge--blocked';
+                return 'dns-lookup__badge--blocked';
             case 'allowed':
-                return 'dns-tools__badge--allowed';
+                return 'dns-lookup__badge--allowed';
             case 'none':
-                return 'dns-tools__badge--none';
+                return 'dns-lookup__badge--none';
             default:
                 return '';
         }
@@ -424,7 +424,7 @@ export const DnsToolsPage: React.FC = () => {
                     parts.push(domain.substring(lastIndex, m.start));
                 }
                 parts.push(
-                    <mark key={`match-${i}`} className="dns-tools__regex-highlight">
+                    <mark key={`match-${i}`} className="dns-lookup__regex-highlight">
                         {domain.substring(m.start, m.end)}
                     </mark>
                 );
@@ -459,11 +459,11 @@ export const DnsToolsPage: React.FC = () => {
                 threshold={pullToRefresh.threshold}
                 isRefreshing={pullToRefresh.isRefreshing}
             />
-            <div className="dns-tools" ref={pullToRefresh.containerRef}>
-                <div className="dns-tools__header">
+            <div className="dns-lookup" ref={pullToRefresh.containerRef}>
+                <div className="dns-lookup__header">
                     <div>
-                        <h1>DNS Tools</h1>
-                        <p className="dns-tools__subtitle">
+                        <h1>DNS Lookup</h1>
+                        <p className="dns-lookup__subtitle">
                             Check domain blocking status and browse domain lists
                         </p>
                     </div>
@@ -475,8 +475,8 @@ export const DnsToolsPage: React.FC = () => {
                 </div>
 
                 {nodes.length === 0 && (
-                    <div className="dns-tools__warning">
-                        ⚠️ No nodes configured. Please configure nodes to use DNS Tools.
+                    <div className="dns-lookup__warning">
+                        ⚠️ No nodes configured. Please configure nodes to use DNS Lookup.
                     </div>
                 )}
 
@@ -493,44 +493,31 @@ export const DnsToolsPage: React.FC = () => {
                                 </span>
                             </div>
                             <div className="node-selector__cards">
-                                {nodes.map((node) => {
+                                {/* Non-cluster mode: show all nodes */}
+                                {!isClusterEnabled && nodes.map((node) => {
                                     const isSelected = node.id === selectedNodeId;
-                                    const isPrimary = node.isPrimary === true;
-                                    const isSecondary = isClusterEnabled && !isPrimary;
-                                    const isDisabled = loading || isSecondary;
 
                                     return (
                                         <button
                                             key={node.id}
                                             type="button"
-                                            className={`node-selector__card ${isSelected ? 'node-selector__card--selected' : ''} ${isSecondary ? 'node-selector__card--secondary' : ''}`}
+                                            className={`node-selector__card ${isSelected ? 'node-selector__card--selected' : ''}`}
                                             onClick={() => setSelectedNodeId(node.id)}
-                                            disabled={isDisabled}
-                                            title={isSecondary ? 'Secondary node - read-only in cluster mode' : undefined}
+                                            disabled={loading}
                                         >
                                             <div className="node-selector__card-radio">
                                                 <input
                                                     type="radio"
-                                                    name="selected-dns-tools-node"
+                                                    name="selected-dns-lookup-node"
                                                     checked={isSelected}
                                                     onChange={() => setSelectedNodeId(node.id)}
                                                     aria-label={`Select ${node.name || node.id}`}
-                                                    disabled={isDisabled}
+                                                    disabled={loading}
                                                 />
                                             </div>
                                             <div className="node-selector__card-content">
                                                 <div className="node-selector__card-header">
                                                     <strong className="node-selector__card-title">{node.name || node.id}</strong>
-                                                    {isPrimary && isClusterEnabled && (
-                                                        <span className="node-selector__card-badge node-selector__card-badge--primary">
-                                                            Primary
-                                                        </span>
-                                                    )}
-                                                    {isSecondary && (
-                                                        <span className="node-selector__card-badge node-selector__card-badge--secondary">
-                                                            Secondary
-                                                        </span>
-                                                    )}
                                                 </div>
                                                 <div className="node-selector__card-stats">
                                                     {isSelected ? 'Selected' : 'Available'}
@@ -539,44 +526,99 @@ export const DnsToolsPage: React.FC = () => {
                                         </button>
                                     );
                                 })}
+
+                                {/* Cluster mode: Primary node with full details */}
+                                {isClusterEnabled && primaryNode && (() => {
+                                    const isSelected = primaryNode.id === selectedNodeId;
+
+                                    return (
+                                        <button
+                                            key={primaryNode.id}
+                                            type="button"
+                                            className={`node-selector__card ${isSelected ? 'node-selector__card--selected' : ''}`}
+                                            onClick={() => setSelectedNodeId(primaryNode.id)}
+                                            disabled={loading}
+                                        >
+                                            <div className="node-selector__card-radio">
+                                                <input
+                                                    type="radio"
+                                                    name="selected-dns-lookup-node"
+                                                    checked={isSelected}
+                                                    onChange={() => setSelectedNodeId(primaryNode.id)}
+                                                    aria-label={`Select ${primaryNode.name || primaryNode.id}`}
+                                                    disabled={loading}
+                                                />
+                                            </div>
+                                            <div className="node-selector__card-content">
+                                                <div className="node-selector__card-header">
+                                                    <strong className="node-selector__card-title">{primaryNode.name || primaryNode.id}</strong>
+                                                    <span className="node-selector__card-badge node-selector__card-badge--primary">
+                                                        Primary
+                                                    </span>
+                                                </div>
+                                                <div className="node-selector__card-stats">
+                                                    {isSelected ? 'Selected' : 'Available'}
+                                                </div>
+                                            </div>
+                                        </button>
+                                    );
+                                })()}
+
+                                {/* Cluster mode: Secondary nodes - compact row */}
+                                {isClusterEnabled && (() => {
+                                    const secondaryNodes = nodes.filter(n => !n.isPrimary);
+                                    if (secondaryNodes.length === 0) return null;
+
+                                    return (
+                                        <div className="node-selector__secondaries">
+                                            <span className="node-selector__secondaries-label">Secondary nodes:</span>
+                                            {secondaryNodes.map((node) => (
+                                                <span key={node.id} className="node-selector__secondary-chip">
+                                                    {node.name || node.id}
+                                                    <span className="node-selector__secondary-status" title="In sync with Primary">✓</span>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
                     </>
                 )}
 
-                <div className="dns-tools__tabs">
+                <div className="dns-lookup__tabs">
                     <button
-                        className={activeTab === 'lookup' ? 'dns-tools__tab active' : 'dns-tools__tab'}
+                        className={activeTab === 'lookup' ? 'dns-lookup__tab active' : 'dns-lookup__tab'}
                         onClick={() => setActiveTab('lookup')}
                     >
                         Domain Lookup
                     </button>
                     <button
-                        className={activeTab === 'domains' ? 'dns-tools__tab active' : 'dns-tools__tab'}
+                        className={activeTab === 'domains' ? 'dns-lookup__tab active' : 'dns-lookup__tab'}
                         onClick={() => setActiveTab('domains')}
                     >
                         All Domains
                     </button>
                 </div>
 
-                <div className="dns-tools__content">
+                <div className="dns-lookup__content">
                     {activeTab === 'lookup' && (
-                        <div className="dns-tools__section">
-                            <div className="dns-tools__description">
+                        <div className="dns-lookup__section">
+                            <div className="dns-lookup__description">
                                 <p>
                                     Search for any domain or URL to check its blocking status. Results show both group-specific policies and all matching lists across your configuration.
                                 </p>
                             </div>
 
-                            <div className="dns-tools__form">
-                                <div className="dns-tools__form-row">
-                                    <label htmlFor="domain" className="dns-tools__label">
+                            <div className="dns-lookup__form">
+                                <div className="dns-lookup__form-row">
+                                    <label htmlFor="domain" className="dns-lookup__label">
                                         Domain Name or URL
                                     </label>
                                     <input
                                         id="domain"
                                         type="text"
-                                        className="dns-tools__input"
+                                        className="dns-lookup__input"
                                         placeholder="example.com or https://example.com/path"
                                         value={domain}
                                         onChange={(e) => setDomain(e.target.value)}
@@ -589,13 +631,13 @@ export const DnsToolsPage: React.FC = () => {
                                     />
                                 </div>
 
-                                <div className="dns-tools__form-row">
-                                    <label htmlFor="group" className="dns-tools__label">
+                                <div className="dns-lookup__form-row">
+                                    <label htmlFor="group" className="dns-lookup__label">
                                         Client Group (for policy result)
                                     </label>
                                     <select
                                         id="group"
-                                        className="dns-tools__select"
+                                        className="dns-lookup__select"
                                         value={selectedGroup}
                                         onChange={(e) => setSelectedGroup(e.target.value)}
                                         disabled={loading || availableGroups.length === 0 || !selectedNodeId}
@@ -609,13 +651,13 @@ export const DnsToolsPage: React.FC = () => {
                                             </option>
                                         ))}
                                     </select>
-                                    <small className="dns-tools__form-hint">
+                                    <small className="dns-lookup__form-hint">
                                         Shows what action this group would take for the domain
                                     </small>
                                 </div>
 
                                 <button
-                                    className="dns-tools__button"
+                                    className="dns-lookup__button"
                                     onClick={handleDomainLookup}
                                     disabled={loading || !domain.trim() || !selectedNodeId}
                                 >
@@ -625,51 +667,51 @@ export const DnsToolsPage: React.FC = () => {
 
                             {/* Combined Results */}
                             {(policyResult || globalCheckResult) && (
-                                <div className="dns-tools__results">
+                                <div className="dns-lookup__results">
                                     {policyResult && (
                                         <>
-                                            <div className="dns-tools__result-header">
+                                            <div className="dns-lookup__result-header">
                                                 <h2>Policy Result for {policyResult.domain}</h2>
-                                                <span className={`dns-tools__badge ${getActionBadgeClass(policyResult.finalAction)}`}>
+                                                <span className={`dns-lookup__badge ${getActionBadgeClass(policyResult.finalAction)}`}>
                                                     {policyResult.finalAction.toUpperCase()}
                                                 </span>
                                             </div>
 
-                                            <div className="dns-tools__result-section">
+                                            <div className="dns-lookup__result-section">
                                                 <h3>Group: {policyResult.groupName}</h3>
-                                                <p className="dns-tools__evaluation">{policyResult.evaluation}</p>
+                                                <p className="dns-lookup__evaluation">{policyResult.evaluation}</p>
                                             </div>
 
                                             {policyResult.reasons.length > 0 && (
-                                                <div className="dns-tools__result-section">
+                                                <div className="dns-lookup__result-section">
                                                     <h3>Matching Rules ({policyResult.reasons.length})</h3>
-                                                    <div className="dns-tools__reasons">
+                                                    <div className="dns-lookup__reasons">
                                                         {policyResult.reasons.map((reason, index) => (
-                                                            <div key={index} className="dns-tools__reason">
-                                                                <div className="dns-tools__reason-header">
-                                                                    <span className={`dns-tools__action-badge dns-tools__action-badge--${reason.action}`}>
+                                                            <div key={index} className="dns-lookup__reason">
+                                                                <div className="dns-lookup__reason-header">
+                                                                    <span className={`dns-lookup__action-badge dns-lookup__action-badge--${reason.action}`}>
                                                                         <FontAwesomeIcon icon={reason.action === 'block' ? faBan : faCheck} /> {reason.action.toUpperCase()}
                                                                     </span>
-                                                                    <span className="dns-tools__type-badge">
+                                                                    <span className="dns-lookup__type-badge">
                                                                         {getTypeLabel(reason.type)}
                                                                     </span>
                                                                 </div>
-                                                                <div className="dns-tools__reason-source">
+                                                                <div className="dns-lookup__reason-source">
                                                                     {reason.source === 'manual' ? (
-                                                                        <span className="dns-tools__manual">Manual Entry</span>
+                                                                        <span className="dns-lookup__manual">Manual Entry</span>
                                                                     ) : (
                                                                         <a
                                                                             href={reason.source}
                                                                             target="_blank"
                                                                             rel="noopener noreferrer"
-                                                                            className="dns-tools__link"
+                                                                            className="dns-lookup__link"
                                                                         >
                                                                             {reason.source}
                                                                         </a>
                                                                     )}
                                                                 </div>
                                                                 {reason.matchedPattern && (
-                                                                    <div className="dns-tools__pattern">
+                                                                    <div className="dns-lookup__pattern">
                                                                         Pattern: <code>{reason.matchedPattern}</code>
                                                                     </div>
                                                                 )}
@@ -680,12 +722,12 @@ export const DnsToolsPage: React.FC = () => {
                                             )}
 
                                             {policyResult.reasons.length === 0 && (
-                                                <div className="dns-tools__result-section dns-tools__result-section--allowed-default">
-                                                    <div className="dns-tools__allowed-indicator">
-                                                        <span className="dns-tools__allowed-icon">✓</span>
+                                                <div className="dns-lookup__result-section dns-lookup__result-section--allowed-default">
+                                                    <div className="dns-lookup__allowed-indicator">
+                                                        <span className="dns-lookup__allowed-icon">✓</span>
                                                         <div>
                                                             <strong>Domain not found in any lists (allowed by default)</strong>
-                                                            <p className="dns-tools__no-matches">
+                                                            <p className="dns-lookup__no-matches">
                                                                 No matching rules found. Domain is allowed by default.
                                                             </p>
                                                         </div>
@@ -696,29 +738,29 @@ export const DnsToolsPage: React.FC = () => {
                                     )}
 
                                     {globalCheckResult && globalCheckResult.found && globalCheckResult.foundIn && globalCheckResult.foundIn.length > 0 && (
-                                        <div className="dns-tools__result-section dns-tools__result-section--separator">
+                                        <div className="dns-lookup__result-section dns-lookup__result-section--separator">
                                             <h3>All Matching Lists ({globalCheckResult.foundIn.length})</h3>
-                                            <p className="dns-tools__section-description">
+                                            <p className="dns-lookup__section-description">
                                                 Complete list of all allow/block lists containing this domain across all groups
                                             </p>
-                                            <div className="dns-tools__reasons">
+                                            <div className="dns-lookup__reasons">
                                                 {globalCheckResult.foundIn.map((entry, index) => (
-                                                    <div key={index} className="dns-tools__reason">
-                                                        <div className="dns-tools__reason-header">
-                                                            <span className="dns-tools__type-badge">
+                                                    <div key={index} className="dns-lookup__reason">
+                                                        <div className="dns-lookup__reason-header">
+                                                            <span className="dns-lookup__type-badge">
                                                                 {getTypeLabel(entry.type)}
                                                             </span>
                                                             {entry.groupName && (
-                                                                <span className="dns-tools__group-badge">
+                                                                <span className="dns-lookup__group-badge">
                                                                     Group: {entry.groupName}
                                                                 </span>
                                                             )}
                                                             {entry.groups && entry.groups.length > 0 && (
-                                                                <div className="dns-tools__groups-list">
-                                                                    <span className="dns-tools__groups-label">Used by groups:</span>
-                                                                    <div className="dns-tools__groups-badges">
+                                                                <div className="dns-lookup__groups-list">
+                                                                    <span className="dns-lookup__groups-label">Used by groups:</span>
+                                                                    <div className="dns-lookup__groups-badges">
                                                                         {entry.groups.map((group, gIndex) => (
-                                                                            <span key={gIndex} className="dns-tools__group-badge">
+                                                                            <span key={gIndex} className="dns-lookup__group-badge">
                                                                                 {group}
                                                                             </span>
                                                                         ))}
@@ -726,22 +768,22 @@ export const DnsToolsPage: React.FC = () => {
                                                                 </div>
                                                             )}
                                                         </div>
-                                                        <div className="dns-tools__reason-source">
+                                                        <div className="dns-lookup__reason-source">
                                                             {entry.source === 'manual' ? (
-                                                                <span className="dns-tools__manual">Manual Entry</span>
+                                                                <span className="dns-lookup__manual">Manual Entry</span>
                                                             ) : (
                                                                 <a
                                                                     href={entry.source}
                                                                     target="_blank"
                                                                     rel="noopener noreferrer"
-                                                                    className="dns-tools__link"
+                                                                    className="dns-lookup__link"
                                                                 >
                                                                     {entry.source}
                                                                 </a>
                                                             )}
                                                         </div>
                                                         {entry.matchedPattern && (
-                                                            <div className="dns-tools__pattern">
+                                                            <div className="dns-lookup__pattern">
                                                                 Pattern: <code>{entry.matchedPattern}</code>
                                                             </div>
                                                         )}
@@ -756,8 +798,8 @@ export const DnsToolsPage: React.FC = () => {
                     )}
 
                     {activeTab === 'domains' && (
-                        <div className="dns-tools__section">
-                            <div className="dns-tools__description">
+                        <div className="dns-lookup__section">
+                            <div className="dns-lookup__description">
                                 <p>
                                     Browse and filter all domains from Advanced Blocking lists.
                                     Test regex patterns in real-time to see which domains match.
@@ -765,15 +807,15 @@ export const DnsToolsPage: React.FC = () => {
                             </div>
 
                             {showSearchHelp && (
-                                <div className="dns-tools__info-box">
-                                    <div className="dns-tools__info-box-header">
-                                        <div className="dns-tools__info-box-title">
-                                            <span className="dns-tools__info-box-icon">💡</span>
+                                <div className="dns-lookup__info-box">
+                                    <div className="dns-lookup__info-box-header">
+                                        <div className="dns-lookup__info-box-title">
+                                            <span className="dns-lookup__info-box-icon">💡</span>
                                             <strong>Search Tips</strong>
                                         </div>
                                         <button
                                             type="button"
-                                            className="dns-tools__info-box-dismiss"
+                                            className="dns-lookup__info-box-dismiss"
                                             onClick={dismissSearchHelp}
                                             title="Dismiss"
                                             aria-label="Dismiss search tips"
@@ -781,14 +823,14 @@ export const DnsToolsPage: React.FC = () => {
                                             ✕
                                         </button>
                                     </div>
-                                    <div className="dns-tools__info-box-content">
+                                    <div className="dns-lookup__info-box-content">
                                         <p><strong>Text Mode:</strong> Simple substring matching (case-insensitive)</p>
-                                        <ul className="dns-tools__info-box-examples">
+                                        <ul className="dns-lookup__info-box-examples">
                                             <li><code>google</code> - Matches any domain containing "google"</li>
                                             <li><code>ads.</code> - Matches domains with "ads."</li>
                                         </ul>
                                         <p><strong>Regex Mode:</strong> Full regular expression support</p>
-                                        <ul className="dns-tools__info-box-examples">
+                                        <ul className="dns-lookup__info-box-examples">
                                             <li><code>^ads\.</code> - Domains starting with "ads."</li>
                                             <li><code>\.(com|net)$</code> - Domains ending in .com or .net</li>
                                             <li><code>^.*\.google\.(com|net)$</code> - All google.com/net subdomains</li>
@@ -798,50 +840,50 @@ export const DnsToolsPage: React.FC = () => {
                                 </div>
                             )}
 
-                            <div className="dns-tools__actions">
+                            <div className="dns-lookup__actions">
                                 <button
-                                    className="dns-tools__button dns-tools__button--outline"
+                                    className="dns-lookup__button dns-lookup__button--outline"
                                     onClick={handleRefreshDomains}
                                     disabled={loadingDomains || !selectedNodeId}
                                 >
                                     {loadingDomains ? 'Refreshing...' : <><FontAwesomeIcon icon={faRotate} /> Refresh Lists</>}
                                 </button>
                                 {lastRefreshed && (
-                                    <span className="dns-tools__last-refresh dns-tools__last-refresh--small">
+                                    <span className="dns-lookup__last-refresh dns-lookup__last-refresh--small">
                                         Last refreshed: {new Date(lastRefreshed).toLocaleString()}
                                     </span>
                                 )}
                             </div>
 
-                            <div className="dns-tools__filters">
-                                <div className="dns-tools__filter-group">
-                                    <label className="dns-tools__label">
+                            <div className="dns-lookup__filters">
+                                <div className="dns-lookup__filter-group">
+                                    <label className="dns-lookup__label">
                                         <strong>Search Domains:</strong>
                                         {isSearchPending && (
-                                            <span className="dns-tools__search-pending">
+                                            <span className="dns-lookup__search-pending">
                                                 ⏳ Searching...
                                             </span>
                                         )}
                                         {!isSearchPending && searchMode === 'regex' && searchFilter && (
-                                            <span className={regexValid ? 'dns-tools__regex-valid' : 'dns-tools__regex-invalid'}>
+                                            <span className={regexValid ? 'dns-lookup__regex-valid' : 'dns-lookup__regex-invalid'}>
                                                 {regexValid ? <><FontAwesomeIcon icon={faCheck} /> Valid regex</> : <><FontAwesomeIcon icon={faXmark} /> {regexError}</>}
                                             </span>
                                         )}
                                     </label>
-                                    <div className="dns-tools__search-container">
-                                        <div className="dns-tools__search-input-wrapper">
+                                    <div className="dns-lookup__search-container">
+                                        <div className="dns-lookup__search-input-wrapper">
                                             <input
                                                 type="text"
-                                                className={`dns-tools__input dns-tools__search-input ${searchMode === 'regex' && !regexValid ? 'dns-tools__input--error' : ''}`}
+                                                className={`dns-lookup__input dns-lookup__search-input ${searchMode === 'regex' && !regexValid ? 'dns-lookup__input--error' : ''}`}
                                                 placeholder={searchMode === 'text' ? 'Search domains...' : 'e.g., ^.*\\.google\\.(com|net)$'}
                                                 value={searchFilter}
                                                 onChange={(e) => setSearchFilter(e.target.value)}
                                             />
                                             {searchFilter && (
-                                                <div className="dns-tools__search-buttons">
+                                                <div className="dns-lookup__search-buttons">
                                                     <button
                                                         type="button"
-                                                        className="dns-tools__icon-button dns-tools__icon-button--copy"
+                                                        className="dns-lookup__icon-button dns-lookup__icon-button--copy"
                                                         onClick={copySearchText}
                                                         title="Copy search text"
                                                         aria-label="Copy search text to clipboard"
@@ -850,7 +892,7 @@ export const DnsToolsPage: React.FC = () => {
                                                     </button>
                                                     <button
                                                         type="button"
-                                                        className="dns-tools__icon-button dns-tools__icon-button--clear"
+                                                        className="dns-lookup__icon-button dns-lookup__icon-button--clear"
                                                         onClick={clearSearch}
                                                         title="Clear search"
                                                         aria-label="Clear search input"
@@ -860,10 +902,10 @@ export const DnsToolsPage: React.FC = () => {
                                                 </div>
                                             )}
                                         </div>
-                                        <div className="dns-tools__search-mode-toggle">
+                                        <div className="dns-lookup__search-mode-toggle">
                                             <button
                                                 type="button"
-                                                className={`dns-tools__toggle-button ${searchMode === 'text' ? 'dns-tools__toggle-button--active' : ''}`}
+                                                className={`dns-lookup__toggle-button ${searchMode === 'text' ? 'dns-lookup__toggle-button--active' : ''}`}
                                                 onClick={() => setSearchMode('text')}
                                                 title="Text search (substring match)"
                                             >
@@ -871,7 +913,7 @@ export const DnsToolsPage: React.FC = () => {
                                             </button>
                                             <button
                                                 type="button"
-                                                className={`dns-tools__toggle-button ${searchMode === 'regex' ? 'dns-tools__toggle-button--active' : ''}`}
+                                                className={`dns-lookup__toggle-button ${searchMode === 'regex' ? 'dns-lookup__toggle-button--active' : ''}`}
                                                 onClick={() => setSearchMode('regex')}
                                                 title="Regular expression search"
                                             >
@@ -881,12 +923,12 @@ export const DnsToolsPage: React.FC = () => {
                                     </div>
                                 </div>
 
-                                <div className="dns-tools__filter-group">
-                                    <label className="dns-tools__label">
+                                <div className="dns-lookup__filter-group">
+                                    <label className="dns-lookup__label">
                                         <strong>Type Filter:</strong>
                                     </label>
                                     <select
-                                        className="dns-tools__select dns-tools__select--enhanced"
+                                        className="dns-lookup__select dns-lookup__select--enhanced"
                                         value={typeFilter}
                                         onChange={(e) => setTypeFilter(e.target.value as 'all' | 'allow' | 'block')}
                                     >
@@ -905,12 +947,12 @@ export const DnsToolsPage: React.FC = () => {
                                         </option>
                                     </select>
                                     {allDomains.length > 0 && (
-                                        <div className="dns-tools__filter-breakdown">
-                                            <span className="dns-tools__filter-stat dns-tools__filter-stat--block">
+                                        <div className="dns-lookup__filter-breakdown">
+                                            <span className="dns-lookup__filter-stat dns-lookup__filter-stat--block">
                                                 {typeCounts.block.toLocaleString()} blocked
                                             </span>
-                                            <span className="dns-tools__filter-separator">•</span>
-                                            <span className="dns-tools__filter-stat dns-tools__filter-stat--allow">
+                                            <span className="dns-lookup__filter-separator">•</span>
+                                            <span className="dns-lookup__filter-stat dns-lookup__filter-stat--allow">
                                                 {typeCounts.allow.toLocaleString()} allowed
                                             </span>
                                         </div>
@@ -919,32 +961,32 @@ export const DnsToolsPage: React.FC = () => {
                             </div>
 
                             {loadingDomains && !allDomains.length && (
-                                <div className="dns-tools__loading">
+                                <div className="dns-lookup__loading">
                                     Loading domains...
                                 </div>
                             )}
 
                             {!loadingDomains && allDomains.length === 0 && (
-                                <div className="dns-tools__empty">
+                                <div className="dns-lookup__empty">
                                     No domains loaded. Click "Refresh Lists" to load domains.
                                 </div>
                             )}
 
                             {allDomains.length > 0 && (
-                                <div className={`dns-tools__domains-list ${loadingDomains ? 'dns-tools__domains-list--loading' : ''}`}>
+                                <div className={`dns-lookup__domains-list ${loadingDomains ? 'dns-lookup__domains-list--loading' : ''}`}>
                                     {loadingDomains && (
-                                        <div className="dns-tools__loading-overlay">
-                                            <div className="dns-tools__loading-spinner">
-                                                <div className="dns-tools__spinner"></div>
+                                        <div className="dns-lookup__loading-overlay">
+                                            <div className="dns-lookup__loading-spinner">
+                                                <div className="dns-lookup__spinner"></div>
                                                 <span>Loading results...</span>
                                             </div>
                                         </div>
                                     )}
-                                    <div className="dns-tools__stats">
+                                    <div className="dns-lookup__stats">
                                         {useClientSideFiltering ? (
                                             <>
                                                 <strong>Showing {consolidatedDomains.length.toLocaleString()}</strong> matching domains
-                                                <span className="dns-tools__stats-note">
+                                                <span className="dns-lookup__stats-note">
                                                     (filtered from {fullDomainCache.length.toLocaleString()} total - instant client-side filtering)
                                                 </span>
                                             </>
@@ -952,7 +994,7 @@ export const DnsToolsPage: React.FC = () => {
                                             <>
                                                 <strong>Showing {consolidatedDomains.length.toLocaleString()}</strong> of <strong>{totalDomains.toLocaleString()}</strong> matching domains
                                                 {consolidatedDomains.length < displayedDomains.length && (
-                                                    <span className="dns-tools__stats-note">
+                                                    <span className="dns-lookup__stats-note">
                                                         ({displayedDomains.length.toLocaleString()} entries on this page, consolidated by domain)
                                                     </span>
                                                 )}
@@ -962,24 +1004,24 @@ export const DnsToolsPage: React.FC = () => {
                                         )}
                                     </div>
 
-                                    <div className="dns-tools__domains-table">
-                                        <div className="dns-tools__table-header">
-                                            <div className="dns-tools__table-col dns-tools__table-col--domain">Domain</div>
-                                            <div className="dns-tools__table-col dns-tools__table-col--type">Type</div>
-                                            <div className="dns-tools__table-col dns-tools__table-col--sources">Sources</div>
+                                    <div className="dns-lookup__domains-table">
+                                        <div className="dns-lookup__table-header">
+                                            <div className="dns-lookup__table-col dns-lookup__table-col--domain">Domain</div>
+                                            <div className="dns-lookup__table-col dns-lookup__table-col--type">Type</div>
+                                            <div className="dns-lookup__table-col dns-lookup__table-col--sources">Sources</div>
                                         </div>
-                                        <div className="dns-tools__table-body">
+                                        <div className="dns-lookup__table-body">
                                             {consolidatedDomains.slice(0, 1000).map((domainEntry, index) => (
-                                                <div key={index} className="dns-tools__table-row">
-                                                    <div className="dns-tools__table-col dns-tools__table-col--domain">
+                                                <div key={index} className="dns-lookup__table-row">
+                                                    <div className="dns-lookup__table-col dns-lookup__table-col--domain">
                                                         {highlightRegexMatch(domainEntry.domain)}
                                                     </div>
-                                                    <div className="dns-tools__table-col dns-tools__table-col--type">
-                                                        <span className={`dns-tools__type-badge dns-tools__type-badge--${domainEntry.type}`}>
+                                                    <div className="dns-lookup__table-col dns-lookup__table-col--type">
+                                                        <span className={`dns-lookup__type-badge dns-lookup__type-badge--${domainEntry.type}`}>
                                                             {domainEntry.type === 'allow' ? 'Allow' : 'Block'}
                                                         </span>
                                                     </div>
-                                                    <div className="dns-tools__table-col dns-tools__table-col--sources">
+                                                    <div className="dns-lookup__table-col dns-lookup__table-col--sources">
                                                         {(() => {
                                                             // Group sources by identical group memberships
                                                             const sourcesByGroups = new Map<string, DomainSource[]>();
@@ -992,23 +1034,23 @@ export const DnsToolsPage: React.FC = () => {
                                                             });
 
                                                             return Array.from(sourcesByGroups.values()).map((sourcesGroup, groupIndex) => (
-                                                                <div key={groupIndex} className="dns-tools__source-group">
+                                                                <div key={groupIndex} className="dns-lookup__source-group">
                                                                     {sourcesGroup.map((source, sIndex) => (
-                                                                        <div key={sIndex} className="dns-tools__source-item" title={source.url}>
+                                                                        <div key={sIndex} className="dns-lookup__source-item" title={source.url}>
                                                                             <a
                                                                                 href={source.url}
                                                                                 target="_blank"
                                                                                 rel="noopener noreferrer"
-                                                                                className="dns-tools__source-link"
+                                                                                className="dns-lookup__source-link"
                                                                             >
                                                                                 {source.url.split('/').pop() || source.url}
                                                                             </a>
                                                                         </div>
                                                                     ))}
                                                                     {sourcesGroup[0].groups.length > 0 && (
-                                                                        <div className="dns-tools__source-groups">
+                                                                        <div className="dns-lookup__source-groups">
                                                                             {sourcesGroup[0].groups.map((group, gIndex) => (
-                                                                                <span key={gIndex} className="dns-tools__group-badge-small">
+                                                                                <span key={gIndex} className="dns-lookup__group-badge-small">
                                                                                     {group}
                                                                                 </span>
                                                                             ))}
@@ -1024,37 +1066,37 @@ export const DnsToolsPage: React.FC = () => {
 
                                         {/* Pagination Controls */}
                                         {totalPages > 0 && (
-                                            <div className="dns-tools__pagination">
-                                                <div className="dns-tools__pagination-info">
+                                            <div className="dns-lookup__pagination">
+                                                <div className="dns-lookup__pagination-info">
                                                     Showing {((currentPage - 1) * pageSize) + 1} - {Math.min(currentPage * pageSize, totalDomains)} of {totalDomains.toLocaleString()} domains
                                                 </div>
-                                                <div className="dns-tools__pagination-controls">
+                                                <div className="dns-lookup__pagination-controls">
                                                     <button
-                                                        className="dns-tools__pagination-button"
+                                                        className="dns-lookup__pagination-button"
                                                         onClick={() => loadAllDomains(1)}
                                                         disabled={currentPage === 1 || loadingDomains}
                                                     >
                                                         First
                                                     </button>
                                                     <button
-                                                        className="dns-tools__pagination-button"
+                                                        className="dns-lookup__pagination-button"
                                                         onClick={() => loadAllDomains(currentPage - 1)}
                                                         disabled={currentPage === 1 || loadingDomains}
                                                     >
                                                         Previous
                                                     </button>
-                                                    <span className="dns-tools__pagination-text">
+                                                    <span className="dns-lookup__pagination-text">
                                                         Page {currentPage} of {totalPages}
                                                     </span>
                                                     <button
-                                                        className="dns-tools__pagination-button"
+                                                        className="dns-lookup__pagination-button"
                                                         onClick={() => loadAllDomains(currentPage + 1)}
                                                         disabled={currentPage === totalPages || loadingDomains}
                                                     >
                                                         Next
                                                     </button>
                                                     <button
-                                                        className="dns-tools__pagination-button"
+                                                        className="dns-lookup__pagination-button"
                                                         onClick={() => loadAllDomains(totalPages)}
                                                         disabled={currentPage === totalPages || loadingDomains}
                                                     >
@@ -1074,4 +1116,4 @@ export const DnsToolsPage: React.FC = () => {
     );
 };
 
-export default DnsToolsPage;
+export default DnsLookupPage;
