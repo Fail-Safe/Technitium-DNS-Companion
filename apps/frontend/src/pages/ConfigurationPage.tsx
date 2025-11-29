@@ -9,6 +9,9 @@ import { ConfigurationSyncView } from '../components/configuration/Configuration
 import { NodeSelector } from '../components/configuration/NodeSelector.tsx';
 import { ConfigurationSkeleton } from '../components/configuration/ConfigurationSkeleton.tsx';
 import { ClusterInfoBanner } from '../components/common/ClusterInfoBanner.tsx';
+import { BlockingMethodSelector } from '../components/configuration/BlockingMethodSelector.tsx';
+import { BlockingConflictBanner } from '../components/configuration/BlockingConflictBanner.tsx';
+import { BuiltInBlockingEditor } from '../components/configuration/BuiltInBlockingEditor.tsx';
 import { useClusterNodes } from '../hooks/usePrimaryNode';
 import { useNavigationBlocker } from '../hooks/useNavigationBlocker';
 import { compareStringArrays, compareUrlArrays } from '../utils/arrayComparison';
@@ -29,6 +32,10 @@ export function ConfigurationPage() {
         advancedBlockingError,
         reloadAdvancedBlocking,
         saveAdvancedBlockingConfig,
+        blockingStatus,
+        selectedBlockingMethod,
+        reloadBlockingStatus,
+        setSelectedBlockingMethod,
     } = useTechnitiumState();
 
     // Cluster information
@@ -107,10 +114,18 @@ export function ConfigurationPage() {
         }
     }, [isClusterEnabled, primary, selectedNodeId]);
 
+    // Load blocking status on mount to detect conflicts
+    useEffect(() => {
+        reloadBlockingStatus();
+    }, [reloadBlockingStatus]);
+
     // Pull-to-refresh functionality
     const handlePullToRefresh = useCallback(async () => {
-        await reloadAdvancedBlocking();
-    }, [reloadAdvancedBlocking]);
+        await Promise.all([
+            reloadAdvancedBlocking(),
+            reloadBlockingStatus(),
+        ]);
+    }, [reloadAdvancedBlocking, reloadBlockingStatus]);
 
     const pullToRefresh = usePullToRefresh({
         onRefresh: handlePullToRefresh,
@@ -137,19 +152,22 @@ export function ConfigurationPage() {
         }
     }, [activeTab, reloadAdvancedBlocking]);
 
-    // Update selectedNodeId when advancedBlocking data loads
+    // Update selectedNodeId when advancedBlocking data loads OR when nodes change
     useEffect(() => {
-        if (advancedBlocking?.nodes && !selectedNodeId) {
+        if (!selectedNodeId) {
             // If clustering is enabled, prefer Primary node
             if (isClusterEnabled && primary) {
                 setSelectedNodeId(primary.id);
-            } else {
+            } else if (advancedBlocking?.nodes?.length) {
                 const firstNodeWithConfig = advancedBlocking.nodes.find((n) => n.config);
                 const nodeId = firstNodeWithConfig?.nodeId ?? advancedBlocking.nodes[0]?.nodeId ?? '';
                 setSelectedNodeId(nodeId);
+            } else if (nodes.length > 0) {
+                // Fallback to nodes list for built-in blocking mode
+                setSelectedNodeId(nodes[0].id);
             }
         }
-    }, [advancedBlocking, selectedNodeId, isClusterEnabled, primary]);
+    }, [advancedBlocking, nodes, selectedNodeId, isClusterEnabled, primary]);
 
     // Determine which nodes are missing Advanced Blocking app
     const missingNodes = nodes.filter(n => !n.hasAdvancedBlocking).map(n => ({ id: n.id, name: n.name }));
@@ -848,8 +866,25 @@ export function ConfigurationPage() {
                     />
                 </header>
 
-                {/* Show setup guide if Advanced Blocking app is missing */}
-                {(allMissing || someMissing) && (
+                {/* Blocking Method Selector - choose between Built-in and Advanced Blocking */}
+                <BlockingMethodSelector
+                    selectedMethod={selectedBlockingMethod}
+                    onMethodChange={setSelectedBlockingMethod}
+                    hasAdvancedBlocking={nodes.some(n => n.hasAdvancedBlocking)}
+                    hasBuiltInBlocking={blockingStatus?.nodes?.some(n => n.builtInEnabled) ?? false}
+                />
+
+                {/* Conflict Warning Banner - show when both methods are active */}
+                <BlockingConflictBanner
+                    hasConflict={blockingStatus?.hasConflict ?? false}
+                    conflictWarning={blockingStatus?.conflictWarning}
+                    conflictingNodes={blockingStatus?.nodes?.filter(n => n.hasConflict)}
+                    onDismiss={() => {/* Banner handles its own dismiss state */ }}
+                    show={blockingStatus?.hasConflict ?? false}
+                />
+
+                {/* Show setup guide if Advanced Blocking app is missing (only when Advanced mode selected) */}
+                {selectedBlockingMethod === 'advanced' && (allMissing || someMissing) && (
                     <AdvancedBlockingSetupGuide
                         missingNodes={missingNodes}
                         showFullGuide={allMissing}
@@ -857,10 +892,48 @@ export function ConfigurationPage() {
                 )}
 
                 {/* Show skeleton while loading initial data OR when reloading */}
-                {loadingAdvancedBlocking ? (
+                {loadingAdvancedBlocking && selectedBlockingMethod === 'advanced' ? (
                     <ConfigurationSkeleton />
-                ) : (
+                ) : selectedBlockingMethod === 'built-in' ? (
+                    /* Built-in Blocking Mode */
                     <section className="configuration__editors">
+                        {/* Node Selector - shared component for built-in mode */}
+                        {availableNodes.length > 0 && (
+                            <NodeSelector
+                                nodes={availableNodes}
+                                selectedNodeId={selectedNodeId}
+                                onSelectNode={handleNodeSelect}
+                                loading={false}
+                                hasUnsavedChanges={false}
+                                primaryNodeId={primary?.id}
+                                isClusterEnabled={isClusterEnabled}
+                            />
+                        )}
+                        <BuiltInBlockingEditor
+                            selectedNodeId={selectedNodeId || nodes[0]?.id || ''}
+                            onRefresh={reloadBlockingStatus}
+                            advancedBlockingActive={
+                                blockingStatus?.nodesWithAdvancedBlocking &&
+                                blockingStatus.nodesWithAdvancedBlocking.length > 0
+                            }
+                        />
+                    </section>
+                ) : (
+                            /* Advanced Blocking Mode */
+                    <section className="configuration__editors">
+                                {/* Global Node Selector - applies to all tabs except Sync */}
+                                {availableNodes.length > 0 && activeTab !== 'sync' && (
+                                    <NodeSelector
+                                        nodes={availableNodes}
+                                        selectedNodeId={selectedNodeId}
+                                        onSelectNode={handleNodeSelect}
+                                        loading={loadingAdvancedBlocking}
+                                        hasUnsavedChanges={hasAnyUnsavedChanges}
+                                        primaryNodeId={primary?.id}
+                                        isClusterEnabled={isClusterEnabled}
+                                    />
+                                )}
+
                         {/* Tab Switcher */}
                         {availableNodes.length > 0 && (
                             <div className="configuration__tab-switcher">
@@ -901,24 +974,11 @@ export function ConfigurationPage() {
                             </div>
                         )}
 
-                        {/* Global Node Selector - applies to all tabs except Sync */}
-                        {availableNodes.length > 0 && activeTab !== 'sync' && (
-                            <NodeSelector
-                                nodes={availableNodes}
-                                selectedNodeId={selectedNodeId}
-                                onSelectNode={handleNodeSelect}
-                                loading={loadingAdvancedBlocking}
-                                hasUnsavedChanges={hasAnyUnsavedChanges}
-                                primaryNodeId={primary?.id}
-                                isClusterEnabled={isClusterEnabled}
-                            />
-                        )}
-
                         {/* Group Management Tab */}
                         {activeTab === 'group-management' && (
                             <section className="configuration-editor configuration-editor--stacked">
                                 <header className="configuration-editor__header advanced-blocking-summary__actions">
-                                    <div>
+                                            <div className="configuration-editor__title">
                                         <h2>Group Management</h2>
                                         <p>
                                             Create and manage filtering groups. Configure global settings, network mappings, and group-specific blocking behavior.
@@ -941,7 +1001,7 @@ export function ConfigurationPage() {
                         {activeTab === 'list-management' && availableNodes.length > 0 && (
                             <section className="configuration-editor configuration-editor--stacked">
                                 <header className="configuration-editor__header">
-                                    <div>
+                                            <div className="configuration-editor__title">
                                         <h2>List Management</h2>
                                         <p>
                                             Manage blocklist URLs, allowlist URLs, and filter lists across multiple groups.
@@ -961,11 +1021,9 @@ export function ConfigurationPage() {
                         {activeTab === 'domain-management' && availableNodes.length > 0 && (
                             <section className="configuration-editor configuration-editor--stacked">
                                 <header className="configuration-editor__header">
-                                    <div>
+                                            <div className="configuration-editor__title">
                                         <h2>Domain Management</h2>
-                                        <p>
-                                            Search for domains or add new ones with drag & drop to groups.
-                                        </p>
+                                                <p>Search for domains or add new ones with drag & drop to groups.</p>
                                     </div>
                                 </header>
 

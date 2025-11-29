@@ -7,6 +7,8 @@ import { TechnitiumController } from './technitium.controller';
 import { TechnitiumNodeConfig } from './technitium.types';
 import { AdvancedBlockingService } from './advanced-blocking.service';
 import { AdvancedBlockingController } from './advanced-blocking.controller';
+import { BuiltInBlockingService } from './built-in-blocking.service';
+import { BuiltInBlockingController } from './built-in-blocking.controller';
 import { DomainListCacheService } from './domain-list-cache.service';
 import { DomainListPersistenceService } from './domain-list-persistence.service';
 import { DomainListController } from './domain-list-cache.controller';
@@ -27,6 +29,7 @@ import { DomainListController } from './domain-list-cache.controller';
   providers: [
     TechnitiumService,
     AdvancedBlockingService,
+    BuiltInBlockingService,
     DomainListCacheService,
     DomainListPersistenceService,
     {
@@ -95,7 +98,7 @@ import { DomainListController } from './domain-list-cache.controller';
       },
     },
   ],
-  controllers: [TechnitiumController, AdvancedBlockingController, DomainListController],
-  exports: [TechnitiumService, AdvancedBlockingService, DomainListCacheService],
+  controllers: [TechnitiumController, AdvancedBlockingController, BuiltInBlockingController, DomainListController],
+  exports: [TechnitiumService, AdvancedBlockingService, BuiltInBlockingService, DomainListCacheService],
 })
 export class TechnitiumModule { }

@@ -1,0 +1,106 @@
+.blocking-conflict-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: linear-gradient(135deg, var(--warning-bg) 0%, var(--warning-bg-light, rgba(255, 193, 7, 0.08)) 100%);
+    border: 1px solid var(--warning-border);
+    border-left: 4px solid var(--color-warning);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.blocking-conflict-banner__icon {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-warning);
+    color: white;
+    border-radius: 50%;
+    font-size: 0.9rem;
+}
+
+.blocking-conflict-banner__content {
+    flex: 1;
+    min-width: 0;
+}
+
+.blocking-conflict-banner__content strong {
+    display: block;
+    color: var(--warning-text, var(--color-text-primary));
+    font-size: 0.95rem;
+    margin-bottom: 0.25rem;
+}
+
+.blocking-conflict-banner__content p {
+    margin: 0.25rem 0;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+.blocking-conflict-banner__nodes {
+    color: var(--color-text-primary) !important;
+}
+
+.blocking-conflict-banner__hint {
+    margin-top: 0.5rem !important;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--warning-border);
+    font-size: 0.8rem !important;
+    color: var(--color-text-tertiary) !important;
+}
+
+.blocking-conflict-banner__dismiss {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    padding: 0.5rem;
+    cursor: pointer;
+    color: var(--color-text-secondary);
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.blocking-conflict-banner__dismiss:hover {
+    background: var(--color-bg-secondary);
+    color: var(--color-text-primary);
+}
+
+/* Dark mode adjustments */
+[data-theme="dark"] .blocking-conflict-banner {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.15) 0%, rgba(255, 193, 7, 0.05) 100%);
+}
+
+[data-theme="dark"] .blocking-conflict-banner__content strong {
+    color: var(--warning-light, #ffc107);
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .blocking-conflict-banner {
+        flex-wrap: wrap;
+        padding: 0.875rem 1rem;
+    }
+
+    .blocking-conflict-banner__icon {
+        width: 28px;
+        height: 28px;
+        font-size: 0.8rem;
+    }
+
+    .blocking-conflict-banner__content {
+        flex-basis: calc(100% - 44px - 44px);
+    }
+
+    .blocking-conflict-banner__content strong {
+        font-size: 0.9rem;
+    }
+
+    .blocking-conflict-banner__content p {
+        font-size: 0.8rem;
+    }
+}
