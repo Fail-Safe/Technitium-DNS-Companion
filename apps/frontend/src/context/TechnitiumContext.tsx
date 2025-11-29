@@ -25,6 +25,14 @@ import type {
     TechnitiumCombinedZoneOverview,
     TechnitiumZoneListEnvelope,
 } from '../types/zones';
+import type {
+    BlockingStatusOverview,
+    BuiltInBlockingOverview,
+    BlockingZoneListResponse,
+    BlockingSettings,
+    BlockingZoneOperationResult,
+    BlockingMethod,
+} from '../types/builtInBlocking';
 
 type NodeStatus = 'online' | 'syncing' | 'offline' | 'unknown';
 
@@ -92,6 +100,28 @@ interface TechnitiumState {
         nodeId: string,
         config: AdvancedBlockingConfig,
     ) => Promise<AdvancedBlockingSnapshot | undefined>;
+    // Built-in Blocking state
+    builtInBlocking?: BuiltInBlockingOverview;
+    loadingBuiltInBlocking: boolean;
+    builtInBlockingError?: string;
+    blockingStatus?: BlockingStatusOverview;
+    loadingBlockingStatus: boolean;
+    selectedBlockingMethod: BlockingMethod;
+    setSelectedBlockingMethod: (method: BlockingMethod) => void;
+    reloadBuiltInBlocking: () => Promise<void>;
+    reloadBlockingStatus: () => Promise<void>;
+    // Built-in Blocking operations
+    listAllowedDomains: (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number }) => Promise<BlockingZoneListResponse>;
+    listBlockedDomains: (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number }) => Promise<BlockingZoneListResponse>;
+    addAllowedDomain: (nodeId: string, domain: string) => Promise<BlockingZoneOperationResult>;
+    addBlockedDomain: (nodeId: string, domain: string) => Promise<BlockingZoneOperationResult>;
+    deleteAllowedDomain: (nodeId: string, domain: string) => Promise<BlockingZoneOperationResult>;
+    deleteBlockedDomain: (nodeId: string, domain: string) => Promise<BlockingZoneOperationResult>;
+    getBlockingSettings: (nodeId: string) => Promise<BlockingSettings>;
+    updateBlockingSettings: (nodeId: string, settings: Partial<BlockingSettings>) => Promise<BlockingZoneOperationResult>;
+    temporaryDisableBlocking: (nodeId: string, minutes: number) => Promise<{ success: boolean; temporaryDisableBlockingTill?: string; message?: string }>;
+    reEnableBlocking: (nodeId: string) => Promise<BlockingZoneOperationResult>;
+    forceBlockListUpdate: (nodeId: string) => Promise<BlockingZoneOperationResult>;
     loadNodeLogs: (
         nodeId: string,
         filters?: TechnitiumQueryLogFilters,
@@ -165,6 +195,14 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     const [loadingAdvancedBlocking, setLoadingAdvancedBlocking] = useState<boolean>(false);
     const [advancedBlockingError, setAdvancedBlockingError] = useState<string | undefined>();
     const hasCheckedApps = useRef(false);
+
+    // Built-in Blocking state
+    const [builtInBlocking, setBuiltInBlocking] = useState<BuiltInBlockingOverview | undefined>();
+    const [loadingBuiltInBlocking, setLoadingBuiltInBlocking] = useState<boolean>(false);
+    const [builtInBlockingError, setBuiltInBlockingError] = useState<string | undefined>();
+    const [blockingStatus, setBlockingStatus] = useState<BlockingStatusOverview | undefined>();
+    const [loadingBlockingStatus, setLoadingBlockingStatus] = useState<boolean>(false);
+    const [selectedBlockingMethod, setSelectedBlockingMethod] = useState<BlockingMethod>('advanced');
 
     const nodesRef = useRef<TechnitiumNode[]>([]);
 
@@ -867,6 +905,185 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         [],
     );
 
+    // ========================================
+    // Built-in Blocking Callbacks
+    // ========================================
+
+    const reloadBuiltInBlocking = useCallback(async () => {
+        setLoadingBuiltInBlocking(true);
+        setBuiltInBlockingError(undefined);
+
+        try {
+            const response = await apiFetch('/built-in-blocking');
+            if (!response.ok) {
+                throw new Error(`Failed to load built-in blocking overview (${response.status})`);
+            }
+            const data = (await response.json()) as BuiltInBlockingOverview;
+            setBuiltInBlocking(data);
+        } catch (error) {
+            setBuiltInBlocking(undefined);
+            setBuiltInBlockingError((error as Error).message);
+        } finally {
+            setLoadingBuiltInBlocking(false);
+        }
+    }, []);
+
+    const reloadBlockingStatus = useCallback(async () => {
+        setLoadingBlockingStatus(true);
+
+        try {
+            const response = await apiFetch('/built-in-blocking/status');
+            if (!response.ok) {
+                throw new Error(`Failed to load blocking status (${response.status})`);
+            }
+            const data = (await response.json()) as BlockingStatusOverview;
+            setBlockingStatus(data);
+
+            // Auto-select blocking method based on what's available
+            // If Advanced Blocking is installed and enabled, prefer it
+            // If only Built-in is enabled, select that
+            if (data.nodesWithAdvancedBlocking.length > 0) {
+                setSelectedBlockingMethod('advanced');
+            } else if (data.nodesWithBuiltInBlocking.length > 0) {
+                setSelectedBlockingMethod('built-in');
+            }
+        } catch (error) {
+            console.error('Failed to load blocking status:', error);
+        } finally {
+            setLoadingBlockingStatus(false);
+        }
+    }, []);
+
+    const listAllowedDomains = useCallback(
+        async (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number }) => {
+            const query = new URLSearchParams();
+            if (params?.domain) query.set('domain', params.domain);
+            if (params?.pageNumber !== undefined) query.set('pageNumber', params.pageNumber.toString());
+            if (params?.entriesPerPage !== undefined) query.set('entriesPerPage', params.entriesPerPage.toString());
+
+            const url = `/built-in-blocking/${encodeURIComponent(nodeId)}/allowed${query.toString() ? '?' + query.toString() : ''}`;
+            const response = await apiFetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to list allowed domains (${response.status})`);
+            }
+            return (await response.json()) as BlockingZoneListResponse;
+        },
+        [],
+    );
+
+    const listBlockedDomains = useCallback(
+        async (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number }) => {
+            const query = new URLSearchParams();
+            if (params?.domain) query.set('domain', params.domain);
+            if (params?.pageNumber !== undefined) query.set('pageNumber', params.pageNumber.toString());
+            if (params?.entriesPerPage !== undefined) query.set('entriesPerPage', params.entriesPerPage.toString());
+
+            const url = `/built-in-blocking/${encodeURIComponent(nodeId)}/blocked${query.toString() ? '?' + query.toString() : ''}`;
+            const response = await apiFetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to list blocked domains (${response.status})`);
+            }
+            return (await response.json()) as BlockingZoneListResponse;
+        },
+        [],
+    );
+
+    const addAllowedDomain = useCallback(async (nodeId: string, domain: string) => {
+        const response = await apiFetch(`/built-in-blocking/${encodeURIComponent(nodeId)}/allowed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain }),
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to add allowed domain (${response.status})`);
+        }
+        return (await response.json()) as BlockingZoneOperationResult;
+    }, []);
+
+    const addBlockedDomain = useCallback(async (nodeId: string, domain: string) => {
+        const response = await apiFetch(`/built-in-blocking/${encodeURIComponent(nodeId)}/blocked`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain }),
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to add blocked domain (${response.status})`);
+        }
+        return (await response.json()) as BlockingZoneOperationResult;
+    }, []);
+
+    const deleteAllowedDomain = useCallback(async (nodeId: string, domain: string) => {
+        const response = await apiFetch(`/built-in-blocking/${encodeURIComponent(nodeId)}/allowed/${encodeURIComponent(domain)}`, {
+            method: 'DELETE',
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to delete allowed domain (${response.status})`);
+        }
+        return (await response.json()) as BlockingZoneOperationResult;
+    }, []);
+
+    const deleteBlockedDomain = useCallback(async (nodeId: string, domain: string) => {
+        const response = await apiFetch(`/built-in-blocking/${encodeURIComponent(nodeId)}/blocked/${encodeURIComponent(domain)}`, {
+            method: 'DELETE',
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to delete blocked domain (${response.status})`);
+        }
+        return (await response.json()) as BlockingZoneOperationResult;
+    }, []);
+
+    const getBlockingSettings = useCallback(async (nodeId: string) => {
+        const response = await apiFetch(`/built-in-blocking/${encodeURIComponent(nodeId)}/settings`);
+        if (!response.ok) {
+            throw new Error(`Failed to get blocking settings (${response.status})`);
+        }
+        return (await response.json()) as BlockingSettings;
+    }, []);
+
+    const updateBlockingSettings = useCallback(async (nodeId: string, settings: Partial<BlockingSettings>) => {
+        const response = await apiFetch(`/built-in-blocking/${encodeURIComponent(nodeId)}/settings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings),
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to update blocking settings (${response.status})`);
+        }
+        return (await response.json()) as BlockingZoneOperationResult;
+    }, []);
+
+    const temporaryDisableBlocking = useCallback(async (nodeId: string, minutes: number) => {
+        const response = await apiFetch(`/built-in-blocking/${encodeURIComponent(nodeId)}/settings/temporary-disable`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ minutes }),
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to temporarily disable blocking (${response.status})`);
+        }
+        return (await response.json()) as { success: boolean; temporaryDisableBlockingTill?: string; message?: string };
+    }, []);
+
+    const reEnableBlocking = useCallback(async (nodeId: string) => {
+        const response = await apiFetch(`/built-in-blocking/${encodeURIComponent(nodeId)}/settings/re-enable`, {
+            method: 'POST',
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to re-enable blocking (${response.status})`);
+        }
+        return (await response.json()) as BlockingZoneOperationResult;
+    }, []);
+
+    const forceBlockListUpdate = useCallback(async (nodeId: string) => {
+        const response = await apiFetch(`/built-in-blocking/${encodeURIComponent(nodeId)}/settings/force-update`, {
+            method: 'POST',
+        });
+        if (!response.ok) {
+            throw new Error(`Failed to force block list update (${response.status})`);
+        }
+        return (await response.json()) as BlockingZoneOperationResult;
+    }, []);
+
     const value = useMemo<TechnitiumState>(
         () => ({
             nodes,
@@ -876,6 +1093,28 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
             reloadAdvancedBlocking,
             fetchNodeOverviews,
             saveAdvancedBlockingConfig,
+            // Built-in Blocking
+            builtInBlocking,
+            loadingBuiltInBlocking,
+            builtInBlockingError,
+            blockingStatus,
+            loadingBlockingStatus,
+            selectedBlockingMethod,
+            setSelectedBlockingMethod,
+            reloadBuiltInBlocking,
+            reloadBlockingStatus,
+            listAllowedDomains,
+            listBlockedDomains,
+            addAllowedDomain,
+            addBlockedDomain,
+            deleteAllowedDomain,
+            deleteBlockedDomain,
+            getBlockingSettings,
+            updateBlockingSettings,
+            temporaryDisableBlocking,
+            reEnableBlocking,
+            forceBlockListUpdate,
+            // Other
             loadNodeLogs,
             loadCombinedLogs,
             loadDhcpScopes,
@@ -895,6 +1134,27 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
             reloadAdvancedBlocking,
             fetchNodeOverviews,
             saveAdvancedBlockingConfig,
+            // Built-in Blocking
+            builtInBlocking,
+            loadingBuiltInBlocking,
+            builtInBlockingError,
+            blockingStatus,
+            loadingBlockingStatus,
+            selectedBlockingMethod,
+            reloadBuiltInBlocking,
+            reloadBlockingStatus,
+            listAllowedDomains,
+            listBlockedDomains,
+            addAllowedDomain,
+            addBlockedDomain,
+            deleteAllowedDomain,
+            deleteBlockedDomain,
+            getBlockingSettings,
+            updateBlockingSettings,
+            temporaryDisableBlocking,
+            reEnableBlocking,
+            forceBlockListUpdate,
+            // Other
             loadNodeLogs,
             loadCombinedLogs,
             loadDhcpScopes,

@@ -1,0 +1,172 @@
+{
+    "version": "2025-11-28",
+    "lastUpdated": "2025-11-28T00:00:00Z",
+    "sourceUrl": "https://github.com/hagezi/dns-blocklists",
+    "lists": {
+        "hagezi": {
+            "name": "Hagezi DNS Blocklists",
+            "website": "https://github.com/hagezi/dns-blocklists",
+            "description": "Optimized DNS blocklists for various protection levels",
+            "lists": [
+                {
+                    "id": "hagezi-light",
+                    "name": "Hagezi Light",
+                    "url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/light-onlydomains.txt",
+                    "description": "Basic protection - Ads, Tracking, Metrics (~82K domains)",
+                    "category": "multi",
+                    "recommended": false
+                },
+                {
+                    "id": "hagezi-normal",
+                    "name": "Hagezi Normal",
+                    "url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/multi-onlydomains.txt",
+                    "description": "All-round protection - Ads, Tracking, Malware, Scam (~255K domains)",
+                    "category": "multi",
+                    "recommended": false
+                },
+                {
+                    "id": "hagezi-pro",
+                    "name": "Hagezi Pro",
+                    "url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro-onlydomains.txt",
+                    "description": "Extended protection - Balanced blocking (~333K domains)",
+                    "category": "multi",
+                    "recommended": true
+                },
+                {
+                    "id": "hagezi-pro-plus",
+                    "name": "Hagezi Pro++",
+                    "url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro.plus-onlydomains.txt",
+                    "description": "Maximum protection - Aggressive blocking (~378K domains)",
+                    "category": "multi",
+                    "recommended": false
+                },
+                {
+                    "id": "hagezi-ultimate",
+                    "name": "Hagezi Ultimate",
+                    "url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/ultimate-onlydomains.txt",
+                    "description": "Aggressive protection - Strictest blocking (~462K domains)",
+                    "category": "multi",
+                    "recommended": false
+                },
+                {
+                    "id": "hagezi-tif",
+                    "name": "Hagezi TIF (Threat Intelligence)",
+                    "url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/tif-onlydomains.txt",
+                    "description": "Malware, Phishing, Scam, Spam (~615K domains)",
+                    "category": "security",
+                    "recommended": false
+                },
+                {
+                    "id": "hagezi-gambling",
+                    "name": "Hagezi Gambling",
+                    "url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/gambling-onlydomains.txt",
+                    "description": "Blocks gambling content (~210K domains)",
+                    "category": "content",
+                    "recommended": false
+                },
+                {
+                    "id": "hagezi-nsfw",
+                    "name": "Hagezi NSFW/Adult",
+                    "url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/nsfw-onlydomains.txt",
+                    "description": "Blocks adult content (~76K domains)",
+                    "category": "content",
+                    "recommended": false
+                },
+                {
+                    "id": "hagezi-anti-piracy",
+                    "name": "Hagezi Anti-Piracy",
+                    "url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/anti.piracy-onlydomains.txt",
+                    "description": "Blocks piracy sites (~11K domains)",
+                    "category": "content",
+                    "recommended": false
+                },
+                {
+                    "id": "hagezi-social",
+                    "name": "Hagezi Social Networks",
+                    "url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/social-onlydomains.txt",
+                    "description": "Blocks social networks (Facebook, TikTok, X, etc.)",
+                    "category": "content",
+                    "recommended": false
+                },
+                {
+                    "id": "hagezi-doh-bypass",
+                    "name": "Hagezi DoH/VPN/Proxy Bypass",
+                    "url": "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/doh-vpn-proxy-bypass-onlydomains.txt",
+                    "description": "Prevents DNS bypass methods",
+                    "category": "security",
+                    "recommended": false
+                }
+            ]
+        },
+        "stevenblack": {
+            "name": "Steven Black Hosts",
+            "website": "https://github.com/StevenBlack/hosts",
+            "description": "Unified hosts file with base extensions",
+            "lists": [
+                {
+                    "id": "stevenblack-unified",
+                    "name": "Steven Black Unified",
+                    "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+                    "description": "Adware + Malware (~130K domains)",
+                    "category": "multi",
+                    "recommended": false
+                },
+                {
+                    "id": "stevenblack-fakenews",
+                    "name": "Steven Black + Fakenews",
+                    "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews/hosts",
+                    "description": "Unified + Fakenews",
+                    "category": "content",
+                    "recommended": false
+                },
+                {
+                    "id": "stevenblack-gambling",
+                    "name": "Steven Black + Gambling",
+                    "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/gambling/hosts",
+                    "description": "Unified + Gambling",
+                    "category": "content",
+                    "recommended": false
+                },
+                {
+                    "id": "stevenblack-porn",
+                    "name": "Steven Black + Porn",
+                    "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn/hosts",
+                    "description": "Unified + Porn",
+                    "category": "content",
+                    "recommended": false
+                },
+                {
+                    "id": "stevenblack-social",
+                    "name": "Steven Black + Social",
+                    "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/social/hosts",
+                    "description": "Unified + Social Networks",
+                    "category": "content",
+                    "recommended": false
+                }
+            ]
+        },
+        "oisd": {
+            "name": "OISD Blocklists",
+            "website": "https://oisd.nl",
+            "description": "Comprehensive domain blocklists",
+            "lists": [
+                {
+                    "id": "oisd-big",
+                    "name": "OISD Big",
+                    "url": "https://big.oisd.nl/domainswild",
+                    "description": "Comprehensive blocking list",
+                    "category": "multi",
+                    "recommended": false
+                },
+                {
+                    "id": "oisd-nsfw",
+                    "name": "OISD NSFW",
+                    "url": "https://nsfw.oisd.nl/domainswild",
+                    "description": "Adult content blocking",
+                    "category": "content",
+                    "recommended": false
+                }
+            ]
+        }
+    }
+}

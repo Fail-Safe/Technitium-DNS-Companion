@@ -4918,10 +4918,11 @@ button.danger:disabled {
 
 .configuration-editor__header {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 1rem;
   align-items: flex-start;
+  justify-content: space-between;
+  padding: 1.25rem 1rem;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .configuration-editor__actions {
@@ -5020,6 +5021,17 @@ button.danger:disabled {
   gap: 1rem;
 }
 
+.configuration-editor__title h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--color-text-primary);
+}
+
+.configuration-editor__title p {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
 .group-editor {
   border-top: 1px solid var(--color-border);
   padding-top: 1.5rem;

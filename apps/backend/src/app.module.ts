@@ -3,6 +3,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TechnitiumModule } from './technitium/technitium.module';
+import { BlockListCatalogModule } from './blocklist-catalog/blocklist-catalog.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { TechnitiumModule } from './technitium/technitium.module';
       max: 100, // Max 100 items in cache
     }),
     TechnitiumModule,
+    BlockListCatalogModule,
   ],
   controllers: [AppController],
   providers: [AppService],
