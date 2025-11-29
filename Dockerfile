@@ -63,10 +63,10 @@ WORKDIR /app
 COPY --from=manifest-context /app/ ./
 
 # Install production dependencies only for backend
-RUN --mount=type=cache,target=/root/.npm npm ci --workspace=apps/backend --omit=dev && npm cache clean --force
+RUN --mount=type=cache,target=/root/.npm npm ci --workspace=apps/backend --omit=dev
 
 # Copy built backend from builder
-COPY --from=backend-builder /app/apps/backend/dist ./dist
+COPY --from=backend-builder /app/apps/backend/dist ./apps/backend/dist
 
 # Copy built frontend from builder
 COPY --from=frontend-builder /app/apps/frontend/dist ./frontend/dist
@@ -83,4 +83,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD node -e "require('http').get('http://localhost:3000/api/nodes', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 # Run the application
-CMD ["node", "dist/main"]
+CMD ["node", "apps/backend/dist/main"]
