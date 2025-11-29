@@ -1,48 +1,58 @@
-# Multi-stage build for Technitium DNS Companion
+# Multi-stage build for Technitium DNS Companion (Monorepo)
+
 # Stage 1: Build frontend
 FROM node:22-alpine AS frontend-builder
 
-WORKDIR /app/frontend
+WORKDIR /app
 
-# Copy frontend package files
-COPY apps/frontend/package*.json ./
-RUN npm ci
+# Copy root package files (for workspaces)
+COPY package.json package-lock.json ./
+COPY apps/frontend/package.json ./apps/frontend/
+
+# Install dependencies
+RUN npm ci --workspace=apps/frontend
 
 # Copy frontend source
-COPY apps/frontend/ ./
+COPY apps/frontend/ ./apps/frontend/
 
 # Build frontend
-RUN npm run build
+RUN npm run build --workspace=apps/frontend
 
 # Stage 2: Build backend
 FROM node:22-alpine AS backend-builder
 
-WORKDIR /app/backend
+WORKDIR /app
 
-# Copy backend package files
-COPY apps/backend/package*.json ./
-RUN npm ci
+# Copy root package files (for workspaces)
+COPY package.json package-lock.json ./
+COPY apps/backend/package.json ./apps/backend/
+
+# Install dependencies
+RUN npm ci --workspace=apps/backend
 
 # Copy backend source
-COPY apps/backend/ ./
+COPY apps/backend/ ./apps/backend/
 
 # Build backend
-RUN npm run build
+RUN npm run build --workspace=apps/backend
 
 # Stage 3: Production image
 FROM node:22-alpine
 
 WORKDIR /app
 
-# Install production dependencies for backend
-COPY apps/backend/package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+# Copy root package files
+COPY package.json package-lock.json ./
+COPY apps/backend/package.json ./apps/backend/
+
+# Install production dependencies only
+RUN npm ci --workspace=apps/backend --omit=dev && npm cache clean --force
 
 # Copy built backend from builder
-COPY --from=backend-builder /app/backend/dist ./dist
+COPY --from=backend-builder /app/apps/backend/dist ./dist
 
 # Copy built frontend from builder
-COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
+COPY --from=frontend-builder /app/apps/frontend/dist ./frontend/dist
 
 # Create directory for environment file
 RUN mkdir -p /app/config
