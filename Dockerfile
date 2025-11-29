@@ -1,16 +1,22 @@
 # syntax=docker/dockerfile:1.7
 # Multi-stage build for Technitium DNS Companion (Monorepo)
 
+
+# Stage 0: Shared manifest context (reduces repeated COPY invalidations)
+FROM node:22-alpine AS manifest-context
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY apps/backend/package.json ./apps/backend/
+COPY apps/frontend/package.json ./apps/frontend/
+
 # Stage 1: Build frontend
 FROM node:22-alpine AS frontend-builder
 ARG TARGETARCH
 
 WORKDIR /app
 
-# Copy all package files (workspaces need root context)
-COPY package.json package-lock.json ./
-COPY apps/frontend/package.json ./apps/frontend/
-COPY apps/backend/package.json ./apps/backend/
+# Copy package manifests from shared context (stable layer for caching)
+COPY --from=manifest-context /app/ ./
 
 # Install ALL dependencies to get platform-specific optional deps (Rollup binaries)
 # --ignore-scripts skips native module compilation (not needed for frontend build)
@@ -35,10 +41,8 @@ FROM node:22-alpine AS backend-builder
 
 WORKDIR /app
 
-# Copy all package files
-COPY package.json package-lock.json ./
-COPY apps/frontend/package.json ./apps/frontend/
-COPY apps/backend/package.json ./apps/backend/
+# Copy manifests from shared context
+COPY --from=manifest-context /app/ ./
 
 # Install ALL dependencies (NestJS needs full dependency tree)
 # --ignore-scripts skips native module compilation
@@ -55,9 +59,8 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Copy root package files
-COPY package.json package-lock.json ./
-COPY apps/backend/package.json ./apps/backend/
+# Copy manifests from shared context
+COPY --from=manifest-context /app/ ./
 
 # Install production dependencies only for backend
 RUN --mount=type=cache,target=/root/.npm npm ci --workspace=apps/backend --omit=dev && npm cache clean --force
