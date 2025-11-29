@@ -10,9 +10,9 @@ COPY package.json package-lock.json ./
 COPY apps/frontend/package.json ./apps/frontend/
 COPY apps/backend/package.json ./apps/backend/
 
-# Install dependencies for frontend workspace
-# Using full npm ci to get platform-specific optional deps (like Rollup binaries)
-RUN npm ci --workspace=apps/frontend
+# Install ALL dependencies to get platform-specific optional deps (Rollup binaries)
+# --ignore-scripts skips native module compilation (not needed for frontend build)
+RUN npm ci --ignore-scripts
 
 # Copy frontend source
 COPY apps/frontend/ ./apps/frontend/
@@ -30,8 +30,9 @@ COPY package.json package-lock.json ./
 COPY apps/frontend/package.json ./apps/frontend/
 COPY apps/backend/package.json ./apps/backend/
 
-# Install dependencies for backend workspace
-RUN npm ci --workspace=apps/backend
+# Install ALL dependencies (NestJS needs full dependency tree)
+# --ignore-scripts skips native module compilation
+RUN npm ci --ignore-scripts
 
 # Copy backend source
 COPY apps/backend/ ./apps/backend/
