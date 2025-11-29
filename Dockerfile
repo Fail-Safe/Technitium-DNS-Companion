@@ -63,7 +63,7 @@ WORKDIR /app
 COPY --from=manifest-context /app/ ./
 
 # Install production dependencies only for backend
-RUN --mount=type=cache,target=/root/.npm npm ci --workspace=apps/backend --omit=dev
+RUN --mount=type=cache,target=/root/.npm cd apps/backend && npm ci --omit=dev
 
 # Copy built backend from builder
 COPY --from=backend-builder /app/apps/backend/dist ./apps/backend/dist
