@@ -74,6 +74,9 @@ COPY --from=frontend-builder /app/apps/frontend/dist ./frontend/dist
 # Create directory for environment file
 RUN mkdir -p /app/config
 
+# Ensure backend-local node_modules are on the module resolution path
+ENV NODE_PATH=/app/apps/backend/node_modules:/app/node_modules
+
 # Expose ports
 # Default HTTP: 3000, Default HTTPS: 3443
 EXPOSE 3000 3443
