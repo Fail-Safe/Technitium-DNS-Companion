@@ -9,8 +9,5 @@
     ],
     "scripts": {
         "lint": "npm run lint --workspaces --if-present"
-    },
-    "dependencies": {
-        "cap": "^0.2.1"
     }
 }

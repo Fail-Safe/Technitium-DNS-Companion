@@ -10,8 +10,9 @@ COPY package.json package-lock.json ./
 COPY apps/frontend/package.json ./apps/frontend/
 COPY apps/backend/package.json ./apps/backend/
 
-# Install ALL dependencies (Rollup needs platform-specific binaries)
-RUN npm ci
+# Install dependencies for frontend workspace
+# Using full npm ci to get platform-specific optional deps (like Rollup binaries)
+RUN npm ci --workspace=apps/frontend
 
 # Copy frontend source
 COPY apps/frontend/ ./apps/frontend/
@@ -29,8 +30,8 @@ COPY package.json package-lock.json ./
 COPY apps/frontend/package.json ./apps/frontend/
 COPY apps/backend/package.json ./apps/backend/
 
-# Install ALL dependencies
-RUN npm ci
+# Install dependencies for backend workspace
+RUN npm ci --workspace=apps/backend
 
 # Copy backend source
 COPY apps/backend/ ./apps/backend/
