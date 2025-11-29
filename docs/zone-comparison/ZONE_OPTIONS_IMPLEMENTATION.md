@@ -2,7 +2,7 @@
 
 ## Overview
 
-Query Access ACL comparison has been implemented for Technitium DNS zones. This allows technitium-dns-companion to detect when Query Access configurations differ between Primary and Secondary Forwarders (EQ14 and EQ12).
+Query Access ACL comparison has been implemented for Technitium DNS zones. This allows technitium-dns-companion to detect when Query Access configurations differ between Primary and Secondary Forwarders (Node1 and Node2).
 
 Additionally, all zone configuration fields are available for display in the UI, including informational fields like Type, Last Modified, and Zone Transfer settings - even though these informational fields are not used for detecting configuration differences.
 
@@ -170,14 +170,14 @@ CONFIG DETAILS:
 │ SOA Serial: 2025101601       │
 └──────────────────────────────┘
 
-┌─ EQ14 (Primary)   EQ12 (Secondary) ────┐
+┌─ Node1 (Primary)   Node2 (Secondary) ────┐
 │ Query Access:                           │
-│   EQ14: Allow                           │
-│   EQ12: AllowOnlyPrivateNetworks  ❌    │
+│   Node1: Allow                           │
+│   Node2: AllowOnlyPrivateNetworks  ❌    │
 │                                         │
 │ Zone Transfer (Primary only):           │
-│   EQ14: AllowOnlyZoneNameServers        │
-│   EQ12: N/A (secondary)                 │
+│   Node1: AllowOnlyZoneNameServers        │
+│   Node2: N/A (secondary)                 │
 └─────────────────────────────────────────┘
 ```
 
@@ -238,11 +238,11 @@ All zone fields are included in the API response via `TechnitiumZoneSummary`. Th
 - SOA Serial ✓
 - Query Access ✓
 - Query Access ACL ✓
-- Zone Transfer (EQ14) ✓
-- Zone Transfer ACL (EQ14) ✓
-- Zone Transfer TSIG Keys (EQ14) ✓
-- Notify (EQ14) ✓
-- Notify Servers (EQ14) ✓
+- Zone Transfer (Node1) ✓
+- Zone Transfer ACL (Node1) ✓
+- Zone Transfer TSIG Keys (Node1) ✓
+- Notify (Node1) ✓
+- Notify Servers (Node1) ✓
 
 ### Compared for Differences (Subset)
 - DNSSEC Status ✓
@@ -259,7 +259,7 @@ All zone fields are included in the API response via `TechnitiumZoneSummary`. Th
 
 1. **Focused Comparison**: Only meaningful fields are compared, reducing noise
 2. **Rich Display**: Users see all configuration details, including role-specific fields
-3. **Educational**: Users can see why zones differ by design (e.g., "Zone Transfer is only on EQ14 because it's primary")
+3. **Educational**: Users can see why zones differ by design (e.g., "Zone Transfer is only on Node1 because it's primary")
 4. **Flexible**: Easy to adjust what's compared vs displayed
 5. **Architecture-Aware**: Respects PRIMARY/SECONDARY model without forced parity
 
@@ -272,8 +272,8 @@ All zone fields are included in the API response via `TechnitiumZoneSummary`. Th
 
 ### Optional Enhancements
 1. Add UI for editing Query Access (sync from primary to secondary)
-2. Add Zone Transfer ACL monitoring (informational for EQ14)
-3. Add Notify Configuration monitoring (informational for EQ14)
+2. Add Zone Transfer ACL monitoring (informational for Node1)
+3. Add Notify Configuration monitoring (informational for Node1)
 4. Consider performance optimizations (caching, background sync)
 
 ## Troubleshooting

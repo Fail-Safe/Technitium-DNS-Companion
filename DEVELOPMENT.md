@@ -36,23 +36,23 @@ Best for rapid development with instant feedback:
 
 See [DOCKER.md](./DOCKER.md#development-mode-hot-reload-) for full details.
 
-### Option 1b: Remote Development on EQ12
+### Option 1b: Remote Development
 
-Run Docker on EQ12 while editing locally:
+Run Docker on a remote server while editing locally:
 
 ```bash
-# Terminal 1: Start remote container on EQ12
+# Terminal 1: Start remote container
 ./scripts/remote-dev.sh start
 
 # Terminal 2: Watch and sync local changes
 ./scripts/remote-dev.sh watch
 
-# Edit files locally, they sync to EQ12 and hot-reload
-# Access at http://eq12.home-dns.com:5173
+# Edit files locally, they sync to remote and hot-reload
+# Access at http://<your-server>:5173
 ```
 
 **Benefits:**
-- ✅ Production-like environment (EQ12 Linux)
+- ✅ Production-like environment (Linux server)
 - ✅ Direct access to Technitium DNS nodes (same network)
 - ✅ Edit locally, run remotely
 - ✅ Hot-reload works like local development

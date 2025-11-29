@@ -5,14 +5,14 @@
 ```
 ┌─────────────────────────────────────────────────┐
 │  Zone Comparison Request                        │
-│  Input: Zones from EQ14 and EQ12               │
+│  Input: Zones from Node1 and Node2               │
 └──────────────────┬──────────────────────────────┘
                    │
                    ▼
 ┌─────────────────────────────────────────────────┐
 │  Step 1: Extract Zone Types                    │
-│  EQ14: zone.type = "Primary Zone"              │
-│  EQ12: zone.type = "Secondary Zone"            │
+│  Node1: zone.type = "Primary Zone"              │
+│  Node2: zone.type = "Secondary Zone"            │
 └──────────────────┬──────────────────────────────┘
                    │
                    ▼
@@ -53,8 +53,8 @@
 
 ```
 Input:
-  EQ14: Primary Zone (example.com)
-  EQ12: Secondary Zone (example.com)
+  Node1: Primary Zone (example.com)
+  Node2: Secondary Zone (example.com)
 
 Decision Tree:
   1. Extract types: ["Primary Zone", "Secondary Zone"]
@@ -70,8 +70,8 @@ Reason: Primary and Secondary are different roles
 
 ```
 Input:
-  EQ14: Primary Zone (example.com)
-  EQ12: Primary Zone (example.com)
+  Node1: Primary Zone (example.com)
+  Node2: Primary Zone (example.com)
 
 Decision Tree:
   1. Extract types: ["Primary Zone", "Primary Zone"]
@@ -88,8 +88,8 @@ Reason: Both are masters, should have matching configs
 
 ```
 Input:
-  EQ14: Secondary Zone (upstream.com) ← from 1.2.3.4
-  EQ12: Secondary Zone (upstream.com) ← from 1.2.3.4
+  Node1: Secondary Zone (upstream.com) ← from 1.2.3.4
+  Node2: Secondary Zone (upstream.com) ← from 1.2.3.4
 
 Decision Tree:
   1. Extract types: ["Secondary Zone", "Secondary Zone"]
@@ -138,7 +138,7 @@ function computeZoneDifferences(zones: TechnitiumZoneSummary[]): ZoneComparisonF
 
 ## Truth Table
 
-| EQ14 Type | EQ12 Type | Action | Result |
+| Node1 Type | Node2 Type | Action | Result |
 |-----------|-----------|--------|--------|
 | Primary | Primary | Compare | Different/In-Sync |
 | Primary | Secondary | Skip | In-Sync |
@@ -153,7 +153,7 @@ function computeZoneDifferences(zones: TechnitiumZoneSummary[]): ZoneComparisonF
 
 ```
 ┌───────────────────────────────────────────┐
-│  EQ14 (192.168.45.5)                      │
+│  Node1 (192.168.45.5)                      │
 │  ┌─────────────────────────────────────┐  │
 │  │ Primary Zone: example.com           │  │
 │  │ - Notify: [192.168.45.7]            │  │
@@ -165,7 +165,7 @@ function computeZoneDifferences(zones: TechnitiumZoneSummary[]): ZoneComparisonF
                     │ NOTIFY + AXFR
                     ▼
 ┌───────────────────────────────────────────┐
-│  EQ12 (192.168.45.7)                      │
+│  Node2 (192.168.45.7)                      │
 │  ┌─────────────────────────────────────┐  │
 │  │ Secondary Zone: example.com         │  │
 │  │ - Notify: (none)                    │  │

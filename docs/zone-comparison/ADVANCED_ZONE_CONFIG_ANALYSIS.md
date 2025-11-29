@@ -31,8 +31,8 @@ Controls which DNS servers (secondaries, etc.) are allowed to transfer the zone 
 - ❌ NOT Available: Secondary zone types that only receive updates
 
 **Observed in Your Setup:**
-- **EQ14** has `Forwarder` zones → HAS Zone Transfer ACL options
-- **EQ12** has `SecondaryForwarder` zones → NO Zone Transfer ACL options shown in UI
+- **Node1** has `Forwarder` zones → HAS Zone Transfer ACL options
+- **Node2** has `SecondaryForwarder` zones → NO Zone Transfer ACL options shown in UI
 - This is **expected behavior** - secondary forwarders don't control transfers, only receive them
 
 ### When Should It Match?
@@ -47,11 +47,11 @@ Controls which DNS servers (secondaries, etc.) are allowed to transfer the zone 
 
 *\* Only if intentional by design (e.g., different secondaries per region)*
 
-### Your Setup (EQ14 + EQ12)
+### Your Setup (Node1 + Node2)
 **FINDING: Your zones are PRIMARY/SECONDARY pairs, not both primaries!**
 
-- EQ14: `Forwarder` (Primary role) → Has Zone Transfer ACL options
-- EQ12: `SecondaryForwarder` (Secondary role) → Does NOT have Zone Transfer ACL options
+- Node1: `Forwarder` (Primary role) → Has Zone Transfer ACL options
+- Node2: `SecondaryForwarder` (Secondary role) → Does NOT have Zone Transfer ACL options
 
 **This is NOT a configuration drift issue** - it's by design.
 
@@ -83,7 +83,7 @@ Controls which clients/networks are allowed to query the zone.
 
 *\* Generally shouldn't happen - clients should get same responses from all nodes*
 
-### Your Setup (EQ14 + EQ12)
+### Your Setup (Node1 + Node2)
 **Question: Do you have any per-node query access restrictions, or are they standard?**
 
 - If **identical settings**: These should match → Add to comparison ✅
@@ -112,8 +112,8 @@ Controls which servers (secondary nameservers) are notified when zone is updated
 - ❌ NOT Available: `Secondary`, `SecondaryForwarder` (only receive updates, don't send notifications)
 
 **Observed in Your Setup:**
-- **EQ14** has `Forwarder` zones → HAS Notify configuration options
-- **EQ12** has `SecondaryForwarder` zones → NO Notify options shown in UI
+- **Node1** has `Forwarder` zones → HAS Notify configuration options
+- **Node2** has `SecondaryForwarder` zones → NO Notify options shown in UI
 - This is **expected behavior** - secondaries don't notify other servers
 
 ### When Should It Match?
@@ -128,11 +128,11 @@ Controls which servers (secondary nameservers) are notified when zone is updated
 
 *\* Could be intentional if each node notifies different secondaries*
 
-### Your Setup (EQ14 + EQ12)
+### Your Setup (Node1 + Node2)
 **FINDING: Your zones are PRIMARY/SECONDARY pairs, not both primaries!**
 
-- EQ14: `Forwarder` (Primary role) → Has Notify configuration
-- EQ12: `SecondaryForwarder` (Secondary role) → Does NOT have Notify configuration
+- Node1: `Forwarder` (Primary role) → Has Notify configuration
+- Node2: `SecondaryForwarder` (Secondary role) → Does NOT have Notify configuration
 
 **This is NOT a configuration drift issue** - it's by design.
 
@@ -189,13 +189,13 @@ if (ZONE_ADVANCED_COMPARISON_ENABLED) {
 ## Key Finding: Primary/Secondary Architecture
 
 **Your current setup uses a PRIMARY/SECONDARY replication model:**
-- **EQ14 (Primary role)**: Forwarder zones with full configuration options
-- **EQ12 (Secondary role)**: SecondaryForwarder zones that receive zone data from EQ14
+- **Node1 (Primary role)**: Forwarder zones with full configuration options
+- **Node2 (Secondary role)**: SecondaryForwarder zones that receive zone data from Node1
 
 This means:
-- Zone Transfer ACLs only exist on EQ14 (primary forwarders)
-- Notify configuration only exists on EQ14 (primary forwarders)
-- EQ12 has no these options because secondaries don't control transfers or send notifications
+- Zone Transfer ACLs only exist on Node1 (primary forwarders)
+- Notify configuration only exists on Node1 (primary forwarders)
+- Node2 has no these options because secondaries don't control transfers or send notifications
 
 ---
 
@@ -203,7 +203,7 @@ This means:
 
 **YES, compare Primary and Secondary Forwarders, but selectively:**
 
-| Feature | EQ14 (Primary) | EQ12 (Secondary) | Comparable? | Why? |
+| Feature | Node1 (Primary) | Node2 (Secondary) | Comparable? | Why? |
 |---------|---|---|---|---|
 | **Zone Transfer ACLs** | ✅ Has option | ❌ No option | ⚠️ **No** | One-way: Primary controls, Secondary receives - Expected difference |
 | **Query Access ACLs** | ✅ Has option | ✅ Has option | ✅ **YES** | Both nodes serve queries - Must be identical for consistency |
@@ -212,12 +212,12 @@ This means:
 ### Why Query Access Should Match Across Primary/Secondary Pairs
 
 **Critical principle: Both nodes appear in NS records**
-- Clients query both EQ14 and EQ12
+- Clients query both Node1 and Node2
 - If query access differs → Clients get inconsistent responses
 - Example of misconfiguration:
-  - EQ14: `QueryAccess = Allow` (all clients)
-  - EQ12: `QueryAccess = AllowOnlyPrivateNetworks` (private only)
-  - Result: Public clients can't query EQ12, creating asymmetric access ❌
+  - Node1: `QueryAccess = Allow` (all clients)
+  - Node2: `QueryAccess = AllowOnlyPrivateNetworks` (private only)
+  - Result: Public clients can't query Node2, creating asymmetric access ❌
 
 ### Why Zone Transfer and Notify Don't Need Comparison
 
@@ -235,14 +235,14 @@ This means:
 - Query Access ACLs (both nodes should have identical restrictions)
 
 **⚠️ DON'T Compare (they're role-specific):**
-- Zone Transfer ACLs (only EQ14 has these)
-- Notify Configuration (only EQ14 has these)
+- Zone Transfer ACLs (only Node1 has these)
+- Notify Configuration (only Node1 has these)
 
 ### Questions to Confirm
 
-1. **Query Access**: Should clients get identical query restrictions on both EQ14 and EQ12?
-2. **Zone Transfer** (EQ14 only): Who should be allowed to transfer zones from EQ14?
-3. **Notify** (EQ14 only): Should EQ14 notify any secondary nameservers when zones change?
+1. **Query Access**: Should clients get identical query restrictions on both Node1 and Node2?
+2. **Zone Transfer** (Node1 only): Who should be allowed to transfer zones from Node1?
+3. **Notify** (Node1 only): Should Node1 notify any secondary nameservers when zones change?
 
 ---
 
@@ -327,7 +327,7 @@ queryAccessNetworkACL?: string[];
 **To verify it's working:**
 
 1. Check zones with Query Access differences:
-   - Zones where EQ14 has `queryAccess="Allow"` but EQ12 has `queryAccess="AllowOnlyPrivateNetworks"`
+   - Zones where Node1 has `queryAccess="Allow"` but Node2 has `queryAccess="AllowOnlyPrivateNetworks"`
    - These should now show as "Different" with "Query Access" listed
 
 2. Check the logs for zone options fetching:
@@ -340,14 +340,14 @@ queryAccessNetworkACL?: string[];
 ### Next Steps (Optional Enhancements)
 
 1. **Add UI for editing Query Access**: Allow users to sync Query Access settings from primary to secondary
-2. **Add Zone Transfer ACL monitoring**: Show EQ14 configuration for information purposes
-3. **Add Notify Configuration monitoring**: Show EQ14 notification targets for information purposes
+2. **Add Zone Transfer ACL monitoring**: Show Node1 configuration for information purposes
+3. **Add Notify Configuration monitoring**: Show Node1 notification targets for information purposes
 4. **Performance optimization**: Consider caching zone options or implementing periodic sync background jobs
 
 ### Architecture Note
 
 This implementation respects your PRIMARY/SECONDARY replication architecture:
-- EQ14 (Primary Forwarder): Full zone control, includes Transfer and Notify options
-- EQ12 (Secondary Forwarder): Receives zones from EQ14, only has Query Access options
+- Node1 (Primary Forwarder): Full zone control, includes Transfer and Notify options
+- Node2 (Secondary Forwarder): Receives zones from Node1, only has Query Access options
 - Query Access is compared because both nodes use it to serve queries
 - Transfer/Notify differences are expected and not flagged as misconfiguration

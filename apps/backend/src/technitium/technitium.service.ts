@@ -314,8 +314,8 @@ export class TechnitiumService {
       }
 
       // Try to find this node in the cluster topology
-      // The clusterNodes[].name field contains the full DNS domain (e.g., "eq14.home.arpa")
-      // We need to match by prefix (our node ID "eq14" should match "eq14.home.arpa")
+      // The clusterNodes[].name field contains the full DNS domain (e.g., "node1.home.arpa")
+      // We need to match by prefix (our node ID "node1" should match "node1.home.arpa")
       const clusterNode = sharedClusterInfo.clusterNodes?.find(n =>
         n.name === id || n.name.startsWith(`${id}.`)
       );

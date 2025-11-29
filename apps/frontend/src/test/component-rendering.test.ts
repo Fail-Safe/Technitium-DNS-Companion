@@ -167,9 +167,9 @@ class ComponentRenderer {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createMockNode(overrides?: Partial<any>) {
     return {
-        id: 'eq14',
-        name: 'EQ14',
-        baseUrl: 'https://eq14.home-dns.com:53443',
+        id: 'node1',
+        name: 'Node1',
+        baseUrl: 'https://dns1.example.local:53443',
         status: 'online',
         lastSyncTime: new Date().toISOString(),
         ...overrides,
@@ -200,8 +200,8 @@ function createMockAdvancedBlocking(overrides?: Partial<any>) {
         },
         nodes: [
             {
-                nodeId: 'eq14',
-                baseUrl: 'https://eq14.home-dns.com:53443',
+                nodeId: 'node1',
+                baseUrl: 'https://dns1.example.local:53443',
                 fetchedAt: new Date().toISOString(),
                 metrics: {
                     groupCount: 5,
@@ -240,8 +240,8 @@ describe('Component Rendering - Phase 3', () => {
     describe('Overview Page', () => {
         it('should render overview page with nodes', () => {
             const nodes = [
-                createMockNode({ id: 'eq14', name: 'EQ14' }),
-                createMockNode({ id: 'eq12', name: 'EQ12' }),
+                createMockNode({ id: 'node1', name: 'Node1' }),
+                createMockNode({ id: 'node2', name: 'Node2' }),
             ];
 
             const mockComponent: MockElement = {
@@ -288,8 +288,8 @@ describe('Component Rendering - Phase 3', () => {
             const result = renderer.render(mockComponent);
 
             expect(result.text).toContain('Overview');
-            expect(result.text).toContain('EQ14');
-            expect(result.text).toContain('EQ12');
+            expect(result.text).toContain('Node1');
+            expect(result.text).toContain('Node2');
             expect(result.html).toContain('node-card');
         });
 
@@ -373,8 +373,8 @@ describe('Component Rendering - Phase 3', () => {
     describe('Node Status Card', () => {
         it('should render node status card with all information', () => {
             const node = createMockNode({
-                id: 'eq14',
-                name: 'EQ14',
+                id: 'node1',
+                name: 'Node1',
                 status: 'online',
             });
 
@@ -420,7 +420,7 @@ describe('Component Rendering - Phase 3', () => {
                 tag: 'div',
                 props: { className: 'node-card' },
                 children: [
-                    { tag: 'h3', props: {}, children: ['EQ14'] },
+                    { tag: 'h3', props: {}, children: ['Node1'] },
                     {
                         tag: 'button',
                         props: {
@@ -652,9 +652,9 @@ describe('Component Rendering - Phase 3', () => {
     describe('Zones Configuration', () => {
         it('should display zones with sync status', () => {
             const zones = [
-                { name: 'example.com', statuses: { eq14: 'in-sync', eq12: 'in-sync' } },
-                { name: 'test.local', statuses: { eq14: 'in-sync', eq12: 'different' } },
-                { name: 'internal.local', statuses: { eq14: 'missing', eq12: 'in-sync' } },
+                { name: 'example.com', statuses: { node1: 'in-sync', node2: 'in-sync' } },
+                { name: 'test.local', statuses: { node1: 'in-sync', node2: 'different' } },
+                { name: 'internal.local', statuses: { node1: 'missing', node2: 'in-sync' } },
             ];
 
             const mockComponent: MockElement = {
@@ -926,7 +926,7 @@ describe('Component Rendering - Phase 3', () => {
         });
 
         it('should render select dropdown', () => {
-            const options = ['eq14', 'eq12'];
+            const options = ['node1', 'node2'];
 
             const mockComponent: MockElement = {
                 tag: 'select',

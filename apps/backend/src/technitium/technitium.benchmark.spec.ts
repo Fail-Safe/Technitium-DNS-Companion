@@ -26,7 +26,7 @@ describe('TechnitiumService Performance Benchmarks', () => {
         if (!nodes) {
             throw new Error(
                 'TECHNITIUM_NODES environment variable not set. ' +
-                'Set it to comma-separated node IDs (e.g., "eq14,eq12")',
+                'Set it to comma-separated node IDs (e.g., "node1,node2")',
             );
         }
 

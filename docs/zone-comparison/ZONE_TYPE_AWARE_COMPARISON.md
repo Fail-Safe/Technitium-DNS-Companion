@@ -191,12 +191,12 @@ All fields are ALWAYS displayed in the UI (marked with labels), but only the app
 **User Action**: Accidentally adds different Zone Transfer ACLs to same zone on different nodes
 
 ```
-Node: EQ14 (Primary)
+Node: Node1 (Primary)
 Zone: example.com (Primary Zone)
 Zone Transfer: Allow Only Name Servers In Zone
 Zone Transfer ACL: [192.168.1.1, 192.168.1.2]
 
-Node: EQ12 (Secondary)
+Node: Node2 (Secondary)
 Zone: example.com (Primary Zone)
 Zone Transfer: Allow
 Zone Transfer ACL: []
@@ -206,7 +206,7 @@ Zone Transfer ACL: []
 - ✅ Zone marked as "**Different**" (red badge)
 - ✅ Difference shown: "Zone Transfer", "Zone Transfer ACL"
 - ✅ User can see which node has which settings
-- ✅ User can fix by syncing from EQ14
+- ✅ User can fix by syncing from Node1
 
 ### Scenario: ACL on Secondary Forwarder (Should NOT detect)
 

@@ -66,7 +66,7 @@ describe('DHCP Scope Cloning', () => {
 
         it('should allow new scope name to be optional', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
             };
 
             expect(request.targetNodeId).toBeDefined();
@@ -76,7 +76,7 @@ describe('DHCP Scope Cloning', () => {
         it('should allow clone without name (use source name by default)', () => {
             const scopeName = 'primary-scope';
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 // newScopeName is optional
             };
 
@@ -86,7 +86,7 @@ describe('DHCP Scope Cloning', () => {
 
         it('should accept enable flag as optional', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 // enableOnTarget is optional, defaults to false or source value
             };
 
@@ -95,7 +95,7 @@ describe('DHCP Scope Cloning', () => {
 
         it('should handle empty overrides', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 overrides: {},
             };
 
@@ -113,7 +113,7 @@ describe('DHCP Scope Cloning', () => {
     describe('Request Payload Building', () => {
         it('should build minimal clone request', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
             };
 
             const payload: Record<string, unknown> = {};
@@ -121,12 +121,12 @@ describe('DHCP Scope Cloning', () => {
                 payload.targetNodeId = request.targetNodeId.trim();
             }
 
-            expect(payload).toEqual({ targetNodeId: 'eq12' });
+            expect(payload).toEqual({ targetNodeId: 'node2' });
         });
 
         it('should build clone request with new scope name', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 newScopeName: 'cloned-scope',
             };
 
@@ -139,14 +139,14 @@ describe('DHCP Scope Cloning', () => {
             }
 
             expect(payload).toEqual({
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 newScopeName: 'cloned-scope',
             });
         });
 
         it('should build clone request with enable flag', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 enableOnTarget: true,
             };
 
@@ -159,14 +159,14 @@ describe('DHCP Scope Cloning', () => {
             }
 
             expect(payload).toEqual({
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 enableOnTarget: true,
             });
         });
 
         it('should build clone request with single override', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 overrides: {
                     leaseTimeDays: 7,
                 },
@@ -190,7 +190,7 @@ describe('DHCP Scope Cloning', () => {
             }
 
             expect(payload).toEqual({
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 overrides: {
                     leaseTimeDays: 7,
                 },
@@ -199,7 +199,7 @@ describe('DHCP Scope Cloning', () => {
 
         it('should build clone request with multiple overrides', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 newScopeName: 'custom-scope',
                 enableOnTarget: false,
                 overrides: {
@@ -234,7 +234,7 @@ describe('DHCP Scope Cloning', () => {
             }
 
             expect(payload).toEqual({
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 newScopeName: 'custom-scope',
                 enableOnTarget: false,
                 overrides: {
@@ -248,7 +248,7 @@ describe('DHCP Scope Cloning', () => {
 
         it('should ignore undefined override values', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 overrides: {
                     leaseTimeDays: 7,
                     domainName: undefined,
@@ -277,7 +277,7 @@ describe('DHCP Scope Cloning', () => {
 
         it('should trim whitespace from strings', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: '  eq12  ',
+                targetNodeId: '  node2  ',
                 newScopeName: '  cloned-scope  ',
             };
 
@@ -290,14 +290,14 @@ describe('DHCP Scope Cloning', () => {
             }
 
             expect(payload).toEqual({
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 newScopeName: 'cloned-scope',
             });
         });
 
         it('should not include whitespace-only strings', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 newScopeName: '   ',
             };
 
@@ -309,7 +309,7 @@ describe('DHCP Scope Cloning', () => {
                 payload.newScopeName = request.newScopeName.trim();
             }
 
-            expect(payload).toEqual({ targetNodeId: 'eq12' });
+            expect(payload).toEqual({ targetNodeId: 'node2' });
             expect(payload.newScopeName).toBeUndefined();
         });
     });
@@ -418,7 +418,7 @@ describe('DHCP Scope Cloning', () => {
 
         it('should clone scope to secondary node without modifications', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
             };
 
             const clonedScope = { ...sourceScope };
@@ -428,13 +428,13 @@ describe('DHCP Scope Cloning', () => {
                 payload.targetNodeId = request.targetNodeId.trim();
             }
 
-            expect(payload).toEqual({ targetNodeId: 'eq12' });
+            expect(payload).toEqual({ targetNodeId: 'node2' });
             expect(clonedScope).toEqual(sourceScope);
         });
 
         it('should clone with new name and IP range for guest network', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 newScopeName: 'guest-network',
                 overrides: {
                     startingAddress: '192.168.2.100',
@@ -471,7 +471,7 @@ describe('DHCP Scope Cloning', () => {
 
         it('should clone and disable on target node', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 enableOnTarget: false,
             };
 
@@ -488,9 +488,9 @@ describe('DHCP Scope Cloning', () => {
 
         it('should clone with different DNS servers for secondary node', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 overrides: {
-                    domainNameServers: ['192.168.1.7'], // EQ12's IP
+                    domainNameServers: ['192.168.1.7'], // Node2's IP
                 },
             };
 
@@ -535,7 +535,7 @@ describe('DHCP Scope Cloning', () => {
 
         it('should require at least one override or enable flag', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
             };
 
             const hasOverrides = request.overrides && Object.keys(request.overrides).length > 0;
@@ -547,7 +547,7 @@ describe('DHCP Scope Cloning', () => {
         });
 
         it('should handle cloning to same node (validation)', () => {
-            const sourceNodeId = 'eq14';
+            const sourceNodeId = 'node1';
             const request: TechnitiumCloneDhcpScopeRequest = {
                 targetNodeId: sourceNodeId, // Same as source
             };

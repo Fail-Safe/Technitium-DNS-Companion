@@ -20,8 +20,8 @@
 5. **Unknown** - Zones unable to compare
 
 ### Node Snapshot Cards
-- EQ14 (192.168.45.5) - Primary DNS node
-- EQ12 (192.168.45.7) - Secondary DNS node
+- Node1 (192.168.45.5) - Primary DNS node
+- Node2 (192.168.45.7) - Secondary DNS node
 - Status: Healthy/Attention indicator
 - Zone count per node
 - Last snapshot timestamp

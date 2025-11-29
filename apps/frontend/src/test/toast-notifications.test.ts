@@ -431,7 +431,7 @@ describe('Toast Notification System', () => {
 
         it('should handle success on DHCP scope clone', () => {
             toastManager.pushToast({
-                message: 'DHCP scope "default" cloned to eq12 successfully',
+                message: 'DHCP scope "default" cloned to node2 successfully',
                 tone: 'success',
                 timeout: 5000,
             });

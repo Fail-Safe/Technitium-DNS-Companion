@@ -18,8 +18,8 @@ Phase 2 enhancement to validate that Primary and Secondary zones are properly co
 
 ### Current Behavior
 When a domain exists as:
-- **Primary Zone** on EQ14
-- **Secondary Zone** on EQ12
+- **Primary Zone** on Node1
+- **Secondary Zone** on Node2
 
 The system marks them as "in-sync" because different zone types are expected to have different configurations.
 
@@ -49,8 +49,8 @@ Secondary Zone (node2.example.com):
 ```
 
 **Consequences**:
-- External DNS resolvers only know about EQ14
-- No automatic failover if EQ14 goes down
+- External DNS resolvers only know about Node1
+- No automatic failover if Node1 goes down
 - Secondary never receives updates
 - Defeats purpose of having Secondary zone
 - Violates DNS best practices (RFC 1034, RFC 1996)

@@ -40,11 +40,11 @@ function computeZoneDifferences(zones) {
 
 Your setup:
 ```
-EQ14: Primary Zone (example.com)
+Node1: Primary Zone (example.com)
   - Notify: [192.168.45.7]
   - Zone Transfer: Allow [192.168.45.7]
 
-EQ12: Secondary Zone (example.com)
+Node2: Secondary Zone (example.com)
   - Notify: (none)
   - Zone Transfer: Deny
 ```
@@ -81,7 +81,7 @@ EQ12: Secondary Zone (example.com)
 
 ## Your Specific Use Case
 
-**Your Setup** (EQ14 Primary → EQ12 Secondary):
+**Your Setup** (Node1 Primary → Node2 Secondary):
 - ✅ **Now**: Correctly shows as "in-sync"
 - ❌ **Before**: Incorrectly showed as "different"
 

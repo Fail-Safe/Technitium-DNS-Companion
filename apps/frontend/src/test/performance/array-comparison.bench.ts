@@ -104,7 +104,7 @@ describe('Array Comparison Performance', () => {
     });
 
     describe('Real-World Scenarios', () => {
-        bench('EQ14 vs EQ12 sync check (50 groups × 20 domains)', () => {
+        bench('Node1 vs Node2 sync check (50 groups × 20 domains)', () => {
             // Simulate checking 50 groups, each with ~20 domains
             const results: boolean[] = [];
             for (let i = 0; i < 50; i++) {

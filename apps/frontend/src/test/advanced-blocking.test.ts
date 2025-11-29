@@ -407,7 +407,7 @@ describe('Advanced Blocking Logic', () => {
         it('should aggregate snapshots from multiple nodes', () => {
             const snapshots: AdvancedBlockingSnapshot[] = [
                 {
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                     metrics: {
                         groupCount: 5,
                         blockedDomainCount: 1000,
@@ -425,7 +425,7 @@ describe('Advanced Blocking Logic', () => {
                     },
                 },
                 {
-                    nodeId: 'eq12',
+                    nodeId: 'node2',
                     metrics: {
                         groupCount: 5,
                         blockedDomainCount: 1000,
@@ -488,7 +488,7 @@ describe('Advanced Blocking Logic', () => {
         it('should handle snapshots with errors gracefully', () => {
             const snapshots: AdvancedBlockingSnapshot[] = [
                 {
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                     metrics: {
                         groupCount: 5,
                         blockedDomainCount: 1000,
@@ -506,7 +506,7 @@ describe('Advanced Blocking Logic', () => {
                     },
                 },
                 {
-                    nodeId: 'eq12',
+                    nodeId: 'node2',
                     metrics: {
                         groupCount: 0,
                         blockedDomainCount: 0,
@@ -530,7 +530,7 @@ describe('Advanced Blocking Logic', () => {
             const validSnapshots = snapshots.filter((s) => !s.error);
 
             expect(validSnapshots).toHaveLength(1);
-            expect(validSnapshots[0].nodeId).toBe('eq14');
+            expect(validSnapshots[0].nodeId).toBe('node1');
         });
     });
 });

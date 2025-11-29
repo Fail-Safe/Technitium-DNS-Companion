@@ -70,8 +70,8 @@ Conclusion: Comparing them creates false positives!
 
 ### Your Setup
 ```
-EQ14: Primary Zone (example.com)
-EQ12: Secondary Zone (example.com)
+Node1: Primary Zone (example.com)
+Node2: Secondary Zone (example.com)
 ```
 
 ### Before Today ❌
@@ -100,24 +100,24 @@ Reality: Configuration is correct!
 
 **Dual-Primary** (Both Primary Zones):
 ```
-EQ14: Primary Zone
-EQ12: Primary Zone
+Node1: Primary Zone
+Node2: Primary Zone
 → Compare all settings
 → Detect if configs differ
 ```
 
 **Dual-Secondary** (Both Secondary Zones):
 ```
-EQ14: Secondary Zone
-EQ12: Secondary Zone
+Node1: Secondary Zone
+Node2: Secondary Zone
 → Compare all settings
 → Detect if pointing to different upstreams
 ```
 
 **Dual-Forwarder** (Both Forwarders):
 ```
-EQ14: Conditional Forwarder
-EQ12: Conditional Forwarder
+Node1: Conditional Forwarder
+Node2: Conditional Forwarder
 → Compare all settings
 → Detect if forwarding differently
 ```
@@ -126,24 +126,24 @@ EQ12: Conditional Forwarder
 
 **Primary + Secondary** (Your Setup):
 ```
-EQ14: Primary Zone
-EQ12: Secondary Zone
+Node1: Primary Zone
+Node2: Secondary Zone
 → Skip comparison (different roles)
 → Mark as in-sync
 ```
 
 **Primary + Forwarder**:
 ```
-EQ14: Primary Zone
-EQ12: Conditional Forwarder
+Node1: Primary Zone
+Node2: Conditional Forwarder
 → Skip comparison (different types)
 → Mark as in-sync
 ```
 
 **Secondary + Forwarder**:
 ```
-EQ14: Secondary Zone
-EQ12: Conditional Forwarder
+Node1: Secondary Zone
+Node2: Conditional Forwarder
 → Skip comparison (different types)
 → Mark as in-sync
 ```

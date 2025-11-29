@@ -243,7 +243,7 @@ Differences:
 
 Node Details:
 ┌─────────────────────┬─────────────────────┐
-│ EQ14 (Primary)      │ EQ12 (Secondary)    │
+│ Node1 (Primary)      │ Node2 (Secondary)    │
 ├─────────────────────┼─────────────────────┤
 │ Type: Forwarder     │ Type: SecondaryFwd  │
 │ Query Access: Allow │ Query Access: Only  │
@@ -265,7 +265,7 @@ Differences: None
 
 Node Details:
 ┌─────────────────────┬─────────────────────┐
-│ EQ14 (Primary)      │ EQ12 (Secondary)    │
+│ Node1 (Primary)      │ Node2 (Secondary)    │
 ├─────────────────────┼─────────────────────┤
 │ Type: Forwarder     │ Type: SecondaryFwd  │
 │ Query Access: Allow │ Query Access: Allow │
@@ -288,7 +288,7 @@ Differences:
 
 Node Details:
 ┌─────────────────────┬─────────────────────┐
-│ EQ14 (Primary)      │ EQ12 (Secondary)    │
+│ Node1 (Primary)      │ Node2 (Secondary)    │
 ├─────────────────────┼─────────────────────┤
 │ ✅ Zone found       │ ❌ Zone not found   │
 │ Type: Forwarder     │                     │

@@ -179,22 +179,22 @@ describe('Sync Badge Calculation Performance', () => {
         });
     });
 
-    describe('Real-World EQ14/EQ12 Scenarios', () => {
+    describe('Real-World Node1/Node2 Scenarios', () => {
         bench('Production scenario (30 groups, mostly in sync)', () => {
-            const eq14Config = generateConfig(30, 75, 12);
-            const eq12Config = generateConfig(30, 75, 12);
+            const node1Config = generateConfig(30, 75, 12);
+            const node2Config = generateConfig(30, 75, 12);
 
             // Simulate realistic differences:
-            // - 2 groups only on EQ14
-            eq14Config.groups.push(generateGroup('eq14-only-1', 10, 2));
-            eq14Config.groups.push(generateGroup('eq14-only-2', 15, 3));
+            // - 2 groups only on Node1
+            node1Config.groups.push(generateGroup('node1-only-1', 10, 2));
+            node1Config.groups.push(generateGroup('node1-only-2', 15, 3));
 
             // - 3 groups with minor differences
-            eq12Config.groups[5].blocked.push('extra-blocked.example.com');
-            eq12Config.groups[10].allowed.push('extra-allowed.example.com');
-            eq12Config.groups[15].blockListUrls.push('https://extra-list.com/blocklist.txt');
+            node2Config.groups[5].blocked.push('extra-blocked.example.com');
+            node2Config.groups[10].allowed.push('extra-allowed.example.com');
+            node2Config.groups[15].blockListUrls.push('https://extra-list.com/blocklist.txt');
 
-            calculateSyncBadgeCount(eq14Config, eq12Config);
+            calculateSyncBadgeCount(node1Config, node2Config);
         });
 
         bench('Heavy usage (50 groups, 1000 domains each)', () => {

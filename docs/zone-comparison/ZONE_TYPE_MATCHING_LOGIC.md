@@ -10,9 +10,9 @@
 
 ### Original (Wrong) Logic
 ```
-EQ14: Primary Zone (example.com)
+Node1: Primary Zone (example.com)
   vs
-EQ12: Secondary Zone (example.com)
+Node2: Secondary Zone (example.com)
 
 Comparison: Zone Transfer, Notify, Query Access
 Result: DIFFERENT (red badge)
@@ -64,8 +64,8 @@ if (uniqueTypes.size === 1) {
 
 **Both Primary Zones** (Dual-Primary):
 ```
-EQ14: Primary Zone (example.com)
-EQ12: Primary Zone (example.com)
+Node1: Primary Zone (example.com)
+Node2: Primary Zone (example.com)
 
 Action: ✅ COMPARE Zone Transfer, Notify, Query Access
 Reason: Both are masters, should have matching configs
@@ -74,8 +74,8 @@ Expected: Settings should be identical
 
 **Both Secondary Zones** (Dual-Replica):
 ```
-EQ14: Secondary Zone (upstream.com) ← from 1.2.3.4
-EQ12: Secondary Zone (upstream.com) ← from 1.2.3.4
+Node1: Secondary Zone (upstream.com) ← from 1.2.3.4
+Node2: Secondary Zone (upstream.com) ← from 1.2.3.4
 
 Action: ✅ COMPARE Primary server, Zone Transfer, Query Access
 Reason: Both are replicas, should point to same upstream
@@ -84,8 +84,8 @@ Expected: Settings should be identical
 
 **Both Conditional Forwarder Zones**:
 ```
-EQ14: Conditional Forwarder (corp.example.com)
-EQ12: Conditional Forwarder (corp.example.com)
+Node1: Conditional Forwarder (corp.example.com)
+Node2: Conditional Forwarder (corp.example.com)
 
 Action: ✅ COMPARE all settings
 Reason: Both forward same zone, should have matching configs
@@ -96,8 +96,8 @@ Expected: Settings should be identical
 
 **Primary + Secondary** (Replication):
 ```
-EQ14: Primary Zone (example.com)
-EQ12: Secondary Zone (example.com) ← from EQ14
+Node1: Primary Zone (example.com)
+Node2: Secondary Zone (example.com) ← from Node1
 
 Action: ❌ DON'T COMPARE settings
 Reason: Different roles with different configs
@@ -105,17 +105,17 @@ Expected: Settings SHOULD differ
 Result: Mark as in-sync (no differences)
 
 Why:
-- Primary has Notify → [EQ12]
+- Primary has Notify → [Node2]
 - Secondary has Notify → (none)
-- Primary has Zone Transfer → Allow to [EQ12]
+- Primary has Zone Transfer → Allow to [Node2]
 - Secondary has Zone Transfer → Deny
 - These differences are CORRECT, not errors
 ```
 
 **Primary + Conditional Forwarder**:
 ```
-EQ14: Primary Zone (example.com)
-EQ12: Conditional Forwarder (example.com)
+Node1: Primary Zone (example.com)
+Node2: Conditional Forwarder (example.com)
 
 Action: ❌ DON'T COMPARE settings
 Reason: Different zone types
@@ -166,11 +166,11 @@ function computeZoneDifferences(zones) {
 **Before This Fix**:
 ```
 Zone: example.com
-EQ14: Primary Zone
-  - Notify: [192.168.45.7] (EQ12)
+Node1: Primary Zone
+  - Notify: [192.168.45.7] (Node2)
   - Zone Transfer: Allow to [192.168.45.7]
 
-EQ12: Secondary Zone
+Node2: Secondary Zone
   - Notify: (none)
   - Zone Transfer: Deny
 
@@ -182,8 +182,8 @@ Problem: False positive - these should differ
 **After This Fix**:
 ```
 Zone: example.com
-EQ14: Primary Zone
-EQ12: Secondary Zone
+Node1: Primary Zone
+Node2: Secondary Zone
 
 Detection: Different zone types
 Action: Skip comparison
@@ -196,11 +196,11 @@ Reason: Primary/Secondary relationship is normal
 **Scenario**:
 ```
 Zone: example.com
-EQ14: Primary Zone
+Node1: Primary Zone
   - Notify: [192.168.45.7]
   - Zone Transfer: Allow to [192.168.45.7]
 
-EQ12: Primary Zone
+Node2: Primary Zone
   - Notify: [192.168.45.5]
   - Zone Transfer: Allow to [192.168.45.5]
 
@@ -212,17 +212,17 @@ Status: IN SYNC ✅ (Both configured for mutual replication)
 **With Misconfiguration**:
 ```
 Zone: example.com
-EQ14: Primary Zone
+Node1: Primary Zone
   - Notify: [192.168.45.7]
 
-EQ12: Primary Zone
+Node2: Primary Zone
   - Notify: (none) ← Forgot to configure!
 
 Detection: Both same type (Primary)
 Action: Compare settings
 Status: DIFFERENT ❌ (Correct detection!)
 Differences: Notify
-Action Needed: Add EQ14's IP to EQ12's Notify list
+Action Needed: Add Node1's IP to Node2's Notify list
 ```
 
 ### Example 3: Both Secondary (Dual-Replica)
@@ -230,8 +230,8 @@ Action Needed: Add EQ14's IP to EQ12's Notify list
 **Scenario**:
 ```
 Zone: upstream.com
-EQ14: Secondary Zone (from 1.2.3.4)
-EQ12: Secondary Zone (from 1.2.3.5) ← Different upstream!
+Node1: Secondary Zone (from 1.2.3.4)
+Node2: Secondary Zone (from 1.2.3.5) ← Different upstream!
 
 Detection: Both same type (Secondary)
 Action: Compare settings
@@ -317,8 +317,8 @@ This would catch configuration errors like:
 ### Test Case 1: Primary + Secondary (Current Setup)
 ```
 Setup:
-  EQ14: Primary Zone (example.com)
-  EQ12: Secondary Zone (example.com)
+  Node1: Primary Zone (example.com)
+  Node2: Secondary Zone (example.com)
 
 Expected: status = 'in-sync'
 Actual: ✅ PASS (no differences detected)
@@ -328,8 +328,8 @@ Reason: Different types correctly skipped
 ### Test Case 2: Both Primary (Dual-Primary)
 ```
 Setup:
-  EQ14: Primary Zone (example.com), Notify=[EQ12]
-  EQ12: Primary Zone (example.com), Notify=[EQ14]
+  Node1: Primary Zone (example.com), Notify=[Node2]
+  Node2: Primary Zone (example.com), Notify=[Node1]
 
 Expected: status = 'in-sync' (if both configured)
 Actual: ✅ PASS (settings compared and match)
@@ -339,8 +339,8 @@ Reason: Same type, comparison executed
 ### Test Case 3: Both Primary (Misconfigured)
 ```
 Setup:
-  EQ14: Primary Zone (example.com), Notify=[EQ12]
-  EQ12: Primary Zone (example.com), Notify=[]
+  Node1: Primary Zone (example.com), Notify=[Node2]
+  Node2: Primary Zone (example.com), Notify=[]
 
 Expected: status = 'different'
 Actual: ✅ PASS (Notify difference detected)
@@ -350,8 +350,8 @@ Reason: Same type, comparison executed, found difference
 ### Test Case 4: Both Secondary (Both Replicas)
 ```
 Setup:
-  EQ14: Secondary Zone (upstream.com) ← from 1.2.3.4
-  EQ12: Secondary Zone (upstream.com) ← from 1.2.3.4
+  Node1: Secondary Zone (upstream.com) ← from 1.2.3.4
+  Node2: Secondary Zone (upstream.com) ← from 1.2.3.4
 
 Expected: status = 'in-sync'
 Actual: ✅ PASS (both point to same upstream)

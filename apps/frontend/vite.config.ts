@@ -232,27 +232,6 @@ export default defineConfig({
         entryFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash].[ext]',
         manualChunks: (id: string) => {
-          // React core (highest priority - loaded first)
-          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
-            return 'vendor-react'
-          }
-          // React Router (needed for navigation)
-          if (id.includes('node_modules/react-router')) {
-            return 'vendor-router'
-          }
-          // UI libraries (icons, etc.)
-          if (id.includes('node_modules/lucide-react')) {
-            return 'vendor-ui'
-          }
-          // Utility libraries (date-fns, axios, etc.)
-          if (id.includes('node_modules/date-fns') ||
-            id.includes('node_modules/axios')) {
-            return 'vendor-utils'
-          }
-          // Everything else from node_modules
-          if (id.includes('node_modules')) {
-            return 'vendor'
-          }
           // Pages - code-split by route for lazy loading
           if (id.includes('ConfigurationPage')) {
             return 'page-configuration'

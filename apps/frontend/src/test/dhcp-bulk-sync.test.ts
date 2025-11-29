@@ -14,8 +14,8 @@ describe('DHCP Bulk Sync - Business Logic', () => {
     describe('Sync Strategy Validation', () => {
         it('should validate skip-existing strategy', () => {
             const request: DhcpBulkSyncRequest = {
-                sourceNodeId: 'eq14',
-                targetNodeIds: ['eq12'],
+                sourceNodeId: 'node1',
+                targetNodeIds: ['node2'],
                 strategy: 'skip-existing',
             };
 
@@ -25,8 +25,8 @@ describe('DHCP Bulk Sync - Business Logic', () => {
 
         it('should validate overwrite-all strategy', () => {
             const request: DhcpBulkSyncRequest = {
-                sourceNodeId: 'eq14',
-                targetNodeIds: ['eq12'],
+                sourceNodeId: 'node1',
+                targetNodeIds: ['node2'],
                 strategy: 'overwrite-all',
             };
 
@@ -35,8 +35,8 @@ describe('DHCP Bulk Sync - Business Logic', () => {
 
         it('should validate merge-missing strategy', () => {
             const request: DhcpBulkSyncRequest = {
-                sourceNodeId: 'eq14',
-                targetNodeIds: ['eq12'],
+                sourceNodeId: 'node1',
+                targetNodeIds: ['node2'],
                 strategy: 'merge-missing',
             };
 
@@ -55,7 +55,7 @@ describe('DHCP Bulk Sync - Business Logic', () => {
         it('should require source node ID', () => {
             const request = {
                 sourceNodeId: '',
-                targetNodeIds: ['eq12'],
+                targetNodeIds: ['node2'],
                 strategy: 'skip-existing' as const,
             };
 
@@ -65,7 +65,7 @@ describe('DHCP Bulk Sync - Business Logic', () => {
 
         it('should require at least one target node', () => {
             const request = {
-                sourceNodeId: 'eq14',
+                sourceNodeId: 'node1',
                 targetNodeIds: [],
                 strategy: 'skip-existing' as const,
             };
@@ -75,31 +75,31 @@ describe('DHCP Bulk Sync - Business Logic', () => {
 
         it('should accept multiple target nodes', () => {
             const request: DhcpBulkSyncRequest = {
-                sourceNodeId: 'eq14',
-                targetNodeIds: ['eq12', 'eq13', 'eq15'],
+                sourceNodeId: 'node1',
+                targetNodeIds: ['node2', 'node3', 'node4'],
                 strategy: 'skip-existing',
             };
 
             expect(request.targetNodeIds).toHaveLength(3);
-            expect(request.targetNodeIds).toContain('eq12');
-            expect(request.targetNodeIds).toContain('eq13');
+            expect(request.targetNodeIds).toContain('node2');
+            expect(request.targetNodeIds).toContain('node3');
         });
 
         it('should prevent syncing to self', () => {
-            const sourceNodeId = 'eq14';
-            const targetNodeIds = ['eq14', 'eq12'];
+            const sourceNodeId = 'node1';
+            const targetNodeIds = ['node1', 'node2'];
 
             // Filter out source from targets
             const validTargets = targetNodeIds.filter((id) => id !== sourceNodeId);
 
             expect(validTargets).not.toContain(sourceNodeId);
-            expect(validTargets).toContain('eq12');
+            expect(validTargets).toContain('node2');
         });
 
         it('should accept optional scope filter', () => {
             const request: DhcpBulkSyncRequest = {
-                sourceNodeId: 'eq14',
-                targetNodeIds: ['eq12'],
+                sourceNodeId: 'node1',
+                targetNodeIds: ['node2'],
                 strategy: 'skip-existing',
                 scopeNames: ['default', 'guest-network'],
             };
@@ -110,8 +110,8 @@ describe('DHCP Bulk Sync - Business Logic', () => {
 
         it('should accept enableOnTarget option', () => {
             const request: DhcpBulkSyncRequest = {
-                sourceNodeId: 'eq14',
-                targetNodeIds: ['eq12'],
+                sourceNodeId: 'node1',
+                targetNodeIds: ['node2'],
                 strategy: 'skip-existing',
                 enableOnTarget: true,
             };
@@ -123,10 +123,10 @@ describe('DHCP Bulk Sync - Business Logic', () => {
     describe('Response Processing', () => {
         it('should parse successful sync result', () => {
             const result: DhcpBulkSyncResult = {
-                sourceNodeId: 'eq14',
+                sourceNodeId: 'node1',
                 nodeResults: [
                     {
-                        targetNodeId: 'eq12',
+                        targetNodeId: 'node2',
                         status: 'success',
                         scopeResults: [
                             { scopeName: 'default', status: 'synced' },
@@ -150,10 +150,10 @@ describe('DHCP Bulk Sync - Business Logic', () => {
 
         it('should handle partial sync result', () => {
             const result: DhcpBulkSyncResult = {
-                sourceNodeId: 'eq14',
+                sourceNodeId: 'node1',
                 nodeResults: [
                     {
-                        targetNodeId: 'eq12',
+                        targetNodeId: 'node2',
                         status: 'partial',
                         scopeResults: [
                             { scopeName: 'default', status: 'synced' },
@@ -178,10 +178,10 @@ describe('DHCP Bulk Sync - Business Logic', () => {
 
         it('should handle skipped scopes', () => {
             const result: DhcpBulkSyncResult = {
-                sourceNodeId: 'eq14',
+                sourceNodeId: 'node1',
                 nodeResults: [
                     {
-                        targetNodeId: 'eq12',
+                        targetNodeId: 'node2',
                         status: 'success',
                         scopeResults: [
                             { scopeName: 'default', status: 'synced' },
@@ -209,10 +209,10 @@ describe('DHCP Bulk Sync - Business Logic', () => {
 
         it('should handle complete failure', () => {
             const result: DhcpBulkSyncResult = {
-                sourceNodeId: 'eq14',
+                sourceNodeId: 'node1',
                 nodeResults: [
                     {
-                        targetNodeId: 'eq12',
+                        targetNodeId: 'node2',
                         status: 'failed',
                         scopeResults: [],
                         syncedCount: 0,
@@ -235,7 +235,7 @@ describe('DHCP Bulk Sync - Business Logic', () => {
     describe('Summary Calculations', () => {
         it('should calculate summary for single target', () => {
             const nodeResult = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 status: 'success' as const,
                 scopeResults: [
                     { scopeName: 'scope1', status: 'synced' as const },
@@ -255,7 +255,7 @@ describe('DHCP Bulk Sync - Business Logic', () => {
         it('should calculate summary for multiple targets', () => {
             const nodeResults = [
                 {
-                    targetNodeId: 'eq12',
+                    targetNodeId: 'node2',
                     status: 'success' as const,
                     scopeResults: [],
                     syncedCount: 5,
@@ -263,7 +263,7 @@ describe('DHCP Bulk Sync - Business Logic', () => {
                     failedCount: 0,
                 },
                 {
-                    targetNodeId: 'eq13',
+                    targetNodeId: 'node3',
                     status: 'success' as const,
                     scopeResults: [],
                     syncedCount: 4,
@@ -366,18 +366,18 @@ describe('DHCP Bulk Sync - Error Handling', () => {
     });
 
     it('should handle source node offline', () => {
-        const error = new Error('Cannot connect to source node eq14');
+        const error = new Error('Cannot connect to source node node1');
 
         expect(error.message).toContain('Cannot connect');
-        expect(error.message).toContain('eq14');
+        expect(error.message).toContain('node1');
     });
 
     it('should handle target node offline', () => {
         const result: DhcpBulkSyncResult = {
-            sourceNodeId: 'eq14',
+            sourceNodeId: 'node1',
             nodeResults: [
                 {
-                    targetNodeId: 'eq12',
+                    targetNodeId: 'node2',
                     status: 'failed',
                     scopeResults: [],
                     syncedCount: 0,
@@ -397,7 +397,7 @@ describe('DHCP Bulk Sync - Error Handling', () => {
 
     it('should handle empty source scopes', () => {
         const sourceScopes: TechnitiumDhcpScopeListEnvelope = {
-            nodeId: 'eq14',
+            nodeId: 'node1',
             fetchedAt: '2025-01-26T18:00:00Z',
             data: {
                 scopes: [],
@@ -412,8 +412,8 @@ describe('DHCP Bulk Sync - Error Handling', () => {
 
     it('should handle missing strategy', () => {
         const request = {
-            sourceNodeId: 'eq14',
-            targetNodeIds: ['eq12'],
+            sourceNodeId: 'node1',
+            targetNodeIds: ['node2'],
             // Missing strategy
         };
 

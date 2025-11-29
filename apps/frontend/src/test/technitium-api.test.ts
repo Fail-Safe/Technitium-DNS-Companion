@@ -190,8 +190,8 @@ describe('TechnitiumContext API Integration', () => {
                 },
                 nodes: [
                     {
-                        nodeId: 'eq14',
-                        baseUrl: 'https://eq14.home-dns.com:53443',
+                        nodeId: 'node1',
+                        baseUrl: 'https://dns1.example.local:53443',
                         fetchedAt: '2025-10-19T10:00:00Z',
                         metrics: {
                             groupCount: 5,
@@ -251,7 +251,7 @@ describe('TechnitiumContext API Integration', () => {
         });
 
         it('should save Advanced Blocking config successfully', async () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
             const config: AdvancedBlockingConfig = {
                 enableBlocking: true,
                 blockListUrlUpdateIntervalHours: 24,
@@ -272,7 +272,7 @@ describe('TechnitiumContext API Integration', () => {
 
             const mockSnapshot: AdvancedBlockingSnapshot = {
                 nodeId,
-                baseUrl: 'https://eq14.home-dns.com:53443',
+                baseUrl: 'https://dns1.example.local:53443',
                 fetchedAt: '2025-10-19T10:00:00Z',
                 metrics: {
                     groupCount: 1,
@@ -312,7 +312,7 @@ describe('TechnitiumContext API Integration', () => {
         });
 
         it('should handle save Advanced Blocking error', async () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
             const config: AdvancedBlockingConfig = {
                 enableBlocking: true,
                 localEndPointGroupMap: {},
@@ -353,7 +353,7 @@ describe('TechnitiumContext API Integration', () => {
      */
     describe('Query Log API', () => {
         it('should load node query logs without filters', async () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
             const mockData: TechnitiumNodeQueryLogEnvelope = {
                 nodeId,
                 page: {
@@ -384,7 +384,7 @@ describe('TechnitiumContext API Integration', () => {
         });
 
         it('should load node query logs with domain filter', async () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
             const filters: TechnitiumQueryLogFilters = { domain: 'example.com' };
 
             const mockData: TechnitiumNodeQueryLogEnvelope = {
@@ -419,7 +419,7 @@ describe('TechnitiumContext API Integration', () => {
         });
 
         it('should load node query logs with multiple filters', async () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
             const filters: TechnitiumQueryLogFilters = {
                 domain: 'ads',
                 clientIp: '192.168.1',
@@ -494,7 +494,7 @@ describe('TechnitiumContext API Integration', () => {
         });
 
         it('should handle query log API error', async () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
 
             getMockedFetch().mockResolvedValueOnce({
                 ok: false,
@@ -523,7 +523,7 @@ describe('TechnitiumContext API Integration', () => {
      */
     describe('DHCP Scope API', () => {
         it('should load DHCP scopes for a node', async () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
             const mockData: TechnitiumDhcpScopeListEnvelope = {
                 nodeId,
                 scopes: [
@@ -552,7 +552,7 @@ describe('TechnitiumContext API Integration', () => {
         });
 
         it('should load specific DHCP scope', async () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
             const scopeName = 'default';
             const mockData: TechnitiumDhcpScopeEnvelope = {
                 nodeId,
@@ -580,16 +580,16 @@ describe('TechnitiumContext API Integration', () => {
         });
 
         it('should clone DHCP scope to another node', async () => {
-            const sourceNodeId = 'eq14';
+            const sourceNodeId = 'node1';
             const scopeName = 'default';
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 newScopeName: 'cloned-scope',
             };
 
             const mockResult: TechnitiumCloneDhcpScopeResult = {
                 sourceNodeId,
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 status: 'success',
             };
 
@@ -609,14 +609,14 @@ describe('TechnitiumContext API Integration', () => {
 
             expect(response.ok).toBe(true);
             expect(result.status).toBe('success');
-            expect(result.targetNodeId).toBe('eq12');
+            expect(result.targetNodeId).toBe('node2');
         });
 
         it('should clone DHCP scope with overrides', async () => {
-            const sourceNodeId = 'eq14';
+            const sourceNodeId = 'node1';
             const scopeName = 'default';
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 newScopeName: 'custom-scope',
                 overrides: {
                     leaseTimeDays: 7,
@@ -626,7 +626,7 @@ describe('TechnitiumContext API Integration', () => {
 
             const mockResult: TechnitiumCloneDhcpScopeResult = {
                 sourceNodeId,
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
                 status: 'success',
             };
 
@@ -649,7 +649,7 @@ describe('TechnitiumContext API Integration', () => {
         });
 
         it('should update DHCP scope', async () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
             const scopeName = 'default';
             const request: TechnitiumUpdateDhcpScopeRequest = {
                 enabled: false,
@@ -685,10 +685,10 @@ describe('TechnitiumContext API Integration', () => {
         });
 
         it('should handle DHCP scope clone error', async () => {
-            const sourceNodeId = 'eq14';
+            const sourceNodeId = 'node1';
             const scopeName = 'default';
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
             };
 
             getMockedFetch().mockResolvedValueOnce({
@@ -709,7 +709,7 @@ describe('TechnitiumContext API Integration', () => {
         });
 
         it('should require node ID and scope name', () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
             const scopeName = '';
 
             const isValid = !!nodeId && !!scopeName;
@@ -725,7 +725,7 @@ describe('TechnitiumContext API Integration', () => {
      */
     describe('Zone API', () => {
         it('should load zones for a node', async () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
             const mockData: TechnitiumZoneListEnvelope = {
                 nodeId,
                 zones: [
@@ -753,11 +753,11 @@ describe('TechnitiumContext API Integration', () => {
                 zones: [
                     {
                         name: 'example.com',
-                        statuses: { eq14: 'in-sync', eq12: 'in-sync' },
+                        statuses: { node1: 'in-sync', node2: 'in-sync' },
                     },
                     {
                         name: 'test.local',
-                        statuses: { eq14: 'in-sync', eq12: 'different' },
+                        statuses: { node1: 'in-sync', node2: 'different' },
                     },
                 ],
             };
@@ -772,11 +772,11 @@ describe('TechnitiumContext API Integration', () => {
 
             expect(response.ok).toBe(true);
             expect(data.zones).toHaveLength(2);
-            expect(data.zones[0].statuses.eq14).toBe('in-sync');
+            expect(data.zones[0].statuses.node1).toBe('in-sync');
         });
 
         it('should handle zone API error', async () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
 
             getMockedFetch().mockResolvedValueOnce({
                 ok: false,
@@ -956,7 +956,7 @@ describe('TechnitiumContext API Integration', () => {
 
         it('should allow optional fields in clone request', () => {
             const request: TechnitiumCloneDhcpScopeRequest = {
-                targetNodeId: 'eq12',
+                targetNodeId: 'node2',
             };
 
             const errors = [];

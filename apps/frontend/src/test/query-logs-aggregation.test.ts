@@ -36,76 +36,76 @@ describe('Query Log Aggregation', () => {
      */
     describe('Multi-Node Log Combining', () => {
         it('should combine logs from two nodes', () => {
-            const eq14Logs: QueryLogEntry[] = [
+            const node1Logs: QueryLogEntry[] = [
                 {
                     timestamp: '2025-10-19T10:00:00Z',
                     qname: 'example.com',
                     clientIpAddress: '192.168.1.100',
                     blocked: false,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                 },
                 {
                     timestamp: '2025-10-19T10:00:01Z',
                     qname: 'ads.example.com',
                     clientIpAddress: '192.168.1.101',
                     blocked: true,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                 },
             ];
 
-            const eq12Logs: QueryLogEntry[] = [
+            const node2Logs: QueryLogEntry[] = [
                 {
                     timestamp: '2025-10-19T10:00:02Z',
                     qname: 'google.com',
                     clientIpAddress: '192.168.1.50',
                     blocked: false,
-                    nodeId: 'eq12',
+                    nodeId: 'node2',
                 },
                 {
                     timestamp: '2025-10-19T10:00:03Z',
                     qname: 'malware.com',
                     clientIpAddress: '192.168.1.51',
                     blocked: true,
-                    nodeId: 'eq12',
+                    nodeId: 'node2',
                 },
             ];
 
-            const combined = [...eq14Logs, ...eq12Logs];
+            const combined = [...node1Logs, ...node2Logs];
 
             expect(combined).toHaveLength(4);
-            expect(combined[0].nodeId).toBe('eq14');
-            expect(combined[2].nodeId).toBe('eq12');
+            expect(combined[0].nodeId).toBe('node1');
+            expect(combined[2].nodeId).toBe('node2');
         });
 
         it('should combine logs and maintain timestamp order', () => {
-            const eq14Logs: QueryLogEntry[] = [
+            const node1Logs: QueryLogEntry[] = [
                 {
                     timestamp: '2025-10-19T10:00:05Z',
                     qname: 'example.com',
                     clientIpAddress: '192.168.1.100',
                     blocked: false,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                 },
             ];
 
-            const eq12Logs: QueryLogEntry[] = [
+            const node2Logs: QueryLogEntry[] = [
                 {
                     timestamp: '2025-10-19T10:00:01Z',
                     qname: 'google.com',
                     clientIpAddress: '192.168.1.50',
                     blocked: false,
-                    nodeId: 'eq12',
+                    nodeId: 'node2',
                 },
                 {
                     timestamp: '2025-10-19T10:00:03Z',
                     qname: 'facebook.com',
                     clientIpAddress: '192.168.1.51',
                     blocked: false,
-                    nodeId: 'eq12',
+                    nodeId: 'node2',
                 },
             ];
 
-            const combined = [...eq14Logs, ...eq12Logs];
+            const combined = [...node1Logs, ...node2Logs];
             const sorted = combined.sort(
                 (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
             );
@@ -116,42 +116,42 @@ describe('Query Log Aggregation', () => {
         });
 
         it('should handle empty logs from one node', () => {
-            const eq14Logs: QueryLogEntry[] = [
+            const node1Logs: QueryLogEntry[] = [
                 {
                     timestamp: '2025-10-19T10:00:00Z',
                     qname: 'example.com',
                     clientIpAddress: '192.168.1.100',
                     blocked: false,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                 },
             ];
 
-            const eq12Logs: QueryLogEntry[] = [];
+            const node2Logs: QueryLogEntry[] = [];
 
-            const combined = [...eq14Logs, ...eq12Logs];
+            const combined = [...node1Logs, ...node2Logs];
 
             expect(combined).toHaveLength(1);
-            expect(combined[0].nodeId).toBe('eq14');
+            expect(combined[0].nodeId).toBe('node1');
         });
 
         it('should handle logs from three nodes', () => {
-            const eq14Logs: QueryLogEntry[] = [
+            const node1Logs: QueryLogEntry[] = [
                 {
                     timestamp: '2025-10-19T10:00:00Z',
                     qname: 'example.com',
                     clientIpAddress: '192.168.1.100',
                     blocked: false,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                 },
             ];
 
-            const eq12Logs: QueryLogEntry[] = [
+            const node2Logs: QueryLogEntry[] = [
                 {
                     timestamp: '2025-10-19T10:00:01Z',
                     qname: 'google.com',
                     clientIpAddress: '192.168.1.50',
                     blocked: false,
-                    nodeId: 'eq12',
+                    nodeId: 'node2',
                 },
             ];
 
@@ -165,10 +165,10 @@ describe('Query Log Aggregation', () => {
                 },
             ];
 
-            const combined = [...eq14Logs, ...eq12Logs, ...eq11Logs];
+            const combined = [...node1Logs, ...node2Logs, ...eq11Logs];
 
             expect(combined).toHaveLength(3);
-            expect(combined.map((l) => l.nodeId)).toEqual(['eq14', 'eq12', 'eq11']);
+            expect(combined.map((l) => l.nodeId)).toEqual(['node1', 'node2', 'eq11']);
         });
     });
 
@@ -192,14 +192,14 @@ describe('Query Log Aggregation', () => {
                     qname: 'example.com',
                     clientIpAddress: '192.168.1.100',
                     blocked: false,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                 },
                 {
                     timestamp: '2025-10-19T10:00:01Z',
                     qname: 'google.com',
                     clientIpAddress: '192.168.1.101',
                     blocked: false,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                 },
             ];
 
@@ -223,7 +223,7 @@ describe('Query Log Aggregation', () => {
                     qname: 'example.com',
                     clientIpAddress: '192.168.1.200', // Not in DHCP
                     blocked: false,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                 },
             ];
 
@@ -237,8 +237,8 @@ describe('Query Log Aggregation', () => {
 
         it('should handle multiple nodes with different DHCP leases', () => {
             const allDhcpLeases = new Map<string, string>([
-                ['192.168.1.100', 'laptop'], // From EQ14
-                ['10.0.0.50', 'vpn-client'], // From EQ12
+                ['192.168.1.100', 'laptop'], // From Node1
+                ['10.0.0.50', 'vpn-client'], // From Node2
             ]);
 
             const combinedLogs: QueryLogEntry[] = [
@@ -247,14 +247,14 @@ describe('Query Log Aggregation', () => {
                     qname: 'example.com',
                     clientIpAddress: '192.168.1.100',
                     blocked: false,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                 },
                 {
                     timestamp: '2025-10-19T10:00:01Z',
                     qname: 'remote.com',
                     clientIpAddress: '10.0.0.50',
                     blocked: false,
-                    nodeId: 'eq12',
+                    nodeId: 'node2',
                 },
             ];
 
@@ -279,7 +279,7 @@ describe('Query Log Aggregation', () => {
                     clientIpAddress: '192.168.1.100',
                     clientName: 'already-set',
                     blocked: false,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                 },
             ];
 
@@ -306,7 +306,7 @@ describe('Query Log Aggregation', () => {
                 clientIpAddress: '192.168.1.100',
                 clientName: 'laptop',
                 blocked: false,
-                nodeId: 'eq14',
+                nodeId: 'node1',
             },
             {
                 timestamp: '2025-10-19T10:00:01Z',
@@ -314,7 +314,7 @@ describe('Query Log Aggregation', () => {
                 clientIpAddress: '192.168.1.101',
                 clientName: 'phone',
                 blocked: true,
-                nodeId: 'eq14',
+                nodeId: 'node1',
             },
             {
                 timestamp: '2025-10-19T10:00:02Z',
@@ -322,7 +322,7 @@ describe('Query Log Aggregation', () => {
                 clientIpAddress: '192.168.1.50',
                 clientName: 'tablet',
                 blocked: false,
-                nodeId: 'eq12',
+                nodeId: 'node2',
             },
             {
                 timestamp: '2025-10-19T10:00:03Z',
@@ -330,7 +330,7 @@ describe('Query Log Aggregation', () => {
                 clientIpAddress: '192.168.1.51',
                 clientName: 'tv',
                 blocked: true,
-                nodeId: 'eq12',
+                nodeId: 'node2',
             },
         ];
 
@@ -366,11 +366,11 @@ describe('Query Log Aggregation', () => {
             );
 
             expect(filtered).toHaveLength(2);
-            expect(filtered.map((l) => l.nodeId)).toEqual(['eq14', 'eq12']);
+            expect(filtered.map((l) => l.nodeId)).toEqual(['node1', 'node2']);
         });
 
         it('should filter by node ID', () => {
-            const nodeId = 'eq14';
+            const nodeId = 'node1';
             const filtered = allLogs.filter((log) => log.nodeId === nodeId);
 
             expect(filtered).toHaveLength(2);
@@ -398,28 +398,28 @@ describe('Query Log Aggregation', () => {
                 qname: 'example.com',
                 clientIpAddress: '192.168.1.100',
                 blocked: false,
-                nodeId: 'eq14',
+                nodeId: 'node1',
             },
             {
                 timestamp: '2025-10-19T10:00:01Z',
                 qname: 'ads1.com',
                 clientIpAddress: '192.168.1.101',
                 blocked: true,
-                nodeId: 'eq14',
+                nodeId: 'node1',
             },
             {
                 timestamp: '2025-10-19T10:00:02Z',
                 qname: 'google.com',
                 clientIpAddress: '192.168.1.50',
                 blocked: false,
-                nodeId: 'eq12',
+                nodeId: 'node2',
             },
             {
                 timestamp: '2025-10-19T10:00:03Z',
                 qname: 'ads2.com',
                 clientIpAddress: '192.168.1.51',
                 blocked: true,
-                nodeId: 'eq12',
+                nodeId: 'node2',
             },
         ];
 
@@ -452,8 +452,8 @@ describe('Query Log Aggregation', () => {
                 perNode.set(log.nodeId ?? 'unknown', (perNode.get(log.nodeId ?? 'unknown') ?? 0) + 1);
             });
 
-            expect(perNode.get('eq14')).toBe(2);
-            expect(perNode.get('eq12')).toBe(2);
+            expect(perNode.get('node1')).toBe(2);
+            expect(perNode.get('node2')).toBe(2);
         });
 
         it('should count unique domains', () => {
@@ -493,7 +493,7 @@ describe('Query Log Aggregation', () => {
                 qname: `domain${i}.com`,
                 clientIpAddress: `192.168.1.${100 + (i % 100)}`,
                 blocked: i % 2 === 0,
-                nodeId: i % 2 === 0 ? 'eq14' : 'eq12',
+                nodeId: i % 2 === 0 ? 'node1' : 'node2',
             }));
         };
 
@@ -563,7 +563,7 @@ describe('Query Log Aggregation', () => {
                     qname: 'example.com',
                     clientIpAddress: '192.168.1.100',
                     blocked: false,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                     // clientName is undefined
                 },
             ];
@@ -578,7 +578,7 @@ describe('Query Log Aggregation', () => {
                     qname: 'example.com',
                     clientIpAddress: '192.168.1.100',
                     blocked: false,
-                    nodeId: 'eq14',
+                    nodeId: 'node1',
                     // responseType is undefined
                 },
             ];
@@ -592,7 +592,7 @@ describe('Query Log Aggregation', () => {
                 qname: `domain${i % 1000}.com`,
                 clientIpAddress: `192.168.${Math.floor(i / 256)}.${i % 256}`,
                 blocked: Math.random() > 0.5,
-                nodeId: i % 2 === 0 ? 'eq14' : 'eq12',
+                nodeId: i % 2 === 0 ? 'node1' : 'node2',
             }));
 
             expect(logs).toHaveLength(10000);

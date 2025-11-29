@@ -282,8 +282,8 @@ describe('E2E Integration Tests - Phase 4', () => {
      */
     describe('Multi-Node Sync Workflow', () => {
         it('should sync configuration from primary to secondary node', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
-            orchestrator.addNode({ id: 'eq12', name: 'EQ12', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node2', name: 'Node2', status: 'online', lastSyncTime: '' });
 
             const result = await orchestrator.simulateMultiNodeSync();
 
@@ -300,8 +300,8 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should handle offline nodes gracefully', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
-            orchestrator.addNode({ id: 'eq12', name: 'EQ12', status: 'offline', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node2', name: 'Node2', status: 'offline', lastSyncTime: '' });
 
             const result = await orchestrator.simulateMultiNodeSync();
 
@@ -310,8 +310,8 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should track sync progress', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
-            orchestrator.addNode({ id: 'eq12', name: 'EQ12', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node2', name: 'Node2', status: 'online', lastSyncTime: '' });
 
             const syncPromise = orchestrator.simulateMultiNodeSync();
 
@@ -325,19 +325,19 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should update last sync time after successful sync', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             await orchestrator.simulateMultiNodeSync();
 
             const state = orchestrator.getState();
-            const node = state.nodes.find((n) => n.id === 'eq14');
+            const node = state.nodes.find((n) => n.id === 'node1');
 
             expect(node?.lastSyncTime).not.toBe('');
             expect(new Date(node?.lastSyncTime || '').getTime()).toBeGreaterThan(0);
         });
 
         it('should log API calls during sync', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             await orchestrator.simulateMultiNodeSync();
 
@@ -356,21 +356,21 @@ describe('E2E Integration Tests - Phase 4', () => {
      */
     describe('DHCP Scope Cloning Workflow', () => {
         it('should clone DHCP scope from source to target node', async () => {
-            const result = await orchestrator.simulateDhcpCloning('eq14', 'default', 'eq12');
+            const result = await orchestrator.simulateDhcpCloning('node1', 'default', 'node2');
 
             expect(result.success).toBe(true);
 
             const notifications = orchestrator.getNotifications();
             expect(notifications).toContainEqual(
                 expect.objectContaining({
-                    message: expect.stringContaining('cloned to eq12 successfully'),
+                    message: expect.stringContaining('cloned to node2 successfully'),
                     tone: 'success',
                 }),
             );
         });
 
         it('should verify cloned scope on target node', async () => {
-            await orchestrator.simulateDhcpCloning('eq14', 'default', 'eq12');
+            await orchestrator.simulateDhcpCloning('node1', 'default', 'node2');
 
             const log = orchestrator.getApiLog();
             expect(log).toHaveLength(2);
@@ -380,14 +380,14 @@ describe('E2E Integration Tests - Phase 4', () => {
             expect(log[0].method).toBe('POST');
 
             // Second call: verify
-            expect(log[1].url).toContain('eq12');
+            expect(log[1].url).toContain('node2');
             expect(log[1].method).toBe('GET');
         });
 
         it('should handle cloning failure with proper error notification', async () => {
             // This would normally be mocked to fail, but orchestrator auto-succeeds
             // In real implementation, we'd inject error scenarios
-            const result = await orchestrator.simulateDhcpCloning('eq14', 'nonexistent', 'eq12');
+            const result = await orchestrator.simulateDhcpCloning('node1', 'nonexistent', 'node2');
 
             expect(result.success).toBe(true); // Mock always succeeds
         });
@@ -396,7 +396,7 @@ describe('E2E Integration Tests - Phase 4', () => {
             const scopes = ['default', 'guest', 'vpn'];
 
             for (const scope of scopes) {
-                const result = await orchestrator.simulateDhcpCloning('eq14', scope, 'eq12');
+                const result = await orchestrator.simulateDhcpCloning('node1', scope, 'node2');
                 expect(result.success).toBe(true);
             }
 
@@ -414,7 +414,7 @@ describe('E2E Integration Tests - Phase 4', () => {
      */
     describe('Zone Update Propagation Workflow', () => {
         it('should propagate zone updates to all nodes', async () => {
-            const result = await orchestrator.simulateZoneUpdate('example.com', ['eq14', 'eq12']);
+            const result = await orchestrator.simulateZoneUpdate('example.com', ['node1', 'node2']);
 
             expect(result.success).toBe(true);
             expect(result.nodesUpdated).toBe(2);
@@ -430,8 +430,8 @@ describe('E2E Integration Tests - Phase 4', () => {
 
         it('should track zone update progress', async () => {
             const updatePromise = orchestrator.simulateZoneUpdate('example.com', [
-                'eq14',
-                'eq12',
+                'node1',
+                'node2',
             ]);
 
             vi.advanceTimersByTime(50);
@@ -450,7 +450,7 @@ describe('E2E Integration Tests - Phase 4', () => {
             const zones = ['example.com', 'test.local', 'internal.local'];
 
             for (const zone of zones) {
-                const result = await orchestrator.simulateZoneUpdate(zone, ['eq14', 'eq12']);
+                const result = await orchestrator.simulateZoneUpdate(zone, ['node1', 'node2']);
                 expect(result.success).toBe(true);
             }
 
@@ -467,7 +467,7 @@ describe('E2E Integration Tests - Phase 4', () => {
      */
     describe('Advanced Blocking Sync Workflow', () => {
         it('should sync Advanced Blocking from source to targets', async () => {
-            const result = await orchestrator.simulateAdvancedBlockingSync('eq14', ['eq12']);
+            const result = await orchestrator.simulateAdvancedBlockingSync('node1', ['node2']);
 
             expect(result.success).toBe(true);
             expect(result.nodesSynced).toBe(1);
@@ -482,9 +482,9 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should sync to multiple target nodes', async () => {
-            const result = await orchestrator.simulateAdvancedBlockingSync('eq14', [
-                'eq12',
-                'eq13',
+            const result = await orchestrator.simulateAdvancedBlockingSync('node1', [
+                'node2',
+                'node3',
                 'eq11',
             ]);
 
@@ -493,7 +493,7 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should fetch config once and apply to multiple nodes', async () => {
-            await orchestrator.simulateAdvancedBlockingSync('eq14', ['eq12', 'eq13']);
+            await orchestrator.simulateAdvancedBlockingSync('node1', ['node2', 'node3']);
 
             const log = orchestrator.getApiLog();
 
@@ -516,9 +516,9 @@ describe('E2E Integration Tests - Phase 4', () => {
     describe('Concurrent Operations', () => {
         it('should handle concurrent zone and DHCP updates', async () => {
             const operations = [
-                () => orchestrator.simulateZoneUpdate('example.com', ['eq14']),
-                () => orchestrator.simulateDhcpCloning('eq14', 'default', 'eq12'),
-                () => orchestrator.simulateZoneUpdate('test.local', ['eq14']),
+                () => orchestrator.simulateZoneUpdate('example.com', ['node1']),
+                () => orchestrator.simulateDhcpCloning('node1', 'default', 'node2'),
+                () => orchestrator.simulateZoneUpdate('test.local', ['node1']),
             ];
 
             const result = await orchestrator.simulateConcurrentOperations(operations);
@@ -530,7 +530,7 @@ describe('E2E Integration Tests - Phase 4', () => {
 
         it('should complete all concurrent operations', async () => {
             const operations = Array.from({ length: 5 }, (_, i) => () =>
-                orchestrator.simulateDhcpCloning('eq14', `scope-${i}`, 'eq12'),
+                orchestrator.simulateDhcpCloning('node1', `scope-${i}`, 'node2'),
             );
 
             const result = await orchestrator.simulateConcurrentOperations(operations);
@@ -541,8 +541,8 @@ describe('E2E Integration Tests - Phase 4', () => {
         it('should report partial success/failure', async () => {
             // In real implementation, some operations would fail
             const operations = [
-                () => orchestrator.simulateZoneUpdate('example.com', ['eq14']),
-                () => orchestrator.simulateDhcpCloning('eq14', 'default', 'eq12'),
+                () => orchestrator.simulateZoneUpdate('example.com', ['node1']),
+                () => orchestrator.simulateDhcpCloning('node1', 'default', 'node2'),
             ];
 
             const result = await orchestrator.simulateConcurrentOperations(operations);
@@ -560,7 +560,7 @@ describe('E2E Integration Tests - Phase 4', () => {
      */
     describe('Error Recovery', () => {
         it('should set error state on workflow failure', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             await orchestrator.simulateMultiNodeSync();
 
@@ -569,7 +569,7 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should clear error on retry', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             // First attempt
             await orchestrator.simulateMultiNodeSync();
@@ -582,7 +582,7 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should notify user of errors', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             await orchestrator.simulateMultiNodeSync();
 
@@ -602,8 +602,8 @@ describe('E2E Integration Tests - Phase 4', () => {
      */
     describe('State Consistency', () => {
         it('should maintain consistent node list after operations', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
-            orchestrator.addNode({ id: 'eq12', name: 'EQ12', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node2', name: 'Node2', status: 'online', lastSyncTime: '' });
 
             const initialNodeCount = orchestrator.getState().nodes.length;
 
@@ -615,7 +615,7 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should not have nodes in ambiguous state', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             await orchestrator.simulateMultiNodeSync();
 
@@ -626,7 +626,7 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should clear loading state on completion', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             expect(orchestrator.getState().isLoading).toBe(false);
 
@@ -644,7 +644,7 @@ describe('E2E Integration Tests - Phase 4', () => {
      */
     describe('Notification Management', () => {
         it('should notify user of workflow start', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             await orchestrator.simulateMultiNodeSync();
 
@@ -658,7 +658,7 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should notify user of workflow completion', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             await orchestrator.simulateMultiNodeSync();
 
@@ -669,13 +669,13 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should include operation details in notifications', async () => {
-            await orchestrator.simulateDhcpCloning('eq14', 'default', 'eq12');
+            await orchestrator.simulateDhcpCloning('node1', 'default', 'node2');
 
             const notifications = orchestrator.getNotifications();
             const successNotification = notifications.find((n) => n.tone === 'success');
 
             expect(successNotification?.message).toContain('default');
-            expect(successNotification?.message).toContain('eq12');
+            expect(successNotification?.message).toContain('node2');
         });
     });
 
@@ -687,7 +687,7 @@ describe('E2E Integration Tests - Phase 4', () => {
      */
     describe('API Logging', () => {
         it('should log all API calls during sync', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             await orchestrator.simulateMultiNodeSync();
 
@@ -696,7 +696,7 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should include correct HTTP methods in log', async () => {
-            await orchestrator.simulateDhcpCloning('eq14', 'default', 'eq12');
+            await orchestrator.simulateDhcpCloning('node1', 'default', 'node2');
 
             const log = orchestrator.getApiLog();
             expect(log).toContainEqual(expect.objectContaining({ method: 'POST' }));
@@ -704,7 +704,7 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should include success status codes in log', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             await orchestrator.simulateMultiNodeSync();
 
@@ -723,23 +723,23 @@ describe('E2E Integration Tests - Phase 4', () => {
      */
     describe('Complex Multi-Step Workflows', () => {
         it('should complete full configuration sync workflow', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
-            orchestrator.addNode({ id: 'eq12', name: 'EQ12', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node2', name: 'Node2', status: 'online', lastSyncTime: '' });
 
             // Step 1: Sync zones
             const zonesResult = await orchestrator.simulateZoneUpdate('example.com', [
-                'eq14',
-                'eq12',
+                'node1',
+                'node2',
             ]);
             expect(zonesResult.success).toBe(true);
 
             // Step 2: Clone DHCP scope
-            const dhcpResult = await orchestrator.simulateDhcpCloning('eq14', 'default', 'eq12');
+            const dhcpResult = await orchestrator.simulateDhcpCloning('node1', 'default', 'node2');
             expect(dhcpResult.success).toBe(true);
 
             // Step 3: Sync Advanced Blocking
-            const blockingResult = await orchestrator.simulateAdvancedBlockingSync('eq14', [
-                'eq12',
+            const blockingResult = await orchestrator.simulateAdvancedBlockingSync('node1', [
+                'node2',
             ]);
             expect(blockingResult.success).toBe(true);
 
@@ -748,7 +748,7 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should handle workflow failure and recovery', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             // First attempt
             const result1 = await orchestrator.simulateMultiNodeSync();
@@ -763,14 +763,14 @@ describe('E2E Integration Tests - Phase 4', () => {
         });
 
         it('should validate state consistency throughout complex workflow', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
-            orchestrator.addNode({ id: 'eq12', name: 'EQ12', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node2', name: 'Node2', status: 'online', lastSyncTime: '' });
 
             const initialState = { ...orchestrator.getState() };
 
             await orchestrator.simulateMultiNodeSync();
-            await orchestrator.simulateDhcpCloning('eq14', 'default', 'eq12');
-            await orchestrator.simulateZoneUpdate('example.com', ['eq14', 'eq12']);
+            await orchestrator.simulateDhcpCloning('node1', 'default', 'node2');
+            await orchestrator.simulateZoneUpdate('example.com', ['node1', 'node2']);
 
             const finalState = orchestrator.getState();
 
@@ -794,7 +794,7 @@ describe('E2E Integration Tests - Phase 4', () => {
      */
     describe('Performance Characteristics', () => {
         it('should complete single node sync quickly', async () => {
-            orchestrator.addNode({ id: 'eq14', name: 'EQ14', status: 'online', lastSyncTime: '' });
+            orchestrator.addNode({ id: 'node1', name: 'Node1', status: 'online', lastSyncTime: '' });
 
             const start = Date.now();
             await orchestrator.simulateMultiNodeSync();

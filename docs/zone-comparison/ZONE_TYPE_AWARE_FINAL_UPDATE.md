@@ -124,8 +124,8 @@ notifyNameServers?: string[];
 Zone: example.com
 Type: Primary Zone (supports Zone Transfer)
 
-EQ14: Zone Transfer ACL = [192.168.1.1, 192.168.1.2]
-EQ12: Zone Transfer ACL = [10.0.0.1]
+Node1: Zone Transfer ACL = [192.168.1.1, 192.168.1.2]
+Node2: Zone Transfer ACL = [10.0.0.1]
 ```
 
 **Expected Behavior**:
@@ -147,8 +147,8 @@ EQ12: Zone Transfer ACL = [10.0.0.1]
 Zone: upstream.com
 Type: Secondary Conditional Forwarder (read-only)
 
-EQ14: Zone Transfer = "Deny" (API may return this)
-EQ12: Zone Transfer = "Allow" (API may return this)
+Node1: Zone Transfer = "Deny" (API may return this)
+Node2: Zone Transfer = "Allow" (API may return this)
 ```
 
 **Expected Behavior**:
@@ -169,8 +169,8 @@ EQ12: Zone Transfer = "Allow" (API may return this)
 Zone: internal.local
 Type: Secondary Zone
 
-EQ14: Query Access = "Allow"
-EQ12: Query Access = "Deny"
+Node1: Query Access = "Allow"
+Node2: Query Access = "Deny"
 ```
 
 **Expected Behavior**:

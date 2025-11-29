@@ -196,7 +196,7 @@ const [loading, setLoading] = useState(false);
 ### Node Card
 ```tsx
 <div className="zones-page__node-card">
-  <div className="zones-page__node-title">EQ14</div>
+  <div className="zones-page__node-title">Node1</div>
   <div className="zones-page__node-meta">
     <span>256 zones</span>
     <span>Updated 2 minutes ago</span>
@@ -235,7 +235,7 @@ const [filter, setFilter] = useState('all');
 ### Node with Details
 ```tsx
 <section className="zones-page__zone-node">
-  <div className="zones-page__zone-node-title">EQ14</div>
+  <div className="zones-page__zone-node-title">Node1</div>
   <dl className="zones-page__details">
     <dt>Type</dt>
     <dd>Primary</dd>
@@ -250,7 +250,7 @@ const [filter, setFilter] = useState('all');
 ### Node with Error
 ```tsx
 <section className="zones-page__zone-node">
-  <div className="zones-page__zone-node-title">EQ12</div>
+  <div className="zones-page__zone-node-title">Node2</div>
   <p className="zones-page__zone-node-error">
     Failed to connect to node
   </p>
@@ -260,7 +260,7 @@ const [filter, setFilter] = useState('all');
 ### Node Missing
 ```tsx
 <section className="zones-page__zone-node">
-  <div className="zones-page__zone-node-title">EQ12</div>
+  <div className="zones-page__zone-node-title">Node2</div>
   <p className="zones-page__zone-node-missing">
     Zone not present.
   </p>

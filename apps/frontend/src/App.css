@@ -3420,7 +3420,7 @@ button.secondary:disabled {
 
 .logs-page__col--node {
   width: clamp(90px, 7vw, 110px);
-  /* Narrower - just "eq14"/"eq12" but with padding */
+  /* Narrower - just "node1.*node2" but with padding */
 }
 
 .logs-page__col--client {

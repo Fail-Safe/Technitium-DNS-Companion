@@ -429,7 +429,7 @@ test.describe('Query Logs E2E', () => {
             await expect(page.locator('button:has-text("Combined View")')).toHaveClass(/active|selected/);
 
             // Get all NODE column values
-            const nodeElements = await page.locator('[data-testid="logs-table"] td').filter({ has: page.locator('text=/^(eq14|eq12)$') }).all();
+            const nodeElements = await page.locator('[data-testid="logs-table"] td').filter({ has: page.locator('text=/^(node1|node2)$') }).all();
 
             // Should have entries from at least 2 nodes
             const nodeSet = new Set<string>();
@@ -438,9 +438,9 @@ test.describe('Query Logs E2E', () => {
                 if (text) nodeSet.add(text.trim());
             }
 
-            // Should see both eq14 and eq12
-            expect(nodeSet.has('eq14')).toBeTruthy();
-            expect(nodeSet.has('eq12')).toBeTruthy();
+            // Should see both node1 and node2
+            expect(nodeSet.has('node1')).toBeTruthy();
+            expect(nodeSet.has('node2')).toBeTruthy();
         });
 
         test('should have roughly balanced node distribution with large buffer', async () => {
@@ -454,27 +454,27 @@ test.describe('Query Logs E2E', () => {
 
             // Get all nodes from table
             const nodeElements = await page.locator('[data-testid="logs-table"] tbody tr').all();
-            const nodeCounts: Record<string, number> = { eq14: 0, eq12: 0 };
+            const nodeCounts: Record<string, number> = { node1: 0, node2: 0 };
 
             for (const row of nodeElements) {
                 const nodeCell = row.locator('td').nth(1); // NODE column is typically 2nd
                 const nodeText = await nodeCell.textContent();
-                if (nodeText?.includes('eq14')) nodeCounts['eq14']++;
-                if (nodeText?.includes('eq12')) nodeCounts['eq12']++;
+                if (nodeText?.includes('node1')) nodeCounts['node1']++;
+                if (nodeText?.includes('node2')) nodeCounts['node2']++;
             }
 
             // With balanced sampling, distribution should be roughly equal (within 20% tolerance)
-            // If eq14 has 250, eq12 should have ~200-300 (not 0)
-            const totalVisible = nodeCounts['eq14'] + nodeCounts['eq12'];
-            const eq14Ratio = nodeCounts['eq14'] / totalVisible;
+            // If node1 has 250, node2 should have ~200-300 (not 0)
+            const totalVisible = nodeCounts['node1'] + nodeCounts['node2'];
+            const node1Ratio = nodeCounts['node1'] / totalVisible;
 
             // Should not be heavily skewed (e.g., >80% from one node)
-            expect(eq14Ratio).toBeGreaterThan(0.2);
-            expect(eq14Ratio).toBeLessThan(0.8);
+            expect(node1Ratio).toBeGreaterThan(0.2);
+            expect(node1Ratio).toBeLessThan(0.8);
 
             // Both nodes should be represented
-            expect(nodeCounts['eq14']).toBeGreaterThan(0);
-            expect(nodeCounts['eq12']).toBeGreaterThan(0);
+            expect(nodeCounts['node1']).toBeGreaterThan(0);
+            expect(nodeCounts['node2']).toBeGreaterThan(0);
         });
 
         test('should preserve node diversity when deduplication is enabled', async () => {
@@ -496,26 +496,26 @@ test.describe('Query Logs E2E', () => {
 
             // Count nodes after deduplication
             const nodeElements = await page.locator('[data-testid="logs-table"] tbody tr').all();
-            const nodeCounts: Record<string, number> = { eq14: 0, eq12: 0 };
+            const nodeCounts: Record<string, number> = { node1: 0, node2: 0 };
 
             for (const row of nodeElements) {
                 const nodeCell = row.locator('td').nth(1);
                 const nodeText = await nodeCell.textContent();
-                if (nodeText?.includes('eq14')) nodeCounts['eq14']++;
-                if (nodeText?.includes('eq12')) nodeCounts['eq12']++;
+                if (nodeText?.includes('node1')) nodeCounts['node1']++;
+                if (nodeText?.includes('node2')) nodeCounts['node2']++;
             }
 
             // Even with deduplication, should still see entries from both nodes
-            expect(nodeCounts['eq14']).toBeGreaterThan(0);
-            expect(nodeCounts['eq12']).toBeGreaterThan(0);
+            expect(nodeCounts['node1']).toBeGreaterThan(0);
+            expect(nodeCounts['node2']).toBeGreaterThan(0);
 
             // Should not have deduplication hide all entries from one node
             // (e.g., shouldn't go from 250/250 to 500/0)
-            const totalVisible = nodeCounts['eq14'] + nodeCounts['eq12'];
-            const eq12Ratio = nodeCounts['eq12'] / totalVisible;
+            const totalVisible = nodeCounts['node1'] + nodeCounts['node2'];
+            const node2Ratio = nodeCounts['node2'] / totalVisible;
 
-            // EQ12 should still be at least 5% of visible entries (not hidden completely)
-            expect(eq12Ratio).toBeGreaterThan(0.05);
+            // Node2 should still be at least 5% of visible entries (not hidden completely)
+            expect(node2Ratio).toBeGreaterThan(0.05);
         });
     });
 });

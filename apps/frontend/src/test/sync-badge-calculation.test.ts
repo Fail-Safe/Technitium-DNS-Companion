@@ -561,9 +561,9 @@ describe('Sync Badge Calculation', () => {
 
         describe('🔴 CRITICAL: Real-world Multi-Node Scenarios', () => {
             it('should calculate badge for typical two-node setup', () => {
-                // EQ14 has Ads and Trackers groups
-                // EQ12 has only Ads group (different domains)
-                const adsGroupEQ14: AdvancedBlockingGroup = {
+                // Node1 has Ads and Trackers groups
+                // Node2 has only Ads group (different domains)
+                const adsGroupNode1: AdvancedBlockingGroup = {
                     name: 'Ads',
                     blocked: ['ads.google.com', 'doubleclick.net'],
                     allowed: [],
@@ -576,7 +576,7 @@ describe('Sync Badge Calculation', () => {
                     adblockListUrls: []
                 };
 
-                const adsGroupEQ12: AdvancedBlockingGroup = {
+                const adsGroupNode2: AdvancedBlockingGroup = {
                     name: 'Ads',
                     blocked: ['ads.google.com'], // Missing doubleclick.net
                     allowed: [],
@@ -603,12 +603,12 @@ describe('Sync Badge Calculation', () => {
                 };
 
                 const advancedBlocking: NodeAdvancedBlocking[] = [
-                    { nodeId: 'eq14', config: { groups: [adsGroupEQ14, trackersGroup] } },
-                    { nodeId: 'eq12', config: { groups: [adsGroupEQ12] } }
+                    { nodeId: 'node1', config: { groups: [adsGroupNode1, trackersGroup] } },
+                    { nodeId: 'node2', config: { groups: [adsGroupNode2] } }
                 ];
 
                 // Ads group is different (different domains)
-                // Trackers group only on eq14
+                // Trackers group only on node1
                 expect(calculateSyncBadgeCount(advancedBlocking)).toBe(2);
             });
 
@@ -641,8 +641,8 @@ describe('Sync Badge Calculation', () => {
                 ];
 
                 const advancedBlocking: NodeAdvancedBlocking[] = [
-                    { nodeId: 'eq14', config: { groups: JSON.parse(JSON.stringify(groups)) } },
-                    { nodeId: 'eq12', config: { groups: JSON.parse(JSON.stringify(groups)) } }
+                    { nodeId: 'node1', config: { groups: JSON.parse(JSON.stringify(groups)) } },
+                    { nodeId: 'node2', config: { groups: JSON.parse(JSON.stringify(groups)) } }
                 ];
 
                 expect(calculateSyncBadgeCount(advancedBlocking)).toBe(0);
