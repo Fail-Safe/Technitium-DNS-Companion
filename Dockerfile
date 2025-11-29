@@ -68,8 +68,8 @@ RUN --mount=type=cache,target=/root/.npm cd apps/backend && npm ci --omit=dev
 # Copy built backend from builder
 COPY --from=backend-builder /app/apps/backend/dist ./apps/backend/dist
 
-# Copy built frontend from builder
-COPY --from=frontend-builder /app/apps/frontend/dist ./frontend/dist
+# Copy built frontend from builder (Nest serves from apps/frontend/dist)
+COPY --from=frontend-builder /app/apps/frontend/dist ./apps/frontend/dist
 
 # Create directory for environment file
 RUN mkdir -p /app/config
