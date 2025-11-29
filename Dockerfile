@@ -16,11 +16,11 @@ COPY apps/backend/package.json ./apps/backend/
 # Explicitly install the matching Rollup native build to work around npm optional deps bug
 RUN npm ci --ignore-scripts \
     && if [ "$TARGETARCH" = "amd64" ]; then \
-        npm install --no-save @rollup/rollup-linux-x64-musl; \
+    npm install --no-save @rollup/rollup-linux-x64-musl @esbuild/linux-x64; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
-        npm install --no-save @rollup/rollup-linux-arm64-musl; \
+    npm install --no-save @rollup/rollup-linux-arm64-musl @esbuild/linux-arm64; \
     else \
-        echo "Skipping Rollup native binary install for arch $TARGETARCH"; \
+    echo "Skipping Rollup native binary install for arch $TARGETARCH"; \
     fi
 
 # Copy frontend source
