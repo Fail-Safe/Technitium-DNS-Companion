@@ -5,12 +5,13 @@ FROM node:22-alpine AS frontend-builder
 
 WORKDIR /app
 
-# Copy root package files (for workspaces)
+# Copy all package files (workspaces need root context)
 COPY package.json package-lock.json ./
 COPY apps/frontend/package.json ./apps/frontend/
+COPY apps/backend/package.json ./apps/backend/
 
-# Install dependencies
-RUN npm ci --workspace=apps/frontend
+# Install ALL dependencies (Rollup needs platform-specific binaries)
+RUN npm ci
 
 # Copy frontend source
 COPY apps/frontend/ ./apps/frontend/
@@ -23,12 +24,13 @@ FROM node:22-alpine AS backend-builder
 
 WORKDIR /app
 
-# Copy root package files (for workspaces)
+# Copy all package files
 COPY package.json package-lock.json ./
+COPY apps/frontend/package.json ./apps/frontend/
 COPY apps/backend/package.json ./apps/backend/
 
-# Install dependencies
-RUN npm ci --workspace=apps/backend
+# Install ALL dependencies
+RUN npm ci
 
 # Copy backend source
 COPY apps/backend/ ./apps/backend/
@@ -45,7 +47,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json ./apps/backend/
 
-# Install production dependencies only
+# Install production dependencies only for backend
 RUN npm ci --workspace=apps/backend --omit=dev && npm cache clean --force
 
 # Copy built backend from builder
