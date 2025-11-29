@@ -12,7 +12,9 @@ COPY apps/backend/package.json ./apps/backend/
 
 # Install ALL dependencies to get platform-specific optional deps (Rollup binaries)
 # --ignore-scripts skips native module compilation (not needed for frontend build)
-RUN npm ci --ignore-scripts
+# Explicitly install Rollup's musl-native builds to work around npm optional deps bug
+RUN npm ci --ignore-scripts \
+    && npm install --no-save @rollup/rollup-linux-x64-musl @rollup/rollup-linux-arm64-musl
 
 # Copy frontend source
 COPY apps/frontend/ ./apps/frontend/
