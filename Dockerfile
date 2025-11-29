@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Multi-stage build for Technitium DNS Companion (Monorepo)
 
 # Stage 1: Build frontend
@@ -14,7 +15,7 @@ COPY apps/backend/package.json ./apps/backend/
 # Install ALL dependencies to get platform-specific optional deps (Rollup binaries)
 # --ignore-scripts skips native module compilation (not needed for frontend build)
 # Explicitly install the matching Rollup native build to work around npm optional deps bug
-RUN npm ci --ignore-scripts \
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts \
     && if [ "$TARGETARCH" = "amd64" ]; then \
     npm install --no-save @rollup/rollup-linux-x64-musl @esbuild/linux-x64; \
     elif [ "$TARGETARCH" = "arm64" ]; then \
@@ -41,7 +42,7 @@ COPY apps/backend/package.json ./apps/backend/
 
 # Install ALL dependencies (NestJS needs full dependency tree)
 # --ignore-scripts skips native module compilation
-RUN npm ci --ignore-scripts
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts
 
 # Copy backend source
 COPY apps/backend/ ./apps/backend/
@@ -59,7 +60,7 @@ COPY package.json package-lock.json ./
 COPY apps/backend/package.json ./apps/backend/
 
 # Install production dependencies only for backend
-RUN npm ci --workspace=apps/backend --omit=dev && npm cache clean --force
+RUN --mount=type=cache,target=/root/.npm npm ci --workspace=apps/backend --omit=dev && npm cache clean --force
 
 # Copy built backend from builder
 COPY --from=backend-builder /app/apps/backend/dist ./dist
