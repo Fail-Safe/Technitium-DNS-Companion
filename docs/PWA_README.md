@@ -169,10 +169,6 @@ npm run build
 
 **Important**: PWAs require HTTPS in production. Service workers will NOT register on HTTP (except localhost).
 
-Current deployment on EQ12 uses HTTPS:
-- Frontend: `https://eq12.home-dns.com:5174`
-- Backend: `https://eq12.home-dns.com:3443`
-
 Ensure SSL certificates are valid and trusted.
 
 ### Update Strategy
