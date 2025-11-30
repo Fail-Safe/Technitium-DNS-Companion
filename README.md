@@ -20,30 +20,29 @@ This project is **not affiliated with Technitium** but is built to complement Te
 
 ## Requirements
 
-- **Docker and Docker Compose** (recommended for easiest deployment)
+- **Docker, OrbStack, or Podman (or similar)** (recommended for easiest deployment)
 - **OR Node.js 22+** (for running directly without Docker)
 - Access to one or more Technitium DNS servers (v13.6 or v14.0+)
 - Admin API token(s) from your Technitium DNS server(s)
 
-## Quick Start with Docker (Recommended)
+## Quick Start with Docker (or similar) [Recommended]
 
 The easiest way to deploy Technitium DNS Companion is using Docker:
 
 ```bash
-# 1. Clone the repository
-git clone --depth 1 https://github.com/Fail-Safe/technitium-dns-companion.git
-cd technitium-dns-companion
+# 1. Get a copy of the example environment file
+curl -L https://raw.githubusercontent.com/Fail-Safe/Technitium-DNS-Companion/main/.env.example -o technitium.env
 
-# 2. Configure your nodes
-cp .env.example .env
+# 2. Edit technitium.env with your Technitium DNS server details
+# Edit the `TECHNITIUM_NODES`, `TECHNITIUM_*_BASE_URL`, and `TECHNITIUM_*_TOKEN` values depending on your environment.
 
-# 3. Edit .env with your Technitium DNS server details
-# Edit the `TECHNITIUM_NODES`, `TECHNITIUM_*_BASE_URL`, and `TECHNITIUM_*_TOKEN` values
+# 3. Run the Docker container with your environment settings file
+docker run --rm -p 3000:3000 -p 3443:3443 \
+  --env-file technitium.env \
+  -v technitium-dns-companion-data:/data \
+  ghcr.io/fail-safe/technitium-dns-companion:latest
 
-# 4. Build and run
-docker compose up -d
-
-# 5. Access the web interface
+# 4. Access the web interface
 #  HTTP:  http://localhost:3000
 #  HTTPS: https://localhost:3443 (if HTTPS_ENABLED=true in .env)
 ```
