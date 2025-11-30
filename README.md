@@ -31,7 +31,11 @@ The easiest way to deploy Technitium DNS Companion is using Docker:
 
 ```bash
 # 1. Get a copy of the example environment file
-curl -L https://raw.githubusercontent.com/Fail-Safe/Technitium-DNS-Companion/main/.env.example -o technitium.env
+curl -sL https://raw.githubusercontent.com/Fail-Safe/Technitium-DNS-Companion/main/.env.example -o technitium.env
+# Or wget:
+# wget -q https://raw.githubusercontent.com/Fail-Safe/Technitium-DNS-Companion/main/.env.example -O technitium.env
+# Or PowerShell:
+# Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Fail-Safe/Technitium-DNS-Companion/main/.env.example" -OutFile "technitium.env"
 
 # 2. Edit technitium.env with your Technitium DNS server details
 # Edit the `TECHNITIUM_NODES`, `TECHNITIUM_*_BASE_URL`, and `TECHNITIUM_*_TOKEN` values depending on your environment.
