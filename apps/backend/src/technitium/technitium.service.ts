@@ -291,6 +291,10 @@ export class TechnitiumService {
             clusterNodes,
           };
           this.logger.log(`Cluster detected: ${response.info.clusterDomain} with ${clusterNodes.length} nodes`);
+          // Log cluster node details for debugging matching issues
+          for (const cn of clusterNodes) {
+            this.logger.debug(`  Cluster node: name="${cn.name}", url="${cn.url}", ip="${cn.ipAddress}", type="${cn.type}"`);
+          }
         }
       } catch (error) {
         this.logger.warn(`Failed to fetch cluster state from first node ${firstNode.id}, will treat all as standalone: ${error}`);
@@ -313,15 +317,49 @@ export class TechnitiumService {
         };
       }
 
-      // Try to find this node in the cluster topology
-      // The clusterNodes[].name field contains the full DNS domain (e.g., "node1.home.arpa")
-      // We need to match by prefix (our node ID "node1" should match "node1.home.arpa")
-      const clusterNode = sharedClusterInfo.clusterNodes?.find(n =>
-        n.name === id || n.name.startsWith(`${id}.`)
-      );
+      // Try to find this node in the cluster topology using multiple matching strategies:
+      // 1. Match by name prefix (our node ID "node1" should match "node1.home.arpa")
+      // 2. Match by IP address (extract IP from baseUrl and compare to clusterNode.ipAddress)
+      // 3. Match by URL (compare baseUrl to clusterNode.url)
+
+      // Extract IP/hostname from our baseUrl for matching
+      let baseUrlHost = '';
+      try {
+        const url = new URL(baseUrl);
+        baseUrlHost = url.hostname;
+      } catch {
+        // Invalid URL, skip host extraction
+      }
+
+      const clusterNode = sharedClusterInfo.clusterNodes?.find(n => {
+        // Strategy 1: Name prefix match
+        if (n.name === id || n.name.startsWith(`${id}.`)) {
+          return true;
+        }
+
+        // Strategy 2: IP address match
+        if (baseUrlHost && n.ipAddress && baseUrlHost === n.ipAddress) {
+          return true;
+        }
+
+        // Strategy 3: URL contains our base URL host or vice versa
+        if (baseUrlHost && n.url) {
+          try {
+            const clusterUrl = new URL(n.url);
+            if (clusterUrl.hostname === baseUrlHost) {
+              return true;
+            }
+          } catch {
+            // Invalid cluster URL
+          }
+        }
+
+        return false;
+      });
       const nodeType = clusterNode?.type || 'Secondary';
 
-      this.logger.debug(`Mapping node ${id}: found cluster node ${clusterNode?.name || 'none'}, type: ${nodeType}`);
+      this.logger.debug(`Mapping node ${id} (baseUrl=${baseUrl}): found cluster node ${clusterNode?.name || 'none'}, type: ${nodeType}`);
+
 
       return {
         id,
