@@ -9,6 +9,8 @@ import {
 } from '@nestjs/common';
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
 import * as https from 'https';
+import * as dns from 'dns';
+import { promisify } from 'util';
 import { TECHNITIUM_NODES_TOKEN } from './technitium.constants';
 import {
   TechnitiumActionPayload,
@@ -239,6 +241,33 @@ export class TechnitiumService {
     this.startPeriodicCacheCleanup();
   }
 
+  /**
+   * Resolve a hostname to IP address with timeout.
+   * Used to match cluster nodes when hostnames don't resolve to the configured baseUrl IPs.
+   */
+  private async resolveHostname(hostname: string): Promise<string | undefined> {
+    if (!hostname) return undefined;
+
+    // If it's already an IP address, return it
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+      return hostname;
+    }
+
+    try {
+      const resolve4 = promisify(dns.resolve4);
+      const ips = await Promise.race([
+        resolve4(hostname),
+        new Promise<string[]>((_, reject) =>
+          setTimeout(() => reject(new Error('DNS timeout')), 2000),
+        ),
+      ]);
+      return ips && ips.length > 0 ? ips[0] : undefined;
+    } catch (error) {
+      // DNS resolution failed or timed out - return undefined
+      return undefined;
+    }
+  }
+
   async listNodes(): Promise<TechnitiumNodeSummary[]> {
     // OPTIMIZATION: Only query ONE node for cluster state since any node can tell us about the entire cluster
     // This reduces N API calls to 1, dramatically improving performance (e.g., 3 nodes: 3x faster)
@@ -302,7 +331,8 @@ export class TechnitiumService {
     }
 
     // Build node summaries using shared cluster info
-    const nodeSummaries = this.nodeConfigs.map(({ id, name, baseUrl }) => {
+    // Note: This needs to be async for DNS resolution
+    const nodeSummariesPromise = this.nodeConfigs.map(async ({ id, name, baseUrl }) => {
       if (!sharedClusterInfo?.initialized) {
         // No clustering or failed to detect - return standalone
         return {
@@ -319,8 +349,8 @@ export class TechnitiumService {
 
       // Try to find this node in the cluster topology using multiple matching strategies:
       // 1. Match by name prefix (our node ID "node1" should match "node1.home.arpa")
-      // 2. Match by IP address (extract IP from baseUrl and compare to clusterNode.ipAddress)
-      // 3. Match by URL (compare baseUrl to clusterNode.url)
+      // 2. Match by IP address (extract IP from baseUrl and compare to clusterNode.ipAddress/resolved IP)
+      // 3. Match by URL hostname (compare baseUrl hostname to cluster node URL hostname)
 
       // Extract IP/hostname from our baseUrl for matching
       let baseUrlHost = '';
@@ -331,18 +361,18 @@ export class TechnitiumService {
         // Invalid URL, skip host extraction
       }
 
-      const clusterNode = sharedClusterInfo.clusterNodes?.find(n => {
+      let clusterNode = sharedClusterInfo.clusterNodes?.find(n => {
         // Strategy 1: Name prefix match
         if (n.name === id || n.name.startsWith(`${id}.`)) {
           return true;
         }
 
-        // Strategy 2: IP address match
+        // Strategy 2: IP address match (direct)
         if (baseUrlHost && n.ipAddress && baseUrlHost === n.ipAddress) {
           return true;
         }
 
-        // Strategy 3: URL contains our base URL host or vice versa
+        // Strategy 3: URL hostname match
         if (baseUrlHost && n.url) {
           try {
             const clusterUrl = new URL(n.url);
@@ -356,10 +386,69 @@ export class TechnitiumService {
 
         return false;
       });
+
+      // If no match found, try DNS resolution to match IPs
+      if (!clusterNode && baseUrlHost) {
+        const baseUrlIsIp = /^\d+\.\d+\.\d+\.\d+$/.test(baseUrlHost);
+
+        if (baseUrlIsIp) {
+          // baseUrl is an IP - resolve cluster node hostnames to find a match
+          for (const cn of sharedClusterInfo.clusterNodes || []) {
+            if (cn.url) {
+              try {
+                const clusterUrl = new URL(cn.url);
+                const clusterHostname = clusterUrl.hostname;
+                // Skip if cluster URL is also an IP (already checked in Strategy 3)
+                if (!/^\d+\.\d+\.\d+\.\d+$/.test(clusterHostname)) {
+                  const resolvedClusterIp = await this.resolveHostname(clusterHostname);
+                  if (resolvedClusterIp === baseUrlHost) {
+                    clusterNode = cn;
+                    this.logger.debug(`  DNS match: ${clusterHostname} → ${resolvedClusterIp} matches baseUrl IP ${baseUrlHost}`);
+                    break;
+                  }
+                }
+              } catch {
+                // Skip on error
+              }
+            }
+          }
+        } else {
+          // baseUrl is a hostname - resolve it and compare to cluster node IPs/resolved hostnames
+          const resolvedBaseUrlIp = await this.resolveHostname(baseUrlHost);
+
+          if (resolvedBaseUrlIp) {
+            for (const cn of sharedClusterInfo.clusterNodes || []) {
+              // Check against cluster node's ipAddress field
+              if (cn.ipAddress && cn.ipAddress === resolvedBaseUrlIp) {
+                clusterNode = cn;
+                this.logger.debug(`  DNS match: ${baseUrlHost} → ${resolvedBaseUrlIp} matches cluster node IP ${cn.ipAddress}`);
+                break;
+              }
+
+              // Also try resolving cluster node URL hostname
+              if (cn.url) {
+                try {
+                  const clusterUrl = new URL(cn.url);
+                  const resolvedClusterIp = await this.resolveHostname(clusterUrl.hostname);
+                  if (resolvedClusterIp === resolvedBaseUrlIp) {
+                    clusterNode = cn;
+                    this.logger.debug(`  DNS match: ${baseUrlHost} → ${resolvedBaseUrlIp} matches ${clusterUrl.hostname} → ${resolvedClusterIp}`);
+                    break;
+                  }
+                } catch {
+                  // Skip on error
+                }
+              }
+            }
+          }
+        }
+      }
+
       const nodeType = clusterNode?.type || 'Secondary';
 
-      this.logger.debug(`Mapping node ${id} (baseUrl=${baseUrl}): found cluster node ${clusterNode?.name || 'none'}, type: ${nodeType}`);
-
+      this.logger.debug(
+        `Mapping node ${id} (baseUrl=${baseUrl}): found cluster node ${clusterNode?.name || 'none'}, type: ${nodeType}`,
+      );
 
       return {
         id,
@@ -376,7 +465,7 @@ export class TechnitiumService {
       };
     });
 
-    return nodeSummaries;
+    return Promise.all(nodeSummariesPromise);
   }
 
   /**
