@@ -992,17 +992,26 @@ export function DhcpPage() {
             });
         }
 
+        if (!arraysEqual(draftScope.domainSearchList || [], baselineScope.domainSearchList || [])) {
+            changes.push({
+                type: 'modified',
+                category: 'DNS',
+                description: `Domain search list modified (${(draftScope.domainSearchList || []).length} entries)`,
+            });
+        }
+
         // Reserved leases - detailed diff
         const baselineReserved = baselineScope.reservedLeases || [];
         const draftReserved = draftScope.reservedLeases || [];
 
-        // Create maps for comparison (key = hostname or MAC)
-        const baselineReservedMap = new Map(baselineReserved.map(r => [r.hostName || r.hardwareAddress, r]));
-        const draftReservedMap = new Map(draftReserved.map(r => [r.hostName || r.hardwareAddress, r]));
+        // Create maps for comparison (key = MAC address, which is the unique identifier)
+        // Multiple reservations can share the same hostname but must have unique MACs
+        const baselineReservedMap = new Map(baselineReserved.map(r => [r.hardwareAddress, r]));
+        const draftReservedMap = new Map(draftReserved.map(r => [r.hardwareAddress, r]));
 
         // Find added reservations
         draftReserved.forEach(reservation => {
-            const key = reservation.hostName || reservation.hardwareAddress;
+            const key = reservation.hardwareAddress;
             if (!baselineReservedMap.has(key)) {
                 changes.push({
                     type: 'added',
@@ -1015,7 +1024,7 @@ export function DhcpPage() {
 
         // Find removed reservations
         baselineReserved.forEach(reservation => {
-            const key = reservation.hostName || reservation.hardwareAddress;
+            const key = reservation.hardwareAddress;
             if (!draftReservedMap.has(key)) {
                 changes.push({
                     type: 'removed',
@@ -1028,7 +1037,7 @@ export function DhcpPage() {
 
         // Find modified reservations
         draftReserved.forEach(draftRes => {
-            const key = draftRes.hostName || draftRes.hardwareAddress;
+            const key = draftRes.hardwareAddress;
             const baselineRes = baselineReservedMap.get(key);
             if (baselineRes && JSON.stringify(baselineRes) !== JSON.stringify(draftRes)) {
                 // Determine what changed
@@ -2633,6 +2642,17 @@ export function DhcpPage() {
                                                                         value={draftDomainName}
                                                                         placeholder="example.com"
                                                                         onChange={(event) => setDraftDomainName(event.target.value)}
+                                                                    />
+                                                                </div>
+                                                                <div className="field-group">
+                                                                    <label htmlFor="dhcp-domain-search-list">Domain search list</label>
+                                                                    <textarea
+                                                                        id="dhcp-domain-search-list"
+                                                                        name="domainSearchList"
+                                                                        rows={3}
+                                                                        value={draftDomainSearchList}
+                                                                        placeholder="home.arpa&#10;example.com"
+                                                                        onChange={(event) => setDraftDomainSearchList(event.target.value)}
                                                                     />
                                                                 </div>
                                                             </div>
