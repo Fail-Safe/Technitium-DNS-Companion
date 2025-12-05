@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, useMemo } from 'react';
 import { useTechnitiumState } from '../context/TechnitiumContext';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { PullToRefreshIndicator } from '../components/common/PullToRefreshIndicator';
+import { ConfirmModal } from '../components/common/ConfirmModal';
 import { AdvancedBlockingEditor } from '../components/configuration/AdvancedBlockingEditor.tsx';
 import { AdvancedBlockingSetupGuide } from '../components/configuration/AdvancedBlockingSetupGuide.tsx';
 import { ListSourceEditor } from '../components/configuration/ListSourceEditor.tsx';
@@ -106,6 +107,27 @@ export function ConfigurationPage() {
     // Dragging state - track what's being dragged
     const [draggedDomain, setDraggedDomain] = useState<string | null>(null);
     const [dragSourceGroup, setDragSourceGroup] = useState<string | null>(null);
+
+    // Confirmation modal state
+    const [confirmModal, setConfirmModal] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string | React.ReactNode;
+        variant: 'danger' | 'warning' | 'info';
+        confirmLabel: string;
+        onConfirm: () => void;
+    }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        variant: 'warning',
+        confirmLabel: 'Confirm',
+        onConfirm: () => { },
+    });
+
+    const closeConfirmModal = useCallback(() => {
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+    }, []);
 
     // Auto-select Primary node if clustering is enabled
     useEffect(() => {
@@ -352,38 +374,52 @@ export function ConfigurationPage() {
             }
 
             if (hasUnsaved) {
-                const confirmed = window.confirm(
-                    `You have unsaved changes in ${tabName}. Are you sure you want to switch tabs? Your changes will be lost.`,
-                );
-                if (!confirmed) {
-                    return;
-                }
-                // Clear the appropriate unsaved flag
-                if (activeTab === 'group-management') setHasUnsavedGroupChanges(false);
-                if (activeTab === 'list-management') setHasUnsavedListSourcesChanges(false);
-                if (activeTab === 'domain-management') setHasUnsavedDomainChanges(false);
+                setConfirmModal({
+                    isOpen: true,
+                    title: 'Unsaved Changes',
+                    message: `You have unsaved changes in ${tabName}. Are you sure you want to switch tabs? Your changes will be lost.`,
+                    variant: 'warning',
+                    confirmLabel: 'Discard Changes',
+                    onConfirm: () => {
+                        closeConfirmModal();
+                        // Clear the appropriate unsaved flag
+                        if (activeTab === 'group-management') setHasUnsavedGroupChanges(false);
+                        if (activeTab === 'list-management') setHasUnsavedListSourcesChanges(false);
+                        if (activeTab === 'domain-management') setHasUnsavedDomainChanges(false);
+                        setActiveTab(newTab);
+                    },
+                });
+                return;
             }
             setActiveTab(newTab);
         },
-        [hasUnsavedGroupChanges, hasUnsavedListSourcesChanges, hasUnsavedDomainChanges, activeTab],
-    );    // Handle node selection with unsaved changes warning
+        [hasUnsavedGroupChanges, hasUnsavedListSourcesChanges, hasUnsavedDomainChanges, activeTab, closeConfirmModal],
+    );
+
+    // Handle node selection with unsaved changes warning
     const handleNodeSelect = useCallback(
         (nodeId: string) => {
             if (hasAnyUnsavedChanges) {
-                const confirmed = window.confirm(
-                    `You have unsaved changes on ${selectedNodeId}. Are you sure you want to switch to ${nodeId}? Your changes will be lost.`,
-                );
-                if (!confirmed) {
-                    return;
-                }
-                // Clear all unsaved flags
-                setHasUnsavedGroupChanges(false);
-                setHasUnsavedListSourcesChanges(false);
-                setHasUnsavedDomainChanges(false);
+                setConfirmModal({
+                    isOpen: true,
+                    title: 'Unsaved Changes',
+                    message: `You have unsaved changes on ${selectedNodeId}. Are you sure you want to switch to ${nodeId}? Your changes will be lost.`,
+                    variant: 'warning',
+                    confirmLabel: 'Discard Changes',
+                    onConfirm: () => {
+                        closeConfirmModal();
+                        // Clear all unsaved flags
+                        setHasUnsavedGroupChanges(false);
+                        setHasUnsavedListSourcesChanges(false);
+                        setHasUnsavedDomainChanges(false);
+                        setSelectedNodeId(nodeId);
+                    },
+                });
+                return;
             }
             setSelectedNodeId(nodeId);
         },
-        [hasAnyUnsavedChanges, selectedNodeId],
+        [hasAnyUnsavedChanges, selectedNodeId, closeConfirmModal],
     );
 
     // TEST tab: helper functions
@@ -1672,6 +1708,17 @@ export function ConfigurationPage() {
                     </div>
                 </div>
             )}
+
+            {/* Confirmation Modal for unsaved changes */}
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                onConfirm={confirmModal.onConfirm}
+                onCancel={closeConfirmModal}
+                title={confirmModal.title}
+                message={confirmModal.message}
+                variant={confirmModal.variant}
+                confirmLabel={confirmModal.confirmLabel}
+            />
         </>
     );
 }

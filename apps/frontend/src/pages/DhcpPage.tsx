@@ -6,6 +6,8 @@ import { useToast } from '../context/ToastContext';
 import { useNavigationBlocker } from '../hooks/useNavigationBlocker';
 import { usePullToRefresh } from '../hooks/usePullToRefresh';
 import { PullToRefreshIndicator } from '../components/common/PullToRefreshIndicator';
+import { ConfirmModal } from '../components/common/ConfirmModal';
+import { Divider } from '../components/common/Divider';
 import { DhcpBulkSyncModal } from '../components/DhcpBulkSyncModal';
 import { DhcpBulkSyncResultsModal } from '../components/DhcpBulkSyncResultsModal';
 import { DhcpPageSkeleton } from '../components/dhcp/DhcpPageSkeleton';
@@ -550,6 +552,7 @@ export function DhcpPage() {
     const [draftBlockLocallyAdministered, setDraftBlockLocallyAdministered] = useState<boolean>(false);
     const [draftIgnoreClientIdentifier, setDraftIgnoreClientIdentifier] = useState<boolean>(false);
     const [draftScopeEnabled, setDraftScopeEnabled] = useState<boolean>(false);
+    const [baselineScopeEnabled, setBaselineScopeEnabled] = useState<boolean>(false);
     const [updateState, setUpdateState] = useState<UpdateState>('idle');
     const [updateMessage, setUpdateMessage] = useState<string | undefined>();
     const [updateError, setUpdateError] = useState<string | undefined>();
@@ -576,6 +579,32 @@ export function DhcpPage() {
     const [bulkSyncSourceScopesLoading, setBulkSyncSourceScopesLoading] = useState(false);
     const [bulkSyncTargetScopes, setBulkSyncTargetScopes] = useState<Map<string, TechnitiumDhcpScopeSummary[]>>(new Map());
     const [bulkSyncExpandedScopes, setBulkSyncExpandedScopes] = useState<Set<string>>(new Set());
+
+    // Bulk sync scope details for diff preview (lazy-loaded when expanded)
+    const [bulkSyncSourceScopeDetails, setBulkSyncSourceScopeDetails] = useState<Map<string, TechnitiumDhcpScope>>(new Map());
+    const [bulkSyncTargetScopeDetails, setBulkSyncTargetScopeDetails] = useState<Map<string, TechnitiumDhcpScope>>(new Map());
+    const [bulkSyncScopeDetailsLoading, setBulkSyncScopeDetailsLoading] = useState<Set<string>>(new Set());
+
+    // Confirmation modal state
+    const [confirmModal, setConfirmModal] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string | React.ReactNode;
+        variant: 'danger' | 'warning' | 'info';
+        confirmLabel: string;
+        onConfirm: () => void;
+    }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        variant: 'warning',
+        confirmLabel: 'Confirm',
+        onConfirm: () => { },
+    });
+
+    const closeConfirmModal = useCallback(() => {
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+    }, []);
 
     const selectedNode = useMemo(
         () => nodes.find((node) => node.id === selectedNodeId),
@@ -831,15 +860,30 @@ export function DhcpPage() {
         }
     }, [currentScope, serializeDraftToScope]);
 
+    // Check if scope enabled state differs from baseline
+    const isScopeEnabledDirty = draftScopeEnabled !== baselineScopeEnabled;
+
+    // Detect macOS for keyboard shortcut display
+    // navigator.userAgentData is not available in all TypeScript DOM libs, so
+    // use a type-safe access via casting to any for feature detection.
+    const isMac =
+        typeof navigator !== 'undefined' && (
+            // userAgentData is available in newer browsers; prefer its platform when present
+            ((navigator as any).userAgentData?.platform?.toLowerCase?.()?.includes('mac')) ||
+            // fall back to userAgent string parsing (navigator.platform is deprecated)
+            (typeof navigator.userAgent === 'string' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent))
+        );
+    const saveShortcut = isMac ? '⌘S' : 'Ctrl+S';
+
     // Check if draft differs from baseline
     const isDirty = useMemo(() => {
-        if (!baselineJson || !currentScope) return false;
+        if (!baselineJson || !currentScope) return isScopeEnabledDirty;
         const draftScope = serializeDraftToScope();
-        if (!draftScope) return false;
+        if (!draftScope) return isScopeEnabledDirty;
 
-        // Compare JSON representations
-        return baselineJson !== JSON.stringify(draftScope);
-    }, [baselineJson, currentScope, serializeDraftToScope]);
+        // Compare JSON representations + scope enabled state
+        return baselineJson !== JSON.stringify(draftScope) || isScopeEnabledDirty;
+    }, [baselineJson, currentScope, serializeDraftToScope, isScopeEnabledDirty]);
 
     // Warn user before leaving page if there are unsaved changes
     useNavigationBlocker(
@@ -851,48 +895,66 @@ export function DhcpPage() {
     const handleTabChange = useCallback(
         (newTab: DhcpTabMode) => {
             if (isDirty && activeTab === 'scope-details') {
-                const confirmed = window.confirm(
-                    `You have unsaved changes in Scope Configuration. If you switch tabs now, your changes will be lost.\n\nDo you want to discard your changes?`
-                );
-                if (!confirmed) {
-                    return;
-                }
+                setConfirmModal({
+                    isOpen: true,
+                    title: 'Unsaved Changes',
+                    message: 'You have unsaved changes in Scope Configuration. If you switch tabs now, your changes will be lost.\n\nDo you want to discard your changes?',
+                    variant: 'warning',
+                    confirmLabel: 'Discard Changes',
+                    onConfirm: () => {
+                        closeConfirmModal();
+                        setActiveTab(newTab);
+                    },
+                });
+                return;
             }
             setActiveTab(newTab);
         },
-        [isDirty, activeTab],
+        [isDirty, activeTab, closeConfirmModal],
     );
 
     // Handle scope selection with unsaved changes warning
     const handleScopeSelect = useCallback(
         (scopeName: string) => {
             if (isDirty) {
-                const confirmed = window.confirm(
-                    `You have unsaved changes for the current scope. If you select a different scope now, your changes will be lost.\n\nDo you want to discard your changes?`
-                );
-                if (!confirmed) {
-                    return;
-                }
+                setConfirmModal({
+                    isOpen: true,
+                    title: 'Unsaved Changes',
+                    message: 'You have unsaved changes for the current scope. If you select a different scope now, your changes will be lost.\n\nDo you want to discard your changes?',
+                    variant: 'warning',
+                    confirmLabel: 'Discard Changes',
+                    onConfirm: () => {
+                        closeConfirmModal();
+                        setSelectedScopeName(scopeName);
+                    },
+                });
+                return;
             }
             setSelectedScopeName(scopeName);
         },
-        [isDirty],
+        [isDirty, closeConfirmModal],
     );
 
     // Handle node selection with unsaved changes warning
     const handleNodeSelect = useCallback(
         (nodeId: string) => {
             if (isDirty) {
-                const confirmed = window.confirm(
-                    `You have unsaved changes for the current scope. If you switch nodes now, your changes will be lost.\n\nDo you want to discard your changes?`
-                );
-                if (!confirmed) {
-                    return;
-                }
+                setConfirmModal({
+                    isOpen: true,
+                    title: 'Unsaved Changes',
+                    message: 'You have unsaved changes for the current scope. If you switch nodes now, your changes will be lost.\n\nDo you want to discard your changes?',
+                    variant: 'warning',
+                    confirmLabel: 'Discard Changes',
+                    onConfirm: () => {
+                        closeConfirmModal();
+                        setSelectedNodeId(nodeId);
+                    },
+                });
+                return;
             }
             setSelectedNodeId(nodeId);
         },
-        [isDirty],
+        [isDirty, closeConfirmModal],
     );
 
     // Compute pending changes for display
@@ -911,13 +973,14 @@ export function DhcpPage() {
         const draftScope = serializeDraftToScope();
         if (!draftScope) return [];
 
-        // Helper to compare arrays
-        const arraysEqual = (a: unknown[], b: unknown[]): boolean => {
-            if (a.length !== b.length) return false;
-            const aSorted = JSON.stringify([...a].sort());
-            const bSorted = JSON.stringify([...b].sort());
-            return aSorted === bSorted;
-        };
+        // Scope enabled/disabled state
+        if (isScopeEnabledDirty) {
+            changes.push({
+                type: 'modified',
+                category: 'Scope Status',
+                description: draftScopeEnabled ? 'Enable scope on this node' : 'Disable scope on this node',
+            });
+        }
 
         // Basic settings
         if (draftScope.startingAddress !== baselineScope.startingAddress) {
@@ -971,17 +1034,49 @@ export function DhcpPage() {
                 type: 'modified',
                 category: 'DNS',
                 description: draftScope.useThisDnsServer
-                    ? 'Changed to use this DNS server'
+                    ? 'Changed to use this node as the DNS server'
                     : 'Changed to use custom DNS servers',
             });
         }
 
-        if (!draftScope.useThisDnsServer && !arraysEqual(draftScope.dnsServers || [], baselineScope.dnsServers || [])) {
-            changes.push({
-                type: 'modified',
-                category: 'DNS',
-                description: `DNS servers modified (${(draftScope.dnsServers || []).length} total)`,
-            });
+        // DNS servers - detailed diff (only when not using this DNS server)
+        if (!draftScope.useThisDnsServer) {
+            const baselineDnsServers = baselineScope.dnsServers || [];
+            const draftDnsServers = draftScope.dnsServers || [];
+
+            // Show changes by position - pair up old and new values
+            const maxLen = Math.max(baselineDnsServers.length, draftDnsServers.length);
+            for (let i = 0; i < maxLen; i++) {
+                const oldServer = baselineDnsServers[i];
+                const newServer = draftDnsServers[i];
+
+                if (oldServer !== newServer) {
+                    if (oldServer && newServer) {
+                        // Modified at this position
+                        changes.push({
+                            type: 'modified',
+                            category: 'DNS',
+                            description: `DNS server: ${oldServer} → ${newServer}`,
+                        });
+                    } else if (newServer && !oldServer) {
+                        // Added
+                        changes.push({
+                            type: 'added',
+                            category: 'DNS',
+                            description: 'DNS server',
+                            detail: newServer,
+                        });
+                    } else if (oldServer && !newServer) {
+                        // Removed
+                        changes.push({
+                            type: 'removed',
+                            category: 'DNS',
+                            description: 'DNS server',
+                            detail: oldServer,
+                        });
+                    }
+                }
+            }
         }
 
         if (draftScope.domainName !== baselineScope.domainName) {
@@ -992,12 +1087,42 @@ export function DhcpPage() {
             });
         }
 
-        if (!arraysEqual(draftScope.domainSearchList || [], baselineScope.domainSearchList || [])) {
-            changes.push({
-                type: 'modified',
-                category: 'DNS',
-                description: `Domain search list modified (${(draftScope.domainSearchList || []).length} entries)`,
-            });
+        // Domain search list - detailed diff
+        const baselineSearchList = baselineScope.domainSearchList || [];
+        const draftSearchList = draftScope.domainSearchList || [];
+
+        // Show changes by position - pair up old and new values
+        const maxSearchLen = Math.max(baselineSearchList.length, draftSearchList.length);
+        for (let i = 0; i < maxSearchLen; i++) {
+            const oldDomain = baselineSearchList[i];
+            const newDomain = draftSearchList[i];
+
+            if (oldDomain !== newDomain) {
+                if (oldDomain && newDomain) {
+                    // Modified at this position
+                    changes.push({
+                        type: 'modified',
+                        category: 'DNS',
+                        description: `Domain search list: ${oldDomain} → ${newDomain}`,
+                    });
+                } else if (newDomain && !oldDomain) {
+                    // Added
+                    changes.push({
+                        type: 'added',
+                        category: 'DNS',
+                        description: 'Domain search list',
+                        detail: newDomain,
+                    });
+                } else if (oldDomain && !newDomain) {
+                    // Removed
+                    changes.push({
+                        type: 'removed',
+                        category: 'DNS',
+                        description: 'Domain search list',
+                        detail: oldDomain,
+                    });
+                }
+            }
         }
 
         // Reserved leases - detailed diff
@@ -1138,12 +1263,51 @@ export function DhcpPage() {
             });
         }
 
+        if (draftScope.blockLocallyAdministeredMacAddresses !== baselineScope.blockLocallyAdministeredMacAddresses) {
+            changes.push({
+                type: 'modified',
+                category: 'Options',
+                description: draftScope.blockLocallyAdministeredMacAddresses
+                    ? 'Enabled: Block locally administered MACs'
+                    : 'Disabled: Block locally administered MACs',
+            });
+        }
+
+        if (draftScope.ignoreClientIdentifierOption !== baselineScope.ignoreClientIdentifierOption) {
+            changes.push({
+                type: 'modified',
+                category: 'Options',
+                description: draftScope.ignoreClientIdentifierOption
+                    ? 'Enabled: Ignore client identifier option'
+                    : 'Disabled: Ignore client identifier option',
+            });
+        }
+
         if (draftScope.pingCheckEnabled !== baselineScope.pingCheckEnabled) {
             changes.push({
                 type: 'modified',
                 category: 'Options',
                 description: draftScope.pingCheckEnabled ? 'Enabled ping check' : 'Disabled ping check',
             });
+        }
+
+        // Ping check settings (only show when ping check stays enabled - otherwise the main toggle explains it)
+        if (draftScope.pingCheckEnabled && baselineScope.pingCheckEnabled) {
+            if (draftScope.pingCheckTimeout !== baselineScope.pingCheckTimeout) {
+                changes.push({
+                    type: 'modified',
+                    category: 'Options',
+                    description: `Ping timeout: ${baselineScope.pingCheckTimeout ?? 0}ms → ${draftScope.pingCheckTimeout ?? 0}ms`,
+                });
+            }
+
+            if (draftScope.pingCheckRetries !== baselineScope.pingCheckRetries) {
+                changes.push({
+                    type: 'modified',
+                    category: 'Options',
+                    description: `Ping retries: ${baselineScope.pingCheckRetries ?? 0} → ${draftScope.pingCheckRetries ?? 0}`,
+                });
+            }
         }
 
         if (draftScope.dnsUpdates !== baselineScope.dnsUpdates) {
@@ -1154,8 +1318,122 @@ export function DhcpPage() {
             });
         }
 
+        // DNS TTL (only show when DNS updates stays enabled - otherwise the main toggle explains it)
+        if (draftScope.dnsUpdates && baselineScope.dnsUpdates) {
+            if (draftScope.dnsTtl !== baselineScope.dnsTtl) {
+                changes.push({
+                    type: 'modified',
+                    category: 'DNS',
+                    description: `DNS TTL: ${baselineScope.dnsTtl ?? 0}s → ${draftScope.dnsTtl ?? 0}s`,
+                });
+            }
+        }
+
+        // Offer delay time
+        if (draftScope.offerDelayTime !== baselineScope.offerDelayTime) {
+            changes.push({
+                type: 'modified',
+                category: 'Options',
+                description: `Offer delay: ${baselineScope.offerDelayTime ?? 0}ms → ${draftScope.offerDelayTime ?? 0}ms`,
+            });
+        }
+
+        // Server identity settings
+        if (draftScope.serverAddress !== baselineScope.serverAddress) {
+            changes.push({
+                type: 'modified',
+                category: 'Server Identity',
+                description: `Server address: ${baselineScope.serverAddress || 'auto'} → ${draftScope.serverAddress || 'auto'}`,
+            });
+        }
+
+        if (draftScope.serverHostName !== baselineScope.serverHostName) {
+            changes.push({
+                type: 'modified',
+                category: 'Server Identity',
+                description: `Server hostname: ${baselineScope.serverHostName || 'none'} → ${draftScope.serverHostName || 'none'}`,
+            });
+        }
+
+        if (draftScope.bootFileName !== baselineScope.bootFileName) {
+            changes.push({
+                type: 'modified',
+                category: 'Server Identity',
+                description: `Boot file: ${baselineScope.bootFileName || 'none'} → ${draftScope.bootFileName || 'none'}`,
+            });
+        }
+
+        // Ancillary services arrays
+        const compareArrayChanges = (
+            baseline: string[] | undefined,
+            draft: string[] | undefined,
+            category: string,
+            itemLabel: string,
+        ) => {
+            const baseArr = baseline || [];
+            const draftArr = draft || [];
+            const baseSet = new Set(baseArr);
+            const draftSet = new Set(draftArr);
+
+            draftArr.forEach(item => {
+                if (!baseSet.has(item)) {
+                    changes.push({ type: 'added', category, description: itemLabel, detail: item });
+                }
+            });
+
+            baseArr.forEach(item => {
+                if (!draftSet.has(item)) {
+                    changes.push({ type: 'removed', category, description: itemLabel, detail: item });
+                }
+            });
+        };
+
+        compareArrayChanges(baselineScope.winsServers, draftScope.winsServers, 'Ancillary Services', 'WINS server');
+        compareArrayChanges(baselineScope.ntpServers, draftScope.ntpServers, 'Ancillary Services', 'NTP server');
+        compareArrayChanges(baselineScope.ntpServerDomainNames, draftScope.ntpServerDomainNames, 'Ancillary Services', 'NTP domain');
+        compareArrayChanges(baselineScope.capwapAcIpAddresses, draftScope.capwapAcIpAddresses, 'Ancillary Services', 'CAPWAP controller');
+        compareArrayChanges(baselineScope.tftpServerAddresses, draftScope.tftpServerAddresses, 'Ancillary Services', 'TFTP server');
+
+        // Vendor info
+        const baselineVendor = baselineScope.vendorInfo || [];
+        const draftVendor = draftScope.vendorInfo || [];
+        const baselineVendorStrs = new Set(baselineVendor.map(v => `${v.identifier}:${v.information}`));
+        const draftVendorStrs = new Set(draftVendor.map(v => `${v.identifier}:${v.information}`));
+
+        draftVendor.forEach(v => {
+            const str = `${v.identifier}:${v.information}`;
+            if (!baselineVendorStrs.has(str)) {
+                changes.push({ type: 'added', category: 'Vendor Info', description: v.identifier, detail: v.information });
+            }
+        });
+        baselineVendor.forEach(v => {
+            const str = `${v.identifier}:${v.information}`;
+            if (!draftVendorStrs.has(str)) {
+                changes.push({ type: 'removed', category: 'Vendor Info', description: v.identifier, detail: v.information });
+            }
+        });
+
+        // Generic options
+        const baselineGeneric = baselineScope.genericOptions || [];
+        const draftGeneric = draftScope.genericOptions || [];
+        const baselineGenericStrs = new Set(baselineGeneric.map(g => `${g.code}:${g.value}`));
+        const draftGenericStrs = new Set(draftGeneric.map(g => `${g.code}:${g.value}`));
+
+        draftGeneric.forEach(g => {
+            const str = `${g.code}:${g.value}`;
+            if (!baselineGenericStrs.has(str)) {
+                changes.push({ type: 'added', category: 'Generic Options', description: `Option ${g.code}`, detail: g.value });
+            }
+        });
+        baselineGeneric.forEach(g => {
+            const str = `${g.code}:${g.value}`;
+            if (!draftGenericStrs.has(str)) {
+                changes.push({ type: 'removed', category: 'Generic Options', description: `Option ${g.code}`, detail: g.value });
+            }
+        });
+
         return changes;
-    }, [isDirty, baselineJson, currentScope, serializeDraftToScope]);
+    }, [isDirty, baselineJson, currentScope, serializeDraftToScope, isScopeEnabledDirty, draftScopeEnabled]);
 
     const handleAddStaticRoute = () => {
         setDraftStaticRoutes((previous) => [...previous, buildStaticRouteDraft()]);
@@ -1279,9 +1557,60 @@ export function DhcpPage() {
     const handleResetChanges = useCallback(() => {
         if (currentScope) {
             syncDraftWithScope(currentScope);
+            setDraftScopeEnabled(baselineScopeEnabled);
             setShowChangesSummary(false);
         }
-    }, [currentScope]);
+    }, [currentScope, baselineScopeEnabled]);
+
+    // Keyboard shortcuts: Ctrl/Cmd+S to save, Escape to reset
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            // Only handle shortcuts when on scopes tab with a scope selected
+            if (activePageTab !== 'scopes' || !selectedScopeName || !currentScope) {
+                return;
+            }
+
+            // Ctrl+S or Cmd+S to save
+            if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+                event.preventDefault();
+                if (isDirty && updateState !== 'loading') {
+                    // Trigger save by dispatching a custom event that the save button listens to
+                    const saveButton = document.querySelector('[data-keyboard-save]') as HTMLButtonElement;
+                    if (saveButton && !saveButton.disabled) {
+                        saveButton.click();
+                    }
+                }
+                return;
+            }
+
+            // Escape to reset changes
+            if (event.key === 'Escape') {
+                // Don't reset if a modal is open or user is typing in an input
+                const activeElement = document.activeElement;
+                const isInInput = activeElement instanceof HTMLInputElement ||
+                    activeElement instanceof HTMLTextAreaElement ||
+                    activeElement instanceof HTMLSelectElement;
+
+                if (!isInInput && isDirty) {
+                    handleResetChanges();
+                }
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [activePageTab, selectedScopeName, currentScope, isDirty, updateState, handleResetChanges]);
+
+    // Auto-dismiss success message after 5 seconds
+    useEffect(() => {
+        if (updateState === 'success' && updateMessage) {
+            const timer = setTimeout(() => {
+                setUpdateMessage(undefined);
+                setUpdateState('idle');
+            }, 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [updateState, updateMessage]);
 
     useEffect(() => {
         if (!selectedNodeId && nodes.length > 0) {
@@ -1495,7 +1824,9 @@ export function DhcpPage() {
     }, [selectedScopeName, selectedScopeSummary, cloneMode]);
 
     useEffect(() => {
-        setDraftScopeEnabled(selectedScopeSummary?.enabled ?? false);
+        const enabled = selectedScopeSummary?.enabled ?? false;
+        setDraftScopeEnabled(enabled);
+        setBaselineScopeEnabled(enabled);
     }, [selectedScopeSummary]);
 
     useEffect(() => {
@@ -2074,6 +2405,7 @@ export function DhcpPage() {
             setCurrentScope(response.data.scope);
             syncDraftWithScope(response.data.scope);
             setDraftScopeEnabled(response.data.enabled);
+            setBaselineScopeEnabled(response.data.enabled);
 
             setScopes((previous) =>
                 previous.map((scope) =>
@@ -2104,48 +2436,55 @@ export function DhcpPage() {
     };
 
     // Delete scope handler
-    const handleDeleteScope = async () => {
+    const handleDeleteScope = () => {
         if (!selectedScopeName) {
             pushToast({ message: 'No scope selected to delete.', tone: 'error' });
             return;
         }
 
-        const confirmed = window.confirm(
-            `Are you sure you want to delete DHCP scope "${selectedScopeName}" from ${selectedNodeLabel}?\n\nThis action cannot be undone.`
-        );
+        setConfirmModal({
+            isOpen: true,
+            title: 'Delete DHCP Scope',
+            message: (
+                <>
+                    <p>Are you sure you want to delete DHCP scope <strong>"{selectedScopeName}"</strong> from <strong>{selectedNodeLabel}</strong>?</p>
+                    <p style={{ marginTop: '0.75rem', fontWeight: 500 }}>This action cannot be undone.</p>
+                </>
+            ),
+            variant: 'danger',
+            confirmLabel: 'Delete Scope',
+            onConfirm: async () => {
+                closeConfirmModal();
+                try {
+                    const result = await deleteDhcpScope(selectedNodeId, selectedScopeName);
+                    pushToast({ message: result.message, tone: 'success' });
 
-        if (!confirmed) {
-            return;
-        }
+                    // Refresh scope list
+                    const envelope = await loadDhcpScopes(selectedNodeId);
+                    const nextScopes = envelope.data?.scopes ?? [];
+                    setScopes(nextScopes);
 
-        try {
-            const result = await deleteDhcpScope(selectedNodeId, selectedScopeName);
-            pushToast({ message: result.message, tone: 'success' });
+                    // Update scope count
+                    setScopeCountByNode((prev) => {
+                        const updated = new Map(prev);
+                        updated.set(selectedNodeId, nextScopes.length);
+                        return updated;
+                    });
 
-            // Refresh scope list
-            const envelope = await loadDhcpScopes(selectedNodeId);
-            const nextScopes = envelope.data?.scopes ?? [];
-            setScopes(nextScopes);
-
-            // Update scope count
-            setScopeCountByNode((prev) => {
-                const updated = new Map(prev);
-                updated.set(selectedNodeId, nextScopes.length);
-                return updated;
-            });
-
-            // Clear selected scope and details
-            setSelectedScopeName(nextScopes[0]?.name);
-            setCurrentScope(undefined);
-            setDetailCache((prev) => {
-                const next = new Map(prev);
-                next.delete(buildScopeKey(selectedNodeId, selectedScopeName));
-                return next;
-            });
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to delete DHCP scope.';
-            pushToast({ message, tone: 'error', timeout: 6000 });
-        }
+                    // Clear selected scope and details
+                    setSelectedScopeName(nextScopes[0]?.name);
+                    setCurrentScope(undefined);
+                    setDetailCache((prev) => {
+                        const next = new Map(prev);
+                        next.delete(buildScopeKey(selectedNodeId, selectedScopeName));
+                        return next;
+                    });
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : 'Failed to delete DHCP scope.';
+                    pushToast({ message, tone: 'error', timeout: 6000 });
+                }
+            },
+        });
     };
 
     // Bulk sync handlers
@@ -2174,7 +2513,9 @@ export function DhcpPage() {
         setBulkSyncTargetNodeIds([]);
     };
 
-    const handleBulkSyncToggleScopeExpanded = (scopeName: string) => {
+    const handleBulkSyncToggleScopeExpanded = async (scopeName: string) => {
+        const isCurrentlyExpanded = bulkSyncExpandedScopes.has(scopeName);
+
         setBulkSyncExpandedScopes((prev) => {
             const next = new Set(prev);
             if (next.has(scopeName)) {
@@ -2184,6 +2525,83 @@ export function DhcpPage() {
             }
             return next;
         });
+
+        // If expanding and we don't have details yet, load them
+        // Load for both merge-missing and overwrite-all (both show diff comparison)
+        if (!isCurrentlyExpanded && (bulkSyncStrategy === 'merge-missing' || bulkSyncStrategy === 'overwrite-all')) {
+            const { nodeIds: targetNodeIdsWithScope } = getScopeExistsOnTargets(scopeName);
+
+            // Only load if there are targets with this scope (for diff comparison)
+            if (targetNodeIdsWithScope.length > 0) {
+                // Check if we already have the details cached
+                const sourceKey = `${bulkSyncSourceNodeId}:${scopeName}`;
+                const hasSourceDetails = bulkSyncSourceScopeDetails.has(sourceKey);
+
+                // Get current target details map to check cache
+                const currentTargetDetails = bulkSyncTargetScopeDetails;
+                const hasAllTargetDetails = targetNodeIdsWithScope.every(nodeId =>
+                    currentTargetDetails.has(`${nodeId}:${scopeName}`)
+                );
+
+                if (!hasSourceDetails || !hasAllTargetDetails) {
+                    // Mark as loading
+                    setBulkSyncScopeDetailsLoading(prev => new Set(prev).add(scopeName));
+
+                    try {
+                        // Load source scope details
+                        if (!hasSourceDetails) {
+                            const sourceEnvelope = await loadDhcpScope(bulkSyncSourceNodeId, scopeName);
+                            if (sourceEnvelope.data) {
+                                setBulkSyncSourceScopeDetails(prev => {
+                                    const next = new Map(prev);
+                                    next.set(sourceKey, sourceEnvelope.data);
+                                    return next;
+                                });
+                            }
+                        }
+
+                        // Load target scope details for all targets with this scope
+                        // Use Promise.all for parallel loading
+                        const targetLoadPromises = targetNodeIdsWithScope
+                            .filter(nodeId => !currentTargetDetails.has(`${nodeId}:${scopeName}`))
+                            .map(async (targetNodeId) => {
+                                const targetKey = `${targetNodeId}:${scopeName}`;
+                                try {
+                                    const targetEnvelope = await loadDhcpScope(targetNodeId, scopeName);
+                                    if (targetEnvelope.data) {
+                                        return { key: targetKey, data: targetEnvelope.data };
+                                    }
+                                } catch (err) {
+                                    console.warn(`Failed to load scope ${scopeName} from ${targetNodeId}`, err);
+                                }
+                                return null;
+                            });
+
+                        const results = await Promise.all(targetLoadPromises);
+
+                        // Batch update all target details at once
+                        const validResults = results.filter((r): r is { key: string; data: TechnitiumDhcpScope } => r !== null);
+                        if (validResults.length > 0) {
+                            setBulkSyncTargetScopeDetails(prev => {
+                                const next = new Map(prev);
+                                for (const result of validResults) {
+                                    next.set(result.key, result.data);
+                                }
+                                return next;
+                            });
+                        }
+                    } catch (error) {
+                        console.warn('Failed to load scope details for diff preview', error);
+                    } finally {
+                        setBulkSyncScopeDetailsLoading(prev => {
+                            const next = new Set(prev);
+                            next.delete(scopeName);
+                            return next;
+                        });
+                    }
+                }
+            }
+        }
     };
 
     // Helper to determine if a scope exists on any target
@@ -2197,42 +2615,133 @@ export function DhcpPage() {
         return { exists: existingNodeIds.length > 0, nodeIds: existingNodeIds };
     };
 
-    const handleBulkSyncStart = async () => {
-        if (!bulkSyncCanStart) return;
+    // Helper to compute differences between source and target scopes
+    interface ScopeDiff {
+        field: string;
+        label: string;
+        type: 'modified' | 'added' | 'removed';
+        sourceValue?: string;
+        targetValue?: string;
+    }
 
-        // Show confirmation dialog for destructive operations
-        if (bulkSyncStrategy === 'overwrite-all') {
-            const targetNames = nodes
-                .filter(n => bulkSyncTargetNodeIds.includes(n.id))
-                .map(n => n.name || n.id)
-                .join(', ');
+    const computeScopeDiff = (sourceScope: TechnitiumDhcpScope | undefined, targetScope: TechnitiumDhcpScope | undefined): ScopeDiff[] => {
+        const diffs: ScopeDiff[] = [];
 
-            const confirmed = window.confirm(
-                `⚠️ MIRROR OPERATION - This will DELETE ALL existing scopes on: ${targetNames}\n\n` +
-                `Then copy all scopes from ${nodes.find(n => n.id === bulkSyncSourceNodeId)?.name || bulkSyncSourceNodeId}.\n\n` +
-                `This operation is DESTRUCTIVE and cannot be undone.\n\n` +
-                `⚠️ IMPORTANT: Ensure you have a current backup from your target node(s) before continuing.\n\n` +
-                `Are you absolutely sure you want to continue?`
-            );
+        if (!sourceScope) return diffs;
 
-            if (!confirmed) return;
-        } else if (bulkSyncStrategy === 'merge-missing') {
-            const targetNames = nodes
-                .filter(n => bulkSyncTargetNodeIds.includes(n.id))
-                .map(n => n.name || n.id)
-                .join(', ');
-
-            const confirmed = window.confirm(
-                `Sync All Operation\n\n` +
-                `This will update existing scopes and add missing scopes on: ${targetNames}\n\n` +
-                `Existing scopes will be modified to match the source configuration.\n\n` +
-                `⚠️ IMPORTANT: Ensure you have a current backup from your target node(s) before continuing.\n\n` +
-                `Continue?`
-            );
-
-            if (!confirmed) return;
+        // If target doesn't exist, show what will be created
+        if (!targetScope) {
+            if (sourceScope.subnetMask) {
+                diffs.push({ field: 'subnetMask', label: 'Subnet Mask', type: 'added', sourceValue: sourceScope.subnetMask });
+            }
+            if (sourceScope.startingAddress) {
+                diffs.push({ field: 'startingAddress', label: 'Starting Address', type: 'added', sourceValue: sourceScope.startingAddress });
+            }
+            if (sourceScope.endingAddress) {
+                diffs.push({ field: 'endingAddress', label: 'Ending Address', type: 'added', sourceValue: sourceScope.endingAddress });
+            }
+            if (sourceScope.routerAddress) {
+                diffs.push({ field: 'routerAddress', label: 'Router', type: 'added', sourceValue: sourceScope.routerAddress });
+            }
+            const srcDns = sourceScope.dnsServers?.join(', ');
+            if (srcDns) {
+                diffs.push({ field: 'dnsServers', label: 'DNS Servers', type: 'added', sourceValue: srcDns });
+            }
+            const srcDomain = sourceScope.domainSearchList?.join(', ');
+            if (srcDomain) {
+                diffs.push({ field: 'domainSearchList', label: 'Domain Search List', type: 'added', sourceValue: srcDomain });
+            }
+            if (sourceScope.leaseTimeDays || sourceScope.leaseTimeHours || sourceScope.leaseTimeMinutes) {
+                const lease = `${sourceScope.leaseTimeDays || 0}d ${sourceScope.leaseTimeHours || 0}h ${sourceScope.leaseTimeMinutes || 0}m`;
+                diffs.push({ field: 'leaseTime', label: 'Lease Time', type: 'added', sourceValue: lease });
+            }
+            return diffs;
         }
 
+        // Compare individual fields
+        const compareSimple = (field: keyof TechnitiumDhcpScope, label: string) => {
+            const srcVal = sourceScope[field] as string | number | boolean | undefined;
+            const tgtVal = targetScope[field] as string | number | boolean | undefined;
+            const srcStr = srcVal?.toString() || '';
+            const tgtStr = tgtVal?.toString() || '';
+
+            if (srcStr !== tgtStr) {
+                if (!tgtStr && srcStr) {
+                    diffs.push({ field, label, type: 'added', sourceValue: srcStr });
+                } else if (tgtStr && !srcStr) {
+                    diffs.push({ field, label, type: 'removed', targetValue: tgtStr });
+                } else {
+                    diffs.push({ field, label, type: 'modified', sourceValue: srcStr, targetValue: tgtStr });
+                }
+            }
+        };
+
+        const compareArray = (field: keyof TechnitiumDhcpScope, label: string) => {
+            const srcArr = (sourceScope[field] as string[] | undefined) || [];
+            const tgtArr = (targetScope[field] as string[] | undefined) || [];
+            const srcStr = srcArr.join(', ');
+            const tgtStr = tgtArr.join(', ');
+
+            if (srcStr !== tgtStr) {
+                if (!tgtStr && srcStr) {
+                    diffs.push({ field, label, type: 'added', sourceValue: srcStr });
+                } else if (tgtStr && !srcStr) {
+                    diffs.push({ field, label, type: 'removed', targetValue: tgtStr });
+                } else {
+                    diffs.push({ field, label, type: 'modified', sourceValue: srcStr, targetValue: tgtStr });
+                }
+            }
+        };
+
+        // Basic settings
+        compareSimple('subnetMask', 'Subnet Mask');
+        compareSimple('startingAddress', 'Starting Address');
+        compareSimple('endingAddress', 'Ending Address');
+        compareSimple('routerAddress', 'Router');
+        compareArray('dnsServers', 'DNS Servers');
+        compareArray('domainSearchList', 'Domain Search List');
+
+        // Lease time comparison
+        const srcLease = `${sourceScope.leaseTimeDays || 0}d ${sourceScope.leaseTimeHours || 0}h ${sourceScope.leaseTimeMinutes || 0}m`;
+        const tgtLease = `${targetScope.leaseTimeDays || 0}d ${targetScope.leaseTimeHours || 0}h ${targetScope.leaseTimeMinutes || 0}m`;
+        if (srcLease !== tgtLease) {
+            diffs.push({ field: 'leaseTime', label: 'Lease Time', type: 'modified', sourceValue: srcLease, targetValue: tgtLease });
+        }
+
+        // Domain name comparison
+        compareSimple('domainName', 'Domain Name');
+
+        // Reserved leases comparison (count)
+        const srcReserved = sourceScope.reservedLeases?.length || 0;
+        const tgtReserved = targetScope.reservedLeases?.length || 0;
+        if (srcReserved !== tgtReserved) {
+            diffs.push({
+                field: 'reservedLeases',
+                label: 'Reserved Leases',
+                type: 'modified',
+                sourceValue: `${srcReserved} entries`,
+                targetValue: `${tgtReserved} entries`
+            });
+        }
+
+        // Exclusions comparison (count)
+        const srcExclusions = sourceScope.exclusions?.length || 0;
+        const tgtExclusions = targetScope.exclusions?.length || 0;
+        if (srcExclusions !== tgtExclusions) {
+            diffs.push({
+                field: 'exclusions',
+                label: 'Exclusions',
+                type: 'modified',
+                sourceValue: `${srcExclusions} entries`,
+                targetValue: `${tgtExclusions} entries`
+            });
+        }
+
+        return diffs;
+    };
+
+    // Extracted bulk sync execution logic
+    const executeBulkSync = async () => {
         const request: DhcpBulkSyncRequest = {
             sourceNodeId: bulkSyncSourceNodeId,
             targetNodeIds: bulkSyncTargetNodeIds,
@@ -2254,6 +2763,66 @@ export function DhcpPage() {
             pushToast({ message, tone: 'error', timeout: 6000 });
         } finally {
             setBulkSyncInProgress(false);
+        }
+    };
+
+    const handleBulkSyncStart = () => {
+        if (!bulkSyncCanStart) return;
+
+        const sourceNodeName = nodes.find(n => n.id === bulkSyncSourceNodeId)?.name || bulkSyncSourceNodeId;
+        const targetNames = nodes
+            .filter(n => bulkSyncTargetNodeIds.includes(n.id))
+            .map(n => n.name || n.id)
+            .join(', ');
+
+        // Show confirmation dialog for destructive operations
+        if (bulkSyncStrategy === 'overwrite-all') {
+            setConfirmModal({
+                isOpen: true,
+                title: 'Mirror Operation',
+                message: (
+                    <>
+                        <p style={{ fontWeight: 500, color: 'var(--color-danger)' }}>⚠️ DESTRUCTIVE OPERATION</p>
+                        <p style={{ marginTop: '0.75rem' }}>This will <strong>DELETE ALL</strong> existing scopes on:</p>
+                        <p style={{ fontWeight: 500, marginTop: '0.25rem' }}>{targetNames}</p>
+                        <p style={{ marginTop: '0.75rem' }}>Then copy all scopes from <strong>{sourceNodeName}</strong>.</p>
+                        <p style={{ marginTop: '0.75rem', fontWeight: 500, color: 'var(--color-danger)' }}>This operation cannot be undone.</p>
+                        <p style={{ marginTop: '0.75rem', fontSize: '0.9em', color: 'var(--color-text-muted)' }}>
+                            Ensure you have a current backup from your target node(s) before continuing.
+                        </p>
+                    </>
+                ),
+                variant: 'danger',
+                confirmLabel: 'Mirror Scopes',
+                onConfirm: () => {
+                    closeConfirmModal();
+                    executeBulkSync();
+                },
+            });
+        } else if (bulkSyncStrategy === 'merge-missing') {
+            setConfirmModal({
+                isOpen: true,
+                title: 'Sync All Operation',
+                message: (
+                    <>
+                        <p>This will update existing scopes and add missing scopes on:</p>
+                        <p style={{ fontWeight: 500, marginTop: '0.25rem' }}>{targetNames}</p>
+                        <p style={{ marginTop: '0.75rem' }}>Existing scopes will be modified to match the source configuration from <strong>{sourceNodeName}</strong>.</p>
+                        <p style={{ marginTop: '0.75rem', fontSize: '0.9em', color: 'var(--color-text-muted)' }}>
+                            Ensure you have a current backup from your target node(s) before continuing.
+                        </p>
+                    </>
+                ),
+                variant: 'warning',
+                confirmLabel: 'Sync All',
+                onConfirm: () => {
+                    closeConfirmModal();
+                    executeBulkSync();
+                },
+            });
+        } else {
+            // skip-existing strategy - no confirmation needed
+            executeBulkSync();
         }
     };
 
@@ -2533,7 +3102,7 @@ export function DhcpPage() {
                                                             className="dhcp-page__clone-panel dhcp-page__update-panel"
                                                             aria-labelledby="dhcp-update-scope-title"
                                                         >
-                                                            <h3 id="dhcp-update-scope-title">Scope Configuration</h3>
+                                                            <h3 id="dhcp-update-scope-tdhcp-page__clone-griditle">Scope Configuration</h3>
                                                             <p className="dhcp-page__clone-intro">
                                                                 Modify the settings for this DHCP scope on {selectedNodeLabel}.
                                                             </p>
@@ -2619,8 +3188,8 @@ export function DhcpPage() {
                                                                     )}
                                                                 </div>
                                                             </div>
-
-                                                            <div className="dhcp-page__clone-grid">
+                                                            <Divider />
+                                                            <div className="dhcp-page__dns-grid">
                                                                 <div className="field-group">
                                                                     <label htmlFor="dhcp-dns-servers">DNS servers (one per line)</label>
                                                                     <textarea
@@ -2633,16 +3202,30 @@ export function DhcpPage() {
                                                                         onChange={(event) => setDraftDnsServers(event.target.value)}
                                                                     />
                                                                 </div>
-                                                                <div className="field-group">
-                                                                    <label htmlFor="dhcp-domain-name">Domain name</label>
-                                                                    <input
-                                                                        id="dhcp-domain-name"
-                                                                        name="domainName"
-                                                                        type="text"
-                                                                        value={draftDomainName}
-                                                                        placeholder="example.com"
-                                                                        onChange={(event) => setDraftDomainName(event.target.value)}
-                                                                    />
+                                                                <div className="dhcp-page__domain-fields">
+                                                                    <div className="field-group">
+                                                                        <label htmlFor="dhcp-domain-name">Domain name</label>
+                                                                        <input
+                                                                            id="dhcp-domain-name"
+                                                                            name="domainName"
+                                                                            type="text"
+                                                                            value={draftDomainName}
+                                                                            placeholder="example.com"
+                                                                            onChange={(event) => setDraftDomainName(event.target.value)}
+                                                                        />
+                                                                    </div>
+                                                                    <div className="field-group field-group--inline dhcp-page__use-dns-checkbox">
+                                                                        <label className="checkbox" htmlFor="dhcp-use-this-dns">
+                                                                            <input
+                                                                                id="dhcp-use-this-dns"
+                                                                                name="useThisDnsServer"
+                                                                                type="checkbox"
+                                                                                checked={draftUseThisDnsServer}
+                                                                                onChange={(event) => setDraftUseThisDnsServer(event.target.checked)}
+                                                                            />
+                                                                            <span>Use this node as the DNS server for DHCP clients</span>
+                                                                        </label>
+                                                                    </div>
                                                                 </div>
                                                                 <div className="field-group">
                                                                     <label htmlFor="dhcp-domain-search-list">Domain search list</label>
@@ -2656,20 +3239,7 @@ export function DhcpPage() {
                                                                     />
                                                                 </div>
                                                             </div>
-
-                                                            <div className="field-group field-group--inline">
-                                                                <label className="checkbox" htmlFor="dhcp-use-this-dns">
-                                                                    <input
-                                                                        id="dhcp-use-this-dns"
-                                                                        name="useThisDnsServer"
-                                                                        type="checkbox"
-                                                                        checked={draftUseThisDnsServer}
-                                                                        onChange={(event) => setDraftUseThisDnsServer(event.target.checked)}
-                                                                    />
-                                                                    <span>Use this DNS server for DHCP clients</span>
-                                                                </label>
-                                                            </div>
-
+                                                            <Divider />
                                                             <div className="dhcp-page__clone-grid">
                                                                 <div className="field-group">
                                                                     <label htmlFor="dhcp-lease-days">Lease duration (days)</label>
@@ -3292,27 +3862,36 @@ export function DhcpPage() {
                                                                                 onClick={() => setShowChangesSummary(!showChangesSummary)}
                                                                                 title="Click to see what will be saved"
                                                                             >
-                                                                                You have unsaved changes ({pendingChanges.length}) {showChangesSummary ? '▼' : '▲'}
+                                                                                {pendingChanges.length > 0
+                                                                                    ? `You have unsaved changes (${pendingChanges.length}) ${showChangesSummary ? '▼' : '▲'}`
+                                                                                    : 'You have unsaved changes'
+                                                                                }
                                                                             </button>
 
-                                                                            {showChangesSummary && pendingChanges.length > 0 && (
+                                                                            {showChangesSummary && (
                                                                                 <div className="configuration-editor__changes-summary">
-                                                                                    <ul className="configuration-editor__changes-list">
-                                                                                        {pendingChanges.map((change, idx) => (
-                                                                                            <li key={idx} className={`change-item change-item--${change.type}`}>
-                                                                                                <span className="change-icon">
-                                                                                                    <FontAwesomeIcon icon={change.type === 'added' ? faPlus : change.type === 'removed' ? faMinus : faPencil} />
-                                                                                                </span>
-                                                                                                <span className="change-type">{change.category}</span>
-                                                                                                <span className="change-description">
-                                                                                                    {change.description}
-                                                                                                    {change.detail && (
-                                                                                                        <span className="change-detail"> • {change.detail}</span>
-                                                                                                    )}
-                                                                                                </span>
-                                                                                            </li>
-                                                                                        ))}
-                                                                                    </ul>
+                                                                                    {pendingChanges.length > 0 ? (
+                                                                                        <ul className="configuration-editor__changes-list">
+                                                                                            {pendingChanges.map((change, idx) => (
+                                                                                                <li key={idx} className={`change-item change-item--${change.type}`}>
+                                                                                                    <span className="change-icon">
+                                                                                                        <FontAwesomeIcon icon={change.type === 'added' ? faPlus : change.type === 'removed' ? faMinus : faPencil} />
+                                                                                                    </span>
+                                                                                                    <span className="change-type">{change.category}</span>
+                                                                                                    <span className="change-description">
+                                                                                                        {change.description}
+                                                                                                        {change.detail && (
+                                                                                                            <span className="change-detail"> • {change.detail}</span>
+                                                                                                        )}
+                                                                                                    </span>
+                                                                                                </li>
+                                                                                            ))}
+                                                                                        </ul>
+                                                                                    ) : (
+                                                                                        <p className="configuration-editor__changes-fallback">
+                                                                                            Configuration has been modified. Click "Save Changes" to apply.
+                                                                                        </p>
+                                                                                    )}
                                                                                 </div>
                                                                             )}
                                                                         </>
@@ -3331,6 +3910,7 @@ export function DhcpPage() {
                                                                         <button
                                                                             type="button"
                                                                             className="secondary"
+                                                                            title="Discard changes (Escape)"
                                                                             onClick={handleResetChanges}
                                                                             disabled={!isDirty || updateState === 'loading'}
                                                                         >
@@ -3339,6 +3919,8 @@ export function DhcpPage() {
                                                                         <button
                                                                             type="button"
                                                                             className="primary"
+                                                                            data-keyboard-save
+                                                                            title={`Save Changes (${saveShortcut})`}
                                                                             onClick={handleUpdate}
                                                                             disabled={!isDirty || updateState === 'loading' || cloneState === 'loading'}
                                                                         >
@@ -3476,7 +4058,7 @@ export function DhcpPage() {
                                                                 </label>
                                                             </div>
 
-                                                            <div className="dhcp-page__clone-divider" aria-hidden="true" />
+                                                            <Divider className="dhcp-page__clone-divider" />
 
                                                             <div className="dhcp-page__clone-section-header">
                                                                 <h4>Clone Source Configuration</h4>
@@ -4360,8 +4942,10 @@ export function DhcpPage() {
                                                             // Determine which targets will receive vs skip
                                                             const targetsToSync = bulkSyncTargetNodeIds.filter(id => !nodeIds.includes(id));
                                                             const targetsToSkip = bulkSyncTargetNodeIds.filter(id => nodeIds.includes(id));
-                                                            const willBeSkipped = (bulkSyncStrategy === 'skip-existing' || bulkSyncStrategy === 'merge-missing') && targetsToSync.length === 0;
+                                                            // Only skip-existing actually skips - merge-missing updates existing scopes
+                                                            const willBeSkipped = bulkSyncStrategy === 'skip-existing' && targetsToSync.length === 0;
                                                             const willBeOverwritten = bulkSyncStrategy === 'overwrite-all' && exists;
+                                                            const willBeUpdated = bulkSyncStrategy === 'merge-missing' && exists;
 
                                                             return (
                                                                 <div
@@ -4393,7 +4977,7 @@ export function DhcpPage() {
                                                                                         Will be Disabled
                                                                                     </span>
                                                                                 )}
-                                                                                {(bulkSyncStrategy === 'skip-existing' || bulkSyncStrategy === 'merge-missing') && targetsToSkip.length > 0 && targetsToSync.length > 0 && (
+                                                                                {bulkSyncStrategy === 'skip-existing' && targetsToSkip.length > 0 && targetsToSync.length > 0 && (
                                                                                     <span className="dhcp-bulk-sync-inline__preview-badge dhcp-bulk-sync-inline__preview-badge--partial">
                                                                                         Partial Sync
                                                                                     </span>
@@ -4408,8 +4992,13 @@ export function DhcpPage() {
                                                                                         Will Overwrite
                                                                                     </span>
                                                                                 )}
+                                                                                {willBeUpdated && (
+                                                                                    <span className="dhcp-bulk-sync-inline__preview-badge dhcp-bulk-sync-inline__preview-badge--update">
+                                                                                        Will Update
+                                                                                    </span>
+                                                                                )}
                                                                             </div>
-                                                                            {(bulkSyncStrategy === 'skip-existing' || bulkSyncStrategy === 'merge-missing') && targetsToSkip.length > 0 && (
+                                                                            {bulkSyncStrategy === 'skip-existing' && targetsToSkip.length > 0 && (
                                                                                 <div className="dhcp-bulk-sync-inline__preview-note">
                                                                                     {targetsToSync.length > 0 ? (
                                                                                         <>
@@ -4418,6 +5007,20 @@ export function DhcpPage() {
                                                                                         </>
                                                                                     ) : (
                                                                                         <>Already exists on all targets: {targetsToSkip.map(id => nodes.find(n => n.id === id)?.name || id).join(', ')}</>
+                                                                                    )}
+                                                                                </div>
+                                                                            )}
+                                                                            {bulkSyncStrategy === 'merge-missing' && (
+                                                                                <div className="dhcp-bulk-sync-inline__preview-note">
+                                                                                    {targetsToSync.length > 0 && targetsToSkip.length > 0 ? (
+                                                                                        <>
+                                                                                            <div>+ Will be added to: {targetsToSync.map(id => nodes.find(n => n.id === id)?.name || id).join(', ')}</div>
+                                                                                            <div>↻ Will be updated on: {targetsToSkip.map(id => nodes.find(n => n.id === id)?.name || id).join(', ')}</div>
+                                                                                        </>
+                                                                                    ) : targetsToSkip.length > 0 ? (
+                                                                                        <>↻ Will be updated on: {targetsToSkip.map(id => nodes.find(n => n.id === id)?.name || id).join(', ')}</>
+                                                                                    ) : (
+                                                                                        <>+ Will be added to: {targetsToSync.map(id => nodes.find(n => n.id === id)?.name || id).join(', ')}</>
                                                                                     )}
                                                                                 </div>
                                                                             )}
@@ -4431,39 +5034,131 @@ export function DhcpPage() {
 
                                                                     {isExpanded && (
                                                                         <div className="dhcp-bulk-sync-inline__preview-expanded">
-                                                                            <div className="dhcp-bulk-sync-inline__preview-expanded-section">
-                                                                                <strong>Network Settings:</strong>
-                                                                                <div className="dhcp-bulk-sync-inline__preview-expanded-grid">
-                                                                                    <div><span className="label">IP Range:</span> {scope.startingAddress} - {scope.endingAddress}</div>
-                                                                                    <div><span className="label">Subnet Mask:</span> {scope.subnetMask}</div>
-                                                                                    {scope.networkAddress && (
-                                                                                        <div><span className="label">Network:</span> {scope.networkAddress}</div>
-                                                                                    )}
-                                                                                    {scope.broadcastAddress && (
-                                                                                        <div><span className="label">Broadcast:</span> {scope.broadcastAddress}</div>
-                                                                                    )}
+                                                                            {/* Loading state */}
+                                                                            {bulkSyncScopeDetailsLoading.has(scope.name) && (
+                                                                                <div className="dhcp-bulk-sync-inline__preview-expanded-loading">
+                                                                                    <span className="spinner">⏳</span> Loading scope details...
                                                                                 </div>
-                                                                            </div>
-                                                                            <div className="dhcp-bulk-sync-inline__preview-expanded-section">
-                                                                                <strong>Target State:</strong>
-                                                                                <div className="dhcp-bulk-sync-inline__preview-expanded-note">
-                                                                                    {bulkSyncEnableOnTarget ? (
-                                                                                        <span className="success">
-                                                                                            ✓ Scope will be <strong>enabled</strong> on target nodes
-                                                                                            <div style={{ fontSize: '0.85em', marginTop: '0.25rem', fontWeight: 'normal' }}>
-                                                                                                ("Enable scopes on target nodes" checkbox is selected)
+                                                                            )}
+
+                                                                            {/* Source scope details */}
+                                                                            {!bulkSyncScopeDetailsLoading.has(scope.name) && (() => {
+                                                                                const sourceKey = `${bulkSyncSourceNodeId}:${scope.name}`;
+                                                                                const sourceDetails = bulkSyncSourceScopeDetails.get(sourceKey);
+
+                                                                                return (
+                                                                                    <>
+                                                                                        <div className="dhcp-bulk-sync-inline__preview-expanded-section">
+                                                                                            <strong>Source Configuration ({nodes.find(n => n.id === bulkSyncSourceNodeId)?.name}):</strong>
+                                                                                            <div className="dhcp-bulk-sync-inline__preview-expanded-grid">
+                                                                                                <div><span className="label">IP Range:</span> {scope.startingAddress} - {scope.endingAddress}</div>
+                                                                                                <div><span className="label">Subnet Mask:</span> {scope.subnetMask}</div>
+                                                                                                {sourceDetails?.dnsServers && sourceDetails.dnsServers.length > 0 && (
+                                                                                                    <div><span className="label">DNS Servers:</span> {sourceDetails.dnsServers.join(', ')}</div>
+                                                                                                )}
+                                                                                                {sourceDetails?.domainSearchList && sourceDetails.domainSearchList.length > 0 && (
+                                                                                                    <div><span className="label">Domain Search:</span> {sourceDetails.domainSearchList.join(', ')}</div>
+                                                                                                )}
                                                                                             </div>
-                                                                                        </span>
-                                                                                    ) : (
-                                                                                        <span className="muted">
-                                                                                            ⚠ Scope will be <strong>disabled</strong> on target nodes
-                                                                                            <div style={{ fontSize: '0.85em', marginTop: '0.25rem', fontWeight: 'normal' }}>
-                                                                                                (Safe default - check "Enable scopes on target nodes" to enable)
+                                                                                        </div>
+
+                                                                                        {/* Per-target comparison */}
+                                                                                        {targetsToSkip.length > 0 && (bulkSyncStrategy === 'merge-missing' || bulkSyncStrategy === 'overwrite-all') && (
+                                                                                            <div className="dhcp-bulk-sync-inline__preview-expanded-section">
+                                                                                                <strong>Changes per Target:</strong>
+                                                                                                {targetsToSkip.map(targetNodeId => {
+                                                                                                    const targetNode = nodes.find(n => n.id === targetNodeId);
+                                                                                                    const targetKey = `${targetNodeId}:${scope.name}`;
+                                                                                                    const targetDetails = bulkSyncTargetScopeDetails.get(targetKey);
+                                                                                                    const diffs = computeScopeDiff(sourceDetails, targetDetails);
+
+                                                                                                    return (
+                                                                                                        <div key={targetNodeId} className="dhcp-bulk-sync-inline__preview-target-diff">
+                                                                                                            <div className="dhcp-bulk-sync-inline__preview-target-header">
+                                                                                                                {targetNode?.name || targetNodeId}:
+                                                                                                            </div>
+                                                                                                            {!targetDetails ? (
+                                                                                                                <div className="dhcp-bulk-sync-inline__preview-diff-loading">
+                                                                                                                    Loading target details...
+                                                                                                                </div>
+                                                                                                            ) : diffs.length === 0 ? (
+                                                                                                                <div className="dhcp-bulk-sync-inline__preview-diff-none">
+                                                                                                                    ✓ No changes needed (configurations match)
+                                                                                                                </div>
+                                                                                                            ) : (
+                                                                                                                <ul className="dhcp-bulk-sync-inline__preview-diff-list">
+                                                                                                                    {diffs.map((diff, idx) => (
+                                                                                                                        <li key={idx} className={`dhcp-bulk-sync-inline__preview-diff-item dhcp-bulk-sync-inline__preview-diff-item--${diff.type}`}>
+                                                                                                                            {diff.type === 'modified' && (
+                                                                                                                                <>
+                                                                                                                                    <span className="diff-icon">✏️</span>
+                                                                                                                                    <span className="diff-label">{diff.label}:</span>
+                                                                                                                                    <span className="diff-value diff-old">{diff.targetValue}</span>
+                                                                                                                                    <span className="diff-arrow">→</span>
+                                                                                                                                    <span className="diff-value diff-new">{diff.sourceValue}</span>
+                                                                                                                                </>
+                                                                                                                            )}
+                                                                                                                            {diff.type === 'added' && (
+                                                                                                                                <>
+                                                                                                                                    <span className="diff-icon">➕</span>
+                                                                                                                                    <span className="diff-label">{diff.label}:</span>
+                                                                                                                                    <span className="diff-value diff-new">{diff.sourceValue}</span>
+                                                                                                                                </>
+                                                                                                                            )}
+                                                                                                                            {diff.type === 'removed' && (
+                                                                                                                                <>
+                                                                                                                                    <span className="diff-icon">➖</span>
+                                                                                                                                    <span className="diff-label">{diff.label}:</span>
+                                                                                                                                    <span className="diff-value diff-old">{diff.targetValue}</span>
+                                                                                                                                    <span className="diff-note">(will be cleared)</span>
+                                                                                                                                </>
+                                                                                                                            )}
+                                                                                                                        </li>
+                                                                                                                    ))}
+                                                                                                                </ul>
+                                                                                                            )}
+                                                                                                        </div>
+                                                                                                    );
+                                                                                                })}
                                                                                             </div>
-                                                                                        </span>
                                                                                     )}
-                                                                                </div>
-                                                                            </div>
+
+                                                                                        {/* New scope targets */}
+                                                                                        {targetsToSync.length > 0 && (
+                                                                                            <div className="dhcp-bulk-sync-inline__preview-expanded-section">
+                                                                                                <strong>New Scope Targets:</strong>
+                                                                                                <div className="dhcp-bulk-sync-inline__preview-expanded-note">
+                                                                                                    <span className="success">
+                                                                                                        + Will be created on: {targetsToSync.map(id => nodes.find(n => n.id === id)?.name || id).join(', ')}
+                                                                                                    </span>
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        )}
+
+                                                                                        {/* Target State */}
+                                                                                        <div className="dhcp-bulk-sync-inline__preview-expanded-section">
+                                                                                            <strong>Target State:</strong>
+                                                                                            <div className="dhcp-bulk-sync-inline__preview-expanded-note">
+                                                                                                {bulkSyncEnableOnTarget ? (
+                                                                                                    <span className="success">
+                                                                                                        ✓ Scope will be <strong>enabled</strong> on target nodes
+                                                                                                        <div style={{ fontSize: '0.85em', marginTop: '0.25rem', fontWeight: 'normal' }}>
+                                                                                                            ("Enable scopes on target nodes" checkbox is selected)
+                                                                                                        </div>
+                                                                                                    </span>
+                                                                                                ) : (
+                                                                                                    <span className="muted">
+                                                                                                        ⚠ Scope will be <strong>disabled</strong> on target nodes
+                                                                                                        <div style={{ fontSize: '0.85em', marginTop: '0.25rem', fontWeight: 'normal' }}>
+                                                                                                            (Safe default - check "Enable scopes on target nodes" to enable)
+                                                                                                        </div>
+                                                                                                    </span>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </>
+                                                                                );
+                                                                            })()}
                                                                         </div>
                                                                     )}
                                                                 </div>
@@ -4471,20 +5166,45 @@ export function DhcpPage() {
                                                         })}
                                                         <div className="dhcp-bulk-sync-inline__preview-summary">
                                                             {(() => {
-                                                                const willSync = bulkSyncSourceScopes.filter(scope => {
-                                                                    const { exists } = getScopeExistsOnTargets(scope.name);
-                                                                    return bulkSyncStrategy === 'overwrite-all' || !exists;
-                                                                }).length;
-                                                                const willSkip = bulkSyncSourceScopes.length - willSync;
+                                                                            if (bulkSyncStrategy === 'merge-missing') {
+                                                                                // Sync All: all scopes will be synced (add new + update existing)
+                                                                                const willAdd = bulkSyncSourceScopes.filter(scope => {
+                                                                                    const { exists } = getScopeExistsOnTargets(scope.name);
+                                                                                    return !exists;
+                                                                                }).length;
+                                                                                const willUpdate = bulkSyncSourceScopes.length - willAdd;
 
-                                                                return (
-                                                                    <>
-                                                                        <strong>{willSync}</strong> scope{willSync !== 1 ? 's' : ''} will be copied to <strong>{bulkSyncTargetNodeIds.length}</strong> target node{bulkSyncTargetNodeIds.length !== 1 ? 's' : ''}
-                                                                        {willSkip > 0 && (
-                                                                            <span className="skip-note"> ({willSkip} will be skipped - already exist on target)</span>
-                                                                        )}
-                                                                    </>
-                                                                );
+                                                                                return (
+                                                                                    <>
+                                                                                        <strong>{bulkSyncSourceScopes.length}</strong> scope{bulkSyncSourceScopes.length !== 1 ? 's' : ''} will be synced to <strong>{bulkSyncTargetNodeIds.length}</strong> target node{bulkSyncTargetNodeIds.length !== 1 ? 's' : ''}
+                                                                                        {willUpdate > 0 && willAdd > 0 && (
+                                                                                            <span className="sync-note"> ({willAdd} new, {willUpdate} updated)</span>
+                                                                                        )}
+                                                                                        {willUpdate > 0 && willAdd === 0 && (
+                                                                                            <span className="sync-note"> ({willUpdate} will be updated)</span>
+                                                                                        )}
+                                                                                        {willAdd > 0 && willUpdate === 0 && (
+                                                                                            <span className="sync-note"> ({willAdd} will be added)</span>
+                                                                                        )}
+                                                                                    </>
+                                                                                );
+                                                                            } else {
+                                                                            // skip-existing or overwrite-all
+                                                                                const willSync = bulkSyncSourceScopes.filter(scope => {
+                                                                                    const { exists } = getScopeExistsOnTargets(scope.name);
+                                                                                    return bulkSyncStrategy === 'overwrite-all' || !exists;
+                                                                                }).length;
+                                                                                const willSkip = bulkSyncSourceScopes.length - willSync;
+
+                                                                                return (
+                                                                                    <>
+                                                                                        <strong>{willSync}</strong> scope{willSync !== 1 ? 's' : ''} will be copied to <strong>{bulkSyncTargetNodeIds.length}</strong> target node{bulkSyncTargetNodeIds.length !== 1 ? 's' : ''}
+                                                                                        {willSkip > 0 && (
+                                                                                            <span className="skip-note"> ({willSkip} will be skipped - already exist on target)</span>
+                                                                                        )}
+                                                                                    </>
+                                                                                );
+                                                                            }
                                                             })()}
                                                         </div>
                                                     </div>
@@ -4537,6 +5257,17 @@ export function DhcpPage() {
                     result={bulkSyncResult}
                     onClose={handleBulkSyncResultsClose}
                     onRetry={handleBulkSyncRetry}
+                />
+
+                {/* Confirmation Modal */}
+                <ConfirmModal
+                    isOpen={confirmModal.isOpen}
+                    onConfirm={confirmModal.onConfirm}
+                    onCancel={closeConfirmModal}
+                    title={confirmModal.title}
+                    message={confirmModal.message}
+                    variant={confirmModal.variant}
+                    confirmLabel={confirmModal.confirmLabel}
                 />
             </section>
         </>
