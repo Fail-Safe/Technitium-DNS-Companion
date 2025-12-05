@@ -603,8 +603,11 @@ export class TechnitiumService {
         configRetryIntervalSeconds: data.configRetryIntervalSeconds ?? defaultSettings.configRetryIntervalSeconds,
       };
     } catch (error) {
+      // This is not critical - cluster settings are just timing values for polling.
+      // Primary/Secondary detection works independently via /api/user/session/get.
+      // This call may fail if the token lacks admin permissions (/api/admin/* endpoints).
       this.logger.warn(
-        `Failed to get cluster settings for ${nodeId} (may not be Primary or lack permissions): ${error?.message || String(error)}. Using defaults.`,
+        `Could not fetch cluster timing settings for ${nodeId} (admin permissions may be required): ${error?.message || String(error)}. Using default polling intervals.`,
       );
       return defaultSettings;
     }
