@@ -1355,6 +1355,19 @@ html {
   background: var(--color-success-bg);
   border: 1px solid var(--color-success);
   color: var(--color-success-text);
+  animation: successFadeIn 0.3s ease-out;
+  }
+  
+  @keyframes successFadeIn {
+    0% {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
 }
 
 .dhcp-page__table-wrapper {
@@ -1649,6 +1662,17 @@ html {
   margin: 1.5rem 0;
 }
 
+/* Reusable visual divider used across the app */
+.divider {
+  border: none;
+  height: 1px;
+  background: var(--color-border);
+  margin: 1rem 0;
+}
+
+.divider--compact {
+  margin: 0.5rem 0;
+}
 .dhcp-page__clone-grid {
   display: grid;
   gap: 1rem;
@@ -1702,11 +1726,41 @@ html {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+/* DNS/Domain settings grid - 3 column layout */
+.dhcp-page__dns-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .dhcp-page__dns-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .dhcp-page__dns-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Domain name + checkbox container */
+.dhcp-page__domain-fields {
+  display: flex;
+  flex-direction: column;
+  /* gap: 0.75rem; */
+}
+
+.dhcp-page__use-dns-checkbox {
+  margin-top: 0;
+}
 .dhcp-page__list-section {
   border-top: 1px solid var(--color-border);
-  padding: 1rem 0;
+  padding: 1.25rem 0;
   display: grid;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
 .dhcp-page__list-section:first-of-type {
@@ -1716,12 +1770,14 @@ html {
 
 .dhcp-page__list-section header {
   display: grid;
-  gap: 0.25rem;
+  gap: 0.35rem;
+    margin-bottom: 0.25rem;
 }
 
 .dhcp-page__list-section h4 {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 1rem;
+    font-weight: 600;
   color: var(--color-text-primary);
 }
 
@@ -1733,17 +1789,32 @@ html {
 
 .dhcp-page__list-empty {
   margin: 0;
+  padding: 1rem;
   color: var(--color-text-secondary);
   font-style: italic;
+  background: var(--color-bg-secondary);
+    border-radius: 0.5rem;
+    text-align: center;
 }
 
 .dhcp-page__list-row {
   border: 1px solid var(--color-border);
   border-radius: 0.75rem;
-  padding: 0.75rem;
+  padding: 1rem;
   background: var(--color-bg-secondary);
   display: grid;
   gap: 0.75rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  
+  .dhcp-page__list-row:hover {
+    border-color: var(--color-border-hover, #c0c8d8);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  }
+  
+  [data-theme="dark"] .dhcp-page__list-row:hover {
+    border-color: var(--color-border-hover, #4a5568);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .dhcp-page__list-row-grid {
@@ -1761,6 +1832,19 @@ html {
   align-items: start;
 }
 
+/* Enhanced label styling within list rows */
+.dhcp-page__list-row .field-group>label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.dhcp-page__list-row .field-group>input,
+.dhcp-page__list-row .field-group>textarea {
+  font-size: 0.95rem;
+}
 .dhcp-page__textarea {
   resize: vertical;
   min-height: 2.5rem;
@@ -1772,20 +1856,51 @@ html {
 
 .dhcp-page__list-remove {
   justify-self: flex-start;
+  background: transparent;
+    border: 1px solid var(--color-danger);
+    color: var(--color-danger);
+    padding: 0.4rem 0.75rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  
+  .dhcp-page__list-remove:hover {
+    background: var(--color-danger);
+    color: white;
 }
 
 .dhcp-page__list-section>button.secondary {
-  background: transparent;
-  border: 1px dashed var(--color-border);
+  background: var(--color-bg-secondary);
+    border: 1px dashed var(--color-primary);
   color: var(--color-primary);
   font-weight: 600;
   align-self: flex-start;
   width: fit-content;
+  padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
 }
 
 .dhcp-page__list-section>button.secondary:hover {
+  border-style: solid;
   border-color: var(--color-primary);
-  background: rgba(54, 93, 243, 0.08);
+  background: var(--color-primary);
+    color: white;
+  }
+  
+  [data-theme="dark"] .dhcp-page__list-section>button.secondary {
+    background: var(--color-bg-tertiary, #2d3748);
+  }
+  
+  [data-theme="dark"] .dhcp-page__list-section>button.secondary:hover {
+    background: var(--color-primary);
 }
 
 .dhcp-page__value-header {
@@ -2259,11 +2374,54 @@ button.primary:hover {
 }
 
 button.primary:disabled,
-button.secondary:disabled {
+button.secondary:disabled,
+.btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
+/* BEM-style button classes (alternative to button.primary/secondary) */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.75rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.btn--primary {
+  background: var(--color-primary);
+  color: var(--color-white);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.btn--secondary {
+  background: var(--color-bg-secondary);
+  color: var(--color-primary);
+  border: 1px solid var(--color-border);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: var(--color-info-bg);
+}
+
+.btn--danger {
+  background: var(--color-danger);
+  color: var(--color-white);
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: var(--color-danger-text);
+}
 .logs-page {
   display: flex;
   flex-direction: column;
@@ -5080,8 +5238,20 @@ button.danger:disabled {
   box-shadow: 0 2px 4px rgba(220, 53, 69, 0.2);
 }
 
-.field-group+.field-group--inline,
-.field-group--inline+.field-group {
+.field-group + .field-group--inline,
+.field-group--inline + .field-group {
+  /*
+    The "+" symbol here is the adjacent sibling combinator.
+    It matches the right-hand element only if it immediately follows
+    the left-hand element in the DOM (no other elements in-between).
+
+    Examples:
+      <div class="field-group"></div>
+      <div class="field-group--inline"></div>   => matched by .field-group + .field-group--inline
+
+      <div class="field-group--inline"></div>
+      <div class="field-group"></div>          => matched by .field-group--inline + .field-group
+  */
   margin-top: 0.4rem;
 }
 
@@ -5679,6 +5849,70 @@ button.danger:disabled {
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.04);
 }
 
+/* Sticky footer variant - fixed to bottom of viewport like multi-group-editor */
+.configuration-editor__footer--sticky {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin-top: 0;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.configuration-editor__footer-hint {
+  flex: 1;
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.configuration-editor__footer-hint--clickable {
+  cursor: pointer;
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  background: none;
+  border: none;
+  font: inherit;
+  padding: 0;
+  transition: all 0.2s ease;
+}
+
+.configuration-editor__footer-hint--clickable:hover {
+  color: var(--color-primary);
+  text-decoration-style: solid;
+}
+
+/* Changes summary (reuse multi-group-editor styles) */
+.configuration-editor__changes-summary {
+  width: 100%;
+  padding: 1rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  margin-top: 0.75rem;
+  max-height: 300px;
+  overflow-y: auto;
+  animation: slideDown 0.2s ease-out;
+}
+
+.configuration-editor__changes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.configuration-editor__changes-fallback {
+  margin: 0;
+  padding: 0.5rem 0;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-style: italic;
+}
 .configuration-editor__status {
   display: flex;
   gap: 0.75rem;
@@ -5862,7 +6096,7 @@ button.danger:disabled {
   min-width: 0;
 }
 
-.field-group--inline {
+.configuration-editor .field-group--inline {
   display: flex;
   flex-wrap: wrap;
   row-gap: 0.75rem;
@@ -5870,18 +6104,18 @@ button.danger:disabled {
   align-items: flex-start;
 }
 
-.field-group--inline .checkbox {
+.configuration-editor .field-group--inline .checkbox {
   margin: 0;
   flex: 1 1 200px;
   display: inline-flex;
   align-items: flex-start;
-  gap: 0.5rem;
+  gap: 0rem;
   line-height: 1.4;
   font-weight: 500;
   min-width: 180px;
 }
 
-.field-group--inline .checkbox input {
+.configuration-editor .field-group--inline .checkbox input {
   margin-top: 0.15rem;
 }
 
@@ -10067,6 +10301,10 @@ button.danger:disabled {
   color: var(--color-response-info-text);
 }
 
+.dhcp-bulk-sync-inline__preview-badge--update {
+  background: var(--color-info-light);
+  color: var(--color-primary);
+}
 .dhcp-bulk-sync-inline__preview-expanded {
   padding: 1rem;
   background: var(--color-bg-tertiary);
@@ -10114,6 +10352,114 @@ button.danger:disabled {
   color: var(--color-text-secondary);
 }
 
+/* Loading state in expanded preview */
+.dhcp-bulk-sync-inline__preview-expanded-loading {
+  padding: 1rem;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.dhcp-bulk-sync-inline__preview-expanded-loading .spinner {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+
+/* Per-target diff display */
+.dhcp-bulk-sync-inline__preview-target-diff {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: var(--color-bg-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--color-border-light);
+}
+
+.dhcp-bulk-sync-inline__preview-target-header {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.dhcp-bulk-sync-inline__preview-diff-loading {
+  color: var(--color-text-tertiary);
+  font-style: italic;
+  font-size: 0.8125rem;
+}
+
+.dhcp-bulk-sync-inline__preview-diff-none {
+  color: var(--color-success-text);
+  font-size: 0.8125rem;
+}
+
+.dhcp-bulk-sync-inline__preview-diff-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.dhcp-bulk-sync-inline__preview-diff-item {
+  font-size: 0.8125rem;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  padding: 0.25rem 0;
+}
+
+.dhcp-bulk-sync-inline__preview-diff-item .diff-icon {
+  flex-shrink: 0;
+  width: 1.25rem;
+}
+
+.dhcp-bulk-sync-inline__preview-diff-item .diff-label {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  min-width: 100px;
+}
+
+.dhcp-bulk-sync-inline__preview-diff-item .diff-value {
+  font-family: var(--font-mono, monospace);
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  word-break: break-all;
+}
+
+.dhcp-bulk-sync-inline__preview-diff-item .diff-old {
+  background: var(--color-danger-bg, #fee2e2);
+  color: var(--color-danger-text, #b91c1c);
+  text-decoration: line-through;
+}
+
+.dhcp-bulk-sync-inline__preview-diff-item .diff-new {
+  background: var(--color-success-bg, #dcfce7);
+  color: var(--color-success-text, #15803d);
+}
+
+.dhcp-bulk-sync-inline__preview-diff-item .diff-arrow {
+  color: var(--color-text-tertiary);
+  font-weight: bold;
+}
+
+.dhcp-bulk-sync-inline__preview-diff-item .diff-note {
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+
+/* Diff item type colors */
+.dhcp-bulk-sync-inline__preview-diff-item--modified .diff-label {
+  color: var(--color-warning-text);
+}
+
+.dhcp-bulk-sync-inline__preview-diff-item--added .diff-label {
+  color: var(--color-success-text);
+}
+
+.dhcp-bulk-sync-inline__preview-diff-item--removed .diff-label {
+  color: var(--color-danger-text);
+}
 .dhcp-bulk-sync-inline__preview-summary {
   margin-top: 0.75rem;
   padding-top: 0.75rem;
