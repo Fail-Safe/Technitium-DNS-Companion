@@ -249,6 +249,26 @@ export function BuiltInBlockingEditor({
     string | null
   >(null);
 
+  // Sorting helper that keeps wildcards with their base domain instead of at the top
+  const wildcardAwareCompare = useCallback((a: string, b: string) => {
+    const normalize = (value: string) =>
+      value.startsWith("*.") ? value.slice(2)
+      : value.startsWith("*") ? value.slice(1)
+      : value;
+
+    const aNorm = normalize(a);
+    const bNorm = normalize(b);
+    const cmp = aNorm.localeCompare(bNorm);
+    if (cmp !== 0) return cmp;
+
+    // Prefer non-wildcard before wildcard when normalized value is identical
+    const aWildcard = a.startsWith("*");
+    const bWildcard = b.startsWith("*");
+    if (aWildcard && !bWildcard) return 1;
+    if (!aWildcard && bWildcard) return -1;
+    return a.localeCompare(b);
+  }, []);
+
   // Domain editing state
   const [editingDomain, setEditingDomain] = useState<string | null>(null);
   const [editDomainValue, setEditDomainValue] = useState("");
@@ -1089,10 +1109,20 @@ export function BuiltInBlockingEditor({
         (d) => !draftAllowedDomains.has(d),
       );
       for (const domain of addedAllowed) {
-        await addAllowedDomain(selectedNodeId, domain);
+        const result = await addAllowedDomain(selectedNodeId, domain);
+        if (!result?.success) {
+          throw new Error(
+            result?.message || `Failed to add allowed domain ${domain}`,
+          );
+        }
       }
       for (const domain of removedAllowed) {
-        await deleteAllowedDomain(selectedNodeId, domain);
+        const result = await deleteAllowedDomain(selectedNodeId, domain);
+        if (!result?.success) {
+          throw new Error(
+            result?.message || `Failed to delete allowed domain ${domain}`,
+          );
+        }
       }
 
       // 3. Save blocked domain changes
@@ -1103,10 +1133,20 @@ export function BuiltInBlockingEditor({
         (d) => !draftBlockedDomains.has(d),
       );
       for (const domain of addedBlocked) {
-        await addBlockedDomain(selectedNodeId, domain);
+        const result = await addBlockedDomain(selectedNodeId, domain);
+        if (!result?.success) {
+          throw new Error(
+            result?.message || `Failed to add blocked domain ${domain}`,
+          );
+        }
       }
       for (const domain of removedBlocked) {
-        await deleteBlockedDomain(selectedNodeId, domain);
+        const result = await deleteBlockedDomain(selectedNodeId, domain);
+        if (!result?.success) {
+          throw new Error(
+            result?.message || `Failed to delete blocked domain ${domain}`,
+          );
+        }
       }
 
       pushToast({ message: "All changes saved successfully", tone: "success" });
@@ -1655,7 +1695,7 @@ export function BuiltInBlockingEditor({
                       !searchQuery ||
                       d.toLowerCase().includes(searchQuery.toLowerCase()),
                   )
-                  .sort();
+                  .sort(wildcardAwareCompare);
 
                 // Paginate
                 const startIdx = currentPage * entriesPerPage;
