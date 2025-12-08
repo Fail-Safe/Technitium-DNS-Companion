@@ -13,16 +13,19 @@ A mobile-friendly web interface for managing multiple Technitium DNS servers. Vi
 ## Backend (NestJS)
 
 ### What It Actually Does
+
 - Proxies requests to multiple Technitium DNS nodes (no state storage)
 - Caches query logs for 30 seconds to improve performance
 - Aggregates data from multiple nodes (combined logs, zone comparison, DHCP scopes)
 - Loads node credentials from environment variables at startup
 
 ### Modules
+
 - **`AppModule`** - Root module, registers cache and Technitium module
 - **`TechnitiumModule`** - Wraps Technitium DNS API client, handles all proxy logic
 
 ### Key Endpoints
+
 ```
 GET  /api/nodes                          - List configured nodes with cluster info
 GET  /api/nodes/:nodeId/status           - Node status and version
@@ -38,6 +41,7 @@ POST /api/dhcp/:nodeId/scopes/clone      - Clone scope to another node
 ## Frontend (React + Vite)
 
 ### Pages
+
 - **Overview** - Dashboard with node health, top queries, recent blocks
 - **DNS Filtering** - Advanced Blocking groups, allowlist/blocklist management
 - **DHCP** - Scope viewer with cross-node cloning
@@ -46,6 +50,7 @@ POST /api/dhcp/:nodeId/scopes/clone      - Clone scope to another node
 - **DNS Lookup** - Query testing against nodes
 
 ### Tech Stack
+
 - React 18 + TypeScript
 - TailwindCSS for styling
 - React Router for navigation
@@ -78,3 +83,5 @@ CACHE_DIR=/data/domain-lists-cache
 ```
 
 See `.env.example` for complete reference.
+
+**Cache directory fallback:** If `CACHE_DIR` is not set, the backend now tries (in order) a project-local `./tmp/domain-lists-cache`, then the OS temp dir (`$TMPDIR/tdc-domain-lists-cache`), and finally `/data/domain-lists-cache` (for Docker). This prevents ENOENT issues in tests/dev while keeping the Docker path as the persistent default when mounted.

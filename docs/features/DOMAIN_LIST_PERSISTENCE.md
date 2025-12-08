@@ -7,11 +7,13 @@ The Domain List Cache Service now includes **persistent file-based caching** to 
 ## Problem Solved
 
 **Before:** Every container restart required re-downloading all blocklists and allowlists from scratch, which:
+
 - Consumed significant bandwidth (potentially hundreds of MB)
 - Caused long startup delays (minutes for large lists)
 - Wasted resources downloading identical data repeatedly
 
 **After:** Downloaded lists are saved to disk and automatically restored on container restart, which:
+
 - **Saves bandwidth**: Only downloads lists when they're actually updated
 - **Faster startups**: Instant availability of cached lists (seconds instead of minutes)
 - **Smarter refresh**: Uses HTTP conditional requests to check if lists changed
@@ -119,6 +121,8 @@ If the server responds with `304 Not Modified`, we skip the download entirely.
 CACHE_DIR=/custom/cache/path
 ```
 
+If `CACHE_DIR` is not set, the service now falls back in this order to avoid ENOENT issues during tests/dev: `./tmp/domain-lists-cache`, then the OS temp dir (`$TMPDIR/tdc-domain-lists-cache`), and finally `/data/domain-lists-cache` (for Docker with a mounted volume).
+
 ### Docker Volume
 
 Make sure to mount a volume to persist the cache:
@@ -127,7 +131,7 @@ Make sure to mount a volume to persist the cache:
 services:
   backend:
     volumes:
-      - ./data:/data  # Persists cache across container restarts
+      - ./data:/data # Persists cache across container restarts
 ```
 
 ## Implementation Details
@@ -190,19 +194,19 @@ await persistenceService.getCacheStats();
 
 ### Startup Time Comparison
 
-| Scenario | Before | After | Improvement |
-|----------|--------|-------|-------------|
-| Fresh install | 3-5 min | 3-5 min | Same (must download) |
-| Container restart | 3-5 min | **5-10 sec** | **95% faster** |
-| Config change | 3-5 min | **5-10 sec** | **95% faster** |
+| Scenario          | Before  | After        | Improvement          |
+| ----------------- | ------- | ------------ | -------------------- |
+| Fresh install     | 3-5 min | 3-5 min      | Same (must download) |
+| Container restart | 3-5 min | **5-10 sec** | **95% faster**       |
+| Config change     | 3-5 min | **5-10 sec** | **95% faster**       |
 
 ### Bandwidth Comparison
 
-| Scenario | Before | After | Improvement |
-|----------|--------|-------|-------------|
-| Fresh install | 50 MB | 50 MB | Same |
-| Container restart | 50 MB | **0 MB** | **100% saved** |
-| Scheduled refresh (unchanged) | 50 MB | **~1 KB** | **99.998% saved** |
+| Scenario                      | Before | After     | Improvement       |
+| ----------------------------- | ------ | --------- | ----------------- |
+| Fresh install                 | 50 MB  | 50 MB     | Same              |
+| Container restart             | 50 MB  | **0 MB**  | **100% saved**    |
+| Scheduled refresh (unchanged) | 50 MB  | **~1 KB** | **99.998% saved** |
 
 ### Memory Usage
 
@@ -224,8 +228,8 @@ if (metadata?.etag || metadata?.lastModified) {
   // Make conditional request
   const response = await httpService.get(url, {
     headers: {
-      'If-None-Match': metadata.etag,
-      'If-Modified-Since': metadata.lastModified,
+      "If-None-Match": metadata.etag,
+      "If-Modified-Since": metadata.lastModified,
     },
   });
 
@@ -251,6 +255,7 @@ Allow configuring gzip compression level (1-9) to balance speed vs. disk space.
 **Problem**: Lists are re-downloaded on every restart
 
 **Checks**:
+
 1. Verify Docker volume is mounted: `docker inspect <container> | grep Mounts`
 2. Check directory permissions: `ls -la /data/domain-lists-cache/`
 3. Check logs for persistence errors: `docker logs <container> | grep persistence`
@@ -260,6 +265,7 @@ Allow configuring gzip compression level (1-9) to balance speed vs. disk space.
 **Problem**: Cache directory is too large
 
 **Solutions**:
+
 1. Run cleanup: `POST /api/domain-lists/clear-all-caches`
 2. Reduce retention: Adjust `maxAgeDays` parameter
 3. Disable compression: Set `useCompression = false` (not recommended)
@@ -269,6 +275,7 @@ Allow configuring gzip compression level (1-9) to balance speed vs. disk space.
 **Problem**: Service fails to load cache on startup
 
 **Solution**:
+
 1. Delete cache directory: `rm -rf /data/domain-lists-cache/`
 2. Restart service (will rebuild cache)
 

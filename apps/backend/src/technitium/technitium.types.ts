@@ -11,8 +11,8 @@ export interface TechnitiumClusterState {
   initialized: boolean;
   domain?: string;
   dnsServerDomain?: string;
-  type?: 'Primary' | 'Secondary' | 'Standalone';
-  health?: 'Connected' | 'Unreachable' | 'Self';
+  type?: "Primary" | "Secondary" | "Standalone";
+  health?: "Connected" | "Unreachable" | "Self";
 }
 
 export interface TechnitiumClusterSettings {
@@ -63,17 +63,17 @@ export interface TechnitiumStatusEnvelope<T = unknown> {
 }
 
 export type TechnitiumActionCategory =
-  | 'upstream'
-  | 'zone'
-  | 'dnsRecord'
-  | 'reverseForwarder'
-  | 'dhcpReservation'
-  | 'ipSet'
-  | 'nftSet'
-  | 'advancedBlocking';
+  | "upstream"
+  | "zone"
+  | "dnsRecord"
+  | "reverseForwarder"
+  | "dhcpReservation"
+  | "ipSet"
+  | "nftSet"
+  | "advancedBlocking";
 
 export interface TechnitiumActionPayload {
-  method: 'GET' | 'POST';
+  method: "GET" | "POST";
   url: string;
   params?: Record<string, string | number | boolean>;
   headers?: Record<string, string>;
@@ -90,14 +90,14 @@ export interface TechnitiumAction {
   requiresReview?: boolean;
 }
 
-export type TechnitiumExecutionMode = 'dry-run' | 'apply';
+export type TechnitiumExecutionMode = "dry-run" | "apply";
 
 export type TechnitiumActionExecutionStatus =
-  | 'ready'
-  | 'requires-review'
-  | 'skipped'
-  | 'success'
-  | 'error';
+  | "ready"
+  | "requires-review"
+  | "skipped"
+  | "success"
+  | "error";
 
 export interface TechnitiumActionExecutionResult {
   action: TechnitiumAction;
@@ -194,7 +194,7 @@ export interface TechnitiumQueryLogPage {
 }
 
 export interface TechnitiumApiResponse<T> {
-  status: 'ok' | 'error' | 'invalid-token';
+  status: "ok" | "error" | "invalid-token";
   response?: T;
   errorMessage?: string;
   stackTrace?: string;
@@ -327,7 +327,9 @@ export interface TechnitiumDhcpScope {
   ignoreClientIdentifierOption?: boolean;
 }
 
-export type TechnitiumDhcpScopeOverrides = Partial<Omit<TechnitiumDhcpScope, 'name'>>;
+export type TechnitiumDhcpScopeOverrides = Partial<
+  Omit<TechnitiumDhcpScope, "name">
+>;
 
 export interface TechnitiumCloneDhcpScopeRequest {
   targetNodeId?: string;
@@ -385,7 +387,11 @@ export interface TechnitiumZoneList {
   zones: TechnitiumZoneSummary[];
 }
 
-export type TechnitiumZoneComparisonStatus = 'in-sync' | 'missing' | 'different' | 'unknown';
+export type TechnitiumZoneComparisonStatus =
+  | "in-sync"
+  | "missing"
+  | "different"
+  | "unknown";
 
 export interface TechnitiumZoneNodeState {
   nodeId: string;
@@ -418,7 +424,10 @@ export interface TechnitiumCombinedZoneOverview {
   zones: TechnitiumZoneComparison[];
 }
 
-export type DhcpBulkSyncStrategy = 'skip-existing' | 'overwrite-all' | 'merge-missing';
+export type DhcpBulkSyncStrategy =
+  | "skip-existing"
+  | "overwrite-all"
+  | "merge-missing";
 
 export interface DhcpBulkSyncRequest {
   sourceNodeId: string;
@@ -430,14 +439,14 @@ export interface DhcpBulkSyncRequest {
 
 export interface DhcpBulkSyncScopeResult {
   scopeName: string;
-  status: 'synced' | 'skipped' | 'failed';
+  status: "synced" | "skipped" | "failed";
   reason?: string;
   error?: string;
 }
 
 export interface DhcpBulkSyncNodeResult {
   targetNodeId: string;
-  status: 'success' | 'partial' | 'failed';
+  status: "success" | "partial" | "failed";
   scopeResults: DhcpBulkSyncScopeResult[];
   syncedCount: number;
   skippedCount: number;

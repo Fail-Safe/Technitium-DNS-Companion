@@ -1357,13 +1357,13 @@ html {
   color: var(--color-success-text);
   animation: successFadeIn 0.3s ease-out;
   }
-  
+
   @keyframes successFadeIn {
     0% {
       opacity: 0;
       transform: translateY(-4px);
     }
-  
+
     100% {
       opacity: 1;
       transform: translateY(0);
@@ -1806,12 +1806,12 @@ html {
   gap: 0.75rem;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
-  
+
   .dhcp-page__list-row:hover {
     border-color: var(--color-border-hover, #c0c8d8);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   }
-  
+
   [data-theme="dark"] .dhcp-page__list-row:hover {
     border-color: var(--color-border-hover, #4a5568);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
@@ -1866,7 +1866,7 @@ html {
     cursor: pointer;
     transition: all 0.2s ease;
   }
-  
+
   .dhcp-page__list-remove:hover {
     background: var(--color-danger);
     color: white;
@@ -1894,11 +1894,11 @@ html {
   background: var(--color-primary);
     color: white;
   }
-  
+
   [data-theme="dark"] .dhcp-page__list-section>button.secondary {
     background: var(--color-bg-tertiary, #2d3748);
   }
-  
+
   [data-theme="dark"] .dhcp-page__list-section>button.secondary:hover {
     background: var(--color-primary);
 }
@@ -5061,7 +5061,7 @@ button.danger:disabled {
   border: 1px solid var(--color-border);
   padding: 0.95rem;
   display: grid;
-  gap: 1.5rem;
+  /* gap: 1.5rem; */
   box-shadow: 0 10px 24px rgba(30, 42, 64, 0.05);
   max-width: 100%;
   min-width: 0;
@@ -5069,8 +5069,7 @@ button.danger:disabled {
 }
 
 .configuration-editor--stacked {
-  gap: 2rem;
-  padding-bottom: 6rem;
+  padding-bottom: 3rem;
   /* Extra padding to prevent content from being hidden by fixed footer */
 }
 

@@ -864,12 +864,16 @@ export function DhcpPage() {
     const isScopeEnabledDirty = draftScopeEnabled !== baselineScopeEnabled;
 
     // Detect macOS for keyboard shortcut display
-    // navigator.userAgentData is not available in all TypeScript DOM libs, so
-    // use a type-safe access via casting to any for feature detection.
+    type NavigatorWithUserAgentData = Navigator & {
+        userAgentData?: {
+            platform?: string;
+        };
+    };
+    const navWithUserAgent = navigator as NavigatorWithUserAgentData;
     const isMac =
         typeof navigator !== 'undefined' && (
             // userAgentData is available in newer browsers; prefer its platform when present
-            ((navigator as any).userAgentData?.platform?.toLowerCase?.()?.includes('mac')) ||
+            navWithUserAgent.userAgentData?.platform?.toLowerCase().includes('mac') ||
             // fall back to userAgent string parsing (navigator.platform is deprecated)
             (typeof navigator.userAgent === 'string' && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent))
         );
