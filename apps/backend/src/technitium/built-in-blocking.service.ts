@@ -287,8 +287,8 @@ export class BuiltInBlockingService {
     nodeId: string,
     params?: BlockingZoneListParams,
   ): Promise<BlockingZoneListResponse> {
-    // Get all domains recursively
-    const allDomains = await this.getAllDomainsRecursive(nodeId, "allowed");
+    // Prefer export API for exact entries (captures wildcards and direct leaves)
+    const allDomains = await this.getDomainsFromExport(nodeId, "allowed");
 
     // Apply search filter if provided (params.domain used as search term)
     let filteredDomains = allDomains;
@@ -390,8 +390,8 @@ export class BuiltInBlockingService {
     nodeId: string,
     params?: BlockingZoneListParams,
   ): Promise<BlockingZoneListResponse> {
-    // Get all domains recursively
-    const allDomains = await this.getAllDomainsRecursive(nodeId, "blocked");
+    // Prefer export API for exact entries (captures wildcards and direct leaves)
+    const allDomains = await this.getDomainsFromExport(nodeId, "blocked");
 
     // Apply search filter if provided (params.domain used as search term)
     let filteredDomains = allDomains;
@@ -478,6 +478,28 @@ export class BuiltInBlockingService {
    */
   async exportBlockedZones(nodeId: string): Promise<string> {
     return this.exportZones(nodeId, "blocked");
+  }
+
+  /**
+   * Fetch domains via Technitium's export endpoint to retain exact entries (including wildcards).
+   */
+  private async getDomainsFromExport(
+    nodeId: string,
+    type: "allowed" | "blocked",
+  ): Promise<string[]> {
+    try {
+      const exported = await this.exportZones(nodeId, type);
+      return exported
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !line.startsWith("#"));
+    } catch (error) {
+      this.logger.warn(
+        `Failed to export ${type} zones for node "${nodeId}", falling back to recursive fetch:`,
+        error,
+      );
+      return this.getAllDomainsRecursive(nodeId, type);
+    }
   }
 
   // ========================================
@@ -918,26 +940,32 @@ export class BuiltInBlockingService {
             `Found ${subDomains.length} domains under ${fullDomain}`,
           );
           allDomains.push(...subDomains);
-        } else {
-          // If no subdomains found, check if this zone itself has records
-          const checkResponse = await this.technitiumService.executeAction<
-            TechnitiumApiResponse<RawBlockingListResponse>
-          >(nodeId, {
-            method: "GET",
-            url: `/api/${type}/list`,
-            params: { domain: fullDomain },
-          });
+          continue;
+        }
 
-          if (
-            checkResponse.status === "ok" &&
-            checkResponse.response?.records &&
-            checkResponse.response.records.length > 0
-          ) {
-            this.logger.debug(
-              `Zone ${fullDomain} has records, adding as blocked domain`,
-            );
-            allDomains.push(fullDomain);
-          }
+        // If no subdomains were returned, treat this zone as a leaf.
+        // This captures wildcards (e.g., "*.zeronet.org") and direct entries
+        // that don't expose records via the API response.
+        const checkResponse = await this.technitiumService.executeAction<
+          TechnitiumApiResponse<RawBlockingListResponse>
+        >(nodeId, {
+          method: "GET",
+          url: `/api/${type}/list`,
+          params: { domain: fullDomain },
+        });
+
+        if (
+          checkResponse.status === "ok" &&
+          checkResponse.response?.records &&
+          checkResponse.response.records.length > 0
+        ) {
+          this.logger.debug(
+            `Zone ${fullDomain} has records, adding as blocked domain`,
+          );
+          allDomains.push(fullDomain);
+        } else {
+          // No subdomains and no records — assume this is a configured leaf zone.
+          allDomains.push(fullDomain);
         }
       }
     }
