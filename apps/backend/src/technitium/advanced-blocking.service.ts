@@ -1,6 +1,6 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { TechnitiumService } from './technitium.service';
-import type { TechnitiumNodeSummary } from './technitium.types';
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { TechnitiumService } from "./technitium.service";
+import type { TechnitiumNodeSummary } from "./technitium.types";
 import type {
   AdvancedBlockingConfig,
   AdvancedBlockingGroup,
@@ -14,7 +14,7 @@ import type {
   AdvancedBlockingGroupSettingsDiff,
   AdvancedBlockingGroupSettings,
   AdvancedBlockingGroupComparisonStatus,
-} from './advanced-blocking.types';
+} from "./advanced-blocking.types";
 
 interface TechnitiumAppConfigEnvelope {
   status?: string;
@@ -25,15 +25,17 @@ interface TechnitiumAppConfigEnvelope {
 
 @Injectable()
 export class AdvancedBlockingService {
-  private static readonly APP_NAME_CANDIDATES = ['Advanced Blocking'] as const;
+  private static readonly APP_NAME_CANDIDATES = ["Advanced Blocking"] as const;
   private readonly logger = new Logger(AdvancedBlockingService.name);
   private readonly appNameByNode = new Map<string, string>();
 
-  constructor(private readonly technitiumService: TechnitiumService) { }
+  constructor(private readonly technitiumService: TechnitiumService) {}
 
   async getOverview(): Promise<AdvancedBlockingOverview> {
     const summaries = await this.technitiumService.listNodes();
-    const snapshots = await Promise.all(summaries.map((summary) => this.loadSnapshot(summary)));
+    const snapshots = await Promise.all(
+      summaries.map((summary) => this.loadSnapshot(summary)),
+    );
     const aggregate = snapshots.reduce(
       (acc, snapshot) => this.combineMetrics(acc, snapshot.metrics),
       this.emptyMetrics(),
@@ -48,10 +50,14 @@ export class AdvancedBlockingService {
 
   async getSnapshot(nodeId: string): Promise<AdvancedBlockingSnapshot> {
     const summaries = await this.technitiumService.listNodes();
-    const summary = summaries.find((node) => node.id.toLowerCase() === nodeId.toLowerCase());
+    const summary = summaries.find(
+      (node) => node.id.toLowerCase() === nodeId.toLowerCase(),
+    );
 
     if (!summary) {
-      throw new NotFoundException(`Technitium DNS node "${nodeId}" is not configured.`);
+      throw new NotFoundException(
+        `Technitium DNS node "${nodeId}" is not configured.`,
+      );
     }
 
     return this.loadSnapshot(summary);
@@ -63,7 +69,7 @@ export class AdvancedBlockingService {
   ): Promise<AdvancedBlockingSnapshot> {
     const serialized = this.serializeConfig(config);
     const body = new URLSearchParams();
-    body.set('config', JSON.stringify(serialized, null, 2));
+    body.set("config", JSON.stringify(serialized, null, 2));
 
     const appNames = this.resolveAppNameCandidates(nodeId);
     let lastError: Error | undefined;
@@ -71,13 +77,13 @@ export class AdvancedBlockingService {
     for (const appName of appNames) {
       try {
         await this.technitiumService.executeAction(nodeId, {
-          method: 'POST',
-          url: '/api/apps/config/set',
+          method: "POST",
+          url: "/api/apps/config/set",
           params: {
             name: appName,
           },
           headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
+            "Content-Type": "application/x-www-form-urlencoded",
           },
           body: body.toString(),
         });
@@ -96,10 +102,14 @@ export class AdvancedBlockingService {
       throw lastError;
     }
 
-    throw new Error('Failed to save Advanced Blocking config: no app names succeeded.');
+    throw new Error(
+      "Failed to save Advanced Blocking config: no app names succeeded.",
+    );
   }
 
-  private async loadSnapshot(summary: TechnitiumNodeSummary): Promise<AdvancedBlockingSnapshot> {
+  private async loadSnapshot(
+    summary: TechnitiumNodeSummary,
+  ): Promise<AdvancedBlockingSnapshot> {
     const baseSnapshot: AdvancedBlockingSnapshot = {
       nodeId: summary.id,
       baseUrl: summary.baseUrl,
@@ -108,7 +118,9 @@ export class AdvancedBlockingService {
     };
 
     try {
-      const { envelope, appName } = await this.fetchConfigWithFallback(summary.id);
+      const { envelope, appName } = await this.fetchConfigWithFallback(
+        summary.id,
+      );
 
       const rawConfig = envelope?.response?.config;
       if (!rawConfig) {
@@ -137,7 +149,7 @@ export class AdvancedBlockingService {
         metrics,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      const message = error instanceof Error ? error.message : "Unknown error";
       this.logger.warn(
         `Failed to load Advanced Blocking config from node "${summary.id}": ${message}`,
       );
@@ -157,16 +169,17 @@ export class AdvancedBlockingService {
 
     for (const appName of appNames) {
       try {
-        const envelope = await this.technitiumService.executeAction<TechnitiumAppConfigEnvelope>(
-          nodeId,
-          {
-            method: 'GET',
-            url: '/api/apps/config/get',
-            params: {
-              name: appName,
+        const envelope =
+          await this.technitiumService.executeAction<TechnitiumAppConfigEnvelope>(
+            nodeId,
+            {
+              method: "GET",
+              url: "/api/apps/config/get",
+              params: {
+                name: appName,
+              },
             },
-          },
-        );
+          );
 
         return { envelope, appName };
       } catch (error) {
@@ -181,7 +194,9 @@ export class AdvancedBlockingService {
       throw lastError;
     }
 
-    throw new Error('Unable to fetch Advanced Blocking config: no app names succeeded.');
+    throw new Error(
+      "Unable to fetch Advanced Blocking config: no app names succeeded.",
+    );
   }
 
   private resolveAppNameCandidates(nodeId: string): string[] {
@@ -199,54 +214,68 @@ export class AdvancedBlockingService {
     try {
       parsed = JSON.parse(rawConfig) as Record<string, unknown>;
     } catch (error) {
-      throw new Error(`Unable to parse Advanced Blocking config JSON: ${(error as Error).message}`);
+      throw new Error(
+        `Unable to parse Advanced Blocking config JSON: ${(error as Error).message}`,
+      );
     }
 
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('Advanced Blocking config payload was not an object.');
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("Advanced Blocking config payload was not an object.");
     }
 
     const payload = parsed as Record<string, unknown>;
     const groups = Array.isArray(payload.groups)
       ? payload.groups
-        .map((group) => this.normalizeGroup(group))
-        .filter((group): group is AdvancedBlockingGroup => Boolean(group))
+          .map((group) => this.normalizeGroup(group))
+          .filter((group): group is AdvancedBlockingGroup => Boolean(group))
       : [];
 
     return {
       enableBlocking:
-        typeof payload.enableBlocking === 'boolean' ? payload.enableBlocking : undefined,
+        typeof payload.enableBlocking === "boolean"
+          ? payload.enableBlocking
+          : undefined,
       blockingAnswerTtl:
-        typeof payload.blockingAnswerTtl === 'number'
+        typeof payload.blockingAnswerTtl === "number"
           ? payload.blockingAnswerTtl
           : undefined,
       blockListUrlUpdateIntervalHours:
-        typeof payload.blockListUrlUpdateIntervalHours === 'number'
+        typeof payload.blockListUrlUpdateIntervalHours === "number"
           ? payload.blockListUrlUpdateIntervalHours
           : undefined,
-      localEndPointGroupMap: this.normalizeMapping(payload.localEndPointGroupMap),
+      localEndPointGroupMap: this.normalizeMapping(
+        payload.localEndPointGroupMap,
+      ),
       networkGroupMap: this.normalizeMapping(payload.networkGroupMap),
       groups,
     };
   }
 
   private normalizeGroup(raw: unknown): AdvancedBlockingGroup | undefined {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
       return undefined;
     }
 
     const data = raw as Record<string, unknown>;
-    const name = typeof data.name === 'string' ? data.name : undefined;
+    const name = typeof data.name === "string" ? data.name : undefined;
     if (!name) {
       return undefined;
     }
 
     return {
       name,
-      enableBlocking: typeof data.enableBlocking === 'boolean' ? data.enableBlocking : undefined,
+      enableBlocking:
+        typeof data.enableBlocking === "boolean"
+          ? data.enableBlocking
+          : undefined,
       allowTxtBlockingReport:
-        typeof data.allowTxtBlockingReport === 'boolean' ? data.allowTxtBlockingReport : undefined,
-      blockAsNxDomain: typeof data.blockAsNxDomain === 'boolean' ? data.blockAsNxDomain : undefined,
+        typeof data.allowTxtBlockingReport === "boolean"
+          ? data.allowTxtBlockingReport
+          : undefined,
+      blockAsNxDomain:
+        typeof data.blockAsNxDomain === "boolean"
+          ? data.blockAsNxDomain
+          : undefined,
       blockingAddresses: this.normalizeStringArray(data.blockingAddresses),
       allowed: this.normalizeStringArray(data.allowed),
       blocked: this.normalizeStringArray(data.blocked),
@@ -261,13 +290,15 @@ export class AdvancedBlockingService {
   }
 
   private normalizeMapping(value: unknown): Record<string, string> {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
       return {};
     }
 
     const entries: Array<[string, string]> = [];
-    for (const [key, mapValue] of Object.entries(value as Record<string, unknown>)) {
-      if (typeof mapValue === 'string') {
+    for (const [key, mapValue] of Object.entries(
+      value as Record<string, unknown>,
+    )) {
+      if (typeof mapValue === "string") {
         entries.push([key, mapValue]);
       }
     }
@@ -280,7 +311,9 @@ export class AdvancedBlockingService {
       return [];
     }
 
-    return value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+    return value.filter(
+      (entry): entry is string => typeof entry === "string" && entry.length > 0,
+    );
   }
 
   private normalizeUrlEntries(value: unknown): AdvancedBlockingUrlEntry[] {
@@ -291,30 +324,31 @@ export class AdvancedBlockingService {
     const entries: AdvancedBlockingUrlEntry[] = [];
 
     for (const entry of value) {
-      if (typeof entry === 'string') {
+      if (typeof entry === "string") {
         entries.push(entry);
         continue;
       }
 
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
         continue;
       }
 
       const data = entry as Record<string, unknown>;
-      const url = typeof data.url === 'string' ? data.url : undefined;
+      const url = typeof data.url === "string" ? data.url : undefined;
       if (!url) {
         continue;
       }
 
       const override: AdvancedBlockingUrlOverride = { url };
 
-      if (typeof data.blockAsNxDomain === 'boolean') {
+      if (typeof data.blockAsNxDomain === "boolean") {
         override.blockAsNxDomain = data.blockAsNxDomain;
       }
 
       if (Array.isArray(data.blockingAddresses)) {
         const addresses = data.blockingAddresses.filter(
-          (address): address is string => typeof address === 'string' && address.length > 0,
+          (address): address is string =>
+            typeof address === "string" && address.length > 0,
         );
         if (addresses.length > 0) {
           override.blockingAddresses = addresses;
@@ -327,7 +361,9 @@ export class AdvancedBlockingService {
     return entries;
   }
 
-  private calculateMetrics(config: AdvancedBlockingConfig): AdvancedBlockingMetrics {
+  private calculateMetrics(
+    config: AdvancedBlockingConfig,
+  ): AdvancedBlockingMetrics {
     let blockedDomainCount = 0;
     let allowedDomainCount = 0;
     let blockListUrlCount = 0;
@@ -361,9 +397,11 @@ export class AdvancedBlockingService {
       blockedRegexCount,
       regexAllowListUrlCount,
       regexBlockListUrlCount,
-      localEndpointMappingCount: Object.keys(config.localEndPointGroupMap).length,
+      localEndpointMappingCount: Object.keys(config.localEndPointGroupMap)
+        .length,
       networkMappingCount: Object.keys(config.networkGroupMap).length,
-      scheduledNodeCount: typeof config.blockListUrlUpdateIntervalHours === 'number' ? 1 : 0,
+      scheduledNodeCount:
+        typeof config.blockListUrlUpdateIntervalHours === "number" ? 1 : 0,
     };
   }
 
@@ -375,7 +413,9 @@ export class AdvancedBlockingService {
     };
   }
 
-  private serializeConfig(config: AdvancedBlockingConfig): Record<string, unknown> {
+  private serializeConfig(
+    config: AdvancedBlockingConfig,
+  ): Record<string, unknown> {
     const payload: Record<string, unknown> = {
       localEndPointGroupMap: { ...config.localEndPointGroupMap },
       networkGroupMap: { ...config.networkGroupMap },
@@ -415,15 +455,18 @@ export class AdvancedBlockingService {
     }
 
     if (config.blockListUrlUpdateIntervalHours !== undefined) {
-      payload.blockListUrlUpdateIntervalHours = config.blockListUrlUpdateIntervalHours;
+      payload.blockListUrlUpdateIntervalHours =
+        config.blockListUrlUpdateIntervalHours;
     }
 
     return payload;
   }
 
-  private cloneUrlEntries(entries: AdvancedBlockingUrlEntry[]): AdvancedBlockingUrlEntry[] {
+  private cloneUrlEntries(
+    entries: AdvancedBlockingUrlEntry[],
+  ): AdvancedBlockingUrlEntry[] {
     return entries.map((entry) => {
-      if (typeof entry === 'string') {
+      if (typeof entry === "string") {
         return entry;
       }
 
@@ -451,14 +494,18 @@ export class AdvancedBlockingService {
       allowedDomainCount: target.allowedDomainCount + source.allowedDomainCount,
       blockListUrlCount: target.blockListUrlCount + source.blockListUrlCount,
       allowListUrlCount: target.allowListUrlCount + source.allowListUrlCount,
-      adblockListUrlCount: target.adblockListUrlCount + source.adblockListUrlCount,
+      adblockListUrlCount:
+        target.adblockListUrlCount + source.adblockListUrlCount,
       allowedRegexCount: target.allowedRegexCount + source.allowedRegexCount,
       blockedRegexCount: target.blockedRegexCount + source.blockedRegexCount,
-      regexAllowListUrlCount: target.regexAllowListUrlCount + source.regexAllowListUrlCount,
-      regexBlockListUrlCount: target.regexBlockListUrlCount + source.regexBlockListUrlCount,
+      regexAllowListUrlCount:
+        target.regexAllowListUrlCount + source.regexAllowListUrlCount,
+      regexBlockListUrlCount:
+        target.regexBlockListUrlCount + source.regexBlockListUrlCount,
       localEndpointMappingCount:
         target.localEndpointMappingCount + source.localEndpointMappingCount,
-      networkMappingCount: target.networkMappingCount + source.networkMappingCount,
+      networkMappingCount:
+        target.networkMappingCount + source.networkMappingCount,
       scheduledNodeCount: target.scheduledNodeCount + source.scheduledNodeCount,
     };
   }
@@ -487,7 +534,9 @@ export class AdvancedBlockingService {
    */
   async getCombinedAdvancedBlockingConfig(): Promise<AdvancedBlockingCombinedOverview> {
     const summaries = await this.technitiumService.listNodes();
-    const snapshots = await Promise.all(summaries.map((summary) => this.getSnapshot(summary.id)));
+    const snapshots = await Promise.all(
+      summaries.map((summary) => this.getSnapshot(summary.id)),
+    );
 
     // Build a map of groups by name across all nodes
     const groupsByName = new Map<string, Map<string, AdvancedBlockingGroup>>();
@@ -517,7 +566,10 @@ export class AdvancedBlockingService {
       const sample = Array.from(groupsByNode.values())[0];
       const displayName = sample?.name ?? normalizedName;
 
-      const status = this.determineGroupComparisonStatus(groupsByNode, snapshots);
+      const status = this.determineGroupComparisonStatus(
+        groupsByNode,
+        snapshots,
+      );
       const settingsDifferences = this.compareGroupSettings(groupsByNode);
 
       const sourceNodes = snapshots.map((snapshot) => ({
@@ -535,22 +587,27 @@ export class AdvancedBlockingService {
       comparisons.push({
         name: displayName,
         status,
-        ...(settingsDifferences && settingsDifferences.length > 0 && { settingsDifferences }),
+        ...(settingsDifferences &&
+          settingsDifferences.length > 0 && { settingsDifferences }),
         sourceNodes,
         targetNodes,
       });
     }
 
     // Sort by status priority and name
-    const STATUS_PRIORITY: Record<AdvancedBlockingGroupComparisonStatus, number> = {
+    const STATUS_PRIORITY: Record<
+      AdvancedBlockingGroupComparisonStatus,
+      number
+    > = {
       different: 0,
       missing: 1,
-      'in-sync': 2,
+      "in-sync": 2,
       unknown: 3,
     };
 
     comparisons.sort((a, b) => {
-      const priorityDelta = STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status];
+      const priorityDelta =
+        STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status];
       if (priorityDelta !== 0) {
         return priorityDelta;
       }
@@ -590,16 +647,16 @@ export class AdvancedBlockingService {
 
     // Group exists on some but not all nodes
     if (presentNodeIds.size < nodeIds.size) {
-      return 'missing';
+      return "missing";
     }
 
     // Check if settings differ across nodes
     const settingsDiffs = this.compareGroupSettings(groupsByNode);
     if (settingsDiffs && settingsDiffs.length > 0) {
-      return 'different';
+      return "different";
     }
 
-    return 'in-sync';
+    return "in-sync";
   }
 
   /**
@@ -624,10 +681,10 @@ export class AdvancedBlockingService {
 
     // Settings to compare
     const settingsToCompare: (keyof AdvancedBlockingGroupSettings)[] = [
-      'enableBlocking',
-      'allowTxtBlockingReport',
-      'blockAsNxDomain',
-      'blockingAddresses',
+      "enableBlocking",
+      "allowTxtBlockingReport",
+      "blockAsNxDomain",
+      "blockingAddresses",
     ];
 
     for (const setting of settingsToCompare) {

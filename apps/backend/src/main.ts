@@ -1,15 +1,15 @@
-import 'dotenv/config';
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-import { Logger } from '@nestjs/common';
-import { readFileSync, existsSync } from 'fs';
-import { resolve, join } from 'path';
-import { NestExpressApplication } from '@nestjs/platform-express';
-import { Request, Response, NextFunction } from 'express';
+import "dotenv/config";
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "./app.module";
+import { Logger } from "@nestjs/common";
+import { readFileSync, existsSync } from "fs";
+import { resolve, join } from "path";
+import { NestExpressApplication } from "@nestjs/platform-express";
+import { Request, Response, NextFunction } from "express";
 
 async function bootstrap() {
-  const logger = new Logger('Bootstrap');
-  const httpsEnabled = process.env.HTTPS_ENABLED === 'true';
+  const logger = new Logger("Bootstrap");
+  const httpsEnabled = process.env.HTTPS_ENABLED === "true";
 
   let httpsOptions: { key: Buffer; cert: Buffer; ca?: Buffer } | undefined;
 
@@ -19,8 +19,12 @@ async function bootstrap() {
     const caPath = process.env.HTTPS_CA_PATH;
 
     if (!certPath || !keyPath) {
-      logger.error('HTTPS_ENABLED is true but HTTPS_CERT_PATH or HTTPS_KEY_PATH is missing');
-      logger.error('Please provide both HTTPS_CERT_PATH and HTTPS_KEY_PATH in your .env file');
+      logger.error(
+        "HTTPS_ENABLED is true but HTTPS_CERT_PATH or HTTPS_KEY_PATH is missing",
+      );
+      logger.error(
+        "Please provide both HTTPS_CERT_PATH and HTTPS_KEY_PATH in your .env file",
+      );
       process.exit(1);
     }
 
@@ -35,40 +39,42 @@ async function bootstrap() {
         httpsOptions.ca = readFileSync(resolve(caPath));
       }
 
-      logger.log('HTTPS certificates loaded successfully');
+      logger.log("HTTPS certificates loaded successfully");
       logger.log(`Certificate: ${certPath}`);
       logger.log(`Private Key: ${keyPath}`);
       if (caPath) {
         logger.log(`CA Chain: ${caPath}`);
       }
     } catch (error) {
-      logger.error('Failed to load HTTPS certificates:', error);
-      logger.error('Please check that the certificate paths are correct and files are readable');
+      logger.error("Failed to load HTTPS certificates:", error);
+      logger.error(
+        "Please check that the certificate paths are correct and files are readable",
+      );
       process.exit(1);
     }
   }
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     httpsOptions,
-    logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+    logger: ["error", "warn", "log", "debug", "verbose"],
   });
 
   // Set global API prefix
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix("api");
 
   // Serve static frontend files (production mode)
-  const frontendPath = resolve(__dirname, '../../frontend/dist');
+  const frontendPath = resolve(__dirname, "../../frontend/dist");
   if (existsSync(frontendPath)) {
     app.useStaticAssets(frontendPath, {
-      prefix: '/',
-      index: 'index.html',
+      prefix: "/",
+      index: "index.html",
     });
     logger.log(`Serving frontend from: ${frontendPath}`);
 
     // Handle SPA routing - serve index.html for all non-API routes
     app.use((req: Request, res: Response, next: NextFunction) => {
-      if (!req.url.startsWith('/api') && !req.url.match(/\.\w+$/)) {
-        res.sendFile(join(frontendPath, 'index.html'));
+      if (!req.url.startsWith("/api") && !req.url.match(/\.\w+$/)) {
+        res.sendFile(join(frontendPath, "index.html"));
       } else {
         next();
       }
@@ -79,7 +85,7 @@ async function bootstrap() {
   }
 
   // Enable CORS if needed (can be configured via environment variables)
-  const corsOrigins = process.env.CORS_ORIGINS?.split(',')
+  const corsOrigins = process.env.CORS_ORIGINS?.split(",")
     .map((o) => o.trim())
     .filter(Boolean);
   if (corsOrigins && corsOrigins.length > 0) {
@@ -87,25 +93,29 @@ async function bootstrap() {
       origin: corsOrigins,
       credentials: true,
     });
-    logger.log(`CORS enabled for origins: ${corsOrigins.join(', ')}`);
-  } else if (process.env.NODE_ENV === 'development') {
+    logger.log(`CORS enabled for origins: ${corsOrigins.join(", ")}`);
+  } else if (process.env.NODE_ENV === "development") {
     app.enableCors();
-    logger.log('CORS enabled for all origins (development mode)');
+    logger.log("CORS enabled for all origins (development mode)");
   }
 
-  const port = httpsEnabled ? process.env.HTTPS_PORT || 3443 : process.env.PORT || 3000;
+  const port = httpsEnabled
+    ? process.env.HTTPS_PORT || 3443
+    : process.env.PORT || 3000;
 
   await app.listen(port);
 
-  const protocol = httpsEnabled ? 'https' : 'http';
+  const protocol = httpsEnabled ? "https" : "http";
   logger.log(`Application is running on: ${protocol}://localhost:${port}`);
   logger.log(`API available at: ${protocol}://localhost:${port}/api`);
 
   if (httpsEnabled) {
-    logger.log('🔒 HTTPS is ENABLED');
+    logger.log("🔒 HTTPS is ENABLED");
   } else {
-    logger.log('🔓 HTTPS is DISABLED (using HTTP)');
-    logger.log('   To enable HTTPS, set HTTPS_ENABLED=true in .env and provide certificate paths');
+    logger.log("🔓 HTTPS is DISABLED (using HTTP)");
+    logger.log(
+      "   To enable HTTPS, set HTTPS_ENABLED=true in .env and provide certificate paths",
+    );
   }
 }
 

@@ -4,7 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
-// @ts-ignore - JS config file
+// @ts-expect-error - JS config file
 import { APP_NAME, APP_SHORT_NAME } from './app.config.js'
 
 // Read package.json for app metadata
@@ -18,6 +18,14 @@ export default defineConfig({
     __APP_NAME__: JSON.stringify(APP_NAME),
     __APP_SHORT_NAME__: JSON.stringify(APP_SHORT_NAME),
     __APP_VERSION__: JSON.stringify(rootPackageJson.version),
+  },
+  resolve: {
+    // Ensure a single React instance to avoid invalid hook calls during dev HMR
+    dedupe: ['react', 'react-dom'],
+    alias: {
+      react: resolve(__dirname, '../../node_modules/react'),
+      'react-dom': resolve(__dirname, '../../node_modules/react-dom'),
+    },
   },
   plugins: [
     react(),

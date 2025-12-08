@@ -89,7 +89,11 @@ export interface AdvancedBlockingGroupSettingsDiff {
 /**
  * Comparison status for Advanced Blocking groups
  */
-export type AdvancedBlockingGroupComparisonStatus = 'in-sync' | 'different' | 'missing' | 'unknown';
+export type AdvancedBlockingGroupComparisonStatus =
+  | "in-sync"
+  | "different"
+  | "missing"
+  | "unknown";
 
 /**
  * Full comparison of a group between nodes (settings + content)

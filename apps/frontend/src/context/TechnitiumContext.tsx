@@ -111,8 +111,8 @@ interface TechnitiumState {
     reloadBuiltInBlocking: () => Promise<void>;
     reloadBlockingStatus: () => Promise<void>;
     // Built-in Blocking operations
-    listAllowedDomains: (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number }) => Promise<BlockingZoneListResponse>;
-    listBlockedDomains: (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number }) => Promise<BlockingZoneListResponse>;
+    listAllowedDomains: (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number; format?: 'list' | 'tree' }) => Promise<BlockingZoneListResponse>;
+    listBlockedDomains: (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number; format?: 'list' | 'tree' }) => Promise<BlockingZoneListResponse>;
     addAllowedDomain: (nodeId: string, domain: string) => Promise<BlockingZoneOperationResult>;
     addBlockedDomain: (nodeId: string, domain: string) => Promise<BlockingZoneOperationResult>;
     deleteAllowedDomain: (nodeId: string, domain: string) => Promise<BlockingZoneOperationResult>;
@@ -955,11 +955,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const listAllowedDomains = useCallback(
-        async (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number }) => {
+        async (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number; format?: 'list' | 'tree' }) => {
             const query = new URLSearchParams();
             if (params?.domain) query.set('domain', params.domain);
             if (params?.pageNumber !== undefined) query.set('pageNumber', params.pageNumber.toString());
             if (params?.entriesPerPage !== undefined) query.set('entriesPerPage', params.entriesPerPage.toString());
+            if (params?.format) query.set('format', params.format);
 
             const url = `/built-in-blocking/${encodeURIComponent(nodeId)}/allowed${query.toString() ? '?' + query.toString() : ''}`;
             const response = await apiFetch(url);
@@ -972,11 +973,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     );
 
     const listBlockedDomains = useCallback(
-        async (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number }) => {
+        async (nodeId: string, params?: { domain?: string; pageNumber?: number; entriesPerPage?: number; format?: 'list' | 'tree' }) => {
             const query = new URLSearchParams();
             if (params?.domain) query.set('domain', params.domain);
             if (params?.pageNumber !== undefined) query.set('pageNumber', params.pageNumber.toString());
             if (params?.entriesPerPage !== undefined) query.set('entriesPerPage', params.entriesPerPage.toString());
+            if (params?.format) query.set('format', params.format);
 
             const url = `/built-in-blocking/${encodeURIComponent(nodeId)}/blocked${query.toString() ? '?' + query.toString() : ''}`;
             const response = await apiFetch(url);

@@ -1,15 +1,20 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { firstValueFrom } from 'rxjs';
-import { createHash } from 'crypto';
-import { AdvancedBlockingService } from './advanced-blocking.service';
-import { TechnitiumService } from './technitium.service';
-import { DomainListPersistenceService } from './domain-list-persistence.service';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from "@nestjs/common";
+import { HttpService } from "@nestjs/axios";
+import { firstValueFrom } from "rxjs";
+import { createHash } from "crypto";
+import { AdvancedBlockingService } from "./advanced-blocking.service";
+import { TechnitiumService } from "./technitium.service";
+import { DomainListPersistenceService } from "./domain-list-persistence.service";
 import type {
   AdvancedBlockingConfig,
   AdvancedBlockingGroup,
   AdvancedBlockingUrlEntry,
-} from './advanced-blocking.types';
+} from "./advanced-blocking.types";
 
 // ===== EXPORTED TYPES =====
 
@@ -30,12 +35,12 @@ export interface DomainCheckResult {
   found: boolean;
   foundIn?: {
     type:
-    | 'blocklist'
-    | 'allowlist'
-    | 'regex-blocklist'
-    | 'regex-allowlist'
-    | 'manual-blocked'
-    | 'manual-allowed';
+      | "blocklist"
+      | "allowlist"
+      | "regex-blocklist"
+      | "regex-allowlist"
+      | "manual-blocked"
+      | "manual-allowed";
     source: string; // URL or "manual"
     groupName?: string; // For manual entries (single group)
     groups?: string[]; // For URL-based lists (multiple groups can use same list)
@@ -50,16 +55,16 @@ export interface DomainCheckResult {
 export interface GroupPolicyResult {
   domain: string;
   groupName: string;
-  finalAction: 'blocked' | 'allowed' | 'none'; // Final effective action
+  finalAction: "blocked" | "allowed" | "none"; // Final effective action
   reasons: {
-    action: 'block' | 'allow';
+    action: "block" | "allow";
     type:
-    | 'blocklist'
-    | 'allowlist'
-    | 'regex-blocklist'
-    | 'regex-allowlist'
-    | 'manual-blocked'
-    | 'manual-allowed';
+      | "blocklist"
+      | "allowlist"
+      | "regex-blocklist"
+      | "regex-allowlist"
+      | "manual-blocked"
+      | "manual-allowed";
     source: string; // URL or "manual"
     matchedPattern?: string; // For regex matches
     matchedDomain?: string; // For wildcard matches (e.g., "pet" matching "uptime.kuma.pet")
@@ -107,36 +112,41 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
   private readonly refreshTimers = new Map<string, NodeJS.Timeout>(); // nodeId -> timer
   private readonly lastRefreshTimes = new Map<string, Date>(); // nodeId -> last refresh timestamp
   private readonly configHashes = new Map<string, string>(); // nodeId -> config hash (to detect changes)
+  private initializationTimer?: NodeJS.Timeout; // deferred startup timer
 
   constructor(
     private readonly httpService: HttpService,
     private readonly advancedBlockingService: AdvancedBlockingService,
     private readonly technitiumService: TechnitiumService,
     private readonly persistenceService: DomainListPersistenceService,
-  ) { }
+  ) {}
 
   /**
    * Initialize scheduled refreshes when the module starts
    */
   async onModuleInit() {
-    this.logger.log('Domain List Cache Service initialized');
+    this.logger.log("Domain List Cache Service initialized");
 
     // Initialize persistence layer
     try {
       await this.persistenceService.initialize();
-      this.logger.log('Persistence layer initialized');
+      this.logger.log("Persistence layer initialized");
 
       // Load cached data from disk
       await this.loadCachesFromDisk();
     } catch (error) {
-      this.logger.error('Failed to initialize persistence:', error);
+      this.logger.error("Failed to initialize persistence:", error);
     }
 
     // Start scheduled refreshes after a short delay to allow other services to initialize
-    setTimeout(() => {
-      this.initializeScheduledRefreshes().catch((err) => {
-        this.logger.error('Failed to initialize scheduled refreshes:', err);
-      });
+    this.initializationTimer = setTimeout(() => {
+      this.initializeScheduledRefreshes()
+        .catch((err) => {
+          this.logger.error("Failed to initialize scheduled refreshes:", err);
+        })
+        .finally(() => {
+          this.initializationTimer = undefined;
+        });
     }, 5000); // 5 second delay
   }
 
@@ -144,6 +154,10 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
    * Clean up timers when the module is destroyed
    */
   onModuleDestroy() {
+    if (this.initializationTimer) {
+      clearTimeout(this.initializationTimer);
+      this.initializationTimer = undefined;
+    }
     this.stopScheduledRefreshes();
   }
 
@@ -182,13 +196,19 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
         this.logger.log(`Automatic refresh triggered for node ${nodeId}`);
         // Use void to suppress the async warning - refresh runs in background
         void this.refreshLists(nodeId).catch((err: unknown) => {
-          this.logger.error(`Failed to auto-refresh lists for node ${nodeId}:`, err);
+          this.logger.error(
+            `Failed to auto-refresh lists for node ${nodeId}:`,
+            err,
+          );
         });
       }, intervalMs);
 
       this.refreshTimers.set(nodeId, timer);
     } catch (error) {
-      this.logger.error(`Failed to schedule refresh for node ${nodeId}:`, error);
+      this.logger.error(
+        `Failed to schedule refresh for node ${nodeId}:`,
+        error,
+      );
     }
   }
 
@@ -196,21 +216,23 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
    * Initialize scheduled refreshes for all configured nodes
    */
   async initializeScheduledRefreshes(): Promise<void> {
-    this.logger.log('Initializing scheduled list refreshes...');
+    this.logger.log("Initializing scheduled list refreshes...");
     const nodes = await this.technitiumService.listNodes();
 
     for (const node of nodes) {
       await this.scheduleNodeRefresh(node.id);
     }
 
-    this.logger.log(`Scheduled refreshes initialized for ${nodes.length} node(s)`);
+    this.logger.log(
+      `Scheduled refreshes initialized for ${nodes.length} node(s)`,
+    );
   }
 
   /**
    * Stop all scheduled refreshes
    */
   stopScheduledRefreshes(): void {
-    this.logger.log('Stopping all scheduled refreshes');
+    this.logger.log("Stopping all scheduled refreshes");
     for (const [nodeId, timer] of this.refreshTimers.entries()) {
       clearInterval(timer);
       this.logger.log(`Stopped scheduled refresh for node ${nodeId}`);
@@ -222,7 +244,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
    * Load all cached data from disk on startup
    */
   private async loadCachesFromDisk(): Promise<void> {
-    this.logger.log('Loading caches from disk...');
+    this.logger.log("Loading caches from disk...");
 
     try {
       const nodes = await this.technitiumService.listNodes();
@@ -242,15 +264,17 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
                 this.cache.set(node.id, new Map());
               }
 
-              this.cache.get(node.id)!.set(hash, {
-                url: cached.url,
-                hash,
-                domains: new Set(cached.domains),
-                fetchedAt: cached.fetchedAt,
-                lineCount: cached.lineCount,
-                commentCount: cached.commentCount,
-                errorMessage: cached.errorMessage,
-              });
+              this.cache
+                .get(node.id)!
+                .set(hash, {
+                  url: cached.url,
+                  hash,
+                  domains: new Set(cached.domains),
+                  fetchedAt: cached.fetchedAt,
+                  lineCount: cached.lineCount,
+                  commentCount: cached.commentCount,
+                  errorMessage: cached.errorMessage,
+                });
 
               totalLoaded++;
             } else if (cached.patterns) {
@@ -263,22 +287,26 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
               const patterns: RegExp[] = [];
               for (const pattern of cached.patterns) {
                 try {
-                  patterns.push(new RegExp(pattern, 'i'));
-                } catch (error) {
-                  this.logger.warn(`Failed to compile regex pattern: ${pattern}`);
+                  patterns.push(new RegExp(pattern, "i"));
+                } catch {
+                  this.logger.warn(
+                    `Failed to compile regex pattern: ${pattern}`,
+                  );
                 }
               }
 
-              this.regexCache.get(node.id)!.set(hash, {
-                url: cached.url,
-                hash,
-                patterns,
-                rawPatterns: cached.patterns,
-                fetchedAt: cached.fetchedAt,
-                lineCount: cached.lineCount,
-                commentCount: cached.commentCount,
-                errorMessage: cached.errorMessage,
-              });
+              this.regexCache
+                .get(node.id)!
+                .set(hash, {
+                  url: cached.url,
+                  hash,
+                  patterns,
+                  rawPatterns: cached.patterns,
+                  fetchedAt: cached.fetchedAt,
+                  lineCount: cached.lineCount,
+                  commentCount: cached.commentCount,
+                  errorMessage: cached.errorMessage,
+                });
 
               totalLoaded++;
             }
@@ -288,14 +316,16 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
       this.logger.log(`Loaded ${totalLoaded} cached lists from disk`);
     } catch (error) {
-      this.logger.error('Failed to load caches from disk:', error);
+      this.logger.error("Failed to load caches from disk:", error);
     }
   }
 
   /**
    * Get metadata about all lists configured for a node
    */
-  async getListsMetadata(nodeId: string): Promise<{
+  async getListsMetadata(
+    nodeId: string,
+  ): Promise<{
     blocklists: ListMetadata[];
     allowlists: ListMetadata[];
     regexBlocklists: ListMetadata[];
@@ -316,23 +346,34 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    const blocklistUrls = this.extractAllUrls(config, 'blockListUrls');
-    const allowlistUrls = this.extractAllUrls(config, 'allowListUrls');
-    const regexBlocklistUrls = this.extractAllUrls(config, 'blockListRegexUrls');
-    const regexAllowlistUrls = this.extractAllUrls(config, 'allowListRegexUrls');
+    const blocklistUrls = this.extractAllUrls(config, "blockListUrls");
+    const allowlistUrls = this.extractAllUrls(config, "allowListUrls");
+    const regexBlocklistUrls = this.extractAllUrls(
+      config,
+      "blockListRegexUrls",
+    );
+    const regexAllowlistUrls = this.extractAllUrls(
+      config,
+      "allowListRegexUrls",
+    );
 
-    const [blocklists, allowlists, regexBlocklists, regexAllowlists] = await Promise.all([
-      this.getOrFetchMultiple(nodeId, blocklistUrls),
-      this.getOrFetchMultiple(nodeId, allowlistUrls),
-      this.getOrFetchMultipleRegex(nodeId, regexBlocklistUrls),
-      this.getOrFetchMultipleRegex(nodeId, regexAllowlistUrls),
-    ]);
+    const [blocklists, allowlists, regexBlocklists, regexAllowlists] =
+      await Promise.all([
+        this.getOrFetchMultiple(nodeId, blocklistUrls),
+        this.getOrFetchMultiple(nodeId, allowlistUrls),
+        this.getOrFetchMultipleRegex(nodeId, regexBlocklistUrls),
+        this.getOrFetchMultipleRegex(nodeId, regexAllowlistUrls),
+      ]);
 
     return {
       blocklists: blocklists.map((list) => this.listToMetadata(list)),
       allowlists: allowlists.map((list) => this.listToMetadata(list)),
-      regexBlocklists: regexBlocklists.map((list) => this.regexListToMetadata(list)),
-      regexAllowlists: regexAllowlists.map((list) => this.regexListToMetadata(list)),
+      regexBlocklists: regexBlocklists.map((list) =>
+        this.regexListToMetadata(list),
+      ),
+      regexAllowlists: regexAllowlists.map((list) =>
+        this.regexListToMetadata(list),
+      ),
     };
   }
 
@@ -342,19 +383,16 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
   async getAllDomains(
     nodeId: string,
     search?: string,
-    searchMode?: 'text' | 'regex',
-    typeFilter?: 'all' | 'allow' | 'block',
+    searchMode?: "text" | "regex",
+    typeFilter?: "all" | "allow" | "block",
     page: number = 1,
     limit: number = 1000,
   ): Promise<{
     lastRefreshed: Date | null;
     domains: Array<{
       domain: string;
-      type: 'allow' | 'block';
-      sources: Array<{
-        url: string;
-        groups: string[];
-      }>;
+      type: "allow" | "block";
+      sources: Array<{ url: string; groups: string[] }>;
     }>;
     pagination: {
       page: number;
@@ -373,21 +411,22 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       return {
         lastRefreshed: this.lastRefreshTimes.get(nodeId) || null,
         domains: [],
-        pagination: {
-          page,
-          limit,
-          total: 0,
-          totalPages: 0,
-        },
+        pagination: { page, limit, total: 0, totalPages: 0 },
       };
     }
 
     // Build URL-to-groups mappings for both block and allow lists
-    const blocklistUrlToGroups = this.buildUrlToGroupsMap(config, 'blockListUrls');
-    const allowlistUrlToGroups = this.buildUrlToGroupsMap(config, 'allowListUrls');
+    const blocklistUrlToGroups = this.buildUrlToGroupsMap(
+      config,
+      "blockListUrls",
+    );
+    const allowlistUrlToGroups = this.buildUrlToGroupsMap(
+      config,
+      "allowListUrls",
+    );
 
-    const blocklistUrls = this.extractAllUrls(config, 'blockListUrls');
-    const allowlistUrls = this.extractAllUrls(config, 'allowListUrls');
+    const blocklistUrls = this.extractAllUrls(config, "blockListUrls");
+    const allowlistUrls = this.extractAllUrls(config, "allowListUrls");
 
     const [blocklists, allowlists] = await Promise.all([
       this.getOrFetchMultiple(nodeId, blocklistUrls),
@@ -399,7 +438,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       string,
       {
         domain: string;
-        type: 'allow' | 'block';
+        type: "allow" | "block";
         sources: Map<string, Set<string>>; // url -> Set of group names
       }
     >();
@@ -412,7 +451,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
         if (!domainMap.has(normalized)) {
           domainMap.set(normalized, {
             domain: normalized,
-            type: 'block',
+            type: "block",
             sources: new Map(),
           });
         }
@@ -432,12 +471,12 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
         if (!domainMap.has(normalized)) {
           domainMap.set(normalized, {
             domain: normalized,
-            type: 'allow',
+            type: "allow",
             sources: new Map(),
           });
         }
         const entry = domainMap.get(normalized)!;
-        entry.type = 'allow'; // Allow lists take precedence
+        entry.type = "allow"; // Allow lists take precedence
         if (!entry.sources.has(list.url)) {
           entry.sources.set(list.url, new Set());
         }
@@ -455,12 +494,12 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
           if (!domainMap.has(normalized)) {
             domainMap.set(normalized, {
               domain: normalized,
-              type: 'block',
+              type: "block",
               sources: new Map(),
             });
           }
           const entry = domainMap.get(normalized)!;
-          const manualSource = 'Manual Entry';
+          const manualSource = "Manual Entry";
           if (!entry.sources.has(manualSource)) {
             entry.sources.set(manualSource, new Set());
           }
@@ -475,13 +514,13 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
           if (!domainMap.has(normalized)) {
             domainMap.set(normalized, {
               domain: normalized,
-              type: 'allow',
+              type: "allow",
               sources: new Map(),
             });
           }
           const entry = domainMap.get(normalized)!;
-          entry.type = 'allow'; // Allow takes precedence
-          const manualSource = 'Manual Entry';
+          entry.type = "allow"; // Allow takes precedence
+          const manualSource = "Manual Entry";
           if (!entry.sources.has(manualSource)) {
             entry.sources.set(manualSource, new Set());
           }
@@ -496,12 +535,12 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
           if (!domainMap.has(normalized)) {
             domainMap.set(normalized, {
               domain: normalized,
-              type: 'block',
+              type: "block",
               sources: new Map(),
             });
           }
           const entry = domainMap.get(normalized)!;
-          const regexSource = 'Regex Pattern (Manual)';
+          const regexSource = "Regex Pattern (Manual)";
           if (!entry.sources.has(regexSource)) {
             entry.sources.set(regexSource, new Set());
           }
@@ -516,13 +555,13 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
           if (!domainMap.has(normalized)) {
             domainMap.set(normalized, {
               domain: normalized,
-              type: 'allow',
+              type: "allow",
               sources: new Map(),
             });
           }
           const entry = domainMap.get(normalized)!;
-          entry.type = 'allow'; // Allow takes precedence
-          const regexSource = 'Regex Pattern (Manual)';
+          entry.type = "allow"; // Allow takes precedence
+          const regexSource = "Regex Pattern (Manual)";
           if (!entry.sources.has(regexSource)) {
             entry.sources.set(regexSource, new Set());
           }
@@ -542,14 +581,14 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }));
 
     // Apply type filter
-    if (typeFilter && typeFilter !== 'all') {
+    if (typeFilter && typeFilter !== "all") {
       domains = domains.filter((d) => d.type === typeFilter);
     }
 
     // Apply search filter
     if (search && search.trim()) {
       const searchTrim = search.trim();
-      if (searchMode === 'regex') {
+      if (searchMode === "regex") {
         try {
           const regex = new RegExp(searchTrim);
           domains = domains.filter((d) => regex.test(d.domain));
@@ -570,10 +609,10 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
           // Check if this domain is a parent of the search term (wildcard match)
           // e.g., searching "cdn3.editmysite.com" should find "editmysite.com"
-          if (searchLower.includes('.')) {
-            const searchParts = searchLower.split('.');
+          if (searchLower.includes(".")) {
+            const searchParts = searchLower.split(".");
             for (let i = 1; i < searchParts.length; i++) {
-              const parentDomain = searchParts.slice(i).join('.');
+              const parentDomain = searchParts.slice(i).join(".");
               if (domainLower === parentDomain) {
                 return true;
               }
@@ -597,19 +636,17 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     return {
       lastRefreshed: this.lastRefreshTimes.get(nodeId) || null,
       domains: paginatedDomains,
-      pagination: {
-        page,
-        limit,
-        total,
-        totalPages,
-      },
+      pagination: { page, limit, total, totalPages },
     };
   }
 
   /**
    * Check if a domain exists in any blocklist or allowlist
    */
-  async checkDomain(nodeId: string, domain: string): Promise<DomainCheckResult> {
+  async checkDomain(
+    nodeId: string,
+    domain: string,
+  ): Promise<DomainCheckResult> {
     // Check if config has changed and invalidate cache if needed
     await this.ensureCacheValid(nodeId);
 
@@ -621,22 +658,26 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     const normalizedDomain = this.normalizeDomain(domain);
-    const foundIn: DomainCheckResult['foundIn'] = [];
+    const foundIn: DomainCheckResult["foundIn"] = [];
 
     // Check manual entries in each group
     const groups = Array.isArray(config.groups) ? config.groups : [];
     for (const group of groups) {
-      if (group.blocked?.some((d) => this.normalizeDomain(d) === normalizedDomain)) {
+      if (
+        group.blocked?.some((d) => this.normalizeDomain(d) === normalizedDomain)
+      ) {
         foundIn.push({
-          type: 'manual-blocked',
-          source: 'manual',
+          type: "manual-blocked",
+          source: "manual",
           groupName: group.name,
         });
       }
-      if (group.allowed?.some((d) => this.normalizeDomain(d) === normalizedDomain)) {
+      if (
+        group.allowed?.some((d) => this.normalizeDomain(d) === normalizedDomain)
+      ) {
         foundIn.push({
-          type: 'manual-allowed',
-          source: 'manual',
+          type: "manual-allowed",
+          source: "manual",
           groupName: group.name,
         });
       }
@@ -648,8 +689,8 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
             const regex = new RegExp(pattern);
             if (regex.test(normalizedDomain)) {
               foundIn.push({
-                type: 'regex-allowlist',
-                source: 'manual',
+                type: "regex-allowlist",
+                source: "manual",
                 groupName: group.name,
                 matchedPattern: pattern,
               });
@@ -668,8 +709,8 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
             const regex = new RegExp(pattern);
             if (regex.test(normalizedDomain)) {
               foundIn.push({
-                type: 'regex-blocklist',
-                source: 'manual',
+                type: "regex-blocklist",
+                source: "manual",
                 groupName: group.name,
                 matchedPattern: pattern,
               });
@@ -684,30 +725,52 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Build URL-to-groups mappings
-    const blocklistUrlToGroups = this.buildUrlToGroupsMap(config, 'blockListUrls');
-    const allowlistUrlToGroups = this.buildUrlToGroupsMap(config, 'allowListUrls');
-    const regexBlocklistUrlToGroups = this.buildUrlToGroupsMap(config, 'blockListRegexUrls');
-    const regexAllowlistUrlToGroups = this.buildUrlToGroupsMap(config, 'allowListRegexUrls');
+    const blocklistUrlToGroups = this.buildUrlToGroupsMap(
+      config,
+      "blockListUrls",
+    );
+    const allowlistUrlToGroups = this.buildUrlToGroupsMap(
+      config,
+      "allowListUrls",
+    );
+    const regexBlocklistUrlToGroups = this.buildUrlToGroupsMap(
+      config,
+      "blockListRegexUrls",
+    );
+    const regexAllowlistUrlToGroups = this.buildUrlToGroupsMap(
+      config,
+      "allowListRegexUrls",
+    );
 
     // Check URL-based lists
-    const blocklistUrls = this.extractAllUrls(config, 'blockListUrls');
-    const allowlistUrls = this.extractAllUrls(config, 'allowListUrls');
-    const regexBlocklistUrls = this.extractAllUrls(config, 'blockListRegexUrls');
-    const regexAllowlistUrls = this.extractAllUrls(config, 'allowListRegexUrls');
+    const blocklistUrls = this.extractAllUrls(config, "blockListUrls");
+    const allowlistUrls = this.extractAllUrls(config, "allowListUrls");
+    const regexBlocklistUrls = this.extractAllUrls(
+      config,
+      "blockListRegexUrls",
+    );
+    const regexAllowlistUrls = this.extractAllUrls(
+      config,
+      "allowListRegexUrls",
+    );
 
-    const [blocklists, allowlists, regexBlocklists, regexAllowlists] = await Promise.all([
-      this.getOrFetchMultiple(nodeId, blocklistUrls),
-      this.getOrFetchMultiple(nodeId, allowlistUrls),
-      this.getOrFetchMultipleRegex(nodeId, regexBlocklistUrls),
-      this.getOrFetchMultipleRegex(nodeId, regexAllowlistUrls),
-    ]);
+    const [blocklists, allowlists, regexBlocklists, regexAllowlists] =
+      await Promise.all([
+        this.getOrFetchMultiple(nodeId, blocklistUrls),
+        this.getOrFetchMultiple(nodeId, allowlistUrls),
+        this.getOrFetchMultipleRegex(nodeId, regexBlocklistUrls),
+        this.getOrFetchMultipleRegex(nodeId, regexAllowlistUrls),
+      ]);
 
     // Check exact domain lists (with wildcard subdomain matching)
     for (const list of blocklists) {
-      const match = this.domainMatchesSetWithMatch(normalizedDomain, list.domains);
+      const match = this.domainMatchesSetWithMatch(
+        normalizedDomain,
+        list.domains,
+      );
       if (match.matched) {
         foundIn.push({
-          type: 'blocklist',
+          type: "blocklist",
           source: list.url,
           groups: blocklistUrlToGroups.get(list.url),
           matchedDomain: match.matchedDomain,
@@ -716,10 +779,13 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     for (const list of allowlists) {
-      const match = this.domainMatchesSetWithMatch(normalizedDomain, list.domains);
+      const match = this.domainMatchesSetWithMatch(
+        normalizedDomain,
+        list.domains,
+      );
       if (match.matched) {
         foundIn.push({
-          type: 'allowlist',
+          type: "allowlist",
           source: list.url,
           groups: allowlistUrlToGroups.get(list.url),
           matchedDomain: match.matchedDomain,
@@ -732,7 +798,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       for (let i = 0; i < list.patterns.length; i++) {
         if (list.patterns[i].test(normalizedDomain)) {
           foundIn.push({
-            type: 'regex-blocklist',
+            type: "regex-blocklist",
             source: list.url,
             matchedPattern: list.rawPatterns[i],
             groups: regexBlocklistUrlToGroups.get(list.url),
@@ -746,7 +812,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       for (let i = 0; i < list.patterns.length; i++) {
         if (list.patterns[i].test(normalizedDomain)) {
           foundIn.push({
-            type: 'regex-allowlist',
+            type: "regex-allowlist",
             source: list.url,
             matchedPattern: list.rawPatterns[i],
             groups: regexAllowlistUrlToGroups.get(list.url),
@@ -786,7 +852,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       return {
         domain,
         groupName,
-        finalAction: 'none',
+        finalAction: "none",
         reasons: [],
         evaluation: `Group configuration not found`,
       };
@@ -798,28 +864,28 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       return {
         domain,
         groupName,
-        finalAction: 'none',
+        finalAction: "none",
         reasons: [],
         evaluation: `Group "${groupName}" not found`,
       };
     }
     const normalizedDomain = this.normalizeDomain(domain);
-    const reasons: GroupPolicyResult['reasons'] = [];
+    const reasons: GroupPolicyResult["reasons"] = [];
 
     // 1. Check manual entries (highest priority)
     if (group.allowed?.includes(normalizedDomain)) {
       reasons.push({
-        action: 'allow',
-        type: 'manual-allowed',
-        source: 'manual',
+        action: "allow",
+        type: "manual-allowed",
+        source: "manual",
       });
     }
 
     if (group.blocked?.includes(normalizedDomain)) {
       reasons.push({
-        action: 'block',
-        type: 'manual-blocked',
-        source: 'manual',
+        action: "block",
+        type: "manual-blocked",
+        source: "manual",
       });
     }
 
@@ -830,9 +896,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
           const regex = new RegExp(pattern);
           if (regex.test(normalizedDomain)) {
             reasons.push({
-              action: 'allow',
-              type: 'regex-allowlist',
-              source: 'manual',
+              action: "allow",
+              type: "regex-allowlist",
+              source: "manual",
               matchedPattern: pattern,
             });
           }
@@ -848,9 +914,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
           const regex = new RegExp(pattern);
           if (regex.test(normalizedDomain)) {
             reasons.push({
-              action: 'block',
-              type: 'regex-blocklist',
-              source: 'manual',
+              action: "block",
+              type: "regex-blocklist",
+              source: "manual",
               matchedPattern: pattern,
             });
           }
@@ -861,14 +927,17 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     // 2. Check allowlists (with wildcard subdomain matching)
-    const allowlistUrls = this.extractUrlsFromGroup(group, 'allowListUrls');
+    const allowlistUrls = this.extractUrlsFromGroup(group, "allowListUrls");
     const allowlists = await this.getOrFetchMultiple(nodeId, allowlistUrls);
     for (const list of allowlists) {
-      const match = this.domainMatchesSetWithMatch(normalizedDomain, list.domains);
+      const match = this.domainMatchesSetWithMatch(
+        normalizedDomain,
+        list.domains,
+      );
       if (match.matched) {
         reasons.push({
-          action: 'allow',
-          type: 'allowlist',
+          action: "allow",
+          type: "allowlist",
           source: list.url,
           matchedDomain: match.matchedDomain,
         });
@@ -876,14 +945,20 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     // 3. Check regex allowlists
-    const regexAllowlistUrls = this.extractUrlsFromGroup(group, 'allowListRegexUrls');
-    const regexAllowlists = await this.getOrFetchMultipleRegex(nodeId, regexAllowlistUrls);
+    const regexAllowlistUrls = this.extractUrlsFromGroup(
+      group,
+      "allowListRegexUrls",
+    );
+    const regexAllowlists = await this.getOrFetchMultipleRegex(
+      nodeId,
+      regexAllowlistUrls,
+    );
     for (const list of regexAllowlists) {
       for (let i = 0; i < list.patterns.length; i++) {
         if (list.patterns[i].test(normalizedDomain)) {
           reasons.push({
-            action: 'allow',
-            type: 'regex-allowlist',
+            action: "allow",
+            type: "regex-allowlist",
             source: list.url,
             matchedPattern: list.rawPatterns[i],
           });
@@ -893,14 +968,17 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     // 4. Check blocklists (with wildcard subdomain matching)
-    const blocklistUrls = this.extractUrlsFromGroup(group, 'blockListUrls');
+    const blocklistUrls = this.extractUrlsFromGroup(group, "blockListUrls");
     const blocklists = await this.getOrFetchMultiple(nodeId, blocklistUrls);
     for (const list of blocklists) {
-      const match = this.domainMatchesSetWithMatch(normalizedDomain, list.domains);
+      const match = this.domainMatchesSetWithMatch(
+        normalizedDomain,
+        list.domains,
+      );
       if (match.matched) {
         reasons.push({
-          action: 'block',
-          type: 'blocklist',
+          action: "block",
+          type: "blocklist",
           source: list.url,
           matchedDomain: match.matchedDomain,
         });
@@ -908,14 +986,20 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     // 5. Check regex blocklists
-    const regexBlocklistUrls = this.extractUrlsFromGroup(group, 'blockListRegexUrls');
-    const regexBlocklists = await this.getOrFetchMultipleRegex(nodeId, regexBlocklistUrls);
+    const regexBlocklistUrls = this.extractUrlsFromGroup(
+      group,
+      "blockListRegexUrls",
+    );
+    const regexBlocklists = await this.getOrFetchMultipleRegex(
+      nodeId,
+      regexBlocklistUrls,
+    );
     for (const list of regexBlocklists) {
       for (let i = 0; i < list.patterns.length; i++) {
         if (list.patterns[i].test(normalizedDomain)) {
           reasons.push({
-            action: 'block',
-            type: 'regex-blocklist',
+            action: "block",
+            type: "regex-blocklist",
             source: list.url,
             matchedPattern: list.rawPatterns[i],
           });
@@ -925,39 +1009,47 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Determine final action based on Technitium's precedence rules
-    let finalAction: 'blocked' | 'allowed' | 'none' = 'none';
-    let evaluation = '';
+    let finalAction: "blocked" | "allowed" | "none" = "none";
+    let evaluation = "";
 
     // Manual blocked takes highest priority
-    if (reasons.some((r) => r.type === 'manual-blocked')) {
-      finalAction = 'blocked';
-      evaluation = 'Domain is manually blocked in group configuration';
+    if (reasons.some((r) => r.type === "manual-blocked")) {
+      finalAction = "blocked";
+      evaluation = "Domain is manually blocked in group configuration";
     }
     // Then manual allowed
-    else if (reasons.some((r) => r.type === 'manual-allowed')) {
-      finalAction = 'allowed';
-      evaluation = 'Domain is manually allowed in group configuration';
+    else if (reasons.some((r) => r.type === "manual-allowed")) {
+      finalAction = "allowed";
+      evaluation = "Domain is manually allowed in group configuration";
     }
     // Then allowlists (regex or exact)
-    else if (reasons.some((r) => r.type === 'allowlist' || r.type === 'regex-allowlist')) {
-      finalAction = 'allowed';
+    else if (
+      reasons.some(
+        (r) => r.type === "allowlist" || r.type === "regex-allowlist",
+      )
+    ) {
+      finalAction = "allowed";
       const count = reasons.filter(
-        (r) => r.type === 'allowlist' || r.type === 'regex-allowlist',
+        (r) => r.type === "allowlist" || r.type === "regex-allowlist",
       ).length;
-      evaluation = `Domain found in ${count} allowlist${count > 1 ? 's' : ''}`;
+      evaluation = `Domain found in ${count} allowlist${count > 1 ? "s" : ""}`;
     }
     // Finally blocklists (regex or exact)
-    else if (reasons.some((r) => r.type === 'blocklist' || r.type === 'regex-blocklist')) {
-      finalAction = 'blocked';
+    else if (
+      reasons.some(
+        (r) => r.type === "blocklist" || r.type === "regex-blocklist",
+      )
+    ) {
+      finalAction = "blocked";
       const count = reasons.filter(
-        (r) => r.type === 'blocklist' || r.type === 'regex-blocklist',
+        (r) => r.type === "blocklist" || r.type === "regex-blocklist",
       ).length;
-      evaluation = `Domain found in ${count} blocklist${count > 1 ? 's' : ''}`;
+      evaluation = `Domain found in ${count} blocklist${count > 1 ? "s" : ""}`;
     }
     // Not found in any list
     else {
-      finalAction = 'none';
-      evaluation = 'Domain not found in any lists (allowed by default)';
+      finalAction = "none";
+      evaluation = "Domain not found in any lists (allowed by default)";
     }
 
     return {
@@ -976,7 +1068,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     nodeId: string,
     query: string,
     options: {
-      type?: 'blocklist' | 'allowlist' | 'regex-blocklist' | 'regex-allowlist';
+      type?: "blocklist" | "allowlist" | "regex-blocklist" | "regex-allowlist";
       limit?: number;
     } = {},
   ): Promise<ListSearchResult[]> {
@@ -990,14 +1082,14 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       return [];
     }
 
-    const { type = 'blocklist', limit = 100 } = options;
+    const { type = "blocklist", limit = 100 } = options;
 
     // Handle regex lists
-    if (type === 'regex-blocklist' || type === 'regex-allowlist') {
+    if (type === "regex-blocklist" || type === "regex-allowlist") {
       const urls =
-        type === 'regex-blocklist'
-          ? this.extractAllUrls(config, 'blockListRegexUrls')
-          : this.extractAllUrls(config, 'allowListRegexUrls');
+        type === "regex-blocklist" ?
+          this.extractAllUrls(config, "blockListRegexUrls")
+        : this.extractAllUrls(config, "allowListRegexUrls");
 
       const lists = await this.getOrFetchMultipleRegex(nodeId, urls);
       const normalizedQuery = this.normalizeDomain(query).toLowerCase();
@@ -1022,9 +1114,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
     // Handle exact domain lists
     const urls =
-      type === 'blocklist'
-        ? this.extractAllUrls(config, 'blockListUrls')
-        : this.extractAllUrls(config, 'allowListUrls');
+      type === "blocklist" ?
+        this.extractAllUrls(config, "blockListUrls")
+      : this.extractAllUrls(config, "allowListUrls");
 
     const lists = await this.getOrFetchMultiple(nodeId, urls);
     const normalizedQuery = this.normalizeDomain(query).toLowerCase();
@@ -1118,14 +1210,14 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
    */
   clearAllCaches(): void {
     this.cache.clear();
-    this.logger.log('Cleared all blocklist caches');
+    this.logger.log("Cleared all blocklist caches");
   }
 
   /**
    * Generate a hash of the list URL configuration to detect changes
    */
   private generateConfigHash(config: AdvancedBlockingConfig | null): string {
-    if (!config) return '';
+    if (!config) return "";
 
     // Collect all URLs from all groups, sorted for consistent hashing
     const allUrls = new Set<string>();
@@ -1133,10 +1225,14 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     const groups = Array.isArray(config.groups) ? config.groups : [];
     for (const group of groups) {
       // Collect URLs from typed fields
-      const blockListEntries: AdvancedBlockingUrlEntry[] = group.blockListUrls ?? [];
-      const allowListEntries: AdvancedBlockingUrlEntry[] = group.allowListUrls ?? [];
-      const blockListRegexEntries: AdvancedBlockingUrlEntry[] = group.regexBlockListUrls ?? [];
-      const allowListRegexEntries: AdvancedBlockingUrlEntry[] = group.regexAllowListUrls ?? [];
+      const blockListEntries: AdvancedBlockingUrlEntry[] =
+        group.blockListUrls ?? [];
+      const allowListEntries: AdvancedBlockingUrlEntry[] =
+        group.allowListUrls ?? [];
+      const blockListRegexEntries: AdvancedBlockingUrlEntry[] =
+        group.regexBlockListUrls ?? [];
+      const allowListRegexEntries: AdvancedBlockingUrlEntry[] =
+        group.regexAllowListUrls ?? [];
 
       const allEntries = [
         ...blockListEntries,
@@ -1146,17 +1242,17 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       ];
 
       for (const entry of allEntries) {
-        const url = typeof entry === 'string' ? entry : entry.url;
+        const url = typeof entry === "string" ? entry : entry.url;
         if (url) allUrls.add(url);
       }
     }
 
     // Sort URLs and create a stable string representation
     const sortedUrls = Array.from(allUrls).sort();
-    const configString = sortedUrls.join('|');
+    const configString = sortedUrls.join("|");
 
     // Hash the configuration
-    return createHash('sha256').update(configString).digest('hex');
+    return createHash("sha256").update(configString).digest("hex");
   }
 
   /**
@@ -1184,7 +1280,10 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
       return false;
     } catch (error) {
-      this.logger.error(`Failed to check config changes for node ${nodeId}:`, error);
+      this.logger.error(
+        `Failed to check config changes for node ${nodeId}:`,
+        error,
+      );
       return false;
     }
   }
@@ -1216,12 +1315,16 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
    */
   private extractUrlsFromGroup(
     group: AdvancedBlockingGroup,
-    field: 'blockListUrls' | 'allowListUrls' | 'blockListRegexUrls' | 'allowListRegexUrls',
+    field:
+      | "blockListUrls"
+      | "allowListUrls"
+      | "blockListRegexUrls"
+      | "allowListRegexUrls",
   ): string[] {
     const urls: string[] = [];
     const entries = (group[field] as AdvancedBlockingUrlEntry[]) || [];
     for (const entry of entries) {
-      const url = typeof entry === 'string' ? entry : entry.url;
+      const url = typeof entry === "string" ? entry : entry.url;
       if (url) urls.push(url);
     }
     return urls;
@@ -1229,7 +1332,11 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
   private extractAllUrls(
     config: AdvancedBlockingConfig,
-    field: 'blockListUrls' | 'allowListUrls' | 'blockListRegexUrls' | 'allowListRegexUrls',
+    field:
+      | "blockListUrls"
+      | "allowListUrls"
+      | "blockListRegexUrls"
+      | "allowListRegexUrls",
   ): string[] {
     const urls = new Set<string>();
     const groups = Array.isArray(config.groups) ? config.groups : [];
@@ -1237,7 +1344,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     for (const group of groups) {
       const entries = (group[field] as AdvancedBlockingUrlEntry[]) || [];
       for (const entry of entries) {
-        const url = typeof entry === 'string' ? entry : entry.url;
+        const url = typeof entry === "string" ? entry : entry.url;
         if (url) urls.add(url);
       }
     }
@@ -1250,7 +1357,11 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
    */
   private buildUrlToGroupsMap(
     config: AdvancedBlockingConfig,
-    field: 'blockListUrls' | 'allowListUrls' | 'blockListRegexUrls' | 'allowListRegexUrls',
+    field:
+      | "blockListUrls"
+      | "allowListUrls"
+      | "blockListRegexUrls"
+      | "allowListRegexUrls",
   ): Map<string, string[]> {
     const urlToGroups = new Map<string, string[]>();
     const groups = Array.isArray(config.groups) ? config.groups : [];
@@ -1258,7 +1369,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     for (const group of groups) {
       const entries = (group[field] as AdvancedBlockingUrlEntry[]) || [];
       for (const entry of entries) {
-        const url = typeof entry === 'string' ? entry : entry.url;
+        const url = typeof entry === "string" ? entry : entry.url;
         if (url) {
           if (!urlToGroups.has(url)) {
             urlToGroups.set(url, []);
@@ -1274,11 +1385,17 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     return urlToGroups;
   }
 
-  private async getOrFetchMultiple(nodeId: string, urls: string[]): Promise<CachedList[]> {
+  private async getOrFetchMultiple(
+    nodeId: string,
+    urls: string[],
+  ): Promise<CachedList[]> {
     return Promise.all(urls.map((url) => this.getOrFetchList(nodeId, url)));
   }
 
-  private async getOrFetchList(nodeId: string, url: string): Promise<CachedList> {
+  private async getOrFetchList(
+    nodeId: string,
+    url: string,
+  ): Promise<CachedList> {
     const hash = this.hashUrl(url);
     const nodeCache = this.cache.get(nodeId) || new Map<string, CachedList>();
 
@@ -1287,17 +1404,17 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     const cached = nodeCache.get(hash);
-    if (cached && Date.now() - cached.fetchedAt.getTime() < this.refreshInterval) {
+    if (
+      cached &&
+      Date.now() - cached.fetchedAt.getTime() < this.refreshInterval
+    ) {
       return cached;
     }
 
     this.logger.log(`Fetching blocklist from ${url}`);
     try {
       const response = await firstValueFrom(
-        this.httpService.get(url, {
-          timeout: 30000,
-          responseType: 'text',
-        }),
+        this.httpService.get(url, { timeout: 30000, responseType: "text" }),
       );
 
       const content = response.data as string;
@@ -1318,19 +1435,21 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       );
 
       // Save to persistent storage (async, don't wait)
-      void this.persistenceService.saveCache(
-        nodeId,
-        url,
-        hash,
-        Array.from(domains),
-        null, // Not a regex list
-        lineCount,
-        commentCount,
-        response.headers?.['etag'],
-        response.headers?.['last-modified'],
-      ).catch(err => {
-        this.logger.error(`Failed to persist cache for ${url}:`, err);
-      });
+      void this.persistenceService
+        .saveCache(
+          nodeId,
+          url,
+          hash,
+          Array.from(domains),
+          null, // Not a regex list
+          lineCount,
+          commentCount,
+          response.headers?.["etag"] as string | undefined,
+          response.headers?.["last-modified"] as string | undefined,
+        )
+        .catch((err) => {
+          this.logger.error(`Failed to persist cache for ${url}:`, err);
+        });
 
       return cachedList;
     } catch (error) {
@@ -1354,20 +1473,22 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       nodeCache.set(hash, errorList);
 
       // Save error state to disk (async, don't wait)
-      void this.persistenceService.saveCache(
-        nodeId,
-        url,
-        hash,
-        [],
-        null,
-        0,
-        0,
-        undefined,
-        undefined,
-        errorList.errorMessage,
-      ).catch(err => {
-        this.logger.error(`Failed to persist error cache for ${url}:`, err);
-      });
+      void this.persistenceService
+        .saveCache(
+          nodeId,
+          url,
+          hash,
+          [],
+          null,
+          0,
+          0,
+          undefined,
+          undefined,
+          errorList.errorMessage,
+        )
+        .catch((err) => {
+          this.logger.error(`Failed to persist error cache for ${url}:`, err);
+        });
 
       return errorList;
     }
@@ -1380,36 +1501,43 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     nodeId: string,
     urls: string[],
   ): Promise<CachedRegexList[]> {
-    return Promise.all(urls.map((url) => this.getOrFetchRegexList(nodeId, url)));
+    return Promise.all(
+      urls.map((url) => this.getOrFetchRegexList(nodeId, url)),
+    );
   }
 
   /**
    * Fetch or retrieve a single regex list from cache
    */
-  private async getOrFetchRegexList(nodeId: string, url: string): Promise<CachedRegexList> {
+  private async getOrFetchRegexList(
+    nodeId: string,
+    url: string,
+  ): Promise<CachedRegexList> {
     const hash = this.hashUrl(url);
-    const nodeCache = this.regexCache.get(nodeId) || new Map<string, CachedRegexList>();
+    const nodeCache =
+      this.regexCache.get(nodeId) || new Map<string, CachedRegexList>();
 
     if (!this.regexCache.has(nodeId)) {
       this.regexCache.set(nodeId, nodeCache);
     }
 
     const cached = nodeCache.get(hash);
-    if (cached && Date.now() - cached.fetchedAt.getTime() < this.refreshInterval) {
+    if (
+      cached &&
+      Date.now() - cached.fetchedAt.getTime() < this.refreshInterval
+    ) {
       return cached;
     }
 
     this.logger.log(`Fetching regex blocklist from ${url}`);
     try {
       const response = await firstValueFrom(
-        this.httpService.get(url, {
-          timeout: 30000,
-          responseType: 'text',
-        }),
+        this.httpService.get(url, { timeout: 30000, responseType: "text" }),
       );
 
       const content = response.data as string;
-      const { patterns, rawPatterns, lineCount, commentCount } = this.parseRegexPatterns(content);
+      const { patterns, rawPatterns, lineCount, commentCount } =
+        this.parseRegexPatterns(content);
 
       const cachedList: CachedRegexList = {
         url,
@@ -1427,19 +1555,21 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       );
 
       // Save to persistent storage (async, don't wait)
-      void this.persistenceService.saveCache(
-        nodeId,
-        url,
-        hash,
-        null, // Not a regular list
-        rawPatterns,
-        lineCount,
-        commentCount,
-        response.headers?.['etag'],
-        response.headers?.['last-modified'],
-      ).catch(err => {
-        this.logger.error(`Failed to persist regex cache for ${url}:`, err);
-      });
+      void this.persistenceService
+        .saveCache(
+          nodeId,
+          url,
+          hash,
+          null, // Not a regular list
+          rawPatterns,
+          lineCount,
+          commentCount,
+          response.headers?.["etag"] as string | undefined,
+          response.headers?.["last-modified"] as string | undefined,
+        )
+        .catch((err) => {
+          this.logger.error(`Failed to persist regex cache for ${url}:`, err);
+        });
 
       return cachedList;
     } catch (error) {
@@ -1464,20 +1594,25 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       nodeCache.set(hash, errorList);
 
       // Save error state to disk (async, don't wait)
-      void this.persistenceService.saveCache(
-        nodeId,
-        url,
-        hash,
-        null,
-        [],
-        0,
-        0,
-        undefined,
-        undefined,
-        errorList.errorMessage,
-      ).catch(err => {
-        this.logger.error(`Failed to persist error regex cache for ${url}:`, err);
-      });
+      void this.persistenceService
+        .saveCache(
+          nodeId,
+          url,
+          hash,
+          null,
+          [],
+          0,
+          0,
+          undefined,
+          undefined,
+          errorList.errorMessage,
+        )
+        .catch((err) => {
+          this.logger.error(
+            `Failed to persist error regex cache for ${url}:`,
+            err,
+          );
+        });
 
       return errorList;
     }
@@ -1499,7 +1634,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       if (!trimmed) continue;
 
       // Skip comments
-      if (trimmed.startsWith('#') || trimmed.startsWith('!')) {
+      if (trimmed.startsWith("#") || trimmed.startsWith("!")) {
         commentCount++;
         continue;
       }
@@ -1514,11 +1649,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    return {
-      domains,
-      lineCount: lines.length,
-      commentCount,
-    };
+    return { domains, lineCount: lines.length, commentCount };
   }
 
   /**
@@ -1543,14 +1674,14 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       if (!trimmed) continue;
 
       // Skip comments
-      if (trimmed.startsWith('#') || trimmed.startsWith('!')) {
+      if (trimmed.startsWith("#") || trimmed.startsWith("!")) {
         commentCount++;
         continue;
       }
 
       // Attempt to compile regex pattern
       try {
-        const pattern = new RegExp(trimmed, 'i'); // Case-insensitive
+        const pattern = new RegExp(trimmed, "i"); // Case-insensitive
         patterns.push(pattern);
         rawPatterns.push(trimmed);
       } catch (error) {
@@ -1561,12 +1692,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    return {
-      patterns,
-      rawPatterns,
-      lineCount: lines.length,
-      commentCount,
-    };
+    return { patterns, rawPatterns, lineCount: lines.length, commentCount };
   }
 
   /**
@@ -1585,9 +1711,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
     // Check if any parent domain matches (wildcard matching)
     // For "test.gambling.com", check "gambling.com", then "com"
-    const parts = domain.split('.');
+    const parts = domain.split(".");
     for (let i = 1; i < parts.length; i++) {
-      const parentDomain = parts.slice(i).join('.');
+      const parentDomain = parts.slice(i).join(".");
       if (domainSet.has(parentDomain)) {
         return true;
       }
@@ -1596,7 +1722,10 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     return false;
   }
 
-  private domainMatchesSetWithMatch(domain: string, domainSet: Set<string>): { matched: boolean; matchedDomain?: string } {
+  private domainMatchesSetWithMatch(
+    domain: string,
+    domainSet: Set<string>,
+  ): { matched: boolean; matchedDomain?: string } {
     // First check for exact match (fast O(1) lookup)
     if (domainSet.has(domain)) {
       return { matched: true, matchedDomain: domain };
@@ -1604,9 +1733,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
     // Check if any parent domain matches (wildcard matching)
     // For "test.gambling.com", check "gambling.com", then "com"
-    const parts = domain.split('.');
+    const parts = domain.split(".");
     for (let i = 1; i < parts.length; i++) {
-      const parentDomain = parts.slice(i).join('.');
+      const parentDomain = parts.slice(i).join(".");
       if (domainSet.has(parentDomain)) {
         return { matched: true, matchedDomain: parentDomain };
       }
@@ -1616,7 +1745,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   private hashUrl(url: string): string {
-    return createHash('sha256').update(url).digest('hex');
+    return createHash("sha256").update(url).digest("hex");
   }
 
   private listToMetadata(list: CachedList): ListMetadata {
@@ -1659,6 +1788,8 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     // - Must start with alphanumeric
     // - Can contain alphanumeric and hyphens (but not at the end of a label)
     // - Can optionally have dots with more labels
-    return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(domain);
+    return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(
+      domain,
+    );
   }
 }

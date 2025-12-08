@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faChartLine, faFileLines, faShield, faMagnifyingGlass, faGlobe, faPlug, faBolt, faSun, faMoon, faCircleInfo } from '@fortawesome/free-solid-svg-icons';
-import { useTheme } from '../../context/ThemeContext';
+import { useTheme } from '../../context/theme-context';
 import { AboutModal } from '../common/AboutModal';
 
 export function Header() {

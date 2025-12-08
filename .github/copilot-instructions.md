@@ -249,13 +249,13 @@ npm run preview       # Preview production build
 
 ### Phase 1: Basic Functionality
 
-- [ ] Create a web application using a responsive framework (e.g., React, Vue.js).
+- [x] Create a web application using a responsive framework (e.g., React, Vue.js).
 - [ ] Implement login and authentication for Technitium DNS servers.
-- [ ] Implement a dashboard to display the status of connected Technitium DNS servers.
-- [ ] Implement functionality to connect multiple Technitium DNS servers.
-- [ ] Implement synchronization of basic settings (e.g., DNS records, DHCP settings) across multiple Technitium DNS servers.
+- [x] Implement a dashboard to display the status of connected Technitium DNS servers.
+- [x] Implement functionality to connect multiple Technitium DNS servers.
+- [x] Implement synchronization of basic settings (e.g., DNS records, DHCP settings) across multiple Technitium DNS servers (DHCP sync implemented; DNS & DHCP settings aggregation in progress).
 - [ ] Implement conflict resolution for settings.
-- [ ] Implement logging and error handling.
+- [x] Implement logging and error handling (basic error handling, toasts and backend status pages implemented).
 
 ### Phase 2: Advanced Blocking Functionality
 

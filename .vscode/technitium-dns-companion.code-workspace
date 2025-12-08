@@ -1,14 +1,23 @@
 {
-	"folders": [
-		{
-			"path": ".."
-		}
-	],
-	"settings": {
-		"sshfs.configs": [],
-		"python.analysis.include": [
-			"**/*.py"
-		],
-		"python.analysis.diagnosticMode": "openFilesOnly"
-	}
+  "folders": [{ "path": ".." }],
+  "settings": {
+    "sshfs.configs": [],
+    "python.analysis.include": ["**/*.py"],
+    "python.analysis.diagnosticMode": "openFilesOnly",
+    "[javascript]": { "editor.defaultFormatter": "prettier.prettier-vscode" },
+    "[javascriptreact]": {
+      "editor.defaultFormatter": "prettier.prettier-vscode",
+    },
+    "[json]": { "editor.defaultFormatter": "prettier.prettier-vscode" },
+    "[jsonc]": { "editor.defaultFormatter": "prettier.prettier-vscode" },
+    "[typescript]": { "editor.defaultFormatter": "prettier.prettier-vscode" },
+    "[typescriptreact]": {
+      "editor.defaultFormatter": "prettier.prettier-vscode",
+    },
+    "prettier.tabWidth": 2,
+    "editor.formatOnSave": true,
+    "editor.formatOnSaveMode": "file",
+    "editor.tabSize": 2,
+    "editor.bracketPairColorization.independentColorPoolPerBracketType": true,
+  },
 }

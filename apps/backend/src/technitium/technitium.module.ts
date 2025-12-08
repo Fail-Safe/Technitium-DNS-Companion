@@ -1,17 +1,17 @@
-import { Module, Logger } from '@nestjs/common';
-import { HttpModule } from '@nestjs/axios';
-import { ThrottlerModule } from '@nestjs/throttler';
-import { TECHNITIUM_NODES_TOKEN } from './technitium.constants';
-import { TechnitiumService } from './technitium.service';
-import { TechnitiumController } from './technitium.controller';
-import { TechnitiumNodeConfig } from './technitium.types';
-import { AdvancedBlockingService } from './advanced-blocking.service';
-import { AdvancedBlockingController } from './advanced-blocking.controller';
-import { BuiltInBlockingService } from './built-in-blocking.service';
-import { BuiltInBlockingController } from './built-in-blocking.controller';
-import { DomainListCacheService } from './domain-list-cache.service';
-import { DomainListPersistenceService } from './domain-list-persistence.service';
-import { DomainListController } from './domain-list-cache.controller';
+import { Module, Logger } from "@nestjs/common";
+import { HttpModule } from "@nestjs/axios";
+import { ThrottlerModule } from "@nestjs/throttler";
+import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
+import { TechnitiumService } from "./technitium.service";
+import { TechnitiumController } from "./technitium.controller";
+import { TechnitiumNodeConfig } from "./technitium.types";
+import { AdvancedBlockingService } from "./advanced-blocking.service";
+import { AdvancedBlockingController } from "./advanced-blocking.controller";
+import { BuiltInBlockingService } from "./built-in-blocking.service";
+import { BuiltInBlockingController } from "./built-in-blocking.controller";
+import { DomainListCacheService } from "./domain-list-cache.service";
+import { DomainListPersistenceService } from "./domain-list-persistence.service";
+import { DomainListController } from "./domain-list-cache.controller";
 
 @Module({
   imports: [
@@ -35,15 +35,17 @@ import { DomainListController } from './domain-list-cache.controller';
     {
       provide: TECHNITIUM_NODES_TOKEN,
       useFactory: (): TechnitiumNodeConfig[] => {
-        const logger = new Logger('TechnitiumConfig');
+        const logger = new Logger("TechnitiumConfig");
         const rawNodes = process.env.TECHNITIUM_NODES;
         if (!rawNodes) {
-          logger.warn('No Technitium DNS nodes configured via TECHNITIUM_NODES');
+          logger.warn(
+            "No Technitium DNS nodes configured via TECHNITIUM_NODES",
+          );
           return [];
         }
 
         const ids = rawNodes
-          .split(',')
+          .split(",")
           .map((value) => value.trim())
           .filter(Boolean);
 
@@ -53,7 +55,7 @@ import { DomainListController } from './domain-list-cache.controller';
         const configs: TechnitiumNodeConfig[] = [];
 
         for (const id of ids) {
-          const sanitizedKey = id.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+          const sanitizedKey = id.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
           const name = process.env[`TECHNITIUM_${sanitizedKey}_NAME`];
           const baseUrl = process.env[`TECHNITIUM_${sanitizedKey}_BASE_URL`];
           // Check node-specific token first, then fall back to cluster token
@@ -90,7 +92,7 @@ import { DomainListController } from './domain-list-cache.controller';
 
         if (configs.length === 0) {
           logger.warn(
-            'Technitium DNS configuration contained node ids but none were fully configured.',
+            "Technitium DNS configuration contained node ids but none were fully configured.",
           );
         }
 
@@ -98,7 +100,17 @@ import { DomainListController } from './domain-list-cache.controller';
       },
     },
   ],
-  controllers: [TechnitiumController, AdvancedBlockingController, BuiltInBlockingController, DomainListController],
-  exports: [TechnitiumService, AdvancedBlockingService, BuiltInBlockingService, DomainListCacheService],
+  controllers: [
+    TechnitiumController,
+    AdvancedBlockingController,
+    BuiltInBlockingController,
+    DomainListController,
+  ],
+  exports: [
+    TechnitiumService,
+    AdvancedBlockingService,
+    BuiltInBlockingService,
+    DomainListCacheService,
+  ],
 })
-export class TechnitiumModule { }
+export class TechnitiumModule {}

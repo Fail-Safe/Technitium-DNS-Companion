@@ -25,6 +25,25 @@ export interface BlockingZoneListResponse {
     totalPages?: number;
     /** Current page number */
     pageNumber?: number;
+    /** Optional tree structure (when format=tree) */
+    tree?: DomainTreeNode;
+}
+
+/**
+ * Tree node representing a level in the DNS hierarchy
+ * Used for tree view display (TLD → 2LD → 3LD → subdomain)
+ */
+export interface DomainTreeNode {
+    /** Label at this level (e.g., "com", "example", "www") */
+    label: string;
+    /** Full domain name up to this point (e.g., "com", "example.com", "www.example.com") */
+    fullDomain: string;
+    /** Child nodes (subdomains) */
+    children: DomainTreeNode[];
+    /** Whether this node is a leaf (actual blocked/allowed domain) */
+    isLeaf: boolean;
+    /** Number of leaf domains under this node (for display counts) */
+    domainCount: number;
 }
 
 /**

@@ -1,21 +1,25 @@
-import { Controller, Get, Param } from '@nestjs/common';
-import { AdvancedBlockingService } from './advanced-blocking.service';
+import { Controller, Get, Param } from "@nestjs/common";
+import { AdvancedBlockingService } from "./advanced-blocking.service";
 import type {
   AdvancedBlockingSnapshot,
   AdvancedBlockingOverview,
   AdvancedBlockingCombinedOverview,
-} from './advanced-blocking.types';
+} from "./advanced-blocking.types";
 
-@Controller('advanced-blocking')
+@Controller("advanced-blocking")
 export class AdvancedBlockingController {
-  constructor(private readonly advancedBlockingService: AdvancedBlockingService) {}
+  constructor(
+    private readonly advancedBlockingService: AdvancedBlockingService,
+  ) {}
 
   /**
    * Get Advanced Blocking configuration for a specific node
    * Used by DNS Lookup page to fetch groups for the Policy Simulator
    */
-  @Get(':nodeId')
-  async getNodeConfig(@Param('nodeId') nodeId: string): Promise<AdvancedBlockingSnapshot> {
+  @Get(":nodeId")
+  async getNodeConfig(
+    @Param("nodeId") nodeId: string,
+  ): Promise<AdvancedBlockingSnapshot> {
     return this.advancedBlockingService.getSnapshot(nodeId);
   }
 
@@ -30,7 +34,7 @@ export class AdvancedBlockingController {
   /**
    * Get combined Advanced Blocking overview with group comparisons
    */
-  @Get('combined/overview')
+  @Get("combined/overview")
   async getCombinedOverview(): Promise<AdvancedBlockingCombinedOverview> {
     return this.advancedBlockingService.getCombinedAdvancedBlockingConfig();
   }
