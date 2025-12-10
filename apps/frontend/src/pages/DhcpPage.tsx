@@ -2270,7 +2270,6 @@ export function DhcpPage() {
   const trimmedCloneSubnetMask = cloneSubnetMask.trim();
   const trimmedCloneRouterAddress = cloneRouterAddress.trim();
   const trimmedCloneDnsServers = cloneDnsServers.trim();
-  const trimmedCloneDomainName = cloneDomainName.trim();
   const trimmedCloneDomainSearchList = cloneDomainSearchList.trim();
   const trimmedNewScopeName = newScopeName.trim();
   const trimmedRenameScopeName = renameScopeName.trim();
@@ -2294,12 +2293,13 @@ export function DhcpPage() {
     effectiveSubnetMask.length === 0 ||
     (cloneMode === "remote" && !targetNodeId) ||
     (cloneMode === "local" && trimmedNewScopeName.length === 0);
-  const renameSubmitDisabled =
+  const renameSubmitDisabled: boolean =
     renameState === "loading" ||
     updateState === "loading" ||
     cloneState === "loading" ||
     trimmedRenameScopeName.length === 0 ||
-    (selectedScopeName &&
+    (selectedScopeName !== undefined &&
+      selectedScopeName !== null &&
       trimmedRenameScopeName.toLowerCase() === selectedScopeName.toLowerCase());
 
   const prepareScopeOverrides = (

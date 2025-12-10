@@ -575,9 +575,9 @@ export class TechnitiumService {
       };
     } catch (error: unknown) {
       const name =
-        error instanceof Error && error.constructor ?
-          error.constructor.name
-        : "Unknown";
+        error instanceof Error && error.constructor
+          ? error.constructor.name
+          : "Unknown";
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
         `Failed to get cluster state for ${nodeId}: ${name} - ${message}`,
@@ -1345,18 +1345,18 @@ export class TechnitiumService {
       totalMatchingEntries > 0;
 
     const totalPages =
-      effectiveEntriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
-      : 1;
+      effectiveEntriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
+        : 1;
 
     const startIndex =
-      effectiveEntriesPerPage > 0 ?
-        (pageNumber - 1) * effectiveEntriesPerPage
-      : 0;
+      effectiveEntriesPerPage > 0
+        ? (pageNumber - 1) * effectiveEntriesPerPage
+        : 0;
     const endIndex =
-      effectiveEntriesPerPage > 0 ?
-        startIndex + effectiveEntriesPerPage
-      : totalMatchingEntries;
+      effectiveEntriesPerPage > 0
+        ? startIndex + effectiveEntriesPerPage
+        : totalMatchingEntries;
     const paginatedEntries = filteredEntries.slice(startIndex, endIndex);
 
     return {
@@ -1728,17 +1728,17 @@ export class TechnitiumService {
       anyNodeHitLimit && hasFiltersActive && totalMatchingEntries > 0;
 
     const totalPages =
-      effectiveEntriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
-      : 1;
+      effectiveEntriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
+        : 1;
     const startIndex =
-      effectiveEntriesPerPage > 0 ?
-        (pageNumber - 1) * effectiveEntriesPerPage
-      : 0;
+      effectiveEntriesPerPage > 0
+        ? (pageNumber - 1) * effectiveEntriesPerPage
+        : 0;
     const endIndex =
-      effectiveEntriesPerPage > 0 ?
-        startIndex + effectiveEntriesPerPage
-      : filteredEntries.length;
+      effectiveEntriesPerPage > 0
+        ? startIndex + effectiveEntriesPerPage
+        : filteredEntries.length;
     const paginatedEntries = filteredEntries.slice(startIndex, endIndex);
 
     const nodes: TechnitiumCombinedNodeLogSnapshot[] = snapshots.map(
@@ -1781,13 +1781,13 @@ export class TechnitiumService {
 
     // BENCHMARK: Log detailed metrics
     const hitRate =
-      this.queryLogCacheStats.hits + this.queryLogCacheStats.misses > 0 ?
-        (
-          (this.queryLogCacheStats.hits /
-            (this.queryLogCacheStats.hits + this.queryLogCacheStats.misses)) *
-          100
-        ).toFixed(1)
-      : "0.0";
+      this.queryLogCacheStats.hits + this.queryLogCacheStats.misses > 0
+        ? (
+            (this.queryLogCacheStats.hits /
+              (this.queryLogCacheStats.hits + this.queryLogCacheStats.misses)) *
+            100
+          ).toFixed(1)
+        : "0.0";
 
     this.logger.log(
       `[BENCHMARK] getCombinedQueryLogs: ` +
@@ -1834,9 +1834,8 @@ export class TechnitiumService {
     >(node, { method: "GET", url: "/api/zones/list" });
 
     const payload = this.unwrapApiResponse(envelope, node.id, "zone list");
-    const zones =
-      Array.isArray(payload.zones) ?
-        payload.zones.map((zone) => this.sanitizeZoneSummary(zone))
+    const zones = Array.isArray(payload.zones)
+      ? payload.zones.map((zone) => this.sanitizeZoneSummary(zone))
       : [];
 
     const pageNumber =
@@ -2002,9 +2001,8 @@ export class TechnitiumService {
         const totalZones =
           snapshot.data?.totalZones ??
           (snapshot.data ? snapshot.data.zones.length : undefined);
-        const modifiableZones =
-          snapshot.data ?
-            snapshot.data.zones.filter((zone) => zone.internal !== true).length
+        const modifiableZones = snapshot.data
+          ? snapshot.data.zones.filter((zone) => zone.internal !== true).length
           : undefined;
 
         return {
@@ -2070,9 +2068,9 @@ export class TechnitiumService {
     const sourceNode = this.findNode(sourceNodeId);
     const requestedTargetId = request.targetNodeId?.trim();
     const targetNode = this.findNode(
-      requestedTargetId && requestedTargetId.length > 0 ?
-        requestedTargetId
-      : sourceNode.id,
+      requestedTargetId && requestedTargetId.length > 0
+        ? requestedTargetId
+        : sourceNode.id,
     );
     const isLocalClone =
       targetNode.id.toLowerCase() === sourceNode.id.toLowerCase();
@@ -2193,8 +2191,9 @@ export class TechnitiumService {
       request.enableOnTarget ??
       (sourceSummary?.enabled !== undefined ? sourceSummary.enabled : false);
 
-    const enableDisableUrl =
-      desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+    const enableDisableUrl = desiredEnabled
+      ? "/api/dhcp/scopes/enable"
+      : "/api/dhcp/scopes/disable";
 
     const toggleEnvelope = await this.request<
       TechnitiumApiResponse<Record<string, unknown>>
@@ -2429,8 +2428,9 @@ export class TechnitiumService {
 
     if (wantsEnabledChange) {
       const desiredEnabled = request.enabled as boolean;
-      const enableDisableUrl =
-        desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+      const enableDisableUrl = desiredEnabled
+        ? "/api/dhcp/scopes/enable"
+        : "/api/dhcp/scopes/disable";
 
       const toggleEnvelope = await this.request<
         TechnitiumApiResponse<Record<string, unknown>>
@@ -2526,13 +2526,13 @@ export class TechnitiumService {
 
     // Filter to specific scopes if requested
     const scopesToSync =
-      scopeNames && scopeNames.length > 0 ?
-        sourceScopes.filter((scope) =>
-          scopeNames.some(
-            (name) => name.toLowerCase() === scope.name?.toLowerCase(),
-          ),
-        )
-      : sourceScopes;
+      scopeNames && scopeNames.length > 0
+        ? sourceScopes.filter((scope) =>
+            scopeNames.some(
+              (name) => name.toLowerCase() === scope.name?.toLowerCase(),
+            ),
+          )
+        : sourceScopes;
 
     if (scopesToSync.length === 0) {
       throw new BadRequestException("No scopes found to sync on source node.");
@@ -2653,9 +2653,7 @@ export class TechnitiumService {
       }
 
       const nodeStatus: import("./technitium.types").DhcpBulkSyncNodeResult["status"] =
-        failedCount === 0 ? "success"
-        : syncedCount > 0 ? "partial"
-        : "failed";
+        failedCount === 0 ? "success" : syncedCount > 0 ? "partial" : "failed";
 
       nodeResults.push({
         targetNodeId,
@@ -2952,9 +2950,9 @@ export class TechnitiumService {
         }
       } else {
         const paramsObject =
-          params && typeof params === "object" ?
-            (params as Record<string, unknown>)
-          : {};
+          params && typeof params === "object"
+            ? (params as Record<string, unknown>)
+            : {};
 
         if (!("token" in paramsObject)) {
           axiosConfig.params = { ...paramsObject, token: node.token };
@@ -3170,21 +3168,21 @@ export class TechnitiumService {
 
     assign(
       "allowOnlyReservedLeases",
-      hasOwn("allowOnlyReservedLeases") ?
-        scope.allowOnlyReservedLeases
-      : undefined,
+      hasOwn("allowOnlyReservedLeases")
+        ? scope.allowOnlyReservedLeases
+        : undefined,
     );
     assign(
       "blockLocallyAdministeredMacAddresses",
-      hasOwn("blockLocallyAdministeredMacAddresses") ?
-        scope.blockLocallyAdministeredMacAddresses
-      : undefined,
+      hasOwn("blockLocallyAdministeredMacAddresses")
+        ? scope.blockLocallyAdministeredMacAddresses
+        : undefined,
     );
     assign(
       "ignoreClientIdentifierOption",
-      hasOwn("ignoreClientIdentifierOption") ?
-        scope.ignoreClientIdentifierOption
-      : undefined,
+      hasOwn("ignoreClientIdentifierOption")
+        ? scope.ignoreClientIdentifierOption
+        : undefined,
     );
 
     return form;
@@ -3315,9 +3313,9 @@ export class TechnitiumService {
       if (axiosError.response) {
         const { status, data, statusText } = axiosError.response;
         const message =
-          typeof data === "string" ? data : (
-            ((data as Record<string, unknown>)?.message ?? statusText)
-          );
+          typeof data === "string"
+            ? data
+            : ((data as Record<string, unknown>)?.message ?? statusText);
 
         return new HttpException(
           {

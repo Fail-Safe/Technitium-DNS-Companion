@@ -191,9 +191,8 @@ export class BuiltInBlockingService {
       nodesWithAdvancedBlocking,
       nodesWithBuiltInBlocking,
       nodes: nodeStatuses,
-      conflictWarning:
-        hasConflict ?
-          "Both Built-in Blocking and Advanced Blocking are enabled on some nodes. This may cause unpredictable behavior. Consider disabling Built-in Blocking when using Advanced Blocking."
+      conflictWarning: hasConflict
+        ? "Both Built-in Blocking and Advanced Blocking are enabled on some nodes. This may cause unpredictable behavior. Consider disabling Built-in Blocking when using Advanced Blocking."
         : undefined,
     };
   }
@@ -230,12 +229,12 @@ export class BuiltInBlockingService {
 
         // Build full domain progressively (com → example.com → www.example.com)
         currentFullDomain =
-          i === 0 ? label : (
-            `${labels
-              .slice(0, i + 1)
-              .reverse()
-              .join(".")}`
-          );
+          i === 0
+            ? label
+            : `${labels
+                .slice(0, i + 1)
+                .reverse()
+                .join(".")}`;
 
         // Find or create child node
         let childNode = currentNode.children.find((c) => c.label === label);
@@ -571,9 +570,9 @@ export class BuiltInBlockingService {
     ) {
       // Technitium expects "false" (not an empty string) to clear existing URLs
       params.blockListUrls =
-        settings.blockListUrls.length === 0 ?
-          false
-        : settings.blockListUrls.join(",");
+        settings.blockListUrls.length === 0
+          ? false
+          : settings.blockListUrls.join(",");
     }
 
     if (settings.blockListUrlUpdateIntervalHours !== undefined) {
@@ -920,13 +919,11 @@ export class BuiltInBlockingService {
         // But contains subdomain parts when drilling deeper (e.g., ["www", "mail"] under "example.com")
         // If the zone already ends with the parent domain, it's a full domain name
         const fullDomain =
-          (
-            parentDomain &&
-            !zone.endsWith(`.${parentDomain}`) &&
-            zone !== parentDomain
-          ) ?
-            `${zone}.${parentDomain}`
-          : zone;
+          parentDomain &&
+          !zone.endsWith(`.${parentDomain}`) &&
+          zone !== parentDomain
+            ? `${zone}.${parentDomain}`
+            : zone;
 
         // Recurse to find actual blocked entries
         const subDomains = await this.getAllDomainsRecursive(
@@ -1068,9 +1065,8 @@ export class BuiltInBlockingService {
     params: BlockingZoneImportParams,
   ): Promise<BlockingZoneOperationResult> {
     try {
-      const listUrl =
-        Array.isArray(params.listUrl) ?
-          params.listUrl.join(",")
+      const listUrl = Array.isArray(params.listUrl)
+        ? params.listUrl.join(",")
         : params.listUrl;
       const queryParams = new URLSearchParams();
       queryParams.set("listUrl", listUrl);
