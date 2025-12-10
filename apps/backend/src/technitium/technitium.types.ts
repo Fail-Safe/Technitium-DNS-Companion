@@ -346,6 +346,17 @@ export interface TechnitiumCloneDhcpScopeResult {
   enabledOnTarget: boolean;
 }
 
+export interface TechnitiumRenameDhcpScopeRequest {
+  newScopeName: string;
+}
+
+export interface TechnitiumRenameDhcpScopeResult {
+  nodeId: string;
+  sourceScopeName: string;
+  targetScopeName: string;
+  enabled: boolean;
+}
+
 export interface TechnitiumUpdateDhcpScopeRequest {
   overrides?: TechnitiumDhcpScopeOverrides;
   enabled?: boolean;

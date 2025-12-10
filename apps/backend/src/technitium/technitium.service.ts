@@ -2191,9 +2191,7 @@ export class TechnitiumService {
 
     const desiredEnabled =
       request.enableOnTarget ??
-      (isLocalClone ? false
-      : sourceSummary?.enabled !== undefined ? sourceSummary.enabled
-      : false);
+      (sourceSummary?.enabled !== undefined ? sourceSummary.enabled : false);
 
     const enableDisableUrl =
       desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
@@ -2217,6 +2215,116 @@ export class TechnitiumService {
       sourceScopeName: normalizedScopeName,
       targetScopeName,
       enabledOnTarget: desiredEnabled,
+    };
+  }
+
+  async renameDhcpScope(
+    nodeId: string,
+    scopeName: string,
+    request: import("./technitium.types").TechnitiumRenameDhcpScopeRequest,
+  ): Promise<import("./technitium.types").TechnitiumRenameDhcpScopeResult> {
+    if (!request || !request.newScopeName) {
+      throw new BadRequestException("New scope name is required.");
+    }
+
+    const normalizedScopeName = this.normalizeScopeName(scopeName);
+    const normalizedNewName = this.normalizeScopeName(request.newScopeName);
+
+    if (!normalizedScopeName) {
+      throw new BadRequestException("Scope name is required.");
+    }
+
+    if (!normalizedNewName) {
+      throw new BadRequestException("New scope name cannot be empty.");
+    }
+
+    if (normalizedNewName.toLowerCase() === normalizedScopeName.toLowerCase()) {
+      throw new BadRequestException(
+        "New scope name must be different from the current name.",
+      );
+    }
+
+    const node = this.findNode(nodeId);
+
+    const [scopeEnvelope, listEnvelope] = await Promise.all([
+      this.request<TechnitiumApiResponse<TechnitiumDhcpScope>>(node, {
+        method: "GET",
+        url: "/api/dhcp/scopes/get",
+        params: { name: normalizedScopeName },
+      }),
+      this.request<TechnitiumApiResponse<TechnitiumDhcpScopeList>>(node, {
+        method: "GET",
+        url: "/api/dhcp/scopes/list",
+      }),
+    ]);
+
+    const sourceScope = this.unwrapApiResponse(
+      scopeEnvelope,
+      node.id,
+      `DHCP scope "${normalizedScopeName}"`,
+    );
+    const listPayload = this.unwrapApiResponse(
+      listEnvelope,
+      node.id,
+      "DHCP scope list",
+    );
+    const sourceSummary = (listPayload.scopes ?? []).find(
+      (scope) =>
+        scope.name?.toLowerCase() === normalizedScopeName.toLowerCase(),
+    );
+
+    const desiredEnabled = sourceSummary?.enabled ?? false;
+
+    const conflict = (listPayload.scopes ?? []).some(
+      (scope) => scope.name?.toLowerCase() === normalizedNewName.toLowerCase(),
+    );
+    if (conflict) {
+      throw new BadRequestException(
+        `DHCP scope "${normalizedNewName}" already exists on node "${node.id}". Choose a different name.`,
+      );
+    }
+
+    // Build the scope payload with the new name but send both name (old) and newName (new)
+    const sanitizedNewScope = JSON.parse(
+      JSON.stringify({ ...sourceScope, name: normalizedNewName }),
+    ) as TechnitiumDhcpScope;
+    const formData = this.buildDhcpScopeFormData(sanitizedNewScope);
+    formData.set("name", normalizedScopeName);
+    formData.set("newName", normalizedNewName);
+
+    const setEnvelope = await this.request<
+      TechnitiumApiResponse<Record<string, unknown>>
+    >(node, {
+      method: "POST",
+      url: "/api/dhcp/scopes/set",
+      data: formData.toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+    this.unwrapApiResponse(
+      setEnvelope,
+      node.id,
+      `rename DHCP scope "${normalizedScopeName}" → "${normalizedNewName}"`,
+    );
+
+    // Refresh enabled state from list (Technitium should preserve it across rename)
+    const refreshedListEnvelope = await this.request<
+      TechnitiumApiResponse<TechnitiumDhcpScopeList>
+    >(node, { method: "GET", url: "/api/dhcp/scopes/list" });
+    const refreshedList = this.unwrapApiResponse(
+      refreshedListEnvelope,
+      node.id,
+      "DHCP scope list",
+    );
+    const renamedSummary = (refreshedList.scopes ?? []).find(
+      (scope) => scope.name?.toLowerCase() === normalizedNewName.toLowerCase(),
+    );
+    const refreshedEnabled = renamedSummary?.enabled ?? desiredEnabled;
+
+    return {
+      nodeId: node.id,
+      sourceScopeName: normalizedScopeName,
+      targetScopeName: normalizedNewName,
+      enabled: refreshedEnabled,
     };
   }
 
@@ -2319,25 +2427,28 @@ export class TechnitiumService {
 
     let effectiveEnabled = currentEnabled;
 
-    if (wantsEnabledChange && request.enabled !== currentEnabled) {
+    if (wantsEnabledChange) {
+      const desiredEnabled = request.enabled as boolean;
+      const enableDisableUrl =
+        desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+
       const toggleEnvelope = await this.request<
         TechnitiumApiResponse<Record<string, unknown>>
       >(node, {
         method: "POST",
-        url:
-          request.enabled ?
-            "/api/dhcp/scopes/enable"
-          : "/api/dhcp/scopes/disable",
+        url: enableDisableUrl,
         params: { name: normalizedScopeName },
       });
       this.unwrapApiResponse(
         toggleEnvelope,
         node.id,
-        `${request.enabled ? "enable" : "disable"} DHCP scope "${normalizedScopeName}"`,
+        `${desiredEnabled ? "enable" : "disable"} DHCP scope "${normalizedScopeName}"`,
       );
-      effectiveEnabled = request.enabled ?? currentEnabled;
+
+      effectiveEnabled = desiredEnabled;
     }
 
+    // Fetch the updated scope for the response
     const updatedScopeEnvelope = await this.request<
       TechnitiumApiResponse<TechnitiumDhcpScope>
     >(node, {
@@ -2351,24 +2462,10 @@ export class TechnitiumService {
       `DHCP scope "${normalizedScopeName}"`,
     );
 
-    const refreshedListEnvelope = await this.request<
-      TechnitiumApiResponse<TechnitiumDhcpScopeList>
-    >(node, { method: "GET", url: "/api/dhcp/scopes/list" });
-    const refreshedList = this.unwrapApiResponse(
-      refreshedListEnvelope,
-      node.id,
-      "DHCP scope list",
-    );
-    const refreshedSummary = (refreshedList.scopes ?? []).find(
-      (scope) =>
-        scope.name?.toLowerCase() === normalizedScopeName.toLowerCase(),
-    );
-    const refreshedEnabled = refreshedSummary?.enabled ?? effectiveEnabled;
-
     return {
       nodeId: node.id,
       fetchedAt: new Date().toISOString(),
-      data: { scope: updatedScope, enabled: refreshedEnabled },
+      data: { scope: updatedScope, enabled: effectiveEnabled },
     };
   }
 
