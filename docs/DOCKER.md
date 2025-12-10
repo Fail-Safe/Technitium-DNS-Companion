@@ -1,1 +1,1 @@
---8<-- "../DOCKER.md"
+--8<-- "DOCKER.md"
