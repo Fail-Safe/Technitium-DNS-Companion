@@ -1,5 +1,3 @@
-# Technitium DNS Companion
-
 <!-- Pulls in the root README so the site stays in sync -->
 
 --8<-- "README.md"
