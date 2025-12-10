@@ -1,0 +1,26 @@
+site_name: Technitium DNS Companion
+site_url: https://fail-safe.github.io/Technitium-DNS-Companion/
+repo_url: https://github.com/Fail-Safe/Technitium-DNS-Companion
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: blue
+    - scheme: slate
+      primary: indigo
+      accent: blue
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+nav:
+  - Home: index.md
+markdown_extensions:
+  - toc:
+      permalink: true
+  - admonition
+  - codehilite
+  - pymdownx.snippets:
+      base_path: .
+plugins:
+  - search
