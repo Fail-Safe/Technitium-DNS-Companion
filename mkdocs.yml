@@ -13,6 +13,8 @@ theme:
       toggle:
         icon: material/weather-night
         name: Switch to light mode
+extra_css:
+  - assets/screenshots.css
 nav:
   - Home: index.md
 markdown_extensions:
