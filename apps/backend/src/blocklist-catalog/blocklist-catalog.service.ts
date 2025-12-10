@@ -265,9 +265,7 @@ export class BlockListCatalogService {
   /**
    * Compare current catalog with fetched lists to find updates
    */
-  async compareWithCatalog(
-    currentUrls: string[],
-  ): Promise<{
+  async compareWithCatalog(currentUrls: string[]): Promise<{
     newLists: HageziListInfo[];
     changedUrls: Array<{ oldUrl: string; newUrl: string; listName: string }>;
   }> {

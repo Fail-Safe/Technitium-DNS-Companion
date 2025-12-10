@@ -168,9 +168,8 @@ export function benchmarkCombinedLogs(
     entriesAfterFilter: metrics.entriesAfterFilter,
     entriesAfterDedup: metrics.entriesAfterDedup,
     entriesReturned: metrics.entriesReturned,
-    reductionRatio:
-      metrics.entriesAfterDedup ?
-        (
+    reductionRatio: metrics.entriesAfterDedup
+      ? (
           (1 - metrics.entriesAfterDedup / metrics.entriesAfterFilter) *
           100
         ).toFixed(1) + "%"

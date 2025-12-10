@@ -18,6 +18,7 @@ import type {
   TechnitiumQueryLogFilters,
   TechnitiumCloneDhcpScopeRequest,
   TechnitiumUpdateDhcpScopeRequest,
+  TechnitiumRenameDhcpScopeRequest,
   DhcpBulkSyncRequest,
 } from "./technitium.types";
 import type { AdvancedBlockingUpdateRequest } from "./advanced-blocking.types";
@@ -219,6 +220,27 @@ export class TechnitiumController {
     }
 
     return this.technitiumService.updateDhcpScope(nodeId, scopeName, payload);
+  }
+
+  @Post(":nodeId/dhcp/scopes/:scopeName/rename")
+  renameDhcpScope(
+    @Param("nodeId") nodeId: string,
+    @Param("scopeName") scopeName: string,
+    @Body() body: TechnitiumRenameDhcpScopeRequest,
+  ) {
+    if (!scopeName || scopeName.trim().length === 0) {
+      throw new BadRequestException("Scope name is required.");
+    }
+
+    if (!body || !body.newScopeName) {
+      throw new BadRequestException("New scope name is required.");
+    }
+
+    const payload: TechnitiumRenameDhcpScopeRequest = {
+      newScopeName: body.newScopeName.trim(),
+    };
+
+    return this.technitiumService.renameDhcpScope(nodeId, scopeName, payload);
   }
 
   @Delete(":nodeId/dhcp/scopes/:scopeName")

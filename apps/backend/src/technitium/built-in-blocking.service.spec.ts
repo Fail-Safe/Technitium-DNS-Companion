@@ -1,5 +1,6 @@
 import { BuiltInBlockingService } from "./built-in-blocking.service";
 import type { TechnitiumApiResponse } from "./technitium.types";
+import type { TechnitiumService } from "./technitium.service";
 
 describe("BuiltInBlockingService - export parsing", () => {
   it("preserves wildcard entries from export and strips comments/blank lines", async () => {
@@ -14,7 +15,7 @@ describe("BuiltInBlockingService - export parsing", () => {
 
     const executeAction = jest
       .fn()
-      .mockImplementation(async (_nodeId: string, options: { url: string }) => {
+      .mockImplementation((_nodeId: string, options: { url: string }) => {
         if (options.url === "/api/blocked/export") {
           // Export endpoint returns plain text
           return exportPayload as unknown as TechnitiumApiResponse<string>;
@@ -22,9 +23,11 @@ describe("BuiltInBlockingService - export parsing", () => {
         throw new Error(`Unexpected URL: ${options.url}`);
       });
 
-    const service = new BuiltInBlockingService({
+    const fakeTechnitiumService = {
       executeAction,
-    } as unknown as any);
+    } as unknown as TechnitiumService;
+
+    const service = new BuiltInBlockingService(fakeTechnitiumService);
 
     const result = await service.listBlockedZones("node1");
 
