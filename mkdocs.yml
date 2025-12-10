@@ -24,3 +24,17 @@ markdown_extensions:
       base_path: .
 plugins:
   - search
+  - exclude:
+      glob:
+        - "features/**"
+        - "implementation/**"
+        - "performance/**"
+        - "ui/**"
+        - "zone-comparison/**"
+        - "apps/**"
+        - "configs/**"
+        - "PWA_README.md"
+        - "REMOTE_DEVELOPMENT.md"
+        - "TESTING.md"
+        - "architecture.md"
+        - "release-notes.md"
