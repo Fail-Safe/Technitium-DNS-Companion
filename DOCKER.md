@@ -1,4 +1,4 @@
-# Technitium DNS Companion - Docker Guide
+# Technitium DNS Companion - Getting Started Guide
 
 Getting started is quick and easy with Docker (or an equivalent container runtime). Just a few environment variables are needed to connect to your Technitium DNS nodes.
 
@@ -27,32 +27,36 @@ docker compose up -d --build
 
 3. **Enable HTTPS (optional but recommended)**
 
-- Place certs in `certs/`:
+Place certs in `certs/`:
 
-  ```
-  certs/
-  ├── fullchain.pem
-  └── privkey.pem
-  ```
+```
+certs/
+├── fullchain.pem
+└── privkey.pem
+```
 
-- In `.env`, set:
+In `.env`, set:
 
-  ```bash
-  HTTPS_ENABLED=true
-  HTTPS_PORT=3443
-  HTTPS_CERT_PATH=/app/certs/fullchain.pem
-  HTTPS_KEY_PATH=/app/certs/privkey.pem
-  # HTTPS_CA_PATH=/app/certs/chain.pem  # optional
-  ```
+```bash
+HTTPS_ENABLED=true
+HTTPS_PORT=3443
+HTTPS_CERT_PATH=/app/certs/fullchain.pem
+HTTPS_KEY_PATH=/app/certs/privkey.pem
+# HTTPS_CA_PATH=/app/certs/chain.pem  # optional
+```
 
-- In `docker-compose.yml`, uncomment the certs volume:
+In `docker-compose.yml`, uncomment the certs volume:
 
-  ```yaml
-  volumes:
-    - ./certs:/app/certs:ro
-  ```
+```yaml
+volumes:
+  - ./certs:/app/certs:ro
+```
 
-- Restart: `docker compose down && docker compose up -d --build`
+Restart:
+
+```bash
+docker compose down && docker compose up -d --build
+```
 
 4. **Operations**
 
