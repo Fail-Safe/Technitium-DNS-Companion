@@ -17,6 +17,7 @@ extra_css:
   - assets/screenshots.css
 nav:
   - Home: index.md
+  - Docker: DOCKER.md
 markdown_extensions:
   - toc:
       permalink: true

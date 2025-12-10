@@ -1,6 +1,7 @@
 # Technitium DNS Companion
 
 A multi-node companion tool for aiding in day-to-day management of Technitium DNS servers. Currently offers additional functionality for:
+
 - DNS Query Logs (DNS Logs)
 - Advanced Blocking App upkeep (DNS Filtering)
 - DNS Zone Insight (DNS Zones)
@@ -75,9 +76,10 @@ TECHNITIUM_SECONDARY2_BASE_URL=https://secondary2.home.arpa:53443
 TECHNITIUM_SECONDARY2_TOKEN=shared-cluster-token  # Same token!
 ```
 
-**📄 Example config:** See [`configs/.env.example.v14`](./configs/.env.example.v14)
+**📄 Example config:** See [`configs/.env.example.v14`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/configs/.env.example.v14)
 
 **Cluster Features:**
+
 - ✅ Automatic cluster detection
 - ✅ Primary/Secondary role awareness
 - ✅ Write operations restricted to Primary node
@@ -102,9 +104,10 @@ TECHNITIUM_NODE3_BASE_URL=https://dns3.yourdomain.com:5380
 TECHNITIUM_NODE3_TOKEN=unique-token-for-node3
 ```
 
-**📄 Example config:** See [`configs/.env.example.v13`](./configs/.env.example.v13)
+**📄 Example config:** See [`configs/.env.example.v13`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/configs/.env.example.v13)
 
 **Standalone Features:**
+
 - ✅ All nodes shown as "Standalone"
 - ✅ No write restrictions (all nodes can be modified)
 - ✅ Sync tab available for manual synchronization
