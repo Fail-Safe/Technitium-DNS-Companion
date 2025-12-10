@@ -28,12 +28,15 @@ docker compose up -d --build
 3. **Enable HTTPS (optional but recommended)**
 
 - Place certs in `certs/`:
+
   ```
   certs/
   ├── fullchain.pem
   └── privkey.pem
   ```
+
 - In `.env`, set:
+
   ```bash
   HTTPS_ENABLED=true
   HTTPS_PORT=3443
@@ -41,11 +44,14 @@ docker compose up -d --build
   HTTPS_KEY_PATH=/app/certs/privkey.pem
   # HTTPS_CA_PATH=/app/certs/chain.pem  # optional
   ```
+
 - In `docker-compose.yml`, uncomment the certs volume:
+
   ```yaml
   volumes:
     - ./certs:/app/certs:ro
   ```
+
 - Restart: `docker compose down && docker compose up -d --build`
 
 4. **Operations**
