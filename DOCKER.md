@@ -1,8 +1,8 @@
 # Technitium DNS Companion - Docker Guide
 
-Production is the default choice for most users. Development containers are only needed when you want hot-reload while contributing.
+Getting started is quick and easy with Docker (or an equivalent container runtime). Just a few environment variables are needed to connect to your Technitium DNS nodes.
 
-## Production (recommended)
+## Getting Started
 
 Runs the optimized single container that serves both the API and built frontend.
 
@@ -54,35 +54,9 @@ docker compose up -d --build
 - Restart: `docker compose restart`
 - Upgrade to latest code: `git pull && docker compose up -d --build`
 
-## Development (hot-reload, contributors)
-
-Uses `docker-compose.dev.yml`, host networking, and volume mounts for live code edits. This is heavier and meant for contributors, not production.
-
-1. **Prepare environment**
-
-- Copy `.env.example` to `.env` and set your node URLs/tokens.
-- Ensure `CORS_ORIGIN` includes your dev frontend (defaults to `http://localhost:5173,https://localhost:5174`).
-- Set HTTPS vars if you want HTTPS locally.
-
-2. **Run dev stack**
-
-```bash
-# From repository root
-docker compose -f docker-compose.dev.yml up --build
-```
-
-- Backend (watch mode): https://localhost:3443 (host network)
-- Frontend (Vite dev server): https://localhost:5174
-
-3. **Notes**
-
-- Source code is bind-mounted read-only; changes take effect immediately via HMR (frontend) and NestJS watch (backend).
-- `node_modules` live in named volumes and are auto-populated by `docker-entrypoint-dev.sh`.
-- If you change `package.json`, rebuild: `docker compose -f docker-compose.dev.yml up --build`.
-- HTTPS in dev: mount certs to `/app/certs` (adjust the example path in `docker-compose.dev.yml`) and set `HTTPS_ENABLED=true` and cert paths.
-
 ## Troubleshooting
 
 - Container will not start: `docker compose logs` then `docker compose config` to validate env vars.
-- Cannot reach nodes: exec into the container and curl the node URLs with your token to verify connectivity.
-- Frontend not updating (dev): rebuild or clear named volumes if dependencies changed.
+- Cannot connect to Technitium DNS nodes: Check URLs and tokens in `.env`.
+
+Need contributor/dev container instructions? See `DEVELOPMENT.md` or `docker-compose.dev.yml`.
