@@ -53,3 +53,4 @@ docker-compose.dev.yml
 docker-entrypoint-dev.sh
 Dockerfile.dev
 NEXT_STEPS.md
+/screenshots
