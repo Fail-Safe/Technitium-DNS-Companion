@@ -52,6 +52,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          annotations: |
+            org.opencontainers.image.title=Technitium DNS Companion
+            org.opencontainers.image.description=Web UI to manage and sync multiple Technitium DNS servers (Technitium DNS Companion)
           tags: |
             # Set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
@@ -75,6 +78,7 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           build-args: |
             BUILD_VERSION=${{ steps.package-version.outputs.version }}
             BUILD_REVISION=${{ github.sha }}
