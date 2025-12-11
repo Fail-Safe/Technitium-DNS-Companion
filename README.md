@@ -28,31 +28,30 @@ This project is **not affiliated with Technitium** but is built to complement Te
 
 ## Quick Start with Docker (or similar) [Recommended]
 
-The easiest way to deploy Technitium DNS Companion is using Docker:
+The fastest path is the download-and-run script (no repo clone required). For full options and HTTPS details, see [DOCKER.md](DOCKER.md).
+
+macOS/Linux:
 
 ```bash
-# 1. Get a copy of the example environment file
-curl -sL https://raw.githubusercontent.com/Fail-Safe/Technitium-DNS-Companion/main/.env.example -o technitium.env
-# Or wget:
-# wget -q https://raw.githubusercontent.com/Fail-Safe/Technitium-DNS-Companion/main/.env.example -O technitium.env
-# Or PowerShell:
-# Invoke-WebRequest -Uri "https://raw.githubusercontent.com/Fail-Safe/Technitium-DNS-Companion/main/.env.example" -OutFile "technitium.env"
-
-# 2. Edit technitium.env with your Technitium DNS server details
-# Edit the `TECHNITIUM_NODES`, `TECHNITIUM_*_BASE_URL`, and `TECHNITIUM_*_TOKEN` values depending on your environment.
-
-# 3. Run the Docker container with your environment settings file
-docker run --rm -p 3000:3000 -p 3443:3443 \
-  --env-file technitium.env \
-  -v technitium-dns-companion-data:/data \
-  ghcr.io/fail-safe/technitium-dns-companion:latest
-
-# 4. Access the web interface
-#  HTTP:  http://localhost:3000
-#  HTTPS: https://localhost:3443 (if HTTPS_ENABLED=true in .env)
+curl -fsSL https://raw.githubusercontent.com/Fail-Safe/Technitium-DNS-Companion/main/scripts/docker-quickstart.sh -o docker-quickstart.sh
+chmod +x docker-quickstart.sh
+./docker-quickstart.sh
 ```
 
-**📘 See [DOCKER.md](./DOCKER.md) for complete Docker deployment instructions**, including HTTPS setup, production deployment, and troubleshooting.
+Windows PowerShell:
+
+```powershell
+iwr https://raw.githubusercontent.com/Fail-Safe/Technitium-DNS-Companion/main/scripts/docker-quickstart.ps1 -OutFile docker-quickstart.ps1
+powershell -ExecutionPolicy Bypass -File .\docker-quickstart.ps1
+```
+
+What the script does:
+
+- Verifies Docker is running
+- Downloads .env.example into technitium.env if missing
+- Shows (and can run) the docker run command
+
+Then edit technitium.env with your Technitium DNS node URLs/tokens when prompted and launch. For manual docker run or compose instructions, head to [DOCKER.md](DOCKER.md).
 
 ## Configuration
 
