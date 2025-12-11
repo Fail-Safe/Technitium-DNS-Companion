@@ -14,11 +14,12 @@ DHCP Bulk Sync allows you to synchronize all DHCP scopes from a source node (e.g
 
 ## API Endpoint
 
-### `POST /api/dhcp/bulk-sync`
+### `POST /api/nodes/dhcp/bulk-sync`
 
 Synchronizes DHCP scopes from source node to target node(s).
 
 **Request Body:**
+
 ```typescript
 {
   sourceNodeId: string;           // e.g., "node1"
@@ -30,11 +31,13 @@ Synchronizes DHCP scopes from source node to target node(s).
 ```
 
 **Sync Strategies:**
-- **`skip-existing`**: Only sync scopes that don't exist on target. Leaves existing scopes untouched.
+
+- **`skip-existing`**: Only sync scopes that don't exist on target. Existing scopes are skipped **only if their config matches** (pool, lease times, router/DNS, exclusions, reservations, options). If a scope exists but differs, it's reported as skipped-with-differences so you can choose `overwrite-all` or `merge-missing` to update.
 - **`overwrite-all`**: Sync all scopes, overwriting any existing scopes with the same name.
 - **`merge-missing`**: Only add scopes that are missing on target. Same as `skip-existing`.
 
 **Response:**
+
 ```typescript
 {
   sourceNodeId: string;
@@ -72,9 +75,9 @@ The `bulkSyncDhcpScopes()` function is available in `TechnitiumContext`:
 const { bulkSyncDhcpScopes } = useTechnitiumState();
 
 const result = await bulkSyncDhcpScopes({
-  sourceNodeId: 'node1',
-  targetNodeIds: ['node2'],
-  strategy: 'skip-existing',
+  sourceNodeId: "node1",
+  targetNodeIds: ["node2"],
+  strategy: "skip-existing",
   enableOnTarget: true,
 });
 
@@ -92,6 +95,7 @@ console.log(`Failed: ${result.totalFailed}`);
 **Location**: `apps/frontend/src/pages/DhcpPage.tsx`
 
 **Placement Options**:
+
 - Header area (next to scope table)
 - Floating action button
 - In a dropdown menu
@@ -103,6 +107,7 @@ console.log(`Failed: ${result.totalFailed}`);
 **Components Needed**:
 
 **a) Sync Configuration Form**:
+
 - Source Node selector (dropdown: NODE1, NODE2)
 - Target Node(s) selector (checkboxes for multi-select)
 - Strategy selector (radio buttons):
@@ -112,11 +117,13 @@ console.log(`Failed: ${result.totalFailed}`);
 - Enable on target checkbox
 
 **b) Scope Selection (Optional)**:
+
 - "Sync all scopes" checkbox (default: checked)
 - If unchecked, show list of scopes with checkboxes
 - Filter/search scopes
 
 **c) Preview/Confirmation**:
+
 - Show count of scopes to sync
 - Show which scopes exist on target (will be skipped/overwritten)
 - Confirm button
@@ -124,11 +131,13 @@ console.log(`Failed: ${result.totalFailed}`);
 ### 3. Progress Indication
 
 **During Sync**:
+
 - Loading spinner with "Synchronizing X scopes..."
 - Progress bar (if possible to show per-scope progress)
 - Cancel option (if needed)
 
 **After Sync**:
+
 - Success toast: "Synced 5 scopes from NODE1 to NODE2"
 - Summary modal:
   - ✅ 5 synced
@@ -140,12 +149,14 @@ console.log(`Failed: ${result.totalFailed}`);
 ### 4. Error Handling
 
 **Common Errors**:
+
 - Source node offline: "Cannot connect to source node NODE1"
 - Target node offline: "Cannot sync to NODE2 (offline)"
 - Partial failure: "Synced 3 of 5 scopes. 2 failed."
 - No scopes to sync: "No scopes found on source node"
 
 **UI Response**:
+
 - Clear error messages
 - Retry button
 - View error details
@@ -157,27 +168,27 @@ console.log(`Failed: ${result.totalFailed}`);
 1. User clicks "Bulk Sync" button on DHCP page
 2. Modal opens with sync configuration:
    ```
-   ┌─ Bulk Sync DHCP Scopes ──────────────────┐
-   │                                           │
-   │ Source Node: [NODE1 ▼]                    │
-   │                                           │
-   │ Target Nodes:                             │
+   ┌─ Bulk Sync DHCP Scopes ────────────────────┐
+   │                                            │
+   │ Source Node: [NODE1 ▼]                     │
+   │                                            │
+   │ Target Nodes:                              │
    │ ☑ NODE2                                    │
-   │                                           │
-   │ Sync Strategy:                            │
-   │ ● Skip existing scopes                    │
-   │ ○ Overwrite all scopes                    │
-   │ ○ Only add missing scopes                 │
-   │                                           │
-   │ ☑ Enable scopes on target after sync     │
-   │                                           │
-   │ ───────────────────────────────────────   │
-   │                                           │
+   │                                            │
+   │ Sync Strategy:                             │
+   │ ● Skip existing scopes                     │
+   │ ○ Overwrite all scopes                     │
+   │ ○ Only add missing scopes                  │
+   │                                            │
+   │ ☑ Enable scopes on target after sync       │
+   │                                            │
+   │ ────────────────────────────────────────── │
+   │                                            │
    │ 8 scopes will be synced from NODE1 to NODE2│
    │ 2 scopes already exist on NODE2 (will skip)│
-   │                                           │
-   │           [Cancel]  [Sync Now]            │
-   └───────────────────────────────────────────┘
+   │                                            │
+   │           [Cancel]  [Sync Now]             │
+   └────────────────────────────────────────────┘
    ```
 3. User clicks "Sync Now"
 4. Progress indicator shows
@@ -189,12 +200,14 @@ console.log(`Failed: ${result.totalFailed}`);
 ## Testing Checklist
 
 Backend (✅ Complete):
+
 - [x] TypeScript types defined
 - [x] Service method implemented
 - [x] Controller endpoint added
 - [x] Compiles successfully
 
 Frontend (⏳ Next Steps):
+
 - [ ] Add `bulkSyncDhcpScopes` to TechnitiumContext (✅ Done)
 - [ ] Create bulk sync button
 - [ ] Create bulk sync modal component
@@ -212,22 +225,15 @@ Frontend (⏳ Next Steps):
 ## Implementation Priority
 
 **High Priority** (Required for Phase 1 completion):
+
 1. Basic bulk sync button
 2. Simple modal with source/target/strategy selection
 3. Success/error toasts
 4. Refresh scope list after sync
 
-**Medium Priority** (Nice to have):
-5. Preview of what will be synced
-6. Per-scope status in results
-7. Detailed error messages
-8. Retry functionality
+**Medium Priority** (Nice to have): 5. Preview of what will be synced 6. Per-scope status in results 7. Detailed error messages 8. Retry functionality
 
-**Low Priority** (Future enhancement):
-9. Progress bar during sync
-10. Cancel option
-11. Scheduled bulk syncs
-12. Sync history/audit log
+**Low Priority** (Future enhancement): 9. Progress bar during sync 10. Cancel option 11. Scheduled bulk syncs 12. Sync history/audit log
 
 ---
 
