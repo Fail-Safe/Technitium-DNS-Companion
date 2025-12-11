@@ -57,6 +57,19 @@ RUN npm run build --workspace=apps/backend
 # Stage 3: Production image
 FROM node:22-alpine
 
+ARG BUILD_VERSION=unknown
+ARG BUILD_REVISION=unknown
+
+LABEL \
+    org.opencontainers.image.title="Technitium DNS Companion" \
+    org.opencontainers.image.description="Web UI to manage and sync multiple Technitium DNS servers (Technitium DNS Companion)" \
+    org.opencontainers.image.url="https://github.com/Fail-Safe/Technitium-DNS-Companion" \
+    org.opencontainers.image.source="https://github.com/Fail-Safe/Technitium-DNS-Companion" \
+    org.opencontainers.image.documentation="https://fail-safe.github.io/Technitium-DNS-Companion" \
+    org.opencontainers.image.licenses="MIT" \
+    org.opencontainers.image.version="$BUILD_VERSION" \
+    org.opencontainers.image.revision="$BUILD_REVISION"
+
 WORKDIR /app
 
 # Copy manifests from shared context
