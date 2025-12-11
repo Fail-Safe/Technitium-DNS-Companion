@@ -1060,7 +1060,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         throw new Error("Sync strategy is required for bulk DHCP sync.");
       }
 
-      const response = await apiFetch("/dhcp/bulk-sync", {
+      const response = await apiFetch("/nodes/dhcp/bulk-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),

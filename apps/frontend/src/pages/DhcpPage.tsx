@@ -6799,6 +6799,34 @@ export function DhcpPage() {
                                 bulkSyncTargetNodeIds.filter((id) =>
                                   nodeIds.includes(id),
                                 );
+                              const sourceKey = `${bulkSyncSourceNodeId}:${scope.name}`;
+                              const sourceDetails =
+                                bulkSyncSourceScopeDetails.get(sourceKey);
+                              const targetDetailsForScope = targetsToSkip.map(
+                                (id) =>
+                                  bulkSyncTargetScopeDetails.get(
+                                    `${id}:${scope.name}`,
+                                  ),
+                              );
+                              const hasLoadedAllTargetDetails =
+                                targetDetailsForScope.length > 0 &&
+                                targetDetailsForScope.every(Boolean);
+                              const hasDiffsForTargets =
+                                (
+                                  bulkSyncStrategy === "merge-missing" &&
+                                  exists &&
+                                  sourceDetails &&
+                                  hasLoadedAllTargetDetails
+                                ) ?
+                                  targetDetailsForScope.some(
+                                    (targetDetails) =>
+                                      computeScopeDiff(
+                                        sourceDetails,
+                                        targetDetails as TechnitiumDhcpScope,
+                                      ).length > 0,
+                                  )
+                                : null;
+
                               // Only skip-existing actually skips - merge-missing updates existing scopes
                               const willBeSkipped =
                                 bulkSyncStrategy === "skip-existing" &&
@@ -6806,7 +6834,13 @@ export function DhcpPage() {
                               const willBeOverwritten =
                                 bulkSyncStrategy === "overwrite-all" && exists;
                               const willBeUpdated =
-                                bulkSyncStrategy === "merge-missing" && exists;
+                                bulkSyncStrategy === "merge-missing" &&
+                                exists &&
+                                hasDiffsForTargets !== false;
+                              const willMatchExisting =
+                                bulkSyncStrategy === "merge-missing" &&
+                                exists &&
+                                hasDiffsForTargets === false;
 
                               return (
                                 <div
@@ -6862,6 +6896,11 @@ export function DhcpPage() {
                                         {willBeUpdated && (
                                           <span className="dhcp-bulk-sync-inline__preview-badge dhcp-bulk-sync-inline__preview-badge--update">
                                             Will Update
+                                          </span>
+                                        )}
+                                        {willMatchExisting && (
+                                          <span className="dhcp-bulk-sync-inline__preview-badge dhcp-bulk-sync-inline__preview-badge--update">
+                                            Matches Target
                                           </span>
                                         )}
                                       </div>
