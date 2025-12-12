@@ -1,4 +1,9 @@
-import { faClipboard, faMinus, faPencil, faPlus } from "@fortawesome/free-solid-svg-icons";
+import {
+  faClipboard,
+  faMinus,
+  faPencil,
+  faPlus,
+} from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmModal } from "../components/common/ConfirmModal";
