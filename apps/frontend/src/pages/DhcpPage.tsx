@@ -2831,6 +2831,12 @@ export function DhcpPage() {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to create snapshot.";
+
+      // If the node has no scopes, skip without alarming the user
+      if (message.toLowerCase().includes("no scopes")) {
+        return;
+      }
+
       pushToast({
         message: `Snapshot skipped before ${action}: ${message}`,
         tone: "error",
@@ -3623,27 +3629,6 @@ export function DhcpPage() {
         title: "Mirror Operation",
         message: (
           <>
-            <p style={{ fontWeight: 500, color: "var(--color-danger)" }}>
-              ⚠️ DESTRUCTIVE OPERATION
-            </p>
-            <p style={{ marginTop: "0.75rem" }}>
-              This will <strong>DELETE ALL</strong> existing scopes on:
-            </p>
-            <p style={{ fontWeight: 500, marginTop: "0.25rem" }}>
-              {targetNames}
-            </p>
-            <p style={{ marginTop: "0.75rem" }}>
-              Then copy all scopes from <strong>{sourceNodeName}</strong>.
-            </p>
-            <p
-              style={{
-                marginTop: "0.75rem",
-                fontWeight: 500,
-                color: "var(--color-danger)",
-              }}
-            >
-              This operation cannot be undone.
-            </p>
             <p
               style={{
                 marginTop: "0.75rem",
@@ -3652,6 +3637,34 @@ export function DhcpPage() {
               }}
             >
               Automatic snapshots will be created for all affected nodes before
+              proceeding.
+            </p>
+            <p style={{ marginTop: "0.75rem" }}>
+              This will <strong>DELETE ALL</strong> existing scopes on:
+            </p>
+            <p
+              style={{
+                fontWeight: 500,
+                marginTop: "0.25rem",
+                color: "var(--color-danger)",
+              }}
+            >
+              <strong>{targetNames}</strong>
+            </p>
+            <p style={{ marginTop: "0.75rem" }}>
+              Then copy all scopes from{" "}
+              <strong style={{ color: "var(--color-success)" }}>
+                {sourceNodeName}
+              </strong>
+              .
+            </p>
+            <p style={{ marginTop: "0.75rem", color: "var(--color-warning)" }}>
+              This operation can be undone by restoring from the snapshots that
+              will be automatically created. However, it is{" "}
+              <strong style={{ textDecoration: "underline" }}>
+                strongly recommended
+              </strong>{" "}
+              to ensure you have a current Technitium DNS backup before
               proceeding.
             </p>
           </>
@@ -3669,6 +3682,16 @@ export function DhcpPage() {
         title: "Sync All Operation",
         message: (
           <>
+            <p
+              style={{
+                marginTop: "0.75rem",
+                fontSize: "0.9em",
+                color: "var(--color-info)",
+              }}
+            >
+              Automatic snapshots will be created for all affected nodes before
+              proceeding.
+            </p>
             <p style={{ marginTop: "0.75rem" }}>
               Existing scopes will be modified to match the source configuration
               from{" "}
@@ -3687,12 +3710,32 @@ export function DhcpPage() {
             >
               <strong>{targetNames}</strong>
             </p>
+          </>
+        ),
+        variant: "warning",
+        confirmLabel: "Sync All",
+        onConfirm: () => {
+          closeConfirmModal();
+          executeBulkSync();
+        },
+      });
+    } else if (bulkSyncStrategy === "skip-existing") {
+      setConfirmModal({
+        isOpen: true,
+        title: "Skip-Existing Operation",
+        message: (
+          <>
+            <p style={{ marginTop: "0.75rem" }}>
+              Existing scopes on <strong>{targetNames}</strong> will be left
+              untouched. Only scopes that do not already exist will be copied
+              from <strong>{sourceNodeName}</strong>.
+            </p>
             <p
               style={{
                 marginTop: "0.75rem",
                 fontSize: "0.9em",
                 fontWeight: 500,
-                color: "var(--color-info)",
+                color: "var(--color-text-secondary)",
               }}
             >
               Automatic snapshots will be created for all affected nodes before
@@ -3700,8 +3743,8 @@ export function DhcpPage() {
             </p>
           </>
         ),
-        variant: "warning",
-        confirmLabel: "Sync All",
+        variant: "info",
+        confirmLabel: "Start Sync",
         onConfirm: () => {
           closeConfirmModal();
           executeBulkSync();
@@ -3792,6 +3835,18 @@ export function DhcpPage() {
     setShowBulkSyncResults(false);
     setShowBulkSyncModal(true);
   };
+
+  // Prevent background scroll when bulk sync results modal is open
+  useEffect(() => {
+    if (!showBulkSyncResults) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [showBulkSyncResults]);
 
   // Show skeleton while loading initial scope list
   if (scopeListState === "loading" && scopes.length === 0) {

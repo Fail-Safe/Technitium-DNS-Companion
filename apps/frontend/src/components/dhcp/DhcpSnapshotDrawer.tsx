@@ -417,9 +417,6 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
           <div className="snapshot-drawer__header-text">
             <div className="snapshot-drawer__eyebrow">DHCP Scope History</div>
             <div className="snapshot-drawer__title-row">
-              {/* <h2 className="modal__title snapshot-drawer__title">
-                {nodeName || nodeId || "Select a node"}
-              </h2> */}
               {nodeId && (
                 <span
                   className="snapshot-drawer__node-badge"
