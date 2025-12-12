@@ -1,5 +1,6 @@
 import {
   faClipboard,
+  faClockRotateLeft,
   faMinus,
   faPencil,
   faPlus,
@@ -3184,8 +3185,16 @@ export function DhcpPage() {
             <strong>"{selectedScopeName}"</strong> from{" "}
             <strong>{selectedNodeLabel}</strong>?
           </p>
-          <p style={{ marginTop: "0.75rem", fontWeight: 500 }}>
-            This action cannot be undone.
+          <p
+            style={{
+              marginTop: "0.75rem",
+              fontSize: "0.9em",
+              fontWeight: 500,
+              color: "var(--color-info)",
+            }}
+          >
+            An automatic snapshot will be created before deletion of the scope
+            for recovery, if needed.
           </p>
         </>
       ),
@@ -3194,7 +3203,11 @@ export function DhcpPage() {
       onConfirm: async () => {
         closeConfirmModal();
         try {
-          await ensureSnapshot(selectedNodeId, "deleting DHCP scope");
+          await ensureSnapshot(
+            selectedNodeId,
+            "deleting DHCP scope",
+            `Pre-delete: ${selectedScopeName}`,
+          );
 
           const result = await deleteDhcpScope(
             selectedNodeId,
@@ -3881,6 +3894,10 @@ export function DhcpPage() {
           onClick={() => setShowSnapshotDrawer(true)}
           disabled={!selectedNodeId}
         >
+          <FontAwesomeIcon
+            icon={faClockRotateLeft}
+            style={{ marginBottom: "0.5rem" }}
+          />
           DHCP Scope History
         </button>
 
