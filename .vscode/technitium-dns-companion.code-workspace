@@ -20,4 +20,14 @@
     "editor.tabSize": 2,
     "editor.bracketPairColorization.independentColorPoolPerBracketType": true,
   },
+  "extensions": {
+    "recommendations": [
+      "prettier.prettier-vscode",
+      "mkhl.shfmt",
+      "mads-hartmann.bash-ide-vscode",
+      "ms-playwright.playwright",
+      "ms-vscode.js-debug",
+      "ms-vscode.js-debug-companion",
+    ],
+  },
 }
