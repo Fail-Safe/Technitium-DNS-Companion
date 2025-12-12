@@ -91,7 +91,9 @@
 .snapshot-drawer__eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-size: 0.8rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
   color: var(--color-text-secondary);
 }
 

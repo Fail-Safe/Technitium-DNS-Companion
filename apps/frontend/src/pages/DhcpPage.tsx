@@ -3579,9 +3579,12 @@ export function DhcpPage() {
       enableOnTarget: bulkSyncEnableOnTarget,
     };
 
+    const snapshotNote = `Auto snapshot before bulk sync (${request.strategy})`;
+
     await ensureSnapshotsForNodes(
       [request.sourceNodeId, ...request.targetNodeIds],
       `bulk syncing DHCP scopes (${request.strategy})`,
+      snapshotNote,
     );
 
     setBulkSyncInProgress(true);
@@ -3645,11 +3648,11 @@ export function DhcpPage() {
               style={{
                 marginTop: "0.75rem",
                 fontSize: "0.9em",
-                color: "var(--color-text-muted)",
+                color: "var(--color-info)",
               }}
             >
-              Ensure you have a current backup from your target node(s) before
-              continuing.
+              Automatic snapshots will be created for all affected nodes before
+              proceeding.
             </p>
           </>
         ),
@@ -3666,23 +3669,34 @@ export function DhcpPage() {
         title: "Sync All Operation",
         message: (
           <>
-            <p>This will update existing scopes and add missing scopes on:</p>
-            <p style={{ fontWeight: 500, marginTop: "0.25rem" }}>
-              {targetNames}
-            </p>
             <p style={{ marginTop: "0.75rem" }}>
               Existing scopes will be modified to match the source configuration
-              from <strong>{sourceNodeName}</strong>.
+              from{" "}
+              <strong style={{ color: "var(--color-success)" }}>
+                {sourceNodeName}
+              </strong>
+              .
+            </p>
+            <p>This will update existing scopes and add missing scopes on:</p>
+            <p
+              style={{
+                fontWeight: 500,
+                marginTop: "0.25rem",
+                color: "var(--color-warning)",
+              }}
+            >
+              <strong>{targetNames}</strong>
             </p>
             <p
               style={{
                 marginTop: "0.75rem",
                 fontSize: "0.9em",
-                color: "var(--color-text-muted)",
+                fontWeight: 500,
+                color: "var(--color-info)",
               }}
             >
-              Ensure you have a current backup from your target node(s) before
-              continuing.
+              Automatic snapshots will be created for all affected nodes before
+              proceeding.
             </p>
           </>
         ),
@@ -3703,10 +3717,13 @@ export function DhcpPage() {
     setShowBulkSyncModal(false);
     setBulkSyncInProgress(true);
 
+    const snapshotNote = `Auto snapshot before bulk sync (${request.strategy})`;
+
     try {
       await ensureSnapshotsForNodes(
         [request.sourceNodeId, ...request.targetNodeIds],
         `bulk syncing DHCP scopes (${request.strategy})`,
+        snapshotNote,
       );
 
       const result = await bulkSyncDhcpScopes(request);
@@ -3788,15 +3805,17 @@ export function DhcpPage() {
         threshold={pullToRefresh.threshold}
         isRefreshing={pullToRefresh.isRefreshing}
       />
-      <button
-        type="button"
-        className="drawer-pull drawer-pull--history"
-        aria-label="Open configuration history"
-        onClick={() => setShowSnapshotDrawer(true)}
-        disabled={!selectedNodeId}
-      >
-        DHCP Scope History
-      </button>
+      {activePageTab === "scopes" && (
+        <button
+          type="button"
+          className="drawer-pull drawer-pull--history"
+          aria-label="Open configuration history"
+          onClick={() => setShowSnapshotDrawer(true)}
+          disabled={!selectedNodeId}
+        >
+          DHCP Scope History
+        </button>
+      )}
       <section ref={pullToRefresh.containerRef} className="configuration">
         <header className="configuration__header">
           <div>
@@ -6862,13 +6881,12 @@ export function DhcpPage() {
                             <div className="dhcp-bulk-sync-modal__strategy-name">
                               Mirror{" "}
                               <span className="dhcp-bulk-sync-modal__strategy-badge dhcp-bulk-sync-modal__strategy-badge--warning">
-                                Caution
+                                Replaces targets
                               </span>
                             </div>
                             <div className="dhcp-bulk-sync-modal__strategy-description">
-                              Delete all scopes on target nodes first, then copy
-                              all scopes from source. Makes targets identical to
-                              source.
+                              Replace target scopes to match the source exactly
+                              and delete scopes not present on the source.
                             </div>
                           </div>
                         </label>
