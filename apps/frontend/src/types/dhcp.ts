@@ -172,3 +172,34 @@ export interface DhcpBulkSyncResult {
   totalFailed: number;
   completedAt: string;
 }
+
+export interface DhcpSnapshotMetadata {
+  id: string;
+  nodeId: string;
+  createdAt: string;
+  scopeCount: number;
+  origin: "manual" | "automatic";
+  pinned?: boolean;
+  note?: string;
+}
+
+export interface DhcpSnapshotScopeEntry {
+  scope: TechnitiumDhcpScope;
+  enabled?: boolean;
+}
+
+export interface DhcpSnapshot {
+  metadata: DhcpSnapshotMetadata;
+  scopes: DhcpSnapshotScopeEntry[];
+}
+
+export interface DhcpSnapshotRestoreResult {
+  snapshot: DhcpSnapshotMetadata;
+  restored: number;
+  deleted: number;
+}
+
+export interface DhcpSnapshotRestoreOptions {
+  deleteExtraScopes?: boolean;
+  keepExtras?: boolean; // UI convenience: maps to deleteExtraScopes=false
+}

@@ -16,6 +16,7 @@ import { Divider } from "../components/common/Divider";
 import { DhcpBulkSyncModal } from "../components/DhcpBulkSyncModal";
 import { DhcpBulkSyncResultsModal } from "../components/DhcpBulkSyncResultsModal";
 import { DhcpPageSkeleton } from "../components/dhcp/DhcpPageSkeleton";
+import { DhcpSnapshotDrawer } from "../components/dhcp/DhcpSnapshotDrawer";
 import type {
   TechnitiumCloneDhcpScopeResult,
   TechnitiumDhcpScope,
@@ -522,6 +523,13 @@ export function DhcpPage() {
     updateDhcpScope,
     deleteDhcpScope,
     bulkSyncDhcpScopes,
+    listDhcpSnapshots,
+    createDhcpSnapshot,
+    restoreDhcpSnapshot,
+    setDhcpSnapshotPinned,
+    getDhcpSnapshot,
+    deleteDhcpSnapshot,
+    updateDhcpSnapshotNote,
   } = useTechnitiumState();
   const { pushToast } = useToast();
 
@@ -638,6 +646,7 @@ export function DhcpPage() {
   const [bulkSyncResult, setBulkSyncResult] =
     useState<DhcpBulkSyncResult | null>(null);
   const [showBulkSyncResults, setShowBulkSyncResults] = useState(false);
+  const [showSnapshotDrawer, setShowSnapshotDrawer] = useState(false);
 
   // Bulk sync form state (inline in tab)
   const [bulkSyncSourceNodeId, setBulkSyncSourceNodeId] = useState<string>(
@@ -3636,6 +3645,16 @@ export function DhcpPage() {
               Manage DHCP scopes across nodes and sync configurations
               efficiently.
             </p>
+          </div>
+          <div className="configuration__actions" style={{ gap: "0.5rem" }}>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => setShowSnapshotDrawer(true)}
+              disabled={!selectedNodeId}
+            >
+              Configuration History
+            </button>
           </div>
         </header>
 
@@ -7316,7 +7335,7 @@ export function DhcpPage() {
                             <div className="dhcp-bulk-sync-inline__preview-summary">
                               {(() => {
                                 if (bulkSyncStrategy === "merge-missing") {
-                                  // Sync All: all scopes will be synced (add new + update existing)
+                                  //  Sync All: all scopes will be synced (add new + update existing)
                                   const willAdd = bulkSyncSourceScopes.filter(
                                     (scope) => {
                                       const { exists } =
@@ -7460,6 +7479,21 @@ export function DhcpPage() {
             </div>
           </section>
         )}
+
+        <DhcpSnapshotDrawer
+          isOpen={showSnapshotDrawer}
+          nodeId={selectedNodeId}
+          nodeName={selectedNode?.name || selectedNode?.id}
+          nodeScopeCount={scopeCountByNode.get(selectedNodeId)}
+          onClose={() => setShowSnapshotDrawer(false)}
+          listSnapshots={listDhcpSnapshots}
+          createSnapshot={createDhcpSnapshot}
+          restoreSnapshot={restoreDhcpSnapshot}
+          setSnapshotPinned={setDhcpSnapshotPinned}
+          getSnapshotDetail={getDhcpSnapshot}
+          deleteSnapshot={deleteDhcpSnapshot}
+          updateSnapshotNote={updateDhcpSnapshotNote}
+        />
 
         {/* Bulk Sync Modal */}
         <DhcpBulkSyncModal

@@ -12,6 +12,7 @@ import { BuiltInBlockingController } from "./built-in-blocking.controller";
 import { DomainListCacheService } from "./domain-list-cache.service";
 import { DomainListPersistenceService } from "./domain-list-persistence.service";
 import { DomainListController } from "./domain-list-cache.controller";
+import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { DomainListController } from "./domain-list-cache.controller";
     BuiltInBlockingService,
     DomainListCacheService,
     DomainListPersistenceService,
+    DhcpSnapshotService,
     {
       provide: TECHNITIUM_NODES_TOKEN,
       useFactory: (): TechnitiumNodeConfig[] => {
@@ -111,6 +113,7 @@ import { DomainListController } from "./domain-list-cache.controller";
     AdvancedBlockingService,
     BuiltInBlockingService,
     DomainListCacheService,
+    DhcpSnapshotService,
   ],
 })
 export class TechnitiumModule {}

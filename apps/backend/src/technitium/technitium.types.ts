@@ -262,6 +262,28 @@ export interface TechnitiumDhcpScopeList {
   scopes: TechnitiumDhcpScopeSummary[];
 }
 
+export interface DhcpSnapshotScopeEntry {
+  scope: TechnitiumDhcpScope;
+  enabled?: boolean;
+}
+
+export type DhcpSnapshotOrigin = "manual" | "automatic";
+
+export interface DhcpSnapshotMetadata {
+  id: string;
+  nodeId: string;
+  createdAt: string;
+  scopeCount: number;
+  origin: DhcpSnapshotOrigin;
+  pinned?: boolean;
+  note?: string;
+}
+
+export interface DhcpSnapshot {
+  metadata: DhcpSnapshotMetadata;
+  scopes: DhcpSnapshotScopeEntry[];
+}
+
 export interface TechnitiumDhcpStaticRoute {
   destination: string;
   subnetMask: string;

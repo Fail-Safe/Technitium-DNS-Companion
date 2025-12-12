@@ -1,3 +1,4 @@
+import { CacheInterceptor, CacheTTL } from "@nestjs/cache-manager";
 import {
   BadRequestException,
   Body,
@@ -5,24 +6,25 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Res,
   UseInterceptors,
 } from "@nestjs/common";
-import { CacheInterceptor, CacheTTL } from "@nestjs/cache-manager";
 import { Throttle } from "@nestjs/throttler";
-import { TechnitiumService } from "./technitium.service";
-import { AdvancedBlockingService } from "./advanced-blocking.service";
-import type {
-  TechnitiumQueryLogFilters,
-  TechnitiumCloneDhcpScopeRequest,
-  TechnitiumUpdateDhcpScopeRequest,
-  TechnitiumRenameDhcpScopeRequest,
-  DhcpBulkSyncRequest,
-} from "./technitium.types";
-import type { AdvancedBlockingUpdateRequest } from "./advanced-blocking.types";
 import type { Response } from "express";
+import { AdvancedBlockingService } from "./advanced-blocking.service";
+import type { AdvancedBlockingUpdateRequest } from "./advanced-blocking.types";
+import { TechnitiumService } from "./technitium.service";
+import type {
+  DhcpBulkSyncRequest,
+  DhcpSnapshotOrigin,
+  TechnitiumCloneDhcpScopeRequest,
+  TechnitiumQueryLogFilters,
+  TechnitiumRenameDhcpScopeRequest,
+  TechnitiumUpdateDhcpScopeRequest,
+} from "./technitium.types";
 
 @Controller("nodes")
 export class TechnitiumController {
@@ -114,6 +116,86 @@ export class TechnitiumController {
   @Get(":nodeId/dhcp/scopes")
   listDhcpScopes(@Param("nodeId") nodeId: string) {
     return this.technitiumService.listDhcpScopes(nodeId);
+  }
+
+  @Post(":nodeId/dhcp/snapshots")
+  createDhcpSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Body() body?: { origin?: DhcpSnapshotOrigin },
+  ) {
+    const origin = body?.origin === "automatic" ? "automatic" : "manual";
+    return this.technitiumService.createDhcpSnapshot(nodeId, origin);
+  }
+
+  @Get(":nodeId/dhcp/snapshots/:snapshotId")
+  getDhcpSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ) {
+    return this.technitiumService.getDhcpSnapshot(nodeId, snapshotId);
+  }
+
+  @Get(":nodeId/dhcp/snapshots")
+  listDhcpSnapshots(@Param("nodeId") nodeId: string) {
+    return this.technitiumService.listDhcpSnapshots(nodeId);
+  }
+
+  @Delete(":nodeId/dhcp/snapshots/:snapshotId")
+  deleteDhcpSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ) {
+    return this.technitiumService.deleteDhcpSnapshot(nodeId, snapshotId);
+  }
+
+  @Patch(":nodeId/dhcp/snapshots/:snapshotId/note")
+  updateDhcpSnapshotNote(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+    @Body() body: { note?: string },
+  ) {
+    return this.technitiumService.updateDhcpSnapshotNote(
+      nodeId,
+      snapshotId,
+      body?.note,
+    );
+  }
+
+  @Post(":nodeId/dhcp/snapshots/:snapshotId/restore")
+  restoreDhcpSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+    @Body()
+    body: { deleteExtraScopes?: boolean; confirm?: boolean },
+  ) {
+    return this.technitiumService.restoreDhcpSnapshot(nodeId, snapshotId, {
+      deleteExtraScopes: body?.deleteExtraScopes,
+      confirm: body?.confirm,
+    });
+  }
+
+  @Post(":nodeId/dhcp/snapshots/:snapshotId/pin")
+  pinDhcpSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ) {
+    return this.technitiumService.setDhcpSnapshotPinned(
+      nodeId,
+      snapshotId,
+      true,
+    );
+  }
+
+  @Post(":nodeId/dhcp/snapshots/:snapshotId/unpin")
+  unpinDhcpSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ) {
+    return this.technitiumService.setDhcpSnapshotPinned(
+      nodeId,
+      snapshotId,
+      false,
+    );
   }
 
   @Get(":nodeId/zones")

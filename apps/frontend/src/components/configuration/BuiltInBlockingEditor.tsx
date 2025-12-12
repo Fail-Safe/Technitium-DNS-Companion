@@ -1,36 +1,36 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faPlus,
-  faTrash,
-  faSearch,
-  faSpinner,
   faBan,
-  faShieldAlt,
-  faGear,
+  faCheck,
+  faCheckCircle,
   faExclamationTriangle,
   faExternalLinkAlt,
-  faPencil,
-  faSync,
-  faCheckCircle,
-  faTimes,
-  faCheck,
+  faGear,
   faList,
+  faPencil,
+  faPlus,
+  faSearch,
+  faShieldAlt,
   faSitemap,
+  faSpinner,
+  faSync,
+  faTimes,
+  faTrash,
 } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTechnitiumState } from "../../context/TechnitiumContext";
 import { useToast } from "../../context/ToastContext";
 import {
   useBlockListCatalog,
   type HageziListInfo,
 } from "../../hooks/useBlockListCatalog";
-import { validateDomain } from "../../utils/domainValidation";
 import type {
   BlockingSettings,
   BuiltInBlockingSnapshot,
 } from "../../types/builtInBlocking";
-import DomainTreeView, { type DomainTreeNode } from "./DomainTreeView";
+import { validateDomain } from "../../utils/domainValidation";
 import "./BuiltInBlockingEditor.css";
+import DomainTreeView, { type DomainTreeNode } from "./DomainTreeView";
 
 /** Link to the Technitium DNS developer's explanation about blocking conflicts */
 const TECHNITIUM_DEV_ADV_BLOCK_POST_URL =
@@ -204,6 +204,7 @@ export function BuiltInBlockingEditor({
     temporaryDisableBlocking,
     reEnableBlocking,
     forceBlockListUpdate,
+    createDhcpSnapshot,
   } = useTechnitiumState();
   const { pushToast } = useToast();
   const {
@@ -1044,6 +1045,18 @@ export function BuiltInBlockingEditor({
 
     setSaving(true);
     try {
+      // Capture an automatic snapshot for rollback before applying changes
+      try {
+        await createDhcpSnapshot(selectedNodeId, "automatic");
+      } catch (snapshotError) {
+        console.warn("Failed to capture automatic snapshot", snapshotError);
+        pushToast({
+          message: "Snapshot failed before saving; changes will still apply",
+          tone: "warning",
+          timeout: 6000,
+        });
+      }
+
       // 1. Save settings changes if any
       if (draftSettings && settings) {
         const settingsToSave: Partial<BlockingSettings> = {};
