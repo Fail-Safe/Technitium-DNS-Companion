@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DhcpSnapshotDrawer } from "../components/dhcp/DhcpSnapshotDrawer";
 import type { DhcpSnapshot, DhcpSnapshotMetadata } from "../types/dhcp";
@@ -41,7 +42,10 @@ const detailedSnapshot: DhcpSnapshot = {
   ],
 };
 
-const renderDrawer = (overrides: DrawerMocks = {}) => {
+const renderDrawer = (
+  overrides: DrawerMocks = {},
+  props: Partial<ComponentProps<typeof DhcpSnapshotDrawer>> = {},
+) => {
   const listSnapshots =
     overrides.listSnapshots ?? vi.fn().mockResolvedValue([baseSnapshot]);
   const createSnapshot = overrides.createSnapshot ?? vi.fn();
@@ -58,13 +62,22 @@ const renderDrawer = (overrides: DrawerMocks = {}) => {
     overrides.updateSnapshotNote ??
     vi.fn().mockResolvedValue({ ...baseSnapshot, note: "Saved note" });
 
+  const {
+    isOpen = true,
+    nodeId = "node-1",
+    nodeName = "Node One",
+    nodeScopeCount = 2,
+    onClose = vi.fn(),
+    onRestoreSuccess,
+  } = props;
+
   const utils = render(
     <DhcpSnapshotDrawer
-      isOpen
-      nodeId="node-1"
-      nodeName="Node One"
-      nodeScopeCount={2}
-      onClose={vi.fn()}
+      isOpen={isOpen}
+      nodeId={nodeId}
+      nodeName={nodeName}
+      nodeScopeCount={nodeScopeCount}
+      onClose={onClose}
       listSnapshots={listSnapshots}
       createSnapshot={createSnapshot}
       restoreSnapshot={restoreSnapshot}
@@ -72,6 +85,7 @@ const renderDrawer = (overrides: DrawerMocks = {}) => {
       getSnapshotDetail={getSnapshotDetail}
       deleteSnapshot={deleteSnapshot}
       updateSnapshotNote={updateSnapshotNote}
+      onRestoreSuccess={onRestoreSuccess}
     />,
   );
 
@@ -194,5 +208,112 @@ describe("DhcpSnapshotDrawer", () => {
       expect.objectContaining({ message: "Note saved", tone: "success" }),
     );
     expect(await screen.findByText("Saved note")).not.toBeNull();
+  });
+
+  it("invokes onRestoreSuccess after a successful restore", async () => {
+    const onRestoreSuccess = vi.fn();
+    const listSnapshots = vi.fn().mockResolvedValue([baseSnapshot]);
+    const restoreSnapshot = vi
+      .fn()
+      .mockResolvedValue({ snapshot: baseSnapshot, restored: 1, deleted: 0 });
+
+    renderDrawer({ listSnapshots, restoreSnapshot }, { onRestoreSuccess });
+
+    const restoreButton = await screen.findByRole("button", {
+      name: /restore/i,
+    });
+    await userEvent.click(restoreButton);
+
+    const dialog = screen.getByRole("dialog", { name: /restore snapshot/i });
+    const confirm = within(dialog).getByRole("button", { name: /restore$/i });
+    await userEvent.click(confirm);
+
+    await waitFor(() =>
+      expect(restoreSnapshot).toHaveBeenCalledWith("node-1", baseSnapshot.id, {
+        keepExtras: true,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(onRestoreSuccess).toHaveBeenCalledWith("node-1"),
+    );
+    expect(listSnapshots).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not call onRestoreSuccess when restore fails", async () => {
+    const onRestoreSuccess = vi.fn();
+    const listSnapshots = vi.fn().mockResolvedValue([baseSnapshot]);
+    const restoreSnapshot = vi
+      .fn()
+      .mockRejectedValue(new Error("restore failed"));
+
+    renderDrawer({ listSnapshots, restoreSnapshot }, { onRestoreSuccess });
+
+    const restoreButton = await screen.findByRole("button", {
+      name: /restore/i,
+    });
+    await userEvent.click(restoreButton);
+
+    const dialog = screen.getByRole("dialog", { name: /restore snapshot/i });
+    const confirm = within(dialog).getByRole("button", { name: /restore$/i });
+    await userEvent.click(confirm);
+
+    await waitFor(() =>
+      expect(pushToast).toHaveBeenCalledWith(
+        expect.objectContaining({ tone: "error" }),
+      ),
+    );
+
+    expect(onRestoreSuccess).not.toHaveBeenCalled();
+    expect(listSnapshots).toHaveBeenCalledTimes(1);
+  });
+
+  it("resets keep extras to true when reopening the restore dialog", async () => {
+    renderDrawer();
+
+    const openDialog = async () => {
+      const restoreButton = await screen.findByRole("button", {
+        name: /restore/i,
+      });
+      await userEvent.click(restoreButton);
+      return screen.getByRole("dialog", { name: /restore snapshot/i });
+    };
+
+    let dialog = await openDialog();
+    const checkbox = within(dialog).getByLabelText(
+      /Scopes not in the snapshot should be kept/i,
+    );
+    expect(checkbox).toBeChecked();
+    await userEvent.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+
+    const cancel = within(dialog).getByRole("button", { name: /cancel/i });
+    await userEvent.click(cancel);
+
+    dialog = await openDialog();
+    const checkboxAfter = within(dialog).getByLabelText(
+      /Scopes not in the snapshot should be kept/i,
+    );
+    expect(checkboxAfter).toBeChecked();
+  });
+
+  it("renders multi-line notes in snapshot details", async () => {
+    const getSnapshotDetail = vi
+      .fn()
+      .mockResolvedValue({
+        ...detailedSnapshot,
+        metadata: { ...baseSnapshot, note: "Line one\nLine two" },
+      });
+
+    renderDrawer({ getSnapshotDetail });
+
+    const item = await screen.findByText(/snap-1/i);
+    const viewButton = within(
+      item.closest(".snapshot-drawer__item")!,
+    ).getByRole("button", { name: /view/i });
+    await userEvent.click(viewButton);
+
+    expect(await screen.findByText(/Line one\s*Line two/i)).toBeInTheDocument();
+    expect(getSnapshotDetail).toHaveBeenCalledWith("node-1", baseSnapshot.id);
   });
 });

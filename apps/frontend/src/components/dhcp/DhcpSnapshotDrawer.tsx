@@ -36,6 +36,7 @@ interface DhcpSnapshotDrawerProps {
     snapshotId: string,
     note?: string,
   ) => Promise<DhcpSnapshotMetadata>;
+  onRestoreSuccess?: (nodeId: string) => Promise<void> | void;
 }
 
 const formatDateTime = (value: string): string => {
@@ -74,6 +75,7 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
   getSnapshotDetail,
   deleteSnapshot,
   updateSnapshotNote,
+  onRestoreSuccess,
 }) => {
   const { pushToast } = useToast();
   const [snapshots, setSnapshots] = useState<DhcpSnapshotMetadata[]>([]);
@@ -260,6 +262,14 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
         tone: "success",
         timeout: 5000,
       });
+
+      if (onRestoreSuccess) {
+        try {
+          await onRestoreSuccess(nodeId);
+        } catch (restoreRefreshError) {
+          console.warn("Failed to refresh after restore", restoreRefreshError);
+        }
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Failed to restore snapshot.";

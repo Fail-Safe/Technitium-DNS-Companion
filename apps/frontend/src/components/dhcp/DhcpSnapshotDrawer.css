@@ -600,6 +600,8 @@
 
 .snapshot-drawer__pill-muted {
   color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .snapshot-drawer__italic {
@@ -609,6 +611,11 @@
 .snapshot-drawer__pill-quiet {
   color: var(--color-text-secondary);
   font-size: 0.9rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.18rem 0.7rem;
+  background: color-mix(in srgb, var(--color-bg-tertiary) 85%, transparent);
+  box-shadow: var(--shadow-sm);
 }
 
 .snapshot-drawer__retry-btn {

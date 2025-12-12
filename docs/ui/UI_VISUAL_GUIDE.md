@@ -344,6 +344,9 @@ Missing: [Large gradient number]
 
 All colors in CSS styling should be using the pre-defined theme colors from `apps/frontend/src/index.css` for consistency. Button coloring, shape, hover coloring, etc should match consistent styling across the application. Only in specific cases where unique styling is needed (like the Zones page cards) should custom colors be used.
 
+Someone in the Reddit community sent this to me in response to this project:
+https://www.zolkos.com/2025/12/03/vanilla-css-is-all-you-need
+
 ---
 
 ## Typography Scale

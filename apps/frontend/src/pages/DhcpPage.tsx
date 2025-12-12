@@ -1,36 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faPlus,
+  faClipboard,
   faMinus,
   faPencil,
-  faClipboard,
+  faPlus,
 } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmModal } from "../components/common/ConfirmModal";
+import { Divider } from "../components/common/Divider";
+import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
+import { DhcpPageSkeleton } from "../components/dhcp/DhcpPageSkeleton";
+import { DhcpSnapshotDrawer } from "../components/dhcp/DhcpSnapshotDrawer";
+import { DhcpBulkSyncModal } from "../components/DhcpBulkSyncModal";
+import { DhcpBulkSyncResultsModal } from "../components/DhcpBulkSyncResultsModal";
 import { useTechnitiumState } from "../context/TechnitiumContext";
 import { useToast } from "../context/ToastContext";
 import { useNavigationBlocker } from "../hooks/useNavigationBlocker";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
-import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
-import { ConfirmModal } from "../components/common/ConfirmModal";
-import { Divider } from "../components/common/Divider";
-import { DhcpBulkSyncModal } from "../components/DhcpBulkSyncModal";
-import { DhcpBulkSyncResultsModal } from "../components/DhcpBulkSyncResultsModal";
-import { DhcpPageSkeleton } from "../components/dhcp/DhcpPageSkeleton";
-import { DhcpSnapshotDrawer } from "../components/dhcp/DhcpSnapshotDrawer";
 import type {
+  DhcpBulkSyncRequest,
+  DhcpBulkSyncResult,
+  DhcpBulkSyncStrategy,
   TechnitiumCloneDhcpScopeResult,
+  TechnitiumDhcpExclusionRange,
+  TechnitiumDhcpGenericOption,
+  TechnitiumDhcpReservedLease,
   TechnitiumDhcpScope,
   TechnitiumDhcpScopeOverrides,
   TechnitiumDhcpScopeSummary,
   TechnitiumDhcpStaticRoute,
   TechnitiumDhcpVendorInfo,
-  TechnitiumDhcpGenericOption,
-  TechnitiumDhcpExclusionRange,
-  TechnitiumDhcpReservedLease,
   TechnitiumUpdateDhcpScopeEnvelope,
-  DhcpBulkSyncRequest,
-  DhcpBulkSyncResult,
-  DhcpBulkSyncStrategy,
 } from "../types/dhcp";
 
 type LoadState = "idle" | "loading" | "success" | "error";
@@ -241,23 +241,6 @@ const describeGenericOptionValue = (
   };
 };
 
-interface SanitizedCollectionResult<T> {
-  values: T[];
-  hasPartial: boolean;
-  hasInvalid?: boolean;
-  invalidCode?: boolean;
-  invalidValue?: boolean;
-}
-
-const buildStaticRouteDraft = (
-  route?: TechnitiumDhcpStaticRoute,
-): StaticRouteDraft => ({
-  id: createDraftId(),
-  destination: route?.destination ?? "",
-  subnetMask: route?.subnetMask ?? "",
-  router: route?.router ?? "",
-});
-
 const buildVendorInfoDraft = (
   info?: TechnitiumDhcpVendorInfo,
 ): VendorInfoDraft => ({
@@ -306,6 +289,15 @@ const buildReservedLeaseDraft = (
   hardwareAddress: lease?.hardwareAddress ?? "",
   address: lease?.address ?? "",
   comments: lease?.comments ?? "",
+});
+
+const buildStaticRouteDraft = (
+  route?: TechnitiumDhcpStaticRoute,
+): StaticRouteDraft => ({
+  id: createDraftId(),
+  destination: route?.destination ?? "",
+  subnetMask: route?.subnetMask ?? "",
+  router: route?.router ?? "",
 });
 
 const sanitizeStaticRoutes = (
@@ -1002,6 +994,84 @@ export function DhcpPage() {
     draftBlockLocallyAdministered,
     draftIgnoreClientIdentifier,
   ]);
+  const handleSnapshotRestoreSuccess = useCallback(
+    async (nodeId: string) => {
+      try {
+        const envelope = await loadDhcpScopes(nodeId);
+        const nextScopes = envelope.data?.scopes ?? [];
+
+        setScopeCountByNode((prev) => {
+          const next = new Map(prev);
+          next.set(nodeId, nextScopes.length);
+          return next;
+        });
+
+        if (nodeId === selectedNodeId) {
+          setScopes(nextScopes);
+
+          const stillExists = nextScopes.some(
+            (scope) => scope.name === selectedScopeName,
+          );
+          const nextSelected =
+            stillExists ? selectedScopeName : nextScopes[0]?.name;
+
+          if (!stillExists) {
+            setSelectedScopeName(nextSelected);
+            setCurrentScope(undefined);
+          }
+
+          // Clear cached scope details for this node
+          setDetailCache((prev) => {
+            const next = new Map(prev);
+            const prefix = `${nodeId.toLowerCase()}::`;
+            for (const key of Array.from(next.keys())) {
+              if (key.startsWith(prefix)) {
+                next.delete(key);
+              }
+            }
+            return next;
+          });
+
+          // Reload current scope details to reflect restored state
+          if (nextSelected) {
+            try {
+              const scopeEnvelope = await loadDhcpScope(nodeId, nextSelected);
+              setCurrentScope(scopeEnvelope.data);
+              syncDraftWithScope(scopeEnvelope.data);
+
+              const nextSummary = nextScopes.find(
+                (scope) => scope.name === nextSelected,
+              );
+              const nextEnabled = nextSummary?.enabled ?? false;
+              setBaselineScopeEnabled(nextEnabled);
+              setDraftScopeEnabled(nextEnabled);
+              setBaselineJson(JSON.stringify(scopeEnvelope.data));
+            } catch (detailError) {
+              console.warn("Failed to reload scope after restore", detailError);
+            }
+          }
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ?
+            error.message
+          : "Failed to refresh scopes after snapshot restore.";
+        pushToast({ message, tone: "info", timeout: 6000 });
+      }
+    },
+    [
+      loadDhcpScopes,
+      loadDhcpScope,
+      selectedNodeId,
+      selectedScopeName,
+      setScopes,
+      syncDraftWithScope,
+      setBaselineScopeEnabled,
+      setDraftScopeEnabled,
+      setBaselineJson,
+      pushToast,
+    ],
+  );
 
   // Capture baseline after draft state is fully updated
   useEffect(() => {
@@ -1718,6 +1788,21 @@ export function DhcpPage() {
     isScopeEnabledDirty,
     draftScopeEnabled,
   ]);
+
+  const pendingChangesNote = useMemo(() => {
+    if (pendingChanges.length === 0) return undefined;
+
+    const noteParts = pendingChanges.map((change) => {
+      const detailText = change.detail ? ` (${change.detail})` : "";
+      return `${change.category}: ${change.description}${detailText}`;
+    });
+
+    const note = "Auto-captured before:\n" + noteParts.join(" | ");
+    const MAX_NOTE_LENGTH = 950;
+    return note.length > MAX_NOTE_LENGTH ?
+        `${note.slice(0, MAX_NOTE_LENGTH)}…`
+      : note;
+  }, [pendingChanges]);
 
   const handleAddStaticRoute = () => {
     setDraftStaticRoutes((previous) => [...previous, buildStaticRouteDraft()]);
@@ -2727,6 +2812,47 @@ export function DhcpPage() {
     setUpdateMessage(undefined);
   };
 
+  const ensureSnapshot = async (
+    node: string | undefined,
+    action: string,
+    note?: string,
+  ) => {
+    if (!node) return;
+    try {
+      const snapshot = await createDhcpSnapshot(node, "automatic");
+
+      if (note?.trim()) {
+        try {
+          await updateDhcpSnapshotNote(node, snapshot.id, note.trim());
+        } catch (noteError) {
+          console.warn("Failed to save snapshot note", noteError);
+        }
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to create snapshot.";
+      pushToast({
+        message: `Snapshot skipped before ${action}: ${message}`,
+        tone: "error",
+        timeout: 6000,
+      });
+    }
+  };
+
+  const ensureSnapshotsForNodes = async (
+    nodeIds: Array<string | undefined>,
+    action: string,
+    note?: string,
+  ) => {
+    const uniqueNodes = Array.from(
+      new Set(nodeIds.filter((nodeId): nodeId is string => Boolean(nodeId))),
+    );
+
+    await Promise.all(
+      uniqueNodes.map((nodeId) => ensureSnapshot(nodeId, action, note)),
+    );
+  };
+
   const handleClone = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -2790,6 +2916,11 @@ export function DhcpPage() {
     setCloneMessage(undefined);
 
     try {
+      await ensureSnapshot(selectedNodeId, "cloning DHCP scope");
+      if (cloneMode === "remote") {
+        await ensureSnapshot(targetNodeId, "cloning DHCP scope to target node");
+      }
+
       const result: TechnitiumCloneDhcpScopeResult = await cloneDhcpScope(
         selectedNodeId,
         selectedScopeName,
@@ -2892,6 +3023,8 @@ export function DhcpPage() {
     setRenameMessage(undefined);
 
     try {
+      await ensureSnapshot(selectedNodeId, "renaming DHCP scope");
+
       const result = await renameDhcpScope(selectedNodeId, selectedScopeName, {
         newScopeName: trimmedRenameScopeName,
       });
@@ -2964,6 +3097,12 @@ export function DhcpPage() {
     setUpdateMessage(undefined);
 
     try {
+      await ensureSnapshot(
+        selectedNodeId,
+        "saving DHCP scope changes",
+        pendingChangesNote,
+      );
+
       const response: TechnitiumUpdateDhcpScopeEnvelope = await updateDhcpScope(
         selectedNodeId,
         selectedScopeName,
@@ -3043,6 +3182,8 @@ export function DhcpPage() {
       onConfirm: async () => {
         closeConfirmModal();
         try {
+          await ensureSnapshot(selectedNodeId, "deleting DHCP scope");
+
           const result = await deleteDhcpScope(
             selectedNodeId,
             selectedScopeName,
@@ -3438,6 +3579,11 @@ export function DhcpPage() {
       enableOnTarget: bulkSyncEnableOnTarget,
     };
 
+    await ensureSnapshotsForNodes(
+      [request.sourceNodeId, ...request.targetNodeIds],
+      `bulk syncing DHCP scopes (${request.strategy})`,
+    );
+
     setBulkSyncInProgress(true);
 
     try {
@@ -3558,6 +3704,11 @@ export function DhcpPage() {
     setBulkSyncInProgress(true);
 
     try {
+      await ensureSnapshotsForNodes(
+        [request.sourceNodeId, ...request.targetNodeIds],
+        `bulk syncing DHCP scopes (${request.strategy})`,
+      );
+
       const result = await bulkSyncDhcpScopes(request);
       setBulkSyncResult(result);
       setShowBulkSyncResults(true);
@@ -7493,6 +7644,7 @@ export function DhcpPage() {
           getSnapshotDetail={getDhcpSnapshot}
           deleteSnapshot={deleteDhcpSnapshot}
           updateSnapshotNote={updateDhcpSnapshotNote}
+          onRestoreSuccess={handleSnapshotRestoreSuccess}
         />
 
         {/* Bulk Sync Modal */}
