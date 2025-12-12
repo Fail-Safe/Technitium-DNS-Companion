@@ -3788,6 +3788,15 @@ export function DhcpPage() {
         threshold={pullToRefresh.threshold}
         isRefreshing={pullToRefresh.isRefreshing}
       />
+      <button
+        type="button"
+        className="drawer-pull drawer-pull--history"
+        aria-label="Open configuration history"
+        onClick={() => setShowSnapshotDrawer(true)}
+        disabled={!selectedNodeId}
+      >
+        History
+      </button>
       <section ref={pullToRefresh.containerRef} className="configuration">
         <header className="configuration__header">
           <div>
@@ -3796,16 +3805,6 @@ export function DhcpPage() {
               Manage DHCP scopes across nodes and sync configurations
               efficiently.
             </p>
-          </div>
-          <div className="configuration__actions" style={{ gap: "0.5rem" }}>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={() => setShowSnapshotDrawer(true)}
-              disabled={!selectedNodeId}
-            >
-              Configuration History
-            </button>
           </div>
         </header>
 
