@@ -2494,7 +2494,10 @@ button.secondary:disabled,
   cursor: pointer;
   transition:
     background 0.2s ease,
-    opacity 0.2s ease;
+    opacity 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
 }
 
 .btn--primary {
@@ -2514,6 +2517,25 @@ button.secondary:disabled,
 
 .btn--secondary:hover:not(:disabled) {
   background: var(--color-info-bg);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border-light);
+  color: var(--color-text-primary);
+}
+
+.btn--ghost:focus-visible {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--color-primary) 28%, transparent);
 }
 
 .btn--danger {
