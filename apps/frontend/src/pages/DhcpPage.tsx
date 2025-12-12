@@ -3795,7 +3795,7 @@ export function DhcpPage() {
         onClick={() => setShowSnapshotDrawer(true)}
         disabled={!selectedNodeId}
       >
-        History
+        DHCP Scope History
       </button>
       <section ref={pullToRefresh.containerRef} className="configuration">
         <header className="configuration__header">

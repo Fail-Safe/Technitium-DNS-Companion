@@ -337,6 +337,7 @@
     bottom: 16px;
     right: 12px;
     writing-mode: horizontal-tb;
+    text-orientation: initial;
     padding: 10px 14px;
     border-radius: 16px;
   }
