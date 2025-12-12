@@ -105,7 +105,8 @@
     padding: 0 1.5rem 1.25rem;
 }
 
-.confirm-modal__actions .button {
+.confirm-modal__actions .button,
+.confirm-modal__actions .btn {
     min-width: 90px;
 }
 
@@ -135,7 +136,8 @@
         flex-direction: column-reverse;
     }
 
-    .confirm-modal__actions .button {
+    .confirm-modal__actions .button,
+    .confirm-modal__actions .btn {
         width: 100%;
     }
 }
