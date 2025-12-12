@@ -1424,6 +1424,33 @@ html {
    DHCP Page
    ============================================ */
 
+.dhcp-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.dhcp-page__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.dhcp-page__header h1 {
+  margin: 0 0 0.5rem 0;
+  font-size: 2rem;
+  color: var(--color-text-primary);
+}
+
+.dhcp-page__header p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 1rem;
+}
+
 .dhcp-page__error,
 .dhcp-page__success {
   border-radius: 0.85rem;
@@ -2098,8 +2125,13 @@ html {
 }
 
 @media (max-width: 720px) {
+  .dhcp-page {
+    padding: 1.5rem;
+    gap: 1.5rem;
+  }
+
   .dhcp-page__header {
-    padding: 1.25rem;
+    padding: 0;
   }
 
   .dhcp-page__card,
@@ -4829,11 +4861,6 @@ button.danger:disabled {
   margin-bottom: 0;
   max-width: 600px;
   /* Prevent it from being too wide */
-}
-
-/* Dropdown banner (shown below badge) uses absolute positioning */
-.configuration__header .cluster-info-banner--dropdown {
-  /* Inherits positioning from .cluster-info-banner--dropdown in component CSS */
 }
 
 /* Node Selector Component */

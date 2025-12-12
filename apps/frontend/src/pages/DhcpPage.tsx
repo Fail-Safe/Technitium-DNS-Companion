@@ -1,9 +1,4 @@
-import {
-  faClipboard,
-  faMinus,
-  faPencil,
-  faPlus,
-} from "@fortawesome/free-solid-svg-icons";
+import { faClipboard, faMinus, faPencil, faPlus } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmModal } from "../components/common/ConfirmModal";
@@ -3873,6 +3868,16 @@ export function DhcpPage() {
           threshold={pullToRefresh.threshold}
           isRefreshing={pullToRefresh.isRefreshing}
         />
+
+        <button
+          type="button"
+          className="drawer-pull"
+          aria-label="Open DHCP scope history"
+          onClick={() => setShowSnapshotDrawer(true)}
+          disabled={!selectedNodeId}
+        >
+          DHCP Scope History
+        </button>
 
         <header className="dhcp-page__header">
           <div>
