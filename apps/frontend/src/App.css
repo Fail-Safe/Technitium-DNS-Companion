@@ -6574,8 +6574,9 @@ button.danger:disabled {
     }
 
     .dhcp-page__header h1 {
-      margin: 0 0 0.35rem;
-      font-size: 1.65rem;
+      margin: 0 0 0.5rem 0;
+      font-size: 2rem;
+      color: var(--color-text-primary);
     }
 
     .dhcp-page__header p {

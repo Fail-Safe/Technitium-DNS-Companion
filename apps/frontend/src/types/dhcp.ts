@@ -173,12 +173,14 @@ export interface DhcpBulkSyncResult {
   completedAt: string;
 }
 
+export type DhcpSnapshotOrigin = "manual" | "automatic";
+
 export interface DhcpSnapshotMetadata {
   id: string;
   nodeId: string;
   createdAt: string;
   scopeCount: number;
-  origin: "manual" | "automatic";
+  origin: DhcpSnapshotOrigin;
   pinned?: boolean;
   note?: string;
 }

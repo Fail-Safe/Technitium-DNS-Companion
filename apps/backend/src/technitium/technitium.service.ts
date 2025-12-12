@@ -2771,6 +2771,27 @@ export class TechnitiumService {
       throw new BadRequestException("No scopes found to sync on source node.");
     }
 
+    // Load full source scope details so comparisons are accurate (list call is summary-only)
+    const sourceScopeDetails = new Map<
+      string,
+      import("./technitium.types").TechnitiumDhcpScope
+    >();
+
+    await Promise.all(
+      scopesToSync.map(async (scope) => {
+        if (!scope.name) return;
+
+        try {
+          const envelope = await this.getDhcpScope(sourceNodeId, scope.name);
+          sourceScopeDetails.set(scope.name.toLowerCase(), envelope.data);
+        } catch (error) {
+          this.logger.warn(
+            `Failed to load source scope details for ${scope.name} on ${sourceNodeId}: ${error instanceof Error ? error.message : "unknown error"}`,
+          );
+        }
+      }),
+    );
+
     const nodeResults: import("./technitium.types").DhcpBulkSyncNodeResult[] =
       [];
 
@@ -2849,9 +2870,37 @@ export class TechnitiumService {
           (scope) => scope.name?.toLowerCase() === scopeName.toLowerCase(),
         );
         const existsOnTarget = Boolean(existingTargetScope);
+        let targetScopeDetails:
+          | import("./technitium.types").TechnitiumDhcpScope
+          | undefined;
+
+        if (existsOnTarget) {
+          try {
+            const targetScopeEnvelope = await this.getDhcpScope(
+              targetNodeId,
+              scopeName,
+            );
+            targetScopeDetails = targetScopeEnvelope.data;
+          } catch (error) {
+            this.logger.warn(
+              `Failed to load target scope details for ${scopeName} on ${targetNodeId}: ${error instanceof Error ? error.message : "unknown error"}`,
+            );
+          }
+        }
+
+        const sourceScopeDetail =
+          sourceScopeDetails.get(scopeName.toLowerCase()) ||
+          (sourceScope as unknown as import("./technitium.types").TechnitiumDhcpScope);
+
         const scopeDiff =
-          existingTargetScope &&
-          this.compareDhcpScopes(sourceScope, existingTargetScope);
+          targetScopeDetails ?
+            this.compareDhcpScopes(sourceScopeDetail, targetScopeDetails)
+          : existingTargetScope ?
+            this.compareDhcpScopes(
+              sourceScopeDetail,
+              existingTargetScope as unknown as import("./technitium.types").TechnitiumDhcpScope,
+            )
+          : undefined;
 
         // Apply strategy
         if (strategy === "skip-existing" && existsOnTarget) {
@@ -2996,6 +3045,7 @@ export class TechnitiumService {
     ) => ({
       pool: `${scope.startingAddress}-${scope.endingAddress}-${scope.subnetMask}`,
       leaseTime: `${scope.leaseTimeDays ?? 0}-${scope.leaseTimeHours ?? 0}-${scope.leaseTimeMinutes ?? 0}`,
+      enabled: (scope as { enabled?: boolean }).enabled ?? false,
       routerAddress: scope.routerAddress ?? null,
       domainName: scope.domainName ?? "",
       domainSearchList: normalizeStringArray(scope.domainSearchList),
@@ -3050,6 +3100,7 @@ export class TechnitiumService {
 
     addDiff("Pool", canonicalSource.pool, canonicalTarget.pool);
     addDiff("Lease time", canonicalSource.leaseTime, canonicalTarget.leaseTime);
+    addDiff("Enabled", canonicalSource.enabled, canonicalTarget.enabled);
     addDiff(
       "Router",
       canonicalSource.routerAddress,

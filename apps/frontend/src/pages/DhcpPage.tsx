@@ -9,7 +9,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmModal } from "../components/common/ConfirmModal";
 import { Divider } from "../components/common/Divider";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
-import { DhcpPageSkeleton } from "../components/dhcp/DhcpPageSkeleton";
 import { DhcpSnapshotDrawer } from "../components/dhcp/DhcpSnapshotDrawer";
 import { DhcpBulkSyncModal } from "../components/DhcpBulkSyncModal";
 import { DhcpBulkSyncResultsModal } from "../components/DhcpBulkSyncResultsModal";
@@ -117,6 +116,13 @@ interface ReservedLeaseDraft {
   address: string;
   comments: string;
 }
+
+type SanitizedCollectionResult<T> = {
+  values: T[];
+  hasPartial: boolean;
+  invalidCode?: boolean;
+  invalidValue?: boolean;
+};
 
 const arraysEqualBy = <T,>(
   first: T[] | undefined,
@@ -3383,6 +3389,110 @@ export function DhcpPage() {
     return { exists: existingNodeIds.length > 0, nodeIds: existingNodeIds };
   };
 
+  // Preload source/target scope details for merge-missing so badges are accurate without expanding
+  const preloadMergeMissingScopeDetails = useCallback(async () => {
+    if (bulkSyncStrategy !== "merge-missing") return;
+    if (bulkSyncTargetNodeIds.length === 0 || bulkSyncSourceScopes.length === 0)
+      return;
+
+    const pending: Promise<void>[] = [];
+
+    for (const scope of bulkSyncSourceScopes) {
+      const { nodeIds: targetNodeIdsWithScope } = getScopeExistsOnTargets(
+        scope.name,
+      );
+
+      if (targetNodeIdsWithScope.length === 0) continue;
+
+      const sourceKey = `${bulkSyncSourceNodeId}:${scope.name}`;
+      const needsSource = !bulkSyncSourceScopeDetails.has(sourceKey);
+
+      // enqueue source detail load
+      if (needsSource) {
+        pending.push(
+          (async () => {
+            try {
+              const sourceEnvelope = await loadDhcpScope(
+                bulkSyncSourceNodeId,
+                scope.name,
+              );
+              if (sourceEnvelope.data) {
+                setBulkSyncSourceScopeDetails((prev) => {
+                  const next = new Map(prev);
+                  next.set(sourceKey, sourceEnvelope.data);
+                  return next;
+                });
+              }
+            } catch (error) {
+              console.warn(
+                `Failed to preload source scope ${scope.name} from ${bulkSyncSourceNodeId}`,
+                error,
+              );
+            }
+          })(),
+        );
+      }
+
+      // enqueue target detail loads
+      for (const targetNodeId of targetNodeIdsWithScope) {
+        const targetKey = `${targetNodeId}:${scope.name}`;
+        if (bulkSyncTargetScopeDetails.has(targetKey)) continue;
+
+        pending.push(
+          (async () => {
+            try {
+              const targetEnvelope = await loadDhcpScope(
+                targetNodeId,
+                scope.name,
+              );
+              if (targetEnvelope.data) {
+                setBulkSyncTargetScopeDetails((prev) => {
+                  const next = new Map(prev);
+                  next.set(targetKey, targetEnvelope.data);
+                  return next;
+                });
+              }
+            } catch (error) {
+              console.warn(
+                `Failed to preload target scope ${scope.name} from ${targetNodeId}`,
+                error,
+              );
+            }
+          })(),
+        );
+      }
+    }
+
+    if (pending.length > 0) {
+      setBulkSyncScopeDetailsLoading((prev) => {
+        const next = new Set(prev);
+        bulkSyncSourceScopes.forEach((scope) => next.add(scope.name));
+        return next;
+      });
+
+      await Promise.allSettled(pending);
+
+      setBulkSyncScopeDetailsLoading((prev) => {
+        const next = new Set(prev);
+        bulkSyncSourceScopes.forEach((scope) => next.delete(scope.name));
+        return next;
+      });
+    }
+  }, [
+    bulkSyncStrategy,
+    bulkSyncTargetNodeIds,
+    bulkSyncSourceScopes,
+    bulkSyncSourceNodeId,
+    bulkSyncSourceScopeDetails,
+    bulkSyncTargetScopeDetails,
+    getScopeExistsOnTargets,
+    loadDhcpScope,
+  ]);
+
+  useEffect(() => {
+    preloadMergeMissingScopeDetails();
+  }, [preloadMergeMissingScopeDetails]);
+
   // Helper to compute differences between source and target scopes
   interface ScopeDiff {
     field: string;
@@ -3577,190 +3687,10 @@ export function DhcpPage() {
   };
 
   // Extracted bulk sync execution logic
-  const executeBulkSync = async () => {
-    const request: DhcpBulkSyncRequest = {
-      sourceNodeId: bulkSyncSourceNodeId,
-      targetNodeIds: bulkSyncTargetNodeIds,
-      strategy: bulkSyncStrategy,
-      enableOnTarget: bulkSyncEnableOnTarget,
-    };
-
+  const performBulkSync = async (request: DhcpBulkSyncRequest) => {
     const snapshotNote = `Auto snapshot before bulk sync (${request.strategy})`;
 
-    await ensureSnapshotsForNodes(
-      [request.sourceNodeId, ...request.targetNodeIds],
-      `bulk syncing DHCP scopes (${request.strategy})`,
-      snapshotNote,
-    );
-
     setBulkSyncInProgress(true);
-
-    try {
-      const result = await bulkSyncDhcpScopes(request);
-      setBulkSyncResult(result);
-      setShowBulkSyncResults(true);
-
-      // Refresh scope counts after sync
-      await refreshScopeCounts();
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to sync DHCP scopes.";
-      pushToast({ message, tone: "error", timeout: 6000 });
-    } finally {
-      setBulkSyncInProgress(false);
-    }
-  };
-
-  const handleBulkSyncStart = () => {
-    if (!bulkSyncCanStart) return;
-
-    const sourceNodeName =
-      nodes.find((n) => n.id === bulkSyncSourceNodeId)?.name ||
-      bulkSyncSourceNodeId;
-    const targetNames = nodes
-      .filter((n) => bulkSyncTargetNodeIds.includes(n.id))
-      .map((n) => n.name || n.id)
-      .join(", ");
-
-    // Show confirmation dialog for destructive operations
-    if (bulkSyncStrategy === "overwrite-all") {
-      setConfirmModal({
-        isOpen: true,
-        title: "Mirror Operation",
-        message: (
-          <>
-            <p
-              style={{
-                marginTop: "0.75rem",
-                fontSize: "0.9em",
-                color: "var(--color-info)",
-              }}
-            >
-              Automatic snapshots will be created for all affected nodes before
-              proceeding.
-            </p>
-            <p style={{ marginTop: "0.75rem" }}>
-              This will <strong>DELETE ALL</strong> existing scopes on:
-            </p>
-            <p
-              style={{
-                fontWeight: 500,
-                marginTop: "0.25rem",
-                color: "var(--color-danger)",
-              }}
-            >
-              <strong>{targetNames}</strong>
-            </p>
-            <p style={{ marginTop: "0.75rem" }}>
-              Then copy all scopes from{" "}
-              <strong style={{ color: "var(--color-success)" }}>
-                {sourceNodeName}
-              </strong>
-              .
-            </p>
-            <p style={{ marginTop: "0.75rem", color: "var(--color-warning)" }}>
-              This operation can be undone by restoring from the snapshots that
-              will be automatically created. However, it is{" "}
-              <strong style={{ textDecoration: "underline" }}>
-                strongly recommended
-              </strong>{" "}
-              to ensure you have a current Technitium DNS backup before
-              proceeding.
-            </p>
-          </>
-        ),
-        variant: "danger",
-        confirmLabel: "Mirror Scopes",
-        onConfirm: () => {
-          closeConfirmModal();
-          executeBulkSync();
-        },
-      });
-    } else if (bulkSyncStrategy === "merge-missing") {
-      setConfirmModal({
-        isOpen: true,
-        title: "Sync All Operation",
-        message: (
-          <>
-            <p
-              style={{
-                marginTop: "0.75rem",
-                fontSize: "0.9em",
-                color: "var(--color-info)",
-              }}
-            >
-              Automatic snapshots will be created for all affected nodes before
-              proceeding.
-            </p>
-            <p style={{ marginTop: "0.75rem" }}>
-              Existing scopes will be modified to match the source configuration
-              from{" "}
-              <strong style={{ color: "var(--color-success)" }}>
-                {sourceNodeName}
-              </strong>
-              .
-            </p>
-            <p>This will update existing scopes and add missing scopes on:</p>
-            <p
-              style={{
-                fontWeight: 500,
-                marginTop: "0.25rem",
-                color: "var(--color-warning)",
-              }}
-            >
-              <strong>{targetNames}</strong>
-            </p>
-          </>
-        ),
-        variant: "warning",
-        confirmLabel: "Sync All",
-        onConfirm: () => {
-          closeConfirmModal();
-          executeBulkSync();
-        },
-      });
-    } else if (bulkSyncStrategy === "skip-existing") {
-      setConfirmModal({
-        isOpen: true,
-        title: "Skip-Existing Operation",
-        message: (
-          <>
-            <p style={{ marginTop: "0.75rem" }}>
-              Existing scopes on <strong>{targetNames}</strong> will be left
-              untouched. Only scopes that do not already exist will be copied
-              from <strong>{sourceNodeName}</strong>.
-            </p>
-            <p
-              style={{
-                marginTop: "0.75rem",
-                fontSize: "0.9em",
-                fontWeight: 500,
-                color: "var(--color-text-secondary)",
-              }}
-            >
-              Automatic snapshots will be created for all affected nodes before
-              proceeding.
-            </p>
-          </>
-        ),
-        variant: "info",
-        confirmLabel: "Start Sync",
-        onConfirm: () => {
-          closeConfirmModal();
-          executeBulkSync();
-        },
-      });
-    } else {
-      // skip-existing strategy - no confirmation needed
-      executeBulkSync();
-    }
-  };
-
-  const handleBulkSyncConfirm = async (request: DhcpBulkSyncRequest) => {
-    setShowBulkSyncModal(false);
-    setBulkSyncInProgress(true);
-
-    const snapshotNote = `Auto snapshot before bulk sync (${request.strategy})`;
 
     try {
       await ensureSnapshotsForNodes(
@@ -3773,7 +3703,6 @@ export function DhcpPage() {
       setBulkSyncResult(result);
       setShowBulkSyncResults(true);
 
-      // Show summary toast
       if (result.totalFailed === 0) {
         pushToast({
           message: `Successfully synced ${result.totalSynced} scope(s) across ${result.nodeResults.length} node(s)`,
@@ -3794,7 +3723,6 @@ export function DhcpPage() {
         });
       }
 
-      // Refresh scope list for all affected nodes
       for (const nodeResult of result.nodeResults) {
         if (nodeResult.syncedCount > 0) {
           try {
@@ -3807,23 +3735,124 @@ export function DhcpPage() {
           }
         }
       }
-
-      // Refresh current node if it was a target
-      if (result.nodeResults.some((nr) => nr.targetNodeId === selectedNodeId)) {
-        try {
-          const envelope = await loadDhcpScopes(selectedNodeId);
-          setScopes(envelope.data?.scopes ?? []);
-        } catch (refreshError) {
-          console.warn(`Failed to refresh current node scopes`, refreshError);
-        }
-      }
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to execute bulk sync.";
-      pushToast({ message, tone: "error", timeout: 6000 });
+      console.error("Bulk sync failed", error);
+      setBulkSyncResult(null);
+      pushToast({
+        message: "Bulk sync failed. See console for details.",
+        tone: "error",
+        timeout: 6000,
+      });
     } finally {
       setBulkSyncInProgress(false);
     }
+  };
+
+  const executeBulkSync = async () => {
+    const request: DhcpBulkSyncRequest = {
+      sourceNodeId: bulkSyncSourceNodeId,
+      targetNodeIds: bulkSyncTargetNodeIds,
+      strategy: bulkSyncStrategy,
+      enableOnTarget: bulkSyncEnableOnTarget,
+    };
+
+    await performBulkSync(request);
+  };
+
+  const handleBulkSyncStart = () => {
+    if (!bulkSyncCanStart) return;
+
+    const sourceNodeName =
+      nodes.find((node) => node.id === bulkSyncSourceNodeId)?.name ||
+      bulkSyncSourceNodeId;
+    const targetNames = bulkSyncTargetNodeIds
+      .map((id) => nodes.find((node) => node.id === id)?.name || id)
+      .join(", ");
+
+    if (bulkSyncStrategy === "overwrite-all") {
+      setConfirmModal({
+        isOpen: true,
+        title: "Overwrite Existing Scopes",
+        message: (
+          <>
+            <p style={{ marginTop: "0.75rem" }}>
+              Scopes on <strong>{targetNames}</strong> that also exist on
+              <strong> {sourceNodeName}</strong> will be overwritten with source
+              settings. New scopes will be created when missing.
+            </p>
+            <p
+              style={{
+                fontWeight: 500,
+                marginTop: "0.25rem",
+                color: "var(--color-warning)",
+              }}
+            >
+              This operation replaces existing configuration on targets.
+            </p>
+            <p
+              style={{
+                marginTop: "0.75rem",
+                fontSize: "0.9em",
+                fontWeight: 500,
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              Automatic snapshots will be created for all affected nodes before
+              proceeding.
+            </p>
+          </>
+        ),
+        variant: "warning",
+        confirmLabel: "Sync All",
+        onConfirm: () => {
+          closeConfirmModal();
+          executeBulkSync();
+        },
+      });
+      return;
+    }
+
+    if (bulkSyncStrategy === "merge-missing") {
+      setConfirmModal({
+        isOpen: true,
+        title: "Merge Missing + Update",
+        message: (
+          <>
+            <p style={{ marginTop: "0.75rem" }}>
+              Scopes from <strong>{sourceNodeName}</strong> will be copied to
+              <strong> {targetNames}</strong>. Existing scopes on targets will
+              be updated to match the source.
+            </p>
+            <p
+              style={{
+                marginTop: "0.75rem",
+                fontSize: "0.9em",
+                fontWeight: 500,
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              Automatic snapshots will be created for all affected nodes before
+              proceeding.
+            </p>
+          </>
+        ),
+        variant: "warning",
+        confirmLabel: "Sync All",
+        onConfirm: () => {
+          closeConfirmModal();
+          executeBulkSync();
+        },
+      });
+      return;
+    }
+
+    // skip-existing strategy - no confirmation dialog
+    executeBulkSync();
+  };
+
+  const handleBulkSyncConfirm = async (request: DhcpBulkSyncRequest) => {
+    setShowBulkSyncModal(false);
+    await performBulkSync(request);
   };
 
   const handleBulkSyncResultsClose = () => {
@@ -3833,63 +3862,35 @@ export function DhcpPage() {
 
   const handleBulkSyncRetry = () => {
     setShowBulkSyncResults(false);
-    setShowBulkSyncModal(true);
+    executeBulkSync();
   };
-
-  // Prevent background scroll when bulk sync results modal is open
-  useEffect(() => {
-    if (!showBulkSyncResults) return undefined;
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [showBulkSyncResults]);
-
-  // Show skeleton while loading initial scope list
-  if (scopeListState === "loading" && scopes.length === 0) {
-    return <DhcpPageSkeleton />;
-  }
 
   return (
     <>
-      <PullToRefreshIndicator
-        pullDistance={pullToRefresh.pullDistance}
-        threshold={pullToRefresh.threshold}
-        isRefreshing={pullToRefresh.isRefreshing}
-      />
-      {activePageTab === "scopes" && (
-        <button
-          type="button"
-          className="drawer-pull drawer-pull--history"
-          aria-label="Open configuration history"
-          onClick={() => setShowSnapshotDrawer(true)}
-          disabled={!selectedNodeId}
-        >
-          DHCP Scope History
-        </button>
-      )}
-      <section ref={pullToRefresh.containerRef} className="configuration">
-        <header className="configuration__header">
+      <section className="dhcp-page" ref={pullToRefresh.containerRef}>
+        <PullToRefreshIndicator
+          pullDistance={pullToRefresh.pullDistance}
+          threshold={pullToRefresh.threshold}
+          isRefreshing={pullToRefresh.isRefreshing}
+        />
+
+        <header className="dhcp-page__header">
           <div>
-            <h1>DHCP Management</h1>
+            <h1>DHCP Scopes</h1>
             <p>
-              Manage DHCP scopes across nodes and sync configurations
-              efficiently.
+              Manage DHCP scopes, cloning, and bulk sync across your Technitium
+              nodes.
             </p>
           </div>
         </header>
 
-        {/* Tab Switcher */}
-        <div className="configuration__tab-switcher">
+        <div className="configuration__tab-switcher dhcp-page__page-tabs">
           <button
             type="button"
             className={`configuration__tab ${activePageTab === "scopes" ? "configuration__tab--active" : ""}`}
             onClick={() => setActivePageTab("scopes")}
           >
-            DHCP Scopes
+            Scopes
           </button>
           <button
             type="button"
@@ -3900,7 +3901,6 @@ export function DhcpPage() {
           </button>
         </div>
 
-        {/* DHCP Scopes Tab */}
         {activePageTab === "scopes" && (
           <>
             {/* Node Selector */}

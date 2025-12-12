@@ -1052,7 +1052,7 @@ export function BuiltInBlockingEditor({
         console.warn("Failed to capture automatic snapshot", snapshotError);
         pushToast({
           message: "Snapshot failed before saving; changes will still apply",
-          tone: "warning",
+          tone: "error",
           timeout: 6000,
         });
       }
