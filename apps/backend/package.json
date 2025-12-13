@@ -17,7 +17,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "test:benchmark": "jest benchmark --runInBand --detectOpenHandles"
+    "test:benchmark": "cross-env RUN_BENCHMARK_TESTS=true ALLOW_TECHNITIUM_HTTP_IN_TESTS=true jest benchmark --runInBand --detectOpenHandles"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
@@ -43,9 +43,10 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
     "@types/supertest": "^6.0.2",
+    "cross-env": "^10.1.0",
     "eslint": "^9.18.0",
-    "eslint-plugin-prettier": "^5.2.1",
     "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
     "globals": "^16.0.0",
     "jest": "^30.0.0",
     "prettier": "^3.3.3",
