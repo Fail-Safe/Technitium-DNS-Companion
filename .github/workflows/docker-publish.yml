@@ -66,8 +66,8 @@ jobs:
             # type=ref,event=pr
             # Tag with git tag (v1.0.0)
             type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
-            type=semver,pattern={{major}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            # type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            # type=semver,pattern={{major}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
             # Tag with short SHA
             type=sha,prefix=
 
