@@ -31,6 +31,11 @@ pnpm-debug.log*
 /build
 coverage
 
+# Browser Profiling Data
+**/profiling-data*.json
+reports/*.json
+*.har
+
 # Test output
 test-results
 playwright-report
@@ -38,18 +43,18 @@ playwright-report
 # macOS metadata
 .DS_Store
 
+# Windows metadata
+Thumbs.db
+ehthumbs.db
+
 # Local backups
 /backups
 
-# Browser Profiling Data
-**/profiling-data*.json
-reports/*.json
-*.har
-
-# Personal development files
+# Local development files
 scripts/remote-dev.sh
 NEXT_STEPS.md
 docker-compose.dev.yml
 docker-entrypoint-dev.sh
 Dockerfile.dev
 NEXT_STEPS.md
+technitium.env
