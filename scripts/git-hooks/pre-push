@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+FRONTEND_DIR="${ROOT_DIR}/apps/frontend"
+BACKEND_DIR="${ROOT_DIR}/apps/backend"
+
+run_tests() {
+	local label="$1"
+	local path="$2"
+
+	if [ ! -d "$path" ]; then
+		echo "[pre-push] Skipping ${label} tests: directory ${path} not found" >&2
+		return
+	fi
+
+	echo "[pre-push] Running ${label} tests..."
+	pushd "$path" >/dev/null
+	npm test
+	popd >/dev/null
+	echo "[pre-push] ${label} tests passed"
+}
+
+run_tests "backend" "$BACKEND_DIR"
+run_tests "frontend" "$FRONTEND_DIR"
+
+echo "[pre-push] All test suites passed. Proceeding with push."
