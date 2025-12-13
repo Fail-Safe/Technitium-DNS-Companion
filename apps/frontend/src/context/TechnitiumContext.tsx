@@ -32,6 +32,9 @@ import type {
   DhcpSnapshotRestoreResult,
   TechnitiumCloneDhcpScopeRequest,
   TechnitiumCloneDhcpScopeResult,
+  TechnitiumCreateDhcpScopeEnvelope,
+  TechnitiumCreateDhcpScopeRequest,
+  TechnitiumDhcpScope,
   TechnitiumDhcpScopeEnvelope,
   TechnitiumDhcpScopeListEnvelope,
   TechnitiumRenameDhcpScopeRequest,
@@ -189,6 +192,10 @@ interface TechnitiumState {
     nodeId: string,
     scopeName: string,
   ) => Promise<TechnitiumDhcpScopeEnvelope>;
+  createDhcpScope: (
+    nodeId: string,
+    request: TechnitiumCreateDhcpScopeRequest,
+  ) => Promise<TechnitiumCreateDhcpScopeEnvelope>;
   cloneDhcpScope: (
     nodeId: string,
     scopeName: string,
@@ -847,6 +854,107 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       }
 
       return (await response.json()) as TechnitiumDhcpScopeEnvelope;
+    },
+    [],
+  );
+
+  const createDhcpScope = useCallback(
+    async (nodeId: string, request: TechnitiumCreateDhcpScopeRequest) => {
+      if (!nodeId) {
+        throw new Error("Node id is required to create a DHCP scope.");
+      }
+
+      if (!request || !request.scope) {
+        throw new Error("Scope payload is required to create a DHCP scope.");
+      }
+
+      const trimmedName = request.scope.name?.trim();
+      if (!trimmedName) {
+        throw new Error("Scope name is required to create a DHCP scope.");
+      }
+
+      const trimRequiredField = (value: string | undefined, label: string) => {
+        const trimmed = value?.trim();
+        if (!trimmed) {
+          throw new Error(`${label} is required to create a DHCP scope.`);
+        }
+        return trimmed;
+      };
+
+      const trimOptionalField = (value?: string | null) => {
+        if (value === undefined || value === null) {
+          return undefined;
+        }
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : undefined;
+      };
+
+      const normalizeArray = (values?: string[]) => {
+        if (!Array.isArray(values)) {
+          return undefined;
+        }
+        const normalized = values
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0);
+        return normalized.length > 0 ? normalized : undefined;
+      };
+
+      const scopePayload: TechnitiumDhcpScope = {
+        ...request.scope,
+        name: trimmedName,
+        startingAddress: trimRequiredField(
+          request.scope.startingAddress,
+          "Starting address",
+        ),
+        endingAddress: trimRequiredField(
+          request.scope.endingAddress,
+          "Ending address",
+        ),
+        subnetMask: trimRequiredField(request.scope.subnetMask, "Subnet mask"),
+      };
+
+      scopePayload.routerAddress = trimOptionalField(
+        request.scope.routerAddress ?? undefined,
+      );
+      scopePayload.serverAddress = trimOptionalField(
+        request.scope.serverAddress ?? undefined,
+      );
+      scopePayload.serverHostName = trimOptionalField(
+        request.scope.serverHostName ?? undefined,
+      );
+      scopePayload.bootFileName = trimOptionalField(
+        request.scope.bootFileName ?? undefined,
+      );
+
+      scopePayload.dnsServers = normalizeArray(request.scope.dnsServers);
+      scopePayload.winsServers = normalizeArray(request.scope.winsServers);
+      scopePayload.ntpServers = normalizeArray(request.scope.ntpServers);
+      scopePayload.ntpServerDomainNames = normalizeArray(
+        request.scope.ntpServerDomainNames,
+      );
+
+      const payload: TechnitiumCreateDhcpScopeRequest = { scope: scopePayload };
+
+      if (request.enabled !== undefined) {
+        payload.enabled = request.enabled;
+      }
+
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dhcp/scopes`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to create DHCP scope on node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as TechnitiumCreateDhcpScopeEnvelope;
     },
     [],
   );
@@ -1542,6 +1650,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       loadCombinedLogs,
       loadDhcpScopes,
       loadDhcpScope,
+      createDhcpScope,
       cloneDhcpScope,
       renameDhcpScope,
       updateDhcpScope,
@@ -1590,6 +1699,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       loadCombinedLogs,
       loadDhcpScopes,
       loadDhcpScope,
+      createDhcpScope,
       cloneDhcpScope,
       renameDhcpScope,
       updateDhcpScope,

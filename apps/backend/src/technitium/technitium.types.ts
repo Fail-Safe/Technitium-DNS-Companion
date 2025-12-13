@@ -389,6 +389,16 @@ export interface TechnitiumUpdateDhcpScopeResult {
   enabled: boolean;
 }
 
+export interface TechnitiumCreateDhcpScopeRequest {
+  scope: TechnitiumDhcpScope;
+  enabled?: boolean;
+}
+
+export interface TechnitiumCreateDhcpScopeResult {
+  scope: TechnitiumDhcpScope;
+  enabled: boolean;
+}
+
 export interface TechnitiumZoneSummary {
   name: string;
   type?: string;

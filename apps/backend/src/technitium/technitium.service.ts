@@ -30,6 +30,8 @@ import {
   TechnitiumCombinedQueryLogPage,
   TechnitiumCombinedZoneNodeSnapshot,
   TechnitiumCombinedZoneOverview,
+  TechnitiumCreateDhcpScopeRequest,
+  TechnitiumCreateDhcpScopeResult,
   TechnitiumDashboardStatsData,
   TechnitiumDhcpLeaseList,
   TechnitiumDhcpScope,
@@ -2221,6 +2223,122 @@ export class TechnitiumService {
       sourceScopeName: normalizedScopeName,
       targetScopeName,
       enabledOnTarget: desiredEnabled,
+    };
+  }
+
+  async createDhcpScope(
+    nodeId: string,
+    request: TechnitiumCreateDhcpScopeRequest,
+  ): Promise<TechnitiumStatusEnvelope<TechnitiumCreateDhcpScopeResult>> {
+    if (!request || !request.scope) {
+      throw new BadRequestException(
+        "Scope payload is required to create a DHCP scope.",
+      );
+    }
+
+    const node = this.findNode(nodeId);
+    const normalizedScopeName = this.normalizeScopeName(request.scope.name);
+    if (!normalizedScopeName) {
+      throw new BadRequestException(
+        "Scope name is required to create a DHCP scope.",
+      );
+    }
+
+    const listEnvelope = await this.request<
+      TechnitiumApiResponse<TechnitiumDhcpScopeList>
+    >(node, { method: "GET", url: "/api/dhcp/scopes/list" });
+    const listPayload = this.unwrapApiResponse(
+      listEnvelope,
+      node.id,
+      "DHCP scope list",
+    );
+
+    const conflict = (listPayload.scopes ?? []).some(
+      (scope) =>
+        scope.name?.toLowerCase() === normalizedScopeName.toLowerCase(),
+    );
+    if (conflict) {
+      throw new BadRequestException(
+        `DHCP scope "${normalizedScopeName}" already exists on node "${node.id}". Choose a different name.`,
+      );
+    }
+
+    const sanitizedScope = this.safeJsonClone<TechnitiumDhcpScope>({
+      ...request.scope,
+      name: normalizedScopeName,
+    });
+
+    sanitizedScope.startingAddress = sanitizedScope.startingAddress?.trim();
+    sanitizedScope.endingAddress = sanitizedScope.endingAddress?.trim();
+    sanitizedScope.subnetMask = sanitizedScope.subnetMask?.trim();
+    sanitizedScope.routerAddress = sanitizedScope.routerAddress?.trim() || null;
+    sanitizedScope.serverAddress = sanitizedScope.serverAddress?.trim() || null;
+    sanitizedScope.serverHostName =
+      sanitizedScope.serverHostName?.trim() || null;
+    sanitizedScope.bootFileName = sanitizedScope.bootFileName?.trim() || null;
+
+    if (!sanitizedScope.startingAddress || !sanitizedScope.endingAddress) {
+      throw new BadRequestException(
+        "Starting and ending addresses are required to create a DHCP scope.",
+      );
+    }
+
+    if (!sanitizedScope.subnetMask) {
+      throw new BadRequestException(
+        "Subnet mask is required to create a DHCP scope.",
+      );
+    }
+
+    const formData = this.buildDhcpScopeFormData(sanitizedScope);
+
+    const setEnvelope = await this.request<
+      TechnitiumApiResponse<Record<string, unknown>>
+    >(node, {
+      method: "POST",
+      url: "/api/dhcp/scopes/set",
+      data: formData.toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+    this.unwrapApiResponse(
+      setEnvelope,
+      node.id,
+      `create DHCP scope "${normalizedScopeName}"`,
+    );
+
+    const desiredEnabled = request.enabled ?? false;
+    const enableDisableUrl =
+      desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+
+    const toggleEnvelope = await this.request<
+      TechnitiumApiResponse<Record<string, unknown>>
+    >(node, {
+      method: "POST",
+      url: enableDisableUrl,
+      params: { name: normalizedScopeName },
+    });
+    this.unwrapApiResponse(
+      toggleEnvelope,
+      node.id,
+      `${desiredEnabled ? "enable" : "disable"} DHCP scope "${normalizedScopeName}"`,
+    );
+
+    const createdScopeEnvelope = await this.request<
+      TechnitiumApiResponse<TechnitiumDhcpScope>
+    >(node, {
+      method: "GET",
+      url: "/api/dhcp/scopes/get",
+      params: { name: normalizedScopeName },
+    });
+    const createdScope = this.unwrapApiResponse(
+      createdScopeEnvelope,
+      node.id,
+      `DHCP scope "${normalizedScopeName}"`,
+    );
+
+    return {
+      nodeId: node.id,
+      fetchedAt: new Date().toISOString(),
+      data: { scope: createdScope, enabled: desiredEnabled },
     };
   }
 

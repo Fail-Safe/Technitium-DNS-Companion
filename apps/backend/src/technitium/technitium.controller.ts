@@ -21,6 +21,7 @@ import type {
   DhcpBulkSyncRequest,
   DhcpSnapshotOrigin,
   TechnitiumCloneDhcpScopeRequest,
+  TechnitiumCreateDhcpScopeRequest,
   TechnitiumQueryLogFilters,
   TechnitiumRenameDhcpScopeRequest,
   TechnitiumUpdateDhcpScopeRequest,
@@ -213,6 +214,31 @@ export class TechnitiumController {
     }
 
     return this.technitiumService.getDhcpScope(nodeId, scopeName);
+  }
+
+  @Post(":nodeId/dhcp/scopes")
+  createDhcpScope(
+    @Param("nodeId") nodeId: string,
+    @Body() body: TechnitiumCreateDhcpScopeRequest,
+  ) {
+    if (!body || !body.scope) {
+      throw new BadRequestException("Scope payload is required.");
+    }
+
+    const trimmedName = body.scope.name?.trim();
+    if (!trimmedName) {
+      throw new BadRequestException("Scope name is required.");
+    }
+
+    const payload: TechnitiumCreateDhcpScopeRequest = {
+      scope: { ...body.scope, name: trimmedName },
+    };
+
+    if (body.enabled !== undefined) {
+      payload.enabled = body.enabled;
+    }
+
+    return this.technitiumService.createDhcpScope(nodeId, payload);
   }
 
   @Get(":nodeId/advanced-blocking")

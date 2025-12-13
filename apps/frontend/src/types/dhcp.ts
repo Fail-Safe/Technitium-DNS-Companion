@@ -135,6 +135,19 @@ export interface TechnitiumUpdateDhcpScopeEnvelope {
   data: TechnitiumUpdateDhcpScopeResult;
 }
 
+export interface TechnitiumCreateDhcpScopeRequest {
+  scope: TechnitiumDhcpScope;
+  enabled?: boolean;
+}
+
+export type TechnitiumCreateDhcpScopeResult = TechnitiumUpdateDhcpScopeResult;
+
+export interface TechnitiumCreateDhcpScopeEnvelope {
+  nodeId: string;
+  fetchedAt: string;
+  data: TechnitiumCreateDhcpScopeResult;
+}
+
 export type DhcpBulkSyncStrategy =
   | "skip-existing"
   | "overwrite-all"
