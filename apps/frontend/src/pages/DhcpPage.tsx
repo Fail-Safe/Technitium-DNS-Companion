@@ -1,35 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faPlus,
+  faClipboard,
+  faClockRotateLeft,
   faMinus,
   faPencil,
-  faClipboard,
+  faPlus,
 } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmModal } from "../components/common/ConfirmModal";
+import { Divider } from "../components/common/Divider";
+import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
+import { DhcpSnapshotDrawer } from "../components/dhcp/DhcpSnapshotDrawer";
+import { DhcpBulkSyncModal } from "../components/DhcpBulkSyncModal";
+import { DhcpBulkSyncResultsModal } from "../components/DhcpBulkSyncResultsModal";
 import { useTechnitiumState } from "../context/TechnitiumContext";
 import { useToast } from "../context/ToastContext";
 import { useNavigationBlocker } from "../hooks/useNavigationBlocker";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
-import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
-import { ConfirmModal } from "../components/common/ConfirmModal";
-import { Divider } from "../components/common/Divider";
-import { DhcpBulkSyncModal } from "../components/DhcpBulkSyncModal";
-import { DhcpBulkSyncResultsModal } from "../components/DhcpBulkSyncResultsModal";
-import { DhcpPageSkeleton } from "../components/dhcp/DhcpPageSkeleton";
 import type {
+  DhcpBulkSyncRequest,
+  DhcpBulkSyncResult,
+  DhcpBulkSyncStrategy,
   TechnitiumCloneDhcpScopeResult,
+  TechnitiumDhcpExclusionRange,
+  TechnitiumDhcpGenericOption,
+  TechnitiumDhcpReservedLease,
   TechnitiumDhcpScope,
   TechnitiumDhcpScopeOverrides,
   TechnitiumDhcpScopeSummary,
   TechnitiumDhcpStaticRoute,
   TechnitiumDhcpVendorInfo,
-  TechnitiumDhcpGenericOption,
-  TechnitiumDhcpExclusionRange,
-  TechnitiumDhcpReservedLease,
   TechnitiumUpdateDhcpScopeEnvelope,
-  DhcpBulkSyncRequest,
-  DhcpBulkSyncResult,
-  DhcpBulkSyncStrategy,
 } from "../types/dhcp";
 
 type LoadState = "idle" | "loading" | "success" | "error";
@@ -39,6 +40,8 @@ type CloneState = "idle" | "loading" | "success" | "error";
 type UpdateState = "idle" | "loading" | "success" | "error";
 
 type RenameState = "idle" | "loading" | "success" | "error";
+
+type CreateScopeState = "idle" | "loading" | "success" | "error";
 
 type DhcpTabMode = "scope-details" | "clone";
 
@@ -116,6 +119,13 @@ interface ReservedLeaseDraft {
   address: string;
   comments: string;
 }
+
+type SanitizedCollectionResult<T> = {
+  values: T[];
+  hasPartial: boolean;
+  invalidCode?: boolean;
+  invalidValue?: boolean;
+};
 
 const arraysEqualBy = <T,>(
   first: T[] | undefined,
@@ -240,23 +250,6 @@ const describeGenericOptionValue = (
   };
 };
 
-interface SanitizedCollectionResult<T> {
-  values: T[];
-  hasPartial: boolean;
-  hasInvalid?: boolean;
-  invalidCode?: boolean;
-  invalidValue?: boolean;
-}
-
-const buildStaticRouteDraft = (
-  route?: TechnitiumDhcpStaticRoute,
-): StaticRouteDraft => ({
-  id: createDraftId(),
-  destination: route?.destination ?? "",
-  subnetMask: route?.subnetMask ?? "",
-  router: route?.router ?? "",
-});
-
 const buildVendorInfoDraft = (
   info?: TechnitiumDhcpVendorInfo,
 ): VendorInfoDraft => ({
@@ -305,6 +298,15 @@ const buildReservedLeaseDraft = (
   hardwareAddress: lease?.hardwareAddress ?? "",
   address: lease?.address ?? "",
   comments: lease?.comments ?? "",
+});
+
+const buildStaticRouteDraft = (
+  route?: TechnitiumDhcpStaticRoute,
+): StaticRouteDraft => ({
+  id: createDraftId(),
+  destination: route?.destination ?? "",
+  subnetMask: route?.subnetMask ?? "",
+  router: route?.router ?? "",
 });
 
 const sanitizeStaticRoutes = (
@@ -520,12 +522,22 @@ export function DhcpPage() {
     cloneDhcpScope,
     renameDhcpScope,
     updateDhcpScope,
+    createDhcpScope,
     deleteDhcpScope,
     bulkSyncDhcpScopes,
+    listDhcpSnapshots,
+    createDhcpSnapshot,
+    restoreDhcpSnapshot,
+    setDhcpSnapshotPinned,
+    getDhcpSnapshot,
+    deleteDhcpSnapshot,
+    updateDhcpSnapshotNote,
   } = useTechnitiumState();
   const { pushToast } = useToast();
 
   const [activePageTab, setActivePageTab] = useState<DhcpPageTab>("scopes");
+  const [bulkSyncModalOriginTab, setBulkSyncModalOriginTab] =
+    useState<DhcpPageTab>("scopes");
   const [activeTab, setActiveTab] = useState<DhcpTabMode>("scope-details");
   const [selectedNodeId, setSelectedNodeId] = useState<string>(
     () => nodes[0]?.id ?? "",
@@ -574,6 +586,30 @@ export function DhcpPage() {
   const [renameState, setRenameState] = useState<RenameState>("idle");
   const [renameMessage, setRenameMessage] = useState<string | undefined>();
   const [renameError, setRenameError] = useState<string | undefined>();
+  const [createScopeState, setCreateScopeState] =
+    useState<CreateScopeState>("idle");
+  const [createScopeMessage, setCreateScopeMessage] = useState<
+    string | undefined
+  >();
+  const [createScopeError, setCreateScopeError] = useState<
+    string | undefined
+  >();
+  const [firstScopeName, setFirstScopeName] = useState<string>("");
+  const [firstScopeStartingAddress, setFirstScopeStartingAddress] =
+    useState<string>("");
+  const [firstScopeEndingAddress, setFirstScopeEndingAddress] =
+    useState<string>("");
+  const [firstScopeSubnetMask, setFirstScopeSubnetMask] = useState<string>("");
+  const [firstScopeRouterAddress, setFirstScopeRouterAddress] =
+    useState<string>("");
+  const [firstScopeDomainName, setFirstScopeDomainName] = useState<string>("");
+  const [firstScopeDomainSearchList, setFirstScopeDomainSearchList] =
+    useState<string>("");
+  const [firstScopeDnsServers, setFirstScopeDnsServers] = useState<string>("");
+  const [firstScopeUseThisDnsServer, setFirstScopeUseThisDnsServer] =
+    useState<boolean>(true);
+  const [firstScopeEnableScope, setFirstScopeEnableScope] =
+    useState<boolean>(true);
   const [draftStartingAddress, setDraftStartingAddress] = useState<string>("");
   const [draftEndingAddress, setDraftEndingAddress] = useState<string>("");
   const [draftSubnetMask, setDraftSubnetMask] = useState<string>("");
@@ -638,6 +674,7 @@ export function DhcpPage() {
   const [bulkSyncResult, setBulkSyncResult] =
     useState<DhcpBulkSyncResult | null>(null);
   const [showBulkSyncResults, setShowBulkSyncResults] = useState(false);
+  const [showSnapshotDrawer, setShowSnapshotDrawer] = useState(false);
 
   // Bulk sync form state (inline in tab)
   const [bulkSyncSourceNodeId, setBulkSyncSourceNodeId] = useState<string>(
@@ -754,7 +791,27 @@ export function DhcpPage() {
     disabled: !selectedNodeId,
   });
 
-  const syncDraftWithScope = (scope?: TechnitiumDhcpScope) => {
+  const resetCreateScopeDraft = useCallback(() => {
+    setFirstScopeName("");
+    setFirstScopeStartingAddress("");
+    setFirstScopeEndingAddress("");
+    setFirstScopeSubnetMask("");
+    setFirstScopeRouterAddress("");
+    setFirstScopeDomainName("");
+    setFirstScopeDomainSearchList("");
+    setFirstScopeDnsServers("");
+    setFirstScopeUseThisDnsServer(true);
+    setFirstScopeEnableScope(true);
+  }, []);
+
+  useEffect(() => {
+    resetCreateScopeDraft();
+    setCreateScopeState("idle");
+    setCreateScopeMessage(undefined);
+    setCreateScopeError(undefined);
+  }, [resetCreateScopeDraft, selectedNodeId]);
+
+  const syncDraftWithScope = useCallback((scope?: TechnitiumDhcpScope) => {
     if (!scope) {
       // Clear baseline when no scope
       setBaselineJson(undefined);
@@ -899,7 +956,7 @@ export function DhcpPage() {
 
     // Mark that we need to capture baseline after state updates
     needsBaselineCaptureRef.current = true;
-  };
+  }, []);
 
   // Serialize draft fields back to a scope object for comparison
   const serializeDraftToScope = useCallback(():
@@ -993,6 +1050,84 @@ export function DhcpPage() {
     draftBlockLocallyAdministered,
     draftIgnoreClientIdentifier,
   ]);
+  const handleSnapshotRestoreSuccess = useCallback(
+    async (nodeId: string) => {
+      try {
+        const envelope = await loadDhcpScopes(nodeId);
+        const nextScopes = envelope.data?.scopes ?? [];
+
+        setScopeCountByNode((prev) => {
+          const next = new Map(prev);
+          next.set(nodeId, nextScopes.length);
+          return next;
+        });
+
+        if (nodeId === selectedNodeId) {
+          setScopes(nextScopes);
+
+          const stillExists = nextScopes.some(
+            (scope) => scope.name === selectedScopeName,
+          );
+          const nextSelected =
+            stillExists ? selectedScopeName : nextScopes[0]?.name;
+
+          if (!stillExists) {
+            setSelectedScopeName(nextSelected);
+            setCurrentScope(undefined);
+          }
+
+          // Clear cached scope details for this node
+          setDetailCache((prev) => {
+            const next = new Map(prev);
+            const prefix = `${nodeId.toLowerCase()}::`;
+            for (const key of Array.from(next.keys())) {
+              if (key.startsWith(prefix)) {
+                next.delete(key);
+              }
+            }
+            return next;
+          });
+
+          // Reload current scope details to reflect restored state
+          if (nextSelected) {
+            try {
+              const scopeEnvelope = await loadDhcpScope(nodeId, nextSelected);
+              setCurrentScope(scopeEnvelope.data);
+              syncDraftWithScope(scopeEnvelope.data);
+
+              const nextSummary = nextScopes.find(
+                (scope) => scope.name === nextSelected,
+              );
+              const nextEnabled = nextSummary?.enabled ?? false;
+              setBaselineScopeEnabled(nextEnabled);
+              setDraftScopeEnabled(nextEnabled);
+              setBaselineJson(JSON.stringify(scopeEnvelope.data));
+            } catch (detailError) {
+              console.warn("Failed to reload scope after restore", detailError);
+            }
+          }
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ?
+            error.message
+          : "Failed to refresh scopes after snapshot restore.";
+        pushToast({ message, tone: "info", timeout: 6000 });
+      }
+    },
+    [
+      loadDhcpScopes,
+      loadDhcpScope,
+      selectedNodeId,
+      selectedScopeName,
+      setScopes,
+      syncDraftWithScope,
+      setBaselineScopeEnabled,
+      setDraftScopeEnabled,
+      setBaselineJson,
+      pushToast,
+    ],
+  );
 
   // Capture baseline after draft state is fully updated
   useEffect(() => {
@@ -1710,6 +1845,67 @@ export function DhcpPage() {
     draftScopeEnabled,
   ]);
 
+  const pendingChangesNote = useMemo(() => {
+    if (pendingChanges.length === 0) return undefined;
+
+    const noteParts = pendingChanges.map((change) => {
+      const detailText = change.detail ? ` (${change.detail})` : "";
+      return `${change.category}: ${change.description}${detailText}`;
+    });
+
+    const note = "Auto-captured before:\n" + noteParts.join(" | ");
+    const MAX_NOTE_LENGTH = 950;
+    return note.length > MAX_NOTE_LENGTH ?
+        `${note.slice(0, MAX_NOTE_LENGTH)}…`
+      : note;
+  }, [pendingChanges]);
+
+  const trimmedCreateScopeName = firstScopeName.trim();
+  const trimmedCreateScopeStartingAddress = firstScopeStartingAddress.trim();
+  const trimmedCreateScopeEndingAddress = firstScopeEndingAddress.trim();
+  const trimmedCreateScopeSubnetMask = firstScopeSubnetMask.trim();
+  const trimmedCreateScopeRouterAddress = firstScopeRouterAddress.trim();
+  const trimmedCreateScopeDomainName = firstScopeDomainName.trim();
+  const createScopeDnsList = useMemo(
+    () => splitListInput(firstScopeDnsServers),
+    [firstScopeDnsServers],
+  );
+  const createScopeDomainSearchEntries = useMemo(
+    () => splitListInput(firstScopeDomainSearchList),
+    [firstScopeDomainSearchList],
+  );
+  const createScopeStartingAddressInvalid =
+    firstScopeStartingAddress.length > 0 &&
+    !isValidIPv4Address(firstScopeStartingAddress);
+  const createScopeEndingAddressInvalid =
+    firstScopeEndingAddress.length > 0 &&
+    !isValidIPv4Address(firstScopeEndingAddress);
+  const createScopeSubnetMaskInvalid =
+    firstScopeSubnetMask.length > 0 &&
+    !isValidIPv4Address(firstScopeSubnetMask);
+  const createScopeRouterInvalid =
+    firstScopeRouterAddress.length > 0 &&
+    !isValidIPv4Address(firstScopeRouterAddress);
+  const createScopeDnsMissing =
+    !firstScopeUseThisDnsServer && createScopeDnsList.length === 0;
+  const createScopeHasRequiredFields =
+    trimmedCreateScopeName.length > 0 &&
+    trimmedCreateScopeStartingAddress.length > 0 &&
+    trimmedCreateScopeEndingAddress.length > 0 &&
+    trimmedCreateScopeSubnetMask.length > 0;
+  const createScopeIpInputsValid =
+    !createScopeStartingAddressInvalid &&
+    !createScopeEndingAddressInvalid &&
+    !createScopeSubnetMaskInvalid &&
+    !createScopeRouterInvalid;
+  const createScopeFormValid =
+    createScopeHasRequiredFields &&
+    createScopeIpInputsValid &&
+    !createScopeDnsMissing;
+  const createScopeSubmitDisabled =
+    createScopeState === "loading" || !selectedNodeId || !createScopeFormValid;
+  const zeroScopeState = scopeListState === "success" && scopes.length === 0;
+
   const handleAddStaticRoute = () => {
     setDraftStaticRoutes((previous) => [...previous, buildStaticRouteDraft()]);
   };
@@ -1871,7 +2067,7 @@ export function DhcpPage() {
       setDraftScopeEnabled(baselineScopeEnabled);
       setShowChangesSummary(false);
     }
-  }, [currentScope, baselineScopeEnabled]);
+  }, [currentScope, baselineScopeEnabled, syncDraftWithScope]);
 
   // Keyboard shortcuts: Ctrl/Cmd+S to save, Escape to reset
   useEffect(() => {
@@ -2193,6 +2389,24 @@ export function DhcpPage() {
       return;
     }
 
+    if (scopeListState !== "success") {
+      return;
+    }
+
+    const selectedExists = scopes.some(
+      (scope) => scope.name === selectedScopeName,
+    );
+    if (!selectedExists) {
+      return;
+    }
+
+    if (
+      currentScope?.name === selectedScopeName &&
+      scopeDetailState === "success"
+    ) {
+      return;
+    }
+
     const cacheKey = buildScopeKey(selectedNodeId, selectedScopeName);
     const cached = detailCache.get(cacheKey);
 
@@ -2241,7 +2455,17 @@ export function DhcpPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedNodeId, selectedScopeName, detailCache, loadDhcpScope]);
+  }, [
+    selectedNodeId,
+    selectedScopeName,
+    detailCache,
+    loadDhcpScope,
+    scopeListState,
+    scopes,
+    currentScope?.name,
+    scopeDetailState,
+    syncDraftWithScope,
+  ]);
 
   useEffect(() => {
     setCloneState("idle");
@@ -2718,6 +2942,178 @@ export function DhcpPage() {
     setUpdateMessage(undefined);
   };
 
+  const ensureSnapshot = async (
+    node: string | undefined,
+    action: string,
+    note?: string,
+  ) => {
+    if (!node) return;
+    try {
+      const snapshot = await createDhcpSnapshot(node, "automatic");
+
+      if (note?.trim()) {
+        try {
+          await updateDhcpSnapshotNote(node, snapshot.id, note.trim());
+        } catch (noteError) {
+          console.warn("Failed to save snapshot note", noteError);
+        }
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to create snapshot.";
+
+      // If the node has no scopes, skip without alarming the user
+      if (message.toLowerCase().includes("no scopes")) {
+        return;
+      }
+
+      pushToast({
+        message: `Snapshot skipped before ${action}: ${message}`,
+        tone: "error",
+        timeout: 6000,
+      });
+    }
+  };
+
+  const ensureSnapshotsForNodes = async (
+    nodeIds: Array<string | undefined>,
+    action: string,
+    note?: string,
+  ) => {
+    const uniqueNodes = Array.from(
+      new Set(nodeIds.filter((nodeId): nodeId is string => Boolean(nodeId))),
+    );
+
+    await Promise.all(
+      uniqueNodes.map((nodeId) => ensureSnapshot(nodeId, action, note)),
+    );
+  };
+
+  const handleCreateScope = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!selectedNodeId) {
+      const message = "Select a node before creating a scope.";
+      setCreateScopeState("error");
+      setCreateScopeError(message);
+      setCreateScopeMessage(undefined);
+      pushToast({ message, tone: "error", timeout: 6000 });
+      return;
+    }
+
+    if (!createScopeFormValid) {
+      const message =
+        createScopeDnsMissing ?
+          'Add at least one DNS server or keep "Use this node as DNS" enabled.'
+        : "Fill out the required fields before creating a scope.";
+      setCreateScopeState("error");
+      setCreateScopeError(message);
+      setCreateScopeMessage(undefined);
+      pushToast({ message, tone: "error", timeout: 6000 });
+      return;
+    }
+
+    const duplicate = scopes.some(
+      (scope) =>
+        scope.name.toLowerCase() === trimmedCreateScopeName.toLowerCase(),
+    );
+
+    if (duplicate) {
+      const message =
+        "A scope with that name already exists on this node. Choose another name.";
+      setCreateScopeState("error");
+      setCreateScopeError(message);
+      setCreateScopeMessage(undefined);
+      pushToast({ message, tone: "error", timeout: 6000 });
+      return;
+    }
+
+    setCreateScopeState("loading");
+    setCreateScopeError(undefined);
+    setCreateScopeMessage(undefined);
+
+    try {
+      const response = await createDhcpScope(selectedNodeId, {
+        scope: {
+          name: trimmedCreateScopeName,
+          startingAddress: trimmedCreateScopeStartingAddress,
+          endingAddress: trimmedCreateScopeEndingAddress,
+          subnetMask: trimmedCreateScopeSubnetMask,
+          routerAddress:
+            trimmedCreateScopeRouterAddress.length > 0 ?
+              trimmedCreateScopeRouterAddress
+            : undefined,
+          domainName:
+            trimmedCreateScopeDomainName.length > 0 ?
+              trimmedCreateScopeDomainName
+            : undefined,
+          domainSearchList:
+            createScopeDomainSearchEntries.length > 0 ?
+              createScopeDomainSearchEntries
+            : undefined,
+          dnsServers:
+            firstScopeUseThisDnsServer || createScopeDnsList.length === 0 ?
+              undefined
+            : createScopeDnsList,
+          useThisDnsServer: firstScopeUseThisDnsServer,
+        },
+        enabled: firstScopeEnableScope,
+      });
+
+      const successMessage = `Created scope "${response.data.scope.name}" on ${selectedNodeLabel}.`;
+      setCreateScopeState("success");
+      setCreateScopeMessage(successMessage);
+      setCreateScopeError(undefined);
+      pushToast({ message: successMessage, tone: "success" });
+
+      try {
+        const envelope = await loadDhcpScopes(selectedNodeId);
+        const nextScopes = envelope.data?.scopes ?? [];
+        setScopes(nextScopes);
+
+        setScopeCountByNode((prev) => {
+          const next = new Map(prev);
+          next.set(selectedNodeId, nextScopes.length);
+          return next;
+        });
+
+        setScopeListState("success");
+        setScopeListError(undefined);
+      } catch (refreshError) {
+        console.warn(
+          "Failed to refresh DHCP scopes after creation",
+          refreshError,
+        );
+      }
+
+      setSelectedScopeName(response.data.scope.name);
+      setScopeDetailState("success");
+      setScopeDetailError(undefined);
+      setCurrentScope(response.data.scope);
+      syncDraftWithScope(response.data.scope);
+      setDraftScopeEnabled(response.data.enabled);
+      setBaselineScopeEnabled(response.data.enabled);
+      setBaselineJson(JSON.stringify(response.data.scope));
+      setDetailCache((previous) => {
+        const next = new Map(previous);
+        next.set(
+          buildScopeKey(selectedNodeId, response.data.scope.name),
+          response.data.scope,
+        );
+        return next;
+      });
+
+      resetCreateScopeDraft();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to create DHCP scope.";
+      setCreateScopeState("error");
+      setCreateScopeError(message);
+      setCreateScopeMessage(undefined);
+      pushToast({ message, tone: "error", timeout: 6000 });
+    }
+  };
+
   const handleClone = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -2781,6 +3177,11 @@ export function DhcpPage() {
     setCloneMessage(undefined);
 
     try {
+      await ensureSnapshot(selectedNodeId, "cloning DHCP scope");
+      if (cloneMode === "remote") {
+        await ensureSnapshot(targetNodeId, "cloning DHCP scope to target node");
+      }
+
       const result: TechnitiumCloneDhcpScopeResult = await cloneDhcpScope(
         selectedNodeId,
         selectedScopeName,
@@ -2883,6 +3284,8 @@ export function DhcpPage() {
     setRenameMessage(undefined);
 
     try {
+      await ensureSnapshot(selectedNodeId, "renaming DHCP scope");
+
       const result = await renameDhcpScope(selectedNodeId, selectedScopeName, {
         newScopeName: trimmedRenameScopeName,
       });
@@ -2955,6 +3358,12 @@ export function DhcpPage() {
     setUpdateMessage(undefined);
 
     try {
+      await ensureSnapshot(
+        selectedNodeId,
+        "saving DHCP scope changes",
+        pendingChangesNote,
+      );
+
       const response: TechnitiumUpdateDhcpScopeEnvelope = await updateDhcpScope(
         selectedNodeId,
         selectedScopeName,
@@ -3024,8 +3433,16 @@ export function DhcpPage() {
             <strong>"{selectedScopeName}"</strong> from{" "}
             <strong>{selectedNodeLabel}</strong>?
           </p>
-          <p style={{ marginTop: "0.75rem", fontWeight: 500 }}>
-            This action cannot be undone.
+          <p
+            style={{
+              marginTop: "0.75rem",
+              fontSize: "0.9em",
+              fontWeight: 500,
+              color: "var(--color-info)",
+            }}
+          >
+            An automatic snapshot will be created before deletion of the scope
+            for recovery, if needed.
           </p>
         </>
       ),
@@ -3034,6 +3451,12 @@ export function DhcpPage() {
       onConfirm: async () => {
         closeConfirmModal();
         try {
+          await ensureSnapshot(
+            selectedNodeId,
+            "deleting DHCP scope",
+            `Pre-delete: ${selectedScopeName}`,
+          );
+
           const result = await deleteDhcpScope(
             selectedNodeId,
             selectedScopeName,
@@ -3072,8 +3495,24 @@ export function DhcpPage() {
   };
 
   // Bulk sync handlers
-  const handleBulkSyncCancel = () => {
+  const handleOpenBulkSyncModal = () => {
+    setBulkSyncModalOriginTab(activePageTab);
+    if (activePageTab !== "scopes") {
+      setActivePageTab("scopes");
+    }
+    setShowBulkSyncModal(true);
+  };
+
+  const closeBulkSyncModal = () => {
     setShowBulkSyncModal(false);
+    if (bulkSyncModalOriginTab !== "scopes") {
+      setActivePageTab(bulkSyncModalOriginTab);
+    }
+    setBulkSyncModalOriginTab("scopes");
+  };
+
+  const handleBulkSyncCancel = () => {
+    closeBulkSyncModal();
   };
 
   // Inline bulk sync form handlers
@@ -3215,17 +3654,122 @@ export function DhcpPage() {
   };
 
   // Helper to determine if a scope exists on any target
-  const getScopeExistsOnTargets = (
-    scopeName: string,
-  ): { exists: boolean; nodeIds: string[] } => {
-    const existingNodeIds: string[] = [];
-    for (const [nodeId, scopes] of bulkSyncTargetScopes.entries()) {
-      if (scopes.some((s) => s.name === scopeName)) {
-        existingNodeIds.push(nodeId);
+  const getScopeExistsOnTargets = useCallback(
+    (scopeName: string): { exists: boolean; nodeIds: string[] } => {
+      const existingNodeIds: string[] = [];
+      for (const [nodeId, scopes] of bulkSyncTargetScopes.entries()) {
+        if (scopes.some((s) => s.name === scopeName)) {
+          existingNodeIds.push(nodeId);
+        }
+      }
+      return { exists: existingNodeIds.length > 0, nodeIds: existingNodeIds };
+    },
+    [bulkSyncTargetScopes],
+  );
+
+  // Preload source/target scope details for merge-missing so badges are accurate without expanding
+  const preloadMergeMissingScopeDetails = useCallback(async () => {
+    if (bulkSyncStrategy !== "merge-missing") return;
+    if (bulkSyncTargetNodeIds.length === 0 || bulkSyncSourceScopes.length === 0)
+      return;
+
+    const pending: Promise<void>[] = [];
+
+    for (const scope of bulkSyncSourceScopes) {
+      const { nodeIds: targetNodeIdsWithScope } = getScopeExistsOnTargets(
+        scope.name,
+      );
+
+      if (targetNodeIdsWithScope.length === 0) continue;
+
+      const sourceKey = `${bulkSyncSourceNodeId}:${scope.name}`;
+      const needsSource = !bulkSyncSourceScopeDetails.has(sourceKey);
+
+      // enqueue source detail load
+      if (needsSource) {
+        pending.push(
+          (async () => {
+            try {
+              const sourceEnvelope = await loadDhcpScope(
+                bulkSyncSourceNodeId,
+                scope.name,
+              );
+              if (sourceEnvelope.data) {
+                setBulkSyncSourceScopeDetails((prev) => {
+                  const next = new Map(prev);
+                  next.set(sourceKey, sourceEnvelope.data);
+                  return next;
+                });
+              }
+            } catch (error) {
+              console.warn(
+                `Failed to preload source scope ${scope.name} from ${bulkSyncSourceNodeId}`,
+                error,
+              );
+            }
+          })(),
+        );
+      }
+
+      // enqueue target detail loads
+      for (const targetNodeId of targetNodeIdsWithScope) {
+        const targetKey = `${targetNodeId}:${scope.name}`;
+        if (bulkSyncTargetScopeDetails.has(targetKey)) continue;
+
+        pending.push(
+          (async () => {
+            try {
+              const targetEnvelope = await loadDhcpScope(
+                targetNodeId,
+                scope.name,
+              );
+              if (targetEnvelope.data) {
+                setBulkSyncTargetScopeDetails((prev) => {
+                  const next = new Map(prev);
+                  next.set(targetKey, targetEnvelope.data);
+                  return next;
+                });
+              }
+            } catch (error) {
+              console.warn(
+                `Failed to preload target scope ${scope.name} from ${targetNodeId}`,
+                error,
+              );
+            }
+          })(),
+        );
       }
     }
-    return { exists: existingNodeIds.length > 0, nodeIds: existingNodeIds };
-  };
+
+    if (pending.length > 0) {
+      setBulkSyncScopeDetailsLoading((prev) => {
+        const next = new Set(prev);
+        bulkSyncSourceScopes.forEach((scope) => next.add(scope.name));
+        return next;
+      });
+
+      await Promise.allSettled(pending);
+
+      setBulkSyncScopeDetailsLoading((prev) => {
+        const next = new Set(prev);
+        bulkSyncSourceScopes.forEach((scope) => next.delete(scope.name));
+        return next;
+      });
+    }
+  }, [
+    bulkSyncStrategy,
+    bulkSyncTargetNodeIds,
+    bulkSyncSourceScopes,
+    bulkSyncSourceNodeId,
+    bulkSyncSourceScopeDetails,
+    bulkSyncTargetScopeDetails,
+    getScopeExistsOnTargets,
+    loadDhcpScope,
+  ]);
+
+  useEffect(() => {
+    preloadMergeMissingScopeDetails();
+  }, [preloadMergeMissingScopeDetails]);
 
   // Helper to compute differences between source and target scopes
   interface ScopeDiff {
@@ -3421,139 +3965,22 @@ export function DhcpPage() {
   };
 
   // Extracted bulk sync execution logic
-  const executeBulkSync = async () => {
-    const request: DhcpBulkSyncRequest = {
-      sourceNodeId: bulkSyncSourceNodeId,
-      targetNodeIds: bulkSyncTargetNodeIds,
-      strategy: bulkSyncStrategy,
-      enableOnTarget: bulkSyncEnableOnTarget,
-    };
+  const performBulkSync = async (request: DhcpBulkSyncRequest) => {
+    const snapshotNote = `Auto snapshot before bulk sync (${request.strategy})`;
 
     setBulkSyncInProgress(true);
 
     try {
+      await ensureSnapshotsForNodes(
+        [request.sourceNodeId, ...request.targetNodeIds],
+        `bulk syncing DHCP scopes (${request.strategy})`,
+        snapshotNote,
+      );
+
       const result = await bulkSyncDhcpScopes(request);
       setBulkSyncResult(result);
       setShowBulkSyncResults(true);
 
-      // Refresh scope counts after sync
-      await refreshScopeCounts();
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to sync DHCP scopes.";
-      pushToast({ message, tone: "error", timeout: 6000 });
-    } finally {
-      setBulkSyncInProgress(false);
-    }
-  };
-
-  const handleBulkSyncStart = () => {
-    if (!bulkSyncCanStart) return;
-
-    const sourceNodeName =
-      nodes.find((n) => n.id === bulkSyncSourceNodeId)?.name ||
-      bulkSyncSourceNodeId;
-    const targetNames = nodes
-      .filter((n) => bulkSyncTargetNodeIds.includes(n.id))
-      .map((n) => n.name || n.id)
-      .join(", ");
-
-    // Show confirmation dialog for destructive operations
-    if (bulkSyncStrategy === "overwrite-all") {
-      setConfirmModal({
-        isOpen: true,
-        title: "Mirror Operation",
-        message: (
-          <>
-            <p style={{ fontWeight: 500, color: "var(--color-danger)" }}>
-              ⚠️ DESTRUCTIVE OPERATION
-            </p>
-            <p style={{ marginTop: "0.75rem" }}>
-              This will <strong>DELETE ALL</strong> existing scopes on:
-            </p>
-            <p style={{ fontWeight: 500, marginTop: "0.25rem" }}>
-              {targetNames}
-            </p>
-            <p style={{ marginTop: "0.75rem" }}>
-              Then copy all scopes from <strong>{sourceNodeName}</strong>.
-            </p>
-            <p
-              style={{
-                marginTop: "0.75rem",
-                fontWeight: 500,
-                color: "var(--color-danger)",
-              }}
-            >
-              This operation cannot be undone.
-            </p>
-            <p
-              style={{
-                marginTop: "0.75rem",
-                fontSize: "0.9em",
-                color: "var(--color-text-muted)",
-              }}
-            >
-              Ensure you have a current backup from your target node(s) before
-              continuing.
-            </p>
-          </>
-        ),
-        variant: "danger",
-        confirmLabel: "Mirror Scopes",
-        onConfirm: () => {
-          closeConfirmModal();
-          executeBulkSync();
-        },
-      });
-    } else if (bulkSyncStrategy === "merge-missing") {
-      setConfirmModal({
-        isOpen: true,
-        title: "Sync All Operation",
-        message: (
-          <>
-            <p>This will update existing scopes and add missing scopes on:</p>
-            <p style={{ fontWeight: 500, marginTop: "0.25rem" }}>
-              {targetNames}
-            </p>
-            <p style={{ marginTop: "0.75rem" }}>
-              Existing scopes will be modified to match the source configuration
-              from <strong>{sourceNodeName}</strong>.
-            </p>
-            <p
-              style={{
-                marginTop: "0.75rem",
-                fontSize: "0.9em",
-                color: "var(--color-text-muted)",
-              }}
-            >
-              Ensure you have a current backup from your target node(s) before
-              continuing.
-            </p>
-          </>
-        ),
-        variant: "warning",
-        confirmLabel: "Sync All",
-        onConfirm: () => {
-          closeConfirmModal();
-          executeBulkSync();
-        },
-      });
-    } else {
-      // skip-existing strategy - no confirmation needed
-      executeBulkSync();
-    }
-  };
-
-  const handleBulkSyncConfirm = async (request: DhcpBulkSyncRequest) => {
-    setShowBulkSyncModal(false);
-    setBulkSyncInProgress(true);
-
-    try {
-      const result = await bulkSyncDhcpScopes(request);
-      setBulkSyncResult(result);
-      setShowBulkSyncResults(true);
-
-      // Show summary toast
       if (result.totalFailed === 0) {
         pushToast({
           message: `Successfully synced ${result.totalSynced} scope(s) across ${result.nodeResults.length} node(s)`,
@@ -3574,7 +4001,6 @@ export function DhcpPage() {
         });
       }
 
-      // Refresh scope list for all affected nodes
       for (const nodeResult of result.nodeResults) {
         if (nodeResult.syncedCount > 0) {
           try {
@@ -3587,23 +4013,176 @@ export function DhcpPage() {
           }
         }
       }
-
-      // Refresh current node if it was a target
-      if (result.nodeResults.some((nr) => nr.targetNodeId === selectedNodeId)) {
-        try {
-          const envelope = await loadDhcpScopes(selectedNodeId);
-          setScopes(envelope.data?.scopes ?? []);
-        } catch (refreshError) {
-          console.warn(`Failed to refresh current node scopes`, refreshError);
-        }
-      }
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to execute bulk sync.";
-      pushToast({ message, tone: "error", timeout: 6000 });
+      console.error("Bulk sync failed", error);
+      setBulkSyncResult(null);
+      pushToast({
+        message: "Bulk sync failed. See console for details.",
+        tone: "error",
+        timeout: 6000,
+      });
     } finally {
       setBulkSyncInProgress(false);
     }
+  };
+
+  const executeBulkSync = async () => {
+    const request: DhcpBulkSyncRequest = {
+      sourceNodeId: bulkSyncSourceNodeId,
+      targetNodeIds: bulkSyncTargetNodeIds,
+      strategy: bulkSyncStrategy,
+      enableOnTarget: bulkSyncEnableOnTarget,
+    };
+
+    await performBulkSync(request);
+  };
+
+  const handleBulkSyncStart = () => {
+    if (!bulkSyncCanStart) return;
+
+    const sourceNodeName =
+      nodes.find((node) => node.id === bulkSyncSourceNodeId)?.name ||
+      bulkSyncSourceNodeId;
+    const targetNames = bulkSyncTargetNodeIds
+      .map((id) => nodes.find((node) => node.id === id)?.name || id)
+      .join(", ");
+
+    if (bulkSyncStrategy === "overwrite-all") {
+      setConfirmModal({
+        isOpen: true,
+        title: "Overwrite Existing Scopes",
+        message: (
+          <>
+            <ul style={{ marginTop: "0.75rem" }}>
+              <li>
+                Scopes on <strong>{targetNames}</strong> that also exist on
+                <strong> {sourceNodeName}</strong> will be overwritten with
+                <strong> {sourceNodeName}</strong> settings.
+              </li>
+              <li>
+                Scopes on <strong>{targetNames}</strong> that do not exist on
+                <strong> {sourceNodeName}</strong> will be removed.
+              </li>
+              <li>
+                Scopes on <strong>{sourceNodeName}</strong> that do not exist on
+                <strong> {targetNames}</strong> will be created.
+              </li>
+            </ul>
+            <p
+              style={{
+                fontWeight: 500,
+                marginTop: "0.25rem",
+                color: "var(--color-warning)",
+              }}
+            >
+              This operation removes & replaces existing configuration on
+              targets.
+            </p>
+            <p
+              style={{
+                marginTop: "0.75rem",
+                fontSize: "0.9em",
+                fontWeight: 500,
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              Automatic snapshots will be created for all affected nodes before
+              proceeding.
+            </p>
+          </>
+        ),
+        variant: "warning",
+        confirmLabel: "Sync All",
+        onConfirm: () => {
+          closeConfirmModal();
+          executeBulkSync();
+        },
+      });
+      return;
+    }
+
+    if (bulkSyncStrategy === "merge-missing") {
+      setConfirmModal({
+        isOpen: true,
+        title: "Merge Missing + Update",
+        message: (
+          <>
+            <ul style={{ marginTop: "0.75rem" }}>
+              <li>
+                Scopes on <strong>{targetNames}</strong> that also exist on
+                <strong> {sourceNodeName}</strong> will be overwritten with
+                <strong> {sourceNodeName}</strong> settings.
+              </li>
+              <li>
+                Scopes on <strong>{sourceNodeName}</strong> that do not exist on
+                <strong> {targetNames}</strong> will be created.
+              </li>
+            </ul>
+            <p
+              style={{
+                marginTop: "0.75rem",
+                fontSize: "0.9em",
+                fontWeight: 500,
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              Automatic snapshots will be created for all affected nodes before
+              proceeding.
+            </p>
+          </>
+        ),
+        variant: "warning",
+        confirmLabel: "Sync All",
+        onConfirm: () => {
+          closeConfirmModal();
+          executeBulkSync();
+        },
+      });
+      return;
+    }
+
+    if (bulkSyncStrategy === "skip-existing") {
+      setConfirmModal({
+        isOpen: true,
+        title: "Sync Missing Scopes",
+        message: (
+          <>
+            <p style={{ marginTop: "0.75rem" }}>
+              Only scopes that do not already exist on{" "}
+              <strong>{targetNames}</strong> will be created from{" "}
+              <strong> {sourceNodeName}</strong>. Existing scopes stay
+              untouched.
+            </p>
+            <p
+              style={{
+                marginTop: "0.75rem",
+                fontSize: "0.9em",
+                fontWeight: 500,
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              Automatic snapshots will be created for all affected nodes before
+              proceeding.
+            </p>
+          </>
+        ),
+        variant: "info",
+        confirmLabel: "Sync Missing",
+        onConfirm: () => {
+          closeConfirmModal();
+          executeBulkSync();
+        },
+      });
+      return;
+    }
+
+    // This should be unreachable, but guard just in case
+    executeBulkSync();
+  };
+
+  const handleBulkSyncConfirm = async (request: DhcpBulkSyncRequest) => {
+    closeBulkSyncModal();
+    await performBulkSync(request);
   };
 
   const handleBulkSyncResultsClose = () => {
@@ -3613,40 +4192,51 @@ export function DhcpPage() {
 
   const handleBulkSyncRetry = () => {
     setShowBulkSyncResults(false);
-    setShowBulkSyncModal(true);
+    executeBulkSync();
   };
-
-  // Show skeleton while loading initial scope list
-  if (scopeListState === "loading" && scopes.length === 0) {
-    return <DhcpPageSkeleton />;
-  }
 
   return (
     <>
-      <PullToRefreshIndicator
-        pullDistance={pullToRefresh.pullDistance}
-        threshold={pullToRefresh.threshold}
-        isRefreshing={pullToRefresh.isRefreshing}
-      />
-      <section ref={pullToRefresh.containerRef} className="configuration">
-        <header className="configuration__header">
+      <section className="dhcp-page" ref={pullToRefresh.containerRef}>
+        <PullToRefreshIndicator
+          pullDistance={pullToRefresh.pullDistance}
+          threshold={pullToRefresh.threshold}
+          isRefreshing={pullToRefresh.isRefreshing}
+        />
+
+        {activePageTab === "scopes" && (
+          <button
+            type="button"
+            className="drawer-pull"
+            aria-label="Open DHCP scope history"
+            onClick={() => setShowSnapshotDrawer(true)}
+            disabled={!selectedNodeId}
+          >
+            <FontAwesomeIcon
+              icon={faClockRotateLeft}
+              style={{ marginBottom: "0.5rem" }}
+            />
+            DHCP Scope History
+          </button>
+        )}
+
+        <header className="dhcp-page__header">
           <div>
-            <h1>DHCP Management</h1>
+            <h1>DHCP Scopes</h1>
             <p>
-              Manage DHCP scopes across nodes and sync configurations
-              efficiently.
+              Manage DHCP scopes, cloning, and bulk sync across your Technitium
+              nodes.
             </p>
           </div>
         </header>
 
-        {/* Tab Switcher */}
-        <div className="configuration__tab-switcher">
+        <div className="configuration__tab-switcher dhcp-page__page-tabs">
           <button
             type="button"
             className={`configuration__tab ${activePageTab === "scopes" ? "configuration__tab--active" : ""}`}
             onClick={() => setActivePageTab("scopes")}
           >
-            DHCP Scopes
+            Scopes
           </button>
           <button
             type="button"
@@ -3657,7 +4247,6 @@ export function DhcpPage() {
           </button>
         </div>
 
-        {/* DHCP Scopes Tab */}
         {activePageTab === "scopes" && (
           <>
             {/* Node Selector */}
@@ -3794,35 +4383,322 @@ export function DhcpPage() {
                 </section>
 
                 <section className="dhcp-page__card">
-                  {!selectedScopeName &&
-                    scopes.length === 0 &&
-                    scopeListState === "success" && (
+                  {zeroScopeState && (
+                    <form
+                      className="dhcp-page__clone-panel dhcp-page__update-panel dhcp-page__clone-form"
+                      onSubmit={handleCreateScope}
+                    >
+                      <div className="dhcp-page__clone-section-header">
+                        <h3>Create the first DHCP scope</h3>
+                        <p className="dhcp-page__clone-intro">
+                          {selectedNodeLabel} is online but does not have any
+                          DHCP scopes yet. You can bulk sync from another node
+                          or define the first range right here.
+                        </p>
+                      </div>
+                      <div style={{ paddingRight: "40px" }}>
+                        <ul>
+                          <li>
+                            Use Bulk Sync to copy a proven configuration from a
+                            healthy node.
+                          </li>
+                          <div
+                            className="dhcp-page__clone-actions"
+                            style={{ margin: "1rem auto" }}
+                          >
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={() => setActivePageTab("bulk-sync")}
+                            >
+                              Open Bulk Sync tab
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={handleOpenBulkSyncModal}
+                              disabled={nodes.length < 2}
+                            >
+                              Launch guided bulk sync
+                            </button>
+                          </div>
+                          <li>
+                            Or enter the core scope details below to start
+                            serving leases immediately. Additional configuration
+                            can be added after the core is created.
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div className="field-group">
+                        <label htmlFor="dhcp-first-scope-name">
+                          Scope name
+                        </label>
+                        <input
+                          id="dhcp-first-scope-name"
+                          name="firstScopeName"
+                          type="text"
+                          value={firstScopeName}
+                          onChange={(event) =>
+                            setFirstScopeName(event.target.value)
+                          }
+                          placeholder="Office LAN"
+                          required
+                        />
+                      </div>
+
+                      <div className="dhcp-page__clone-grid">
+                        <div
+                          className={`field-group${createScopeStartingAddressInvalid ? " field-group--error" : ""}`}
+                        >
+                          <label htmlFor="dhcp-first-starting-address">
+                            Starting address
+                          </label>
+                          <input
+                            id="dhcp-first-starting-address"
+                            name="firstScopeStartingAddress"
+                            type="text"
+                            value={firstScopeStartingAddress}
+                            onChange={(event) =>
+                              setFirstScopeStartingAddress(event.target.value)
+                            }
+                            placeholder="192.168.10.10"
+                          />
+                          {createScopeStartingAddressInvalid && (
+                            <span className="field-group__error-message">
+                              Enter a valid IPv4 address.
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          className={`field-group${createScopeEndingAddressInvalid ? " field-group--error" : ""}`}
+                        >
+                          <label htmlFor="dhcp-first-ending-address">
+                            Ending address
+                          </label>
+                          <input
+                            id="dhcp-first-ending-address"
+                            name="firstScopeEndingAddress"
+                            type="text"
+                            value={firstScopeEndingAddress}
+                            onChange={(event) =>
+                              setFirstScopeEndingAddress(event.target.value)
+                            }
+                            placeholder="192.168.10.200"
+                          />
+                          {createScopeEndingAddressInvalid && (
+                            <span className="field-group__error-message">
+                              Enter a valid IPv4 address.
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          className={`field-group${createScopeSubnetMaskInvalid ? " field-group--error" : ""}`}
+                        >
+                          <label htmlFor="dhcp-first-subnet-mask">
+                            Subnet mask
+                          </label>
+                          <input
+                            id="dhcp-first-subnet-mask"
+                            name="firstScopeSubnetMask"
+                            type="text"
+                            value={firstScopeSubnetMask}
+                            onChange={(event) =>
+                              setFirstScopeSubnetMask(event.target.value)
+                            }
+                            placeholder="255.255.255.0"
+                          />
+                          {createScopeSubnetMaskInvalid && (
+                            <span className="field-group__error-message">
+                              Enter a valid IPv4 address.
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          className={`field-group${createScopeRouterInvalid ? " field-group--error" : ""}`}
+                        >
+                          <label htmlFor="dhcp-first-router-address">
+                            Router address
+                          </label>
+                          <input
+                            id="dhcp-first-router-address"
+                            name="firstScopeRouterAddress"
+                            type="text"
+                            value={firstScopeRouterAddress}
+                            onChange={(event) =>
+                              setFirstScopeRouterAddress(event.target.value)
+                            }
+                            placeholder="Optional"
+                          />
+                          {createScopeRouterInvalid && (
+                            <span className="field-group__error-message">
+                              Enter a valid IPv4 address.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <Divider />
+
+                      <div className="dhcp-page__dns-grid">
+                        <div className="field-group">
+                          <label htmlFor="dhcp-first-domain-name">
+                            Domain name
+                          </label>
+                          <input
+                            id="dhcp-first-domain-name"
+                            name="firstScopeDomainName"
+                            type="text"
+                            value={firstScopeDomainName}
+                            onChange={(event) =>
+                              setFirstScopeDomainName(event.target.value)
+                            }
+                            placeholder="example.com"
+                          />
+                        </div>
+                        <div className="field-group">
+                          <label htmlFor="dhcp-first-domain-search">
+                            Domain search list (one per line)
+                          </label>
+                          <textarea
+                            id="dhcp-first-domain-search"
+                            name="firstScopeDomainSearchList"
+                            rows={3}
+                            value={firstScopeDomainSearchList}
+                            onChange={(event) =>
+                              setFirstScopeDomainSearchList(event.target.value)
+                            }
+                            placeholder="home.arpa&#10;example.com"
+                          />
+                        </div>
+                        <div className="field-group">
+                          <label htmlFor="dhcp-first-dns-servers">
+                            DNS servers (one per line)
+                          </label>
+                          <textarea
+                            id="dhcp-first-dns-servers"
+                            name="firstScopeDnsServers"
+                            rows={3}
+                            value={firstScopeDnsServers}
+                            onChange={(event) =>
+                              setFirstScopeDnsServers(event.target.value)
+                            }
+                            placeholder="192.168.10.2&#10;8.8.8.8"
+                            disabled={firstScopeUseThisDnsServer}
+                          />
+                          {createScopeDnsMissing && (
+                            <span className="field-group__error-message">
+                              Provide at least one DNS server or enable the
+                              option below.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="field-group field-group--inline dhcp-page__use-dns-checkbox">
+                        <label
+                          className="checkbox"
+                          htmlFor="dhcp-first-use-this-dns"
+                        >
+                          <input
+                            id="dhcp-first-use-this-dns"
+                            name="firstScopeUseThisDnsServer"
+                            type="checkbox"
+                            checked={firstScopeUseThisDnsServer}
+                            onChange={(event) =>
+                              setFirstScopeUseThisDnsServer(
+                                event.target.checked,
+                              )
+                            }
+                          />
+                          <span>
+                            Advertise this node as the DNS server for this scope
+                          </span>
+                        </label>
+                      </div>
+
+                      <div className="field-group field-group--inline">
+                        <label
+                          className="checkbox"
+                          htmlFor="dhcp-first-enable-scope"
+                        >
+                          <input
+                            id="dhcp-first-enable-scope"
+                            name="firstScopeEnableScope"
+                            type="checkbox"
+                            checked={firstScopeEnableScope}
+                            onChange={(event) =>
+                              setFirstScopeEnableScope(event.target.checked)
+                            }
+                          />
+                          <span>Enable this scope immediately</span>
+                        </label>
+                      </div>
+
+                      <div className="dhcp-page__clone-actions">
+                        <button
+                          type="submit"
+                          className="primary"
+                          disabled={createScopeSubmitDisabled}
+                        >
+                          {createScopeState === "loading" ?
+                            "Creating…"
+                          : "Create scope"}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => {
+                            resetCreateScopeDraft();
+                            setCreateScopeState("idle");
+                            setCreateScopeError(undefined);
+                            setCreateScopeMessage(undefined);
+                          }}
+                          disabled={createScopeState === "loading"}
+                        >
+                          Reset form
+                        </button>
+                      </div>
+
+                      {createScopeState === "error" && createScopeError && (
+                        <div className="dhcp-page__error" role="alert">
+                          {createScopeError}
+                        </div>
+                      )}
+                      {createScopeState === "success" && createScopeMessage && (
+                        <div className="dhcp-page__success" role="status">
+                          {createScopeMessage}
+                        </div>
+                      )}
+                    </form>
+                  )}
+
+                  {!zeroScopeState &&
+                    !selectedScopeName &&
+                    scopes.length > 0 && (
                       <div className="dhcp-page__placeholder">
-                        No DHCP scopes configured on {selectedNodeLabel}. Create
-                        scopes in the Technitium DNS web interface.
+                        Select a scope from the list to view configuration and
+                        clone options.
                       </div>
                     )}
 
-                  {!selectedScopeName && scopes.length > 0 && (
-                    <div className="dhcp-page__placeholder">
-                      Select a scope from the list to view configuration and
-                      clone options.
-                    </div>
-                  )}
+                  {!zeroScopeState &&
+                    selectedScopeName &&
+                    scopeDetailState === "loading" && (
+                      <div className="dhcp-page__placeholder">
+                        Loading scope details…
+                      </div>
+                    )}
 
-                  {selectedScopeName && scopeDetailState === "loading" && (
-                    <div className="dhcp-page__placeholder">
-                      Loading scope details…
-                    </div>
-                  )}
+                  {!zeroScopeState &&
+                    selectedScopeName &&
+                    scopeDetailState === "error" && (
+                      <div className="dhcp-page__error">
+                        {scopeDetailError ?? "Unable to load scope details."}
+                      </div>
+                    )}
 
-                  {selectedScopeName && scopeDetailState === "error" && (
-                    <div className="dhcp-page__error">
-                      {scopeDetailError ?? "Unable to load scope details."}
-                    </div>
-                  )}
-
-                  {selectedScopeName &&
+                  {!zeroScopeState &&
+                    selectedScopeName &&
                     scopeDetailState === "success" &&
                     currentScope && (
                       <>
@@ -6693,13 +7569,12 @@ export function DhcpPage() {
                             <div className="dhcp-bulk-sync-modal__strategy-name">
                               Mirror{" "}
                               <span className="dhcp-bulk-sync-modal__strategy-badge dhcp-bulk-sync-modal__strategy-badge--warning">
-                                Caution
+                                Replaces targets
                               </span>
                             </div>
                             <div className="dhcp-bulk-sync-modal__strategy-description">
-                              Delete all scopes on target nodes first, then copy
-                              all scopes from source. Makes targets identical to
-                              source.
+                              Replace target scopes to match the source exactly
+                              and delete scopes not present on the source.
                             </div>
                           </div>
                         </label>
@@ -7316,7 +8191,7 @@ export function DhcpPage() {
                             <div className="dhcp-bulk-sync-inline__preview-summary">
                               {(() => {
                                 if (bulkSyncStrategy === "merge-missing") {
-                                  // Sync All: all scopes will be synced (add new + update existing)
+                                  //  Sync All: all scopes will be synced (add new + update existing)
                                   const willAdd = bulkSyncSourceScopes.filter(
                                     (scope) => {
                                       const { exists } =
@@ -7461,13 +8336,32 @@ export function DhcpPage() {
           </section>
         )}
 
+        <DhcpSnapshotDrawer
+          isOpen={showSnapshotDrawer}
+          nodeId={selectedNodeId}
+          nodeName={selectedNode?.name || selectedNode?.id}
+          nodeScopeCount={scopeCountByNode.get(selectedNodeId)}
+          onClose={() => setShowSnapshotDrawer(false)}
+          listSnapshots={listDhcpSnapshots}
+          createSnapshot={createDhcpSnapshot}
+          restoreSnapshot={restoreDhcpSnapshot}
+          setSnapshotPinned={setDhcpSnapshotPinned}
+          getSnapshotDetail={getDhcpSnapshot}
+          deleteSnapshot={deleteDhcpSnapshot}
+          updateSnapshotNote={updateDhcpSnapshotNote}
+          onRestoreSuccess={handleSnapshotRestoreSuccess}
+        />
+
         {/* Bulk Sync Modal */}
         <DhcpBulkSyncModal
           isOpen={showBulkSyncModal}
-          availableNodes={nodes.map((node) => ({
-            id: node.id,
-            name: node.name,
-          }))}
+          availableNodes={nodes
+            .filter((node) => node.id !== selectedNode?.id)
+            .map((node) => ({ id: node.id, name: node.name }))}
+          selectedNode={{
+            id: selectedNode?.id || "",
+            name: selectedNode?.name || "",
+          }}
           onConfirm={handleBulkSyncConfirm}
           onCancel={handleBulkSyncCancel}
         />

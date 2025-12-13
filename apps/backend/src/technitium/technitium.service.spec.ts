@@ -1,11 +1,19 @@
+import { promises as fs } from "fs";
+import os from "os";
+import path from "path";
+import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { TechnitiumService } from "./technitium.service";
 import { TechnitiumDhcpScope } from "./technitium.types";
 
 describe("TechnitiumService buildDhcpScopeFormData", () => {
   let service: TechnitiumService;
 
+  beforeAll(() => {
+    process.env.NODE_ENV = "test";
+  });
+
   beforeEach(() => {
-    service = new TechnitiumService([]);
+    service = new TechnitiumService([], new DhcpSnapshotService());
   });
 
   afterEach(() => {
@@ -260,10 +268,13 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
     ) => ({ nodeId, fetchedAt: "now", data: { scopes } });
 
     it("reports differences when target scope has a different pool and does not sync", async () => {
-      const svc = new TechnitiumService([
-        { id: "src", baseUrl: "http://src", token: "t" },
-        { id: "tgt", baseUrl: "http://tgt", token: "t" },
-      ]);
+      const svc = new TechnitiumService(
+        [
+          { id: "src", baseUrl: "http://src", token: "t" },
+          { id: "tgt", baseUrl: "http://tgt", token: "t" },
+        ],
+        new DhcpSnapshotService(),
+      );
 
       jest
         .spyOn(svc, "listDhcpScopes")
@@ -325,10 +336,13 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
     ) => ({ nodeId, fetchedAt: "now", data: { scopes } });
 
     it("updates target when domain search list differs", async () => {
-      const svc = new TechnitiumService([
-        { id: "src", baseUrl: "http://src", token: "t" },
-        { id: "tgt", baseUrl: "http://tgt", token: "t" },
-      ]);
+      const svc = new TechnitiumService(
+        [
+          { id: "src", baseUrl: "http://src", token: "t" },
+          { id: "tgt", baseUrl: "http://tgt", token: "t" },
+        ],
+        new DhcpSnapshotService(),
+      );
 
       jest
         .spyOn(svc, "listDhcpScopes")
@@ -383,6 +397,195 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
       const node = result.nodeResults[0];
       expect(node.status).toBe("success");
       expect(node.scopeResults[0].status).toBe("synced");
+    });
+  });
+
+  describe("DHCP snapshots", () => {
+    const makeScope = (name: string): TechnitiumDhcpScope => ({
+      name,
+      startingAddress: "10.0.0.10",
+      endingAddress: "10.0.0.200",
+      subnetMask: "255.255.255.0",
+    });
+
+    const makeNodeConfig = () => ({
+      id: "node1",
+      baseUrl: "http://node1",
+      token: "t",
+    });
+
+    let tmpDir: string;
+
+    beforeEach(async () => {
+      tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "dhcp-snap-test-"));
+      process.env.DHCP_SNAPSHOT_DIR = tmpDir;
+    });
+
+    afterEach(async () => {
+      delete process.env.DHCP_SNAPSHOT_DIR;
+      delete process.env.DHCP_SNAPSHOT_RETENTION;
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    });
+
+    it("keeps pinned snapshots beyond retention limit and prunes oldest unpinned", async () => {
+      process.env.DHCP_SNAPSHOT_RETENTION = "2";
+      const svc = new DhcpSnapshotService();
+
+      const baseEntry = (name: string) => [
+        { scope: makeScope(name), enabled: false },
+      ];
+
+      const first = await svc.saveSnapshot("node1", baseEntry("one"));
+      await svc.setPinned("node1", first.id, true);
+      const second = await svc.saveSnapshot("node1", baseEntry("two"));
+      const third = await svc.saveSnapshot("node1", baseEntry("three"));
+      const fourth = await svc.saveSnapshot("node1", baseEntry("four"));
+
+      const snapshots = await svc.listSnapshots("node1");
+      const ids = snapshots.map((s) => s.id);
+
+      expect(ids).toEqual(
+        expect.arrayContaining([first.id, third.id, fourth.id]),
+      );
+      expect(ids).not.toContain(second.id); // pruned oldest unpinned
+    });
+
+    it("restores a snapshot with deleteExtraScopes defaulting to true and requires confirm flag", async () => {
+      const nodeConfig = makeNodeConfig();
+      const snapshotSvc = new DhcpSnapshotService();
+      const svc = new TechnitiumService([nodeConfig], snapshotSvc);
+
+      const initialScopes: Record<
+        string,
+        { scope: TechnitiumDhcpScope; enabled: boolean }
+      > = {
+        alpha: { scope: makeScope("alpha"), enabled: true },
+        beta: { scope: makeScope("beta"), enabled: false },
+      };
+
+      const currentScopes = new Map<
+        string,
+        { scope: TechnitiumDhcpScope; enabled: boolean }
+      >([
+        ["alpha", { scope: { ...initialScopes.alpha.scope }, enabled: true }],
+        ["beta", { scope: { ...initialScopes.beta.scope }, enabled: false }],
+      ]);
+
+      const requestSpy = jest
+        .spyOn(svc, "request")
+        .mockImplementation(
+          (
+            node: Parameters<TechnitiumService["request"]>[0],
+            config: Parameters<TechnitiumService["request"]>[1],
+          ) => {
+            const resolveNameParam = (): string => {
+              const params: unknown = config.params;
+              if (params instanceof URLSearchParams) {
+                return params.get("name") ?? "";
+              }
+
+              if (params && typeof params === "object" && "name" in params) {
+                const value = (params as Record<string, unknown>).name;
+                return typeof value === "string" ? value : "";
+              }
+
+              return "";
+            };
+
+            switch (config.url) {
+              case "/api/dhcp/scopes/list": {
+                return Promise.resolve({
+                  status: "ok",
+                  response: {
+                    scopes: Array.from(currentScopes.entries()).map(
+                      ([name, value]) => ({ name, enabled: value.enabled }),
+                    ),
+                  },
+                });
+              }
+              case "/api/dhcp/scopes/get": {
+                const name = resolveNameParam();
+                const entry = currentScopes.get(name);
+                return Promise.resolve({
+                  status: "ok",
+                  response: entry?.scope,
+                });
+              }
+              case "/api/dhcp/scopes/set": {
+                const rawData =
+                  typeof config.data === "string" ? config.data : "";
+                const params = new URLSearchParams(rawData);
+                const name = params.get("name") ?? "";
+                const snapshotEntry = initialScopes[name];
+                currentScopes.set(name, {
+                  scope: snapshotEntry?.scope ?? makeScope(name),
+                  enabled: snapshotEntry?.enabled ?? false,
+                });
+                return Promise.resolve({ status: "ok", response: {} });
+              }
+              case "/api/dhcp/scopes/enable": {
+                const name = resolveNameParam();
+                const existing = currentScopes.get(name) ?? {
+                  scope: makeScope(name),
+                  enabled: false,
+                };
+                currentScopes.set(name, { ...existing, enabled: true });
+                return Promise.resolve({ status: "ok", response: {} });
+              }
+              case "/api/dhcp/scopes/disable": {
+                const name = resolveNameParam();
+                const existing = currentScopes.get(name) ?? {
+                  scope: makeScope(name),
+                  enabled: false,
+                };
+                currentScopes.set(name, { ...existing, enabled: false });
+                return Promise.resolve({ status: "ok", response: {} });
+              }
+              case "/api/dhcp/scopes/delete": {
+                const name = resolveNameParam();
+                currentScopes.delete(name);
+                return Promise.resolve({ status: "ok", response: {} });
+              }
+              default:
+                return Promise.reject(
+                  new Error(
+                    `Unexpected request to ${String(config.url)} for node ${node.id}`,
+                  ),
+                );
+            }
+          },
+        );
+
+      const snapshotMeta = await svc.createDhcpSnapshot(nodeConfig.id);
+
+      currentScopes.clear();
+      currentScopes.set("alpha", { scope: makeScope("alpha"), enabled: false });
+      currentScopes.set("orphan", {
+        scope: makeScope("orphan"),
+        enabled: true,
+      });
+
+      await expect(
+        svc.restoreDhcpSnapshot(nodeConfig.id, snapshotMeta.id),
+      ).rejects.toThrow("confirmation");
+
+      const result = await svc.restoreDhcpSnapshot(
+        nodeConfig.id,
+        snapshotMeta.id,
+        { confirm: true },
+      );
+
+      expect(result.deleted).toBe(1); // orphan deleted
+      expect(result.restored).toBe(2);
+
+      const finalScopes = Array.from(currentScopes.keys());
+      expect(finalScopes).toEqual(expect.arrayContaining(["alpha", "beta"]));
+      expect(finalScopes).not.toContain("orphan");
+
+      expect(currentScopes.get("alpha")?.enabled).toBe(true);
+      expect(currentScopes.get("beta")?.enabled).toBe(false);
+
+      expect(requestSpy).toHaveBeenCalled();
     });
   });
 });

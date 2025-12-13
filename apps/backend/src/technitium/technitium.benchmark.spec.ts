@@ -1,7 +1,7 @@
 import { Test, TestingModule } from "@nestjs/testing";
-import { TechnitiumService } from "./technitium.service";
-import { TechnitiumModule } from "./technitium.module";
 import { runBenchmarkSuite } from "./technitium.benchmark";
+import { TechnitiumModule } from "./technitium.module";
+import { TechnitiumService } from "./technitium.service";
 import type { TechnitiumQueryLogFilters } from "./technitium.types";
 
 /**
@@ -23,13 +23,22 @@ describe("TechnitiumService Performance Benchmarks", () => {
   // Skip benchmarks if we're in CI, explicitly disabled, or lacking required env configuration
   const nodesEnv = process.env.TECHNITIUM_NODES;
   const missingEnv = !nodesEnv;
+  const benchmarksExplicitlyEnabled =
+    process.env.RUN_BENCHMARK_TESTS === "true" ||
+    process.env.ALLOW_TECHNITIUM_HTTP_IN_TESTS === "true";
   const shouldSkip =
     missingEnv ||
+    !benchmarksExplicitlyEnabled ||
     process.env.CI === "true" ||
     process.env.SKIP_BENCHMARKS === "true";
   const describeOrSkip = shouldSkip ? describe.skip : describe;
 
-  if (missingEnv) {
+  if (!benchmarksExplicitlyEnabled) {
+    console.warn(
+      "Skipping performance benchmarks: RUN_BENCHMARK_TESTS is not enabled. " +
+        "Use npm run test:benchmark (or set RUN_BENCHMARK_TESTS=true) to opt-in.",
+    );
+  } else if (missingEnv) {
     console.warn(
       "Skipping performance benchmarks: TECHNITIUM_NODES is not set. " +
         'Set TECHNITIUM_NODES to comma-separated node IDs (e.g., "node1,node2") to enable benchmarks.',

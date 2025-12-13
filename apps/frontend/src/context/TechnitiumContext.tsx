@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   createContext,
   useCallback,
@@ -7,7 +8,6 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ReactNode } from "react";
 import { apiFetch } from "../config";
 import type {
   AdvancedBlockingConfig,
@@ -15,34 +15,42 @@ import type {
   AdvancedBlockingSnapshot,
 } from "../types/advancedBlocking";
 import type {
-  TechnitiumCombinedQueryLogPage,
-  TechnitiumQueryLogFilters,
-  TechnitiumNodeQueryLogEnvelope,
-} from "../types/technitiumLogs";
+  BlockingMethod,
+  BlockingSettings,
+  BlockingStatusOverview,
+  BlockingZoneListResponse,
+  BlockingZoneOperationResult,
+  BuiltInBlockingOverview,
+} from "../types/builtInBlocking";
 import type {
-  TechnitiumCloneDhcpScopeRequest,
-  TechnitiumCloneDhcpScopeResult,
-  TechnitiumRenameDhcpScopeRequest,
-  TechnitiumRenameDhcpScopeResult,
-  TechnitiumDhcpScopeEnvelope,
-  TechnitiumDhcpScopeListEnvelope,
-  TechnitiumUpdateDhcpScopeEnvelope,
-  TechnitiumUpdateDhcpScopeRequest,
   DhcpBulkSyncRequest,
   DhcpBulkSyncResult,
+  DhcpSnapshot,
+  DhcpSnapshotMetadata,
+  DhcpSnapshotOrigin,
+  DhcpSnapshotRestoreOptions,
+  DhcpSnapshotRestoreResult,
+  TechnitiumCloneDhcpScopeRequest,
+  TechnitiumCloneDhcpScopeResult,
+  TechnitiumCreateDhcpScopeEnvelope,
+  TechnitiumCreateDhcpScopeRequest,
+  TechnitiumDhcpScope,
+  TechnitiumDhcpScopeEnvelope,
+  TechnitiumDhcpScopeListEnvelope,
+  TechnitiumRenameDhcpScopeRequest,
+  TechnitiumRenameDhcpScopeResult,
+  TechnitiumUpdateDhcpScopeEnvelope,
+  TechnitiumUpdateDhcpScopeRequest,
 } from "../types/dhcp";
+import type {
+  TechnitiumCombinedQueryLogPage,
+  TechnitiumNodeQueryLogEnvelope,
+  TechnitiumQueryLogFilters,
+} from "../types/technitiumLogs";
 import type {
   TechnitiumCombinedZoneOverview,
   TechnitiumZoneListEnvelope,
 } from "../types/zones";
-import type {
-  BlockingStatusOverview,
-  BuiltInBlockingOverview,
-  BlockingZoneListResponse,
-  BlockingSettings,
-  BlockingZoneOperationResult,
-  BlockingMethod,
-} from "../types/builtInBlocking";
 
 type NodeStatus = "online" | "syncing" | "offline" | "unknown";
 
@@ -184,6 +192,10 @@ interface TechnitiumState {
     nodeId: string,
     scopeName: string,
   ) => Promise<TechnitiumDhcpScopeEnvelope>;
+  createDhcpScope: (
+    nodeId: string,
+    request: TechnitiumCreateDhcpScopeRequest,
+  ) => Promise<TechnitiumCreateDhcpScopeEnvelope>;
   cloneDhcpScope: (
     nodeId: string,
     scopeName: string,
@@ -206,6 +218,31 @@ interface TechnitiumState {
   bulkSyncDhcpScopes: (
     request: DhcpBulkSyncRequest,
   ) => Promise<DhcpBulkSyncResult>;
+  listDhcpSnapshots: (nodeId: string) => Promise<DhcpSnapshotMetadata[]>;
+  createDhcpSnapshot: (
+    nodeId: string,
+    origin?: DhcpSnapshotOrigin,
+  ) => Promise<DhcpSnapshotMetadata>;
+  restoreDhcpSnapshot: (
+    nodeId: string,
+    snapshotId: string,
+    options?: DhcpSnapshotRestoreOptions,
+  ) => Promise<DhcpSnapshotRestoreResult>;
+  setDhcpSnapshotPinned: (
+    nodeId: string,
+    snapshotId: string,
+    pinned: boolean,
+  ) => Promise<DhcpSnapshotMetadata>;
+  getDhcpSnapshot: (
+    nodeId: string,
+    snapshotId: string,
+  ) => Promise<DhcpSnapshot>;
+  deleteDhcpSnapshot: (nodeId: string, snapshotId: string) => Promise<void>;
+  updateDhcpSnapshotNote: (
+    nodeId: string,
+    snapshotId: string,
+    note?: string,
+  ) => Promise<DhcpSnapshotMetadata>;
   loadZones: (nodeId: string) => Promise<TechnitiumZoneListEnvelope>;
   loadCombinedZones: () => Promise<TechnitiumCombinedZoneOverview>;
 }
@@ -461,8 +498,8 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // If polling is already set up, don't restart it
-    if (isPollingSetupRef.current && pollingTimerRef.current) {
+    // If polling is already set up (or being set up), don't restart it
+    if (isPollingSetupRef.current) {
       return;
     }
 
@@ -475,21 +512,27 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
     // Fetch cluster settings and start polling
     (async () => {
-      const settings = await fetchClusterSettings();
-      const intervalMs =
-        (settings?.heartbeatRefreshIntervalSeconds || 30) * 1000;
+      try {
+        const settings = await fetchClusterSettings();
+        const intervalSeconds = settings?.heartbeatRefreshIntervalSeconds || 30;
+        const intervalMs = intervalSeconds * 1000;
 
-      console.log(
-        `🔔 Starting cluster role polling (every ${settings?.heartbeatRefreshIntervalSeconds || 30}s)`,
-      );
+        console.log(
+          `🔔 Starting cluster role polling (every ${intervalSeconds}s)`,
+        );
 
-      // Clear any existing timer (shouldn't exist, but defensive)
-      if (pollingTimerRef.current) {
-        clearInterval(pollingTimerRef.current);
+        // Clear any existing timer (shouldn't exist, but defensive)
+        if (pollingTimerRef.current) {
+          clearInterval(pollingTimerRef.current);
+        }
+
+        // Start polling
+        pollingTimerRef.current = setInterval(pollClusterState, intervalMs);
+      } catch (error) {
+        console.error("Failed to set up cluster role polling:", error);
+        // Allow retry on next render if setup fails
+        isPollingSetupRef.current = false;
       }
-
-      // Start polling
-      pollingTimerRef.current = setInterval(pollClusterState, intervalMs);
     })();
 
     // Cleanup on unmount - but don't reset flag to prevent remount restart
@@ -815,6 +858,107 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const createDhcpScope = useCallback(
+    async (nodeId: string, request: TechnitiumCreateDhcpScopeRequest) => {
+      if (!nodeId) {
+        throw new Error("Node id is required to create a DHCP scope.");
+      }
+
+      if (!request || !request.scope) {
+        throw new Error("Scope payload is required to create a DHCP scope.");
+      }
+
+      const trimmedName = request.scope.name?.trim();
+      if (!trimmedName) {
+        throw new Error("Scope name is required to create a DHCP scope.");
+      }
+
+      const trimRequiredField = (value: string | undefined, label: string) => {
+        const trimmed = value?.trim();
+        if (!trimmed) {
+          throw new Error(`${label} is required to create a DHCP scope.`);
+        }
+        return trimmed;
+      };
+
+      const trimOptionalField = (value?: string | null) => {
+        if (value === undefined || value === null) {
+          return undefined;
+        }
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : undefined;
+      };
+
+      const normalizeArray = (values?: string[]) => {
+        if (!Array.isArray(values)) {
+          return undefined;
+        }
+        const normalized = values
+          .map((entry) => entry.trim())
+          .filter((entry) => entry.length > 0);
+        return normalized.length > 0 ? normalized : undefined;
+      };
+
+      const scopePayload: TechnitiumDhcpScope = {
+        ...request.scope,
+        name: trimmedName,
+        startingAddress: trimRequiredField(
+          request.scope.startingAddress,
+          "Starting address",
+        ),
+        endingAddress: trimRequiredField(
+          request.scope.endingAddress,
+          "Ending address",
+        ),
+        subnetMask: trimRequiredField(request.scope.subnetMask, "Subnet mask"),
+      };
+
+      scopePayload.routerAddress = trimOptionalField(
+        request.scope.routerAddress ?? undefined,
+      );
+      scopePayload.serverAddress = trimOptionalField(
+        request.scope.serverAddress ?? undefined,
+      );
+      scopePayload.serverHostName = trimOptionalField(
+        request.scope.serverHostName ?? undefined,
+      );
+      scopePayload.bootFileName = trimOptionalField(
+        request.scope.bootFileName ?? undefined,
+      );
+
+      scopePayload.dnsServers = normalizeArray(request.scope.dnsServers);
+      scopePayload.winsServers = normalizeArray(request.scope.winsServers);
+      scopePayload.ntpServers = normalizeArray(request.scope.ntpServers);
+      scopePayload.ntpServerDomainNames = normalizeArray(
+        request.scope.ntpServerDomainNames,
+      );
+
+      const payload: TechnitiumCreateDhcpScopeRequest = { scope: scopePayload };
+
+      if (request.enabled !== undefined) {
+        payload.enabled = request.enabled;
+      }
+
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dhcp/scopes`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to create DHCP scope on node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as TechnitiumCreateDhcpScopeEnvelope;
+    },
+    [],
+  );
+
   const loadZones = useCallback(async (nodeId: string) => {
     if (!nodeId) {
       throw new Error("Node id is required to load zones.");
@@ -1074,6 +1218,152 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       }
 
       return (await response.json()) as DhcpBulkSyncResult;
+    },
+    [],
+  );
+
+  const listDhcpSnapshots = useCallback(async (nodeId: string) => {
+    const response = await apiFetch(
+      `/nodes/${encodeURIComponent(nodeId)}/dhcp/snapshots`,
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to list DHCP snapshots for node ${nodeId} (${response.status})`,
+      );
+    }
+
+    return (await response.json()) as DhcpSnapshotMetadata[];
+  }, []);
+
+  const createDhcpSnapshot = useCallback(
+    async (nodeId: string, origin?: DhcpSnapshotOrigin) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dhcp/snapshots`,
+        {
+          method: "POST",
+          headers: origin ? { "Content-Type": "application/json" } : undefined,
+          body: origin ? JSON.stringify({ origin }) : undefined,
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to create DHCP snapshot for node ${nodeId} (${response.status}): ${errorText}`,
+        );
+      }
+
+      return (await response.json()) as DhcpSnapshotMetadata;
+    },
+    [],
+  );
+
+  const restoreDhcpSnapshot = useCallback(
+    async (
+      nodeId: string,
+      snapshotId: string,
+      options?: DhcpSnapshotRestoreOptions,
+    ) => {
+      const payload = {
+        deleteExtraScopes:
+          options?.keepExtras === true ? false : options?.deleteExtraScopes,
+        confirm: true,
+      };
+
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dhcp/snapshots/${encodeURIComponent(snapshotId)}/restore`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to restore DHCP snapshot (${response.status}): ${errorText}`,
+        );
+      }
+
+      return (await response.json()) as DhcpSnapshotRestoreResult;
+    },
+    [],
+  );
+
+  const setDhcpSnapshotPinned = useCallback(
+    async (nodeId: string, snapshotId: string, pinned: boolean) => {
+      const action = pinned ? "pin" : "unpin";
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dhcp/snapshots/${encodeURIComponent(snapshotId)}/${action}`,
+        { method: "POST" },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to ${action} DHCP snapshot for node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as DhcpSnapshotMetadata;
+    },
+    [],
+  );
+
+  const getDhcpSnapshot = useCallback(
+    async (nodeId: string, snapshotId: string) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dhcp/snapshots/${encodeURIComponent(snapshotId)}`,
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load DHCP snapshot ${snapshotId} for node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as DhcpSnapshot;
+    },
+    [],
+  );
+
+  const deleteDhcpSnapshot = useCallback(
+    async (nodeId: string, snapshotId: string) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dhcp/snapshots/${encodeURIComponent(snapshotId)}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to delete DHCP snapshot (${response.status}): ${errorText}`,
+        );
+      }
+    },
+    [],
+  );
+
+  const updateDhcpSnapshotNote = useCallback(
+    async (nodeId: string, snapshotId: string, note?: string) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dhcp/snapshots/${encodeURIComponent(snapshotId)}/note`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note }),
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to update DHCP snapshot note (${response.status}): ${errorText}`,
+        );
+      }
+
+      return (await response.json()) as DhcpSnapshotMetadata;
     },
     [],
   );
@@ -1360,11 +1650,19 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       loadCombinedLogs,
       loadDhcpScopes,
       loadDhcpScope,
+      createDhcpScope,
       cloneDhcpScope,
       renameDhcpScope,
       updateDhcpScope,
       deleteDhcpScope,
       bulkSyncDhcpScopes,
+      listDhcpSnapshots,
+      createDhcpSnapshot,
+      restoreDhcpSnapshot,
+      setDhcpSnapshotPinned,
+      getDhcpSnapshot,
+      deleteDhcpSnapshot,
+      updateDhcpSnapshotNote,
       loadZones,
       loadCombinedZones,
     }),
@@ -1401,11 +1699,19 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       loadCombinedLogs,
       loadDhcpScopes,
       loadDhcpScope,
+      createDhcpScope,
       cloneDhcpScope,
       renameDhcpScope,
       updateDhcpScope,
       deleteDhcpScope,
       bulkSyncDhcpScopes,
+      listDhcpSnapshots,
+      createDhcpSnapshot,
+      restoreDhcpSnapshot,
+      setDhcpSnapshotPinned,
+      getDhcpSnapshot,
+      deleteDhcpSnapshot,
+      updateDhcpSnapshotNote,
       loadZones,
       loadCombinedZones,
     ],

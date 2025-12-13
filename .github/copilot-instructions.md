@@ -29,9 +29,9 @@ This project is designed to work with multiple Technitium DNS servers in various
 - **Supported Versions**: Technitium DNS v13.6.0+
 - **Deployment**: Docker or standalone installations
 - **Clustering**: Full support for Technitium DNS cluster configurations
-    - Automatically detects Primary/Secondary node roles
-    - Primary nodes allow write operations
-    - Secondary nodes are read-only replicas
+  - Automatically detects Primary/Secondary node roles
+  - Primary nodes allow write operations
+  - Secondary nodes are read-only replicas
 - **Network**: Works with static IPs, DHCP, VPN (Tailscale/WireGuard), or public IPs
 - **SSL/TLS**: Supports both Let's Encrypt and self-signed certificates
 - **Authentication**: Uses Technitium DNS admin tokens for API access
@@ -41,17 +41,20 @@ This project is designed to work with multiple Technitium DNS servers in various
 **Implementation Status**: ✅ Active (November 8, 2025)
 
 **Backend**:
+
 - `/api/nodes` endpoint returns `isPrimary: true/false` for each node
 - Primary node automatically detected by parsing `clusterNodes` array from Technitium DNS API
 - Cluster state includes: `type` (Primary/Secondary/Standalone), `domain`, `health`
 
 **Frontend**:
+
 - Helper hooks available: `usePrimaryNode()`, `useIsClusterEnabled()`, `useClusterNodes()`
 - Write pages (DNS Filtering, DHCP, Zones Management) auto-select Primary node
 - `<ClusterInfoBanner>` component displays restriction notice on write pages
 - Read-only views (Dashboard, Logs, Sync) can still view all nodes
 
 **Key Files**:
+
 - `apps/backend/src/technitium/technitium.service.ts` - Primary detection logic
 - `apps/frontend/src/hooks/usePrimaryNode.ts` - Helper hooks
 - `apps/frontend/src/components/common/ClusterInfoBanner.tsx` - Info banner component
@@ -99,6 +102,7 @@ technitium-dns-companion/
 ```
 
 **Tech Stack**:
+
 - **Backend**: NestJS (TypeScript), Axios for HTTP requests
 - **Frontend**: React 18, TypeScript, Vite, TailwindCSS
 - **State Management**: React Context API
@@ -118,6 +122,7 @@ technitium-dns-companion/
 **Before implementing features**: Check relevant documentation to understand existing patterns and decisions.
 
 **Key Documents**:
+
 - 🏗️ `docs/architecture.md` - System design
 - 🔍 `docs/zone-comparison/ZONE_TYPE_MATCHING_LOGIC.md` - Zone comparison logic
 - 🎨 `docs/ui/UI_QUICK_REFERENCE.md` - UI component guide
@@ -125,7 +130,8 @@ technitium-dns-companion/
 
 ## Development Workflow
 
-**Running Locally**:
+### Running Locally
+
 ```bash
 # Backend (port 3000)
 cd apps/backend
@@ -138,7 +144,8 @@ npm install
 npm run dev
 ```
 
-**Development Options**:
+### Development Options
+
 - Local development (backend on `localhost:3000`, frontend on `localhost:5173`)
 - Remote development with hot-reload (see `scripts/remote-dev.sh.example`)
 - Docker development environment with `docker-compose.dev-hotreload.yml`
@@ -146,6 +153,7 @@ npm run dev
 **Backend API Base**: `http://localhost:3000/api`
 
 **Key API Endpoints**:
+
 - `/api/nodes` - List configured nodes
 - `/api/nodes/:nodeId/status` - Node status
 - `/api/logs/combined` - Combined query logs
@@ -154,24 +162,58 @@ npm run dev
 
 **Configuration**: Node credentials are configured via environment variables or config file (see backend README).
 
+### Deployment
+
+#### Publishing to GitHub
+
+Always update ./CHANGELOG.md and version in `./package.json` before publishing.
+
+The ./CHANGELOG.md follows Keep a Changelog format: https://keepachangelog.com/en/1.1.0/
+
+Guiding Principles
+
+    Changelogs are for humans, not machines.
+    There should be an entry for every single version.
+    The same types of changes should be grouped.
+    Versions and sections should be linkable.
+    The latest version comes first.
+    The release date of each version is displayed.
+    Mention whether you follow Semantic Versioning.
+
+Types of changes
+
+    Added for new features.
+    Changed for changes in existing functionality.
+    Deprecated for soon-to-be removed features.
+    Removed for now removed features.
+    Fixed for any bug fixes.
+    Security in case of vulnerabilities.
+
+Adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+
+````bash
+
 ## Testing & Verification
 
 **Backend Tests**:
+
 ```bash
 cd apps/backend
 npm run test          # Unit tests
 npm run test:e2e      # E2E tests
 npm run test:benchmark # Performance benchmarks
 npm run build         # Verify TypeScript compilation
-```
+````
 
 **Performance Benchmarks**:
+
 ```bash
 # From project root
 ./scripts/run-baseline-benchmarks.sh  # Runs all benchmarks with env validation
 ```
 
 **Frontend Build**:
+
 ```bash
 cd apps/frontend
 npm run build         # Production build
@@ -179,6 +221,7 @@ npm run preview       # Preview production build
 ```
 
 **Manual Testing Checklist**:
+
 - [ ] Zone comparison shows correct status badges
 - [ ] Primary+Secondary zones show "in-sync" (not false "different")
 - [ ] Query logs display from both nodes
@@ -189,18 +232,21 @@ npm run preview       # Preview production build
 ## Terminology & Conventions
 
 **Node References**:
+
 - **Primary Node** = Primary cluster node - typically the "source of truth"
 - **Secondary Node** = Secondary cluster node - typically syncs from Primary
 - **Node** = A Technitium DNS server instance
 - **nodeId** = Identifier in code (e.g., "node1", "node2")
 
 **Zone Types** (Important for comparison logic):
+
 - **Primary Zone** = Authoritative, can be edited, sends notifications
 - **Secondary Zone** = Read-only replica, receives zone transfers
 - **Primary Forwarder** = Primary conditional forwarder with Zone Transfer/Notify options
 - **Secondary Forwarder** = Secondary conditional forwarder (no Zone Transfer/Notify options)
 
 **Comparison Status**:
+
 - `in-sync` = Configurations match across nodes
 - `different` = Configurations differ (needs attention)
 - `missing` = Zone exists on some nodes but not others
@@ -211,18 +257,21 @@ npm run preview       # Preview production build
 ## Common Patterns & Gotchas
 
 **Backend Patterns**:
+
 - All Technitium DNS API calls go through `TechnitiumService`
 - Use `unwrapApiResponse()` to extract data from Technitium's response envelope
 - Node credentials via `TECHNITIUM_CLUSTER_TOKEN` (clustered) or `TECHNITIUM_<NODE>_TOKEN` (standalone)
 - Axios errors are normalized to NestJS `HttpException` types
 
 **Frontend Patterns**:
+
 - Use `TechnitiumContext` for API calls and node state
 - Use `ToastContext` for user notifications
 - Zone status badges: green (in-sync), red (different), yellow (missing), gray (unknown)
 - Mobile-first responsive design (touch-friendly controls)
 
 **Important Gotchas**:
+
 1. **Zone Type Matching**: Don't compare zones with different types (Primary vs Secondary)
 2. **Secondary Forwarders**: Lack Zone Transfer/Notify options (expected behavior)
 3. **Internal Zones**: Filter out built-in zones (0.in-addr.arpa, etc.) from comparison
@@ -283,10 +332,12 @@ PERMISSIONS:\
 Apps: View
 
 WHERE:
+
 - `token`: The session token generated by the `login` or the `createToken` call.
 - `name`: The name of the app to retrieve the config.
 
 RESPONSE:
+
 ```
 {
 	"response": {
@@ -310,15 +361,18 @@ PERMISSIONS:\
 Apps: Modify
 
 WHERE:
+
 - `token`: The session token generated by the `login` or the `createToken` call.
 - `name`: The name of the app to retrieve the config.
 
 REQUEST: This is a POST request call where the content type of the request must be `application/x-www-form-urlencoded` and the content must be as shown below:
+
 ```
 config=query-string-encoded-config-data
 ```
 
 RESPONSE:
+
 ```
 {
 	"response": {},

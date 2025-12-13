@@ -52,22 +52,58 @@
  * // Returns: 'example.com'
  */
 export function extractDomainFromInput(input: string): string {
-    const trimmed = input.trim();
-    if (!trimmed) return trimmed;
+  const trimmed = input.trim();
+  if (!trimmed) return trimmed;
 
-    // If input contains protocol or looks like a URL path, parse it
-    if (trimmed.includes('://') || trimmed.includes('/')) {
-        try {
-            // Add protocol if missing to help URL parser
-            const urlString = trimmed.includes('://') ? trimmed : `https://${trimmed}`;
-            const url = new URL(urlString);
-            return url.hostname;
-        } catch {
-            // If URL parsing fails, return as-is (might be a partial domain)
-            return trimmed;
+  // Fast-path parsing without constructing URL objects (perf-sensitive hot path)
+  if (trimmed.includes("://") || trimmed.includes("/")) {
+    try {
+      const candidate =
+        trimmed.includes("://") ? trimmed : `https://${trimmed}`;
+      const schemeIndex = candidate.indexOf("://");
+      const hostStart = schemeIndex >= 0 ? schemeIndex + 3 : 0;
+
+      let hostAndRest = candidate.slice(hostStart);
+
+      // Drop auth segment if present (user:pass@host)
+      const atIndex = hostAndRest.lastIndexOf("@");
+      if (atIndex !== -1) {
+        hostAndRest = hostAndRest.slice(atIndex + 1);
+      }
+
+      // Find first path/query/fragment delimiter
+      let hostEnd = hostAndRest.length;
+      const slashIndex = hostAndRest.indexOf("/");
+      const queryIndex = hostAndRest.indexOf("?");
+      const hashIndex = hostAndRest.indexOf("#");
+
+      if (slashIndex !== -1 && slashIndex < hostEnd) hostEnd = slashIndex;
+      if (queryIndex !== -1 && queryIndex < hostEnd) hostEnd = queryIndex;
+      if (hashIndex !== -1 && hashIndex < hostEnd) hostEnd = hashIndex;
+
+      let hostPort = hostAndRest.slice(0, hostEnd);
+
+      // IPv6 literals keep brackets; trim port after closing bracket if present
+      if (hostPort.startsWith("[")) {
+        const closing = hostPort.indexOf("]");
+        if (closing !== -1) {
+          return hostPort.slice(0, closing + 1);
         }
-    }
+      }
 
-    // If it's just a domain (no protocol, no path), return as-is
-    return trimmed;
+      // Strip port for IPv4/hostname
+      const portIndex = hostPort.lastIndexOf(":");
+      if (portIndex !== -1) {
+        hostPort = hostPort.slice(0, portIndex);
+      }
+
+      return hostPort.toLowerCase();
+    } catch {
+      // Fallback to original behavior if string ops fail unexpectedly
+      return trimmed;
+    }
+  }
+
+  // If it's just a domain (no protocol, no path), return as-is
+  return trimmed;
 }

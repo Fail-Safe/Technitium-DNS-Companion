@@ -1,51 +1,58 @@
 import {
+  BadRequestException,
   HttpException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
   ServiceUnavailableException,
-  Inject,
-  BadRequestException,
 } from "@nestjs/common";
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
-import * as https from "https";
 import * as dns from "dns";
+import * as https from "https";
 import { promisify } from "util";
+import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
 import {
+  DhcpSnapshot,
+  DhcpSnapshotMetadata,
+  DhcpSnapshotOrigin,
+  DhcpSnapshotScopeEntry,
   TechnitiumActionPayload,
-  TechnitiumNodeConfig,
-  TechnitiumNodeSummary,
-  TechnitiumClusterState,
-  TechnitiumClusterSettings,
-  TechnitiumStatusEnvelope,
-  TechnitiumQueryLogFilters,
-  TechnitiumQueryLogPage,
-  TechnitiumQueryLogEntry,
   TechnitiumApiResponse,
-  TechnitiumCombinedQueryLogEntry,
-  TechnitiumCombinedQueryLogPage,
-  TechnitiumCombinedNodeLogSnapshot,
-  TechnitiumDhcpScopeList,
-  TechnitiumDhcpScope,
+  TechnitiumAppInfo,
   TechnitiumCloneDhcpScopeRequest,
   TechnitiumCloneDhcpScopeResult,
+  TechnitiumClusterSettings,
+  TechnitiumClusterState,
+  TechnitiumCombinedNodeLogSnapshot,
+  TechnitiumCombinedQueryLogEntry,
+  TechnitiumCombinedQueryLogPage,
+  TechnitiumCombinedZoneNodeSnapshot,
+  TechnitiumCombinedZoneOverview,
+  TechnitiumCreateDhcpScopeRequest,
+  TechnitiumCreateDhcpScopeResult,
+  TechnitiumDashboardStatsData,
+  TechnitiumDhcpLeaseList,
+  TechnitiumDhcpScope,
+  TechnitiumDhcpScopeList,
+  TechnitiumNodeAppsResponse,
+  TechnitiumNodeConfig,
+  TechnitiumNodeOverview,
+  TechnitiumNodeSummary,
+  TechnitiumPtrLookupResult,
+  TechnitiumQueryLogEntry,
+  TechnitiumQueryLogFilters,
+  TechnitiumQueryLogPage,
+  TechnitiumSettingsData,
+  TechnitiumStatusEnvelope,
   TechnitiumUpdateDhcpScopeRequest,
   TechnitiumUpdateDhcpScopeResult,
-  TechnitiumZoneList,
-  TechnitiumZoneSummary,
-  TechnitiumCombinedZoneOverview,
   TechnitiumZoneComparison,
-  TechnitiumZoneNodeState,
   TechnitiumZoneComparisonStatus,
-  TechnitiumCombinedZoneNodeSnapshot,
-  TechnitiumAppInfo,
-  TechnitiumNodeAppsResponse,
-  TechnitiumNodeOverview,
-  TechnitiumSettingsData,
-  TechnitiumDashboardStatsData,
-  TechnitiumPtrLookupResult,
-  TechnitiumDhcpLeaseList,
+  TechnitiumZoneList,
+  TechnitiumZoneNodeState,
+  TechnitiumZoneSummary,
 } from "./technitium.types";
 
 interface TechnitiumQueryLoggerMetadata {
@@ -240,6 +247,7 @@ export class TechnitiumService {
   constructor(
     @Inject(TECHNITIUM_NODES_TOKEN)
     private readonly nodeConfigs: TechnitiumNodeConfig[],
+    private readonly dhcpSnapshotService: DhcpSnapshotService,
   ) {
     if (this.enableBackgroundTasks) {
       // Start periodic PTR lookup cycle
@@ -2218,6 +2226,122 @@ export class TechnitiumService {
     };
   }
 
+  async createDhcpScope(
+    nodeId: string,
+    request: TechnitiumCreateDhcpScopeRequest,
+  ): Promise<TechnitiumStatusEnvelope<TechnitiumCreateDhcpScopeResult>> {
+    if (!request || !request.scope) {
+      throw new BadRequestException(
+        "Scope payload is required to create a DHCP scope.",
+      );
+    }
+
+    const node = this.findNode(nodeId);
+    const normalizedScopeName = this.normalizeScopeName(request.scope.name);
+    if (!normalizedScopeName) {
+      throw new BadRequestException(
+        "Scope name is required to create a DHCP scope.",
+      );
+    }
+
+    const listEnvelope = await this.request<
+      TechnitiumApiResponse<TechnitiumDhcpScopeList>
+    >(node, { method: "GET", url: "/api/dhcp/scopes/list" });
+    const listPayload = this.unwrapApiResponse(
+      listEnvelope,
+      node.id,
+      "DHCP scope list",
+    );
+
+    const conflict = (listPayload.scopes ?? []).some(
+      (scope) =>
+        scope.name?.toLowerCase() === normalizedScopeName.toLowerCase(),
+    );
+    if (conflict) {
+      throw new BadRequestException(
+        `DHCP scope "${normalizedScopeName}" already exists on node "${node.id}". Choose a different name.`,
+      );
+    }
+
+    const sanitizedScope = this.safeJsonClone<TechnitiumDhcpScope>({
+      ...request.scope,
+      name: normalizedScopeName,
+    });
+
+    sanitizedScope.startingAddress = sanitizedScope.startingAddress?.trim();
+    sanitizedScope.endingAddress = sanitizedScope.endingAddress?.trim();
+    sanitizedScope.subnetMask = sanitizedScope.subnetMask?.trim();
+    sanitizedScope.routerAddress = sanitizedScope.routerAddress?.trim() || null;
+    sanitizedScope.serverAddress = sanitizedScope.serverAddress?.trim() || null;
+    sanitizedScope.serverHostName =
+      sanitizedScope.serverHostName?.trim() || null;
+    sanitizedScope.bootFileName = sanitizedScope.bootFileName?.trim() || null;
+
+    if (!sanitizedScope.startingAddress || !sanitizedScope.endingAddress) {
+      throw new BadRequestException(
+        "Starting and ending addresses are required to create a DHCP scope.",
+      );
+    }
+
+    if (!sanitizedScope.subnetMask) {
+      throw new BadRequestException(
+        "Subnet mask is required to create a DHCP scope.",
+      );
+    }
+
+    const formData = this.buildDhcpScopeFormData(sanitizedScope);
+
+    const setEnvelope = await this.request<
+      TechnitiumApiResponse<Record<string, unknown>>
+    >(node, {
+      method: "POST",
+      url: "/api/dhcp/scopes/set",
+      data: formData.toString(),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    });
+    this.unwrapApiResponse(
+      setEnvelope,
+      node.id,
+      `create DHCP scope "${normalizedScopeName}"`,
+    );
+
+    const desiredEnabled = request.enabled ?? false;
+    const enableDisableUrl =
+      desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+
+    const toggleEnvelope = await this.request<
+      TechnitiumApiResponse<Record<string, unknown>>
+    >(node, {
+      method: "POST",
+      url: enableDisableUrl,
+      params: { name: normalizedScopeName },
+    });
+    this.unwrapApiResponse(
+      toggleEnvelope,
+      node.id,
+      `${desiredEnabled ? "enable" : "disable"} DHCP scope "${normalizedScopeName}"`,
+    );
+
+    const createdScopeEnvelope = await this.request<
+      TechnitiumApiResponse<TechnitiumDhcpScope>
+    >(node, {
+      method: "GET",
+      url: "/api/dhcp/scopes/get",
+      params: { name: normalizedScopeName },
+    });
+    const createdScope = this.unwrapApiResponse(
+      createdScopeEnvelope,
+      node.id,
+      `DHCP scope "${normalizedScopeName}"`,
+    );
+
+    return {
+      nodeId: node.id,
+      fetchedAt: new Date().toISOString(),
+      data: { scope: createdScope, enabled: desiredEnabled },
+    };
+  }
+
   async renameDhcpScope(
     nodeId: string,
     scopeName: string,
@@ -2500,6 +2624,233 @@ export class TechnitiumService {
     };
   }
 
+  private async buildDhcpSnapshotEntries(
+    nodeId: string,
+  ): Promise<DhcpSnapshotScopeEntry[]> {
+    const listEnvelope = await this.listDhcpScopes(nodeId);
+    const summaries = listEnvelope.data.scopes ?? [];
+
+    const entries = await Promise.all(
+      summaries
+        .map((summary) => this.normalizeScopeName(summary.name))
+        .filter((name): name is string => Boolean(name))
+        .map(async (scopeName) => {
+          const scopeEnvelope = await this.getDhcpScope(nodeId, scopeName);
+          return {
+            scope: scopeEnvelope.data,
+            enabled:
+              summaries.find(
+                (s) => this.normalizeScopeName(s.name) === scopeName,
+              )?.enabled ?? false,
+          } satisfies DhcpSnapshotScopeEntry;
+        }),
+    );
+
+    return entries;
+  }
+
+  async createDhcpSnapshot(
+    nodeId: string,
+    origin: DhcpSnapshotOrigin = "manual",
+  ): Promise<DhcpSnapshotMetadata> {
+    const node = this.findNode(nodeId);
+    const scopes = await this.buildDhcpSnapshotEntries(node.id);
+
+    if (!scopes.length) {
+      throw new BadRequestException(
+        `Cannot create snapshot for node ${node.id}: no scopes found.`,
+      );
+    }
+
+    return this.dhcpSnapshotService.saveSnapshot(node.id, scopes, origin);
+  }
+
+  async listDhcpSnapshots(nodeId: string): Promise<DhcpSnapshotMetadata[]> {
+    const node = this.findNode(nodeId);
+    return this.dhcpSnapshotService.listSnapshots(node.id);
+  }
+
+  async getDhcpSnapshot(
+    nodeId: string,
+    snapshotId: string,
+  ): Promise<DhcpSnapshot> {
+    const node = this.findNode(nodeId);
+    const snapshot = await this.dhcpSnapshotService.getSnapshot(
+      node.id,
+      snapshotId,
+    );
+
+    if (!snapshot) {
+      throw new NotFoundException(
+        `Snapshot ${snapshotId} not found for node ${node.id}.`,
+      );
+    }
+
+    return snapshot;
+  }
+
+  async deleteDhcpSnapshot(nodeId: string, snapshotId: string): Promise<void> {
+    const node = this.findNode(nodeId);
+    const deleted = await this.dhcpSnapshotService.deleteSnapshot(
+      node.id,
+      snapshotId,
+    );
+
+    if (!deleted) {
+      throw new NotFoundException(
+        `Snapshot ${snapshotId} not found for node ${node.id}.`,
+      );
+    }
+  }
+
+  async updateDhcpSnapshotNote(
+    nodeId: string,
+    snapshotId: string,
+    note: string | undefined,
+  ): Promise<DhcpSnapshotMetadata> {
+    const node = this.findNode(nodeId);
+    const metadata = await this.dhcpSnapshotService.updateSnapshotNote(
+      node.id,
+      snapshotId,
+      note,
+    );
+
+    if (!metadata) {
+      throw new NotFoundException(
+        `Snapshot ${snapshotId} not found for node ${node.id}.`,
+      );
+    }
+
+    return metadata;
+  }
+
+  async setDhcpSnapshotPinned(
+    nodeId: string,
+    snapshotId: string,
+    pinned: boolean,
+  ): Promise<DhcpSnapshotMetadata> {
+    const node = this.findNode(nodeId);
+    const metadata = await this.dhcpSnapshotService.setPinned(
+      node.id,
+      snapshotId,
+      pinned,
+    );
+
+    if (!metadata) {
+      throw new NotFoundException(
+        `Snapshot ${snapshotId} not found for node ${node.id}.`,
+      );
+    }
+
+    return metadata;
+  }
+
+  async restoreDhcpSnapshot(
+    nodeId: string,
+    snapshotId: string,
+    options?: { deleteExtraScopes?: boolean; confirm?: boolean },
+  ): Promise<{
+    snapshot: DhcpSnapshotMetadata;
+    restored: number;
+    deleted: number;
+  }> {
+    if (!options?.confirm) {
+      throw new BadRequestException(
+        "Restoring a DHCP snapshot requires explicit confirmation (confirm=true).",
+      );
+    }
+
+    const node = this.findNode(nodeId);
+    const snapshot = await this.dhcpSnapshotService.getSnapshot(
+      node.id,
+      snapshotId,
+    );
+
+    if (!snapshot) {
+      throw new NotFoundException(
+        `Snapshot ${snapshotId} not found for node ${node.id}.`,
+      );
+    }
+
+    if (snapshot.metadata.nodeId !== node.id) {
+      throw new BadRequestException(
+        `Snapshot ${snapshotId} belongs to node ${snapshot.metadata.nodeId}, not ${node.id}.`,
+      );
+    }
+
+    const deleteExtraScopes = options?.deleteExtraScopes ?? true;
+
+    const currentList = await this.listDhcpScopes(node.id);
+    const currentScopes = currentList.data.scopes ?? [];
+    const snapshotEntries = snapshot.scopes ?? [];
+    const snapshotNames = new Set(
+      snapshotEntries
+        .map((entry) => this.normalizeScopeName(entry.scope?.name || ""))
+        .filter(Boolean),
+    );
+
+    let deleted = 0;
+    if (deleteExtraScopes) {
+      for (const existing of currentScopes) {
+        const normalized = this.normalizeScopeName(existing.name);
+        if (!normalized) continue;
+        if (!snapshotNames.has(normalized)) {
+          await this.deleteDhcpScope(node.id, existing.name);
+          deleted += 1;
+        }
+      }
+    }
+
+    let restored = 0;
+    for (const entry of snapshotEntries) {
+      const normalizedName = this.normalizeScopeName(entry.scope?.name || "");
+      if (!normalizedName) {
+        continue;
+      }
+
+      const sanitizedScope = this.safeJsonClone<TechnitiumDhcpScope>({
+        ...entry.scope,
+        name: normalizedName,
+      });
+
+      const formData = this.buildDhcpScopeFormData(sanitizedScope);
+      const setEnvelope = await this.request<
+        TechnitiumApiResponse<Record<string, unknown>>
+      >(node, {
+        method: "POST",
+        url: "/api/dhcp/scopes/set",
+        data: formData.toString(),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      });
+      this.unwrapApiResponse(
+        setEnvelope,
+        node.id,
+        `restore DHCP scope "${normalizedName}"`,
+      );
+
+      const desiredEnabled = entry.enabled ?? false;
+      const enableDisableUrl =
+        desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+
+      const toggleEnvelope = await this.request<
+        TechnitiumApiResponse<Record<string, unknown>>
+      >(node, {
+        method: "POST",
+        url: enableDisableUrl,
+        params: { name: normalizedName },
+      });
+      this.unwrapApiResponse(
+        toggleEnvelope,
+        node.id,
+        `${desiredEnabled ? "enable" : "disable"} DHCP scope "${normalizedName}"`,
+      );
+
+      restored += 1;
+    }
+
+    return { snapshot: snapshot.metadata, restored, deleted };
+  }
+
   async bulkSyncDhcpScopes(
     request: import("./technitium.types").DhcpBulkSyncRequest,
   ): Promise<import("./technitium.types").DhcpBulkSyncResult> {
@@ -2537,6 +2888,27 @@ export class TechnitiumService {
     if (scopesToSync.length === 0) {
       throw new BadRequestException("No scopes found to sync on source node.");
     }
+
+    // Load full source scope details so comparisons are accurate (list call is summary-only)
+    const sourceScopeDetails = new Map<
+      string,
+      import("./technitium.types").TechnitiumDhcpScope
+    >();
+
+    await Promise.all(
+      scopesToSync.map(async (scope) => {
+        if (!scope.name) return;
+
+        try {
+          const envelope = await this.getDhcpScope(sourceNodeId, scope.name);
+          sourceScopeDetails.set(scope.name.toLowerCase(), envelope.data);
+        } catch (error) {
+          this.logger.warn(
+            `Failed to load source scope details for ${scope.name} on ${sourceNodeId}: ${error instanceof Error ? error.message : "unknown error"}`,
+          );
+        }
+      }),
+    );
 
     const nodeResults: import("./technitium.types").DhcpBulkSyncNodeResult[] =
       [];
@@ -2616,9 +2988,37 @@ export class TechnitiumService {
           (scope) => scope.name?.toLowerCase() === scopeName.toLowerCase(),
         );
         const existsOnTarget = Boolean(existingTargetScope);
+        let targetScopeDetails:
+          | import("./technitium.types").TechnitiumDhcpScope
+          | undefined;
+
+        if (existsOnTarget) {
+          try {
+            const targetScopeEnvelope = await this.getDhcpScope(
+              targetNodeId,
+              scopeName,
+            );
+            targetScopeDetails = targetScopeEnvelope.data;
+          } catch (error) {
+            this.logger.warn(
+              `Failed to load target scope details for ${scopeName} on ${targetNodeId}: ${error instanceof Error ? error.message : "unknown error"}`,
+            );
+          }
+        }
+
+        const sourceScopeDetail =
+          sourceScopeDetails.get(scopeName.toLowerCase()) ||
+          (sourceScope as unknown as import("./technitium.types").TechnitiumDhcpScope);
+
         const scopeDiff =
-          existingTargetScope &&
-          this.compareDhcpScopes(sourceScope, existingTargetScope);
+          targetScopeDetails ?
+            this.compareDhcpScopes(sourceScopeDetail, targetScopeDetails)
+          : existingTargetScope ?
+            this.compareDhcpScopes(
+              sourceScopeDetail,
+              existingTargetScope as unknown as import("./technitium.types").TechnitiumDhcpScope,
+            )
+          : undefined;
 
         // Apply strategy
         if (strategy === "skip-existing" && existsOnTarget) {
@@ -2763,6 +3163,7 @@ export class TechnitiumService {
     ) => ({
       pool: `${scope.startingAddress}-${scope.endingAddress}-${scope.subnetMask}`,
       leaseTime: `${scope.leaseTimeDays ?? 0}-${scope.leaseTimeHours ?? 0}-${scope.leaseTimeMinutes ?? 0}`,
+      enabled: (scope as { enabled?: boolean }).enabled ?? false,
       routerAddress: scope.routerAddress ?? null,
       domainName: scope.domainName ?? "",
       domainSearchList: normalizeStringArray(scope.domainSearchList),
@@ -2817,6 +3218,7 @@ export class TechnitiumService {
 
     addDiff("Pool", canonicalSource.pool, canonicalTarget.pool);
     addDiff("Lease time", canonicalSource.leaseTime, canonicalTarget.leaseTime);
+    addDiff("Enabled", canonicalSource.enabled, canonicalTarget.enabled);
     addDiff(
       "Router",
       canonicalSource.routerAddress,
@@ -3433,6 +3835,10 @@ export class TechnitiumService {
     console.log("🔍 buildQueryLogParams - params:", params);
 
     return params;
+  }
+
+  private safeJsonClone<T>(value: T): T {
+    return JSON.parse(JSON.stringify(value)) as T;
   }
 
   private async resolveQueryLogger(

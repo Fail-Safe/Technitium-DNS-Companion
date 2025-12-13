@@ -135,6 +135,19 @@ export interface TechnitiumUpdateDhcpScopeEnvelope {
   data: TechnitiumUpdateDhcpScopeResult;
 }
 
+export interface TechnitiumCreateDhcpScopeRequest {
+  scope: TechnitiumDhcpScope;
+  enabled?: boolean;
+}
+
+export type TechnitiumCreateDhcpScopeResult = TechnitiumUpdateDhcpScopeResult;
+
+export interface TechnitiumCreateDhcpScopeEnvelope {
+  nodeId: string;
+  fetchedAt: string;
+  data: TechnitiumCreateDhcpScopeResult;
+}
+
 export type DhcpBulkSyncStrategy =
   | "skip-existing"
   | "overwrite-all"
@@ -171,4 +184,37 @@ export interface DhcpBulkSyncResult {
   totalSkipped: number;
   totalFailed: number;
   completedAt: string;
+}
+
+export type DhcpSnapshotOrigin = "manual" | "automatic";
+
+export interface DhcpSnapshotMetadata {
+  id: string;
+  nodeId: string;
+  createdAt: string;
+  scopeCount: number;
+  origin: DhcpSnapshotOrigin;
+  pinned?: boolean;
+  note?: string;
+}
+
+export interface DhcpSnapshotScopeEntry {
+  scope: TechnitiumDhcpScope;
+  enabled?: boolean;
+}
+
+export interface DhcpSnapshot {
+  metadata: DhcpSnapshotMetadata;
+  scopes: DhcpSnapshotScopeEntry[];
+}
+
+export interface DhcpSnapshotRestoreResult {
+  snapshot: DhcpSnapshotMetadata;
+  restored: number;
+  deleted: number;
+}
+
+export interface DhcpSnapshotRestoreOptions {
+  deleteExtraScopes?: boolean;
+  keepExtras?: boolean; // UI convenience: maps to deleteExtraScopes=false
 }
