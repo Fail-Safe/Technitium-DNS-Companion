@@ -762,7 +762,7 @@ export function DhcpPage() {
     disabled: !selectedNodeId,
   });
 
-  const syncDraftWithScope = (scope?: TechnitiumDhcpScope) => {
+  const syncDraftWithScope = useCallback((scope?: TechnitiumDhcpScope) => {
     if (!scope) {
       // Clear baseline when no scope
       setBaselineJson(undefined);
@@ -907,7 +907,7 @@ export function DhcpPage() {
 
     // Mark that we need to capture baseline after state updates
     needsBaselineCaptureRef.current = true;
-  };
+  }, []);
 
   // Serialize draft fields back to a scope object for comparison
   const serializeDraftToScope = useCallback(():
@@ -1972,7 +1972,7 @@ export function DhcpPage() {
       setDraftScopeEnabled(baselineScopeEnabled);
       setShowChangesSummary(false);
     }
-  }, [currentScope, baselineScopeEnabled]);
+  }, [currentScope, baselineScopeEnabled, syncDraftWithScope]);
 
   // Keyboard shortcuts: Ctrl/Cmd+S to save, Escape to reset
   useEffect(() => {
@@ -2294,6 +2294,24 @@ export function DhcpPage() {
       return;
     }
 
+    if (scopeListState !== "success") {
+      return;
+    }
+
+    const selectedExists = scopes.some(
+      (scope) => scope.name === selectedScopeName,
+    );
+    if (!selectedExists) {
+      return;
+    }
+
+    if (
+      currentScope?.name === selectedScopeName &&
+      scopeDetailState === "success"
+    ) {
+      return;
+    }
+
     const cacheKey = buildScopeKey(selectedNodeId, selectedScopeName);
     const cached = detailCache.get(cacheKey);
 
@@ -2342,7 +2360,17 @@ export function DhcpPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedNodeId, selectedScopeName, detailCache, loadDhcpScope]);
+  }, [
+    selectedNodeId,
+    selectedScopeName,
+    detailCache,
+    loadDhcpScope,
+    scopeListState,
+    scopes,
+    currentScope?.name,
+    scopeDetailState,
+    syncDraftWithScope,
+  ]);
 
   useEffect(() => {
     setCloneState("idle");
@@ -3390,17 +3418,18 @@ export function DhcpPage() {
   };
 
   // Helper to determine if a scope exists on any target
-  const getScopeExistsOnTargets = (
-    scopeName: string,
-  ): { exists: boolean; nodeIds: string[] } => {
-    const existingNodeIds: string[] = [];
-    for (const [nodeId, scopes] of bulkSyncTargetScopes.entries()) {
-      if (scopes.some((s) => s.name === scopeName)) {
-        existingNodeIds.push(nodeId);
+  const getScopeExistsOnTargets = useCallback(
+    (scopeName: string): { exists: boolean; nodeIds: string[] } => {
+      const existingNodeIds: string[] = [];
+      for (const [nodeId, scopes] of bulkSyncTargetScopes.entries()) {
+        if (scopes.some((s) => s.name === scopeName)) {
+          existingNodeIds.push(nodeId);
+        }
       }
-    }
-    return { exists: existingNodeIds.length > 0, nodeIds: existingNodeIds };
-  };
+      return { exists: existingNodeIds.length > 0, nodeIds: existingNodeIds };
+    },
+    [bulkSyncTargetScopes],
+  );
 
   // Preload source/target scope details for merge-missing so badges are accurate without expanding
   const preloadMergeMissingScopeDetails = useCallback(async () => {
@@ -3859,7 +3888,42 @@ export function DhcpPage() {
       return;
     }
 
-    // skip-existing strategy - no confirmation dialog
+    if (bulkSyncStrategy === "skip-existing") {
+      setConfirmModal({
+        isOpen: true,
+        title: "Sync Missing Scopes",
+        message: (
+          <>
+            <p style={{ marginTop: "0.75rem" }}>
+              Only scopes that do not already exist on{" "}
+              <strong>{targetNames}</strong> will be created from{" "}
+              <strong> {sourceNodeName}</strong>. Existing scopes stay
+              untouched.
+            </p>
+            <p
+              style={{
+                marginTop: "0.75rem",
+                fontSize: "0.9em",
+                fontWeight: 500,
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              Automatic snapshots will be created for all affected nodes before
+              proceeding.
+            </p>
+          </>
+        ),
+        variant: "info",
+        confirmLabel: "Sync Missing",
+        onConfirm: () => {
+          closeConfirmModal();
+          executeBulkSync();
+        },
+      });
+      return;
+    }
+
+    // This should be unreachable, but guard just in case
     executeBulkSync();
   };
 
@@ -4064,14 +4128,14 @@ export function DhcpPage() {
                 </section>
 
                 <section className="dhcp-page__card">
-                  {!selectedScopeName &&
+                  {/* {!selectedScopeName &&
                     scopes.length === 0 &&
                     scopeListState === "success" && (
                       <div className="dhcp-page__placeholder">
                         No DHCP scopes configured on {selectedNodeLabel}. Create
                         scopes in the Technitium DNS web interface.
                       </div>
-                    )}
+                    )} */}
 
                   {!selectedScopeName && scopes.length > 0 && (
                     <div className="dhcp-page__placeholder">

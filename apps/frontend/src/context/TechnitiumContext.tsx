@@ -491,8 +491,8 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // If polling is already set up, don't restart it
-    if (isPollingSetupRef.current && pollingTimerRef.current) {
+    // If polling is already set up (or being set up), don't restart it
+    if (isPollingSetupRef.current) {
       return;
     }
 
@@ -505,21 +505,27 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
     // Fetch cluster settings and start polling
     (async () => {
-      const settings = await fetchClusterSettings();
-      const intervalMs =
-        (settings?.heartbeatRefreshIntervalSeconds || 30) * 1000;
+      try {
+        const settings = await fetchClusterSettings();
+        const intervalSeconds = settings?.heartbeatRefreshIntervalSeconds || 30;
+        const intervalMs = intervalSeconds * 1000;
 
-      console.log(
-        `🔔 Starting cluster role polling (every ${settings?.heartbeatRefreshIntervalSeconds || 30}s)`,
-      );
+        console.log(
+          `🔔 Starting cluster role polling (every ${intervalSeconds}s)`,
+        );
 
-      // Clear any existing timer (shouldn't exist, but defensive)
-      if (pollingTimerRef.current) {
-        clearInterval(pollingTimerRef.current);
+        // Clear any existing timer (shouldn't exist, but defensive)
+        if (pollingTimerRef.current) {
+          clearInterval(pollingTimerRef.current);
+        }
+
+        // Start polling
+        pollingTimerRef.current = setInterval(pollClusterState, intervalMs);
+      } catch (error) {
+        console.error("Failed to set up cluster role polling:", error);
+        // Allow retry on next render if setup fails
+        isPollingSetupRef.current = false;
       }
-
-      // Start polling
-      pollingTimerRef.current = setInterval(pollClusterState, intervalMs);
     })();
 
     // Cleanup on unmount - but don't reset flag to prevent remount restart

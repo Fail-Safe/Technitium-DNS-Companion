@@ -1196,6 +1196,7 @@ export function BuiltInBlockingEditor({
     deleteBlockedDomain,
     loadSettings,
     loadDomains,
+    createDhcpSnapshot,
     onRefresh,
     pushToast,
   ]);
