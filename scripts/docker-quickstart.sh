@@ -111,7 +111,12 @@ if [ -n "$confirm_key" ]; then
 fi
 printf '\n'
 
-printf '🚀 Starting container...\n'
+printf '📀 Pulling image: %s\n' "$IMAGE"
+if ! docker pull "$IMAGE" >/dev/null 2>&1; then
+	printf '⚠️  Could not pull image (continuing). If this is a local image name, this is expected.\n' >&2
+fi
+
+printf '\n🚀 Starting container...\n'
 docker run --rm -p "${HTTP_PORT}:3000" -p "${HTTPS_PORT}:3443" \
 	--env-file "$ENV_FILE" \
 	-v "${VOLUME_NAME}:/data" \

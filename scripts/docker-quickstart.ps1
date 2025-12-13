@@ -141,5 +141,16 @@ if (-not $enterPressed) {
     exit 0
 }
 
+Write-Host "📀 Pulling image: $Image"
+try {
+    & docker pull "$Image" *> $null
+    if ($LASTEXITCODE -ne 0) {
+        throw "docker pull failed"
+    }
+} catch {
+    Write-Host "⚠️  Could not pull image (continuing). If this is a local image name, this is expected." -ForegroundColor Yellow
+}
+
+Write-Host ""
 Write-Host "🚀 Starting container..."
 docker run --rm -p "${HttpPort}:3000" -p "${HttpsPort}:3443" --env-file "$EnvFile" -v "${VolumeName}:/data" "$Image"

@@ -26,6 +26,7 @@ powershell -ExecutionPolicy Bypass -File .\docker-quickstart.ps1
 - What the script does:
   - Verifies Docker is running
   - Downloads `.env.example` into `technitium.env` if missing
+  - Pulls the selected image first (so `:latest` stays current)
   - Shows the exact `docker run` command and can run it for you
   - Prompts to confirm HTTP/HTTPS ports before running (must be different; it will re-prompt if you choose the same port)
 

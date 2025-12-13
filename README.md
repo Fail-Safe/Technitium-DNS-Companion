@@ -54,6 +54,7 @@ What the script does:
 - Verifies Docker is running
 - Downloads .env.example into technitium.env if missing
 - Shows (and can run) the docker run command
+- Pulls the selected image first (so `:latest` stays current)
 
 If `technitium.env` does not exist yet, the script will create it and exit so you can edit it. After updating `technitium.env`, rerun the script: it will confirm your desired HTTP/HTTPS ports, show the exact `docker run` command, and only executes it when you press Enter (any other key cancels).
 
