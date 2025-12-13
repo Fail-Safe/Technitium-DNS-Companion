@@ -58,18 +58,13 @@ jobs:
           tags: |
             # Set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
-            # Tag with version from package.json (e.g., 1.0.4)
-            type=raw,value=${{ steps.package-version.outputs.version }},enable={{is_default_branch}}
             # Tag with branch name
             # type=ref,event=branch
             # Tag with PR number
             # type=ref,event=pr
             # Tag with git tag (v1.0.0)
             type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
-            # type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
-            # type=semver,pattern={{major}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
-            # Tag with short SHA
-            type=sha,prefix=
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
