@@ -1,18 +1,18 @@
-import { Module, Logger } from "@nestjs/common";
 import { HttpModule } from "@nestjs/axios";
+import { Logger, Module } from "@nestjs/common";
 import { ThrottlerModule } from "@nestjs/throttler";
-import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
-import { TechnitiumService } from "./technitium.service";
-import { TechnitiumController } from "./technitium.controller";
-import { TechnitiumNodeConfig } from "./technitium.types";
-import { AdvancedBlockingService } from "./advanced-blocking.service";
 import { AdvancedBlockingController } from "./advanced-blocking.controller";
-import { BuiltInBlockingService } from "./built-in-blocking.service";
+import { AdvancedBlockingService } from "./advanced-blocking.service";
 import { BuiltInBlockingController } from "./built-in-blocking.controller";
+import { BuiltInBlockingService } from "./built-in-blocking.service";
+import { DhcpSnapshotService } from "./dhcp-snapshot.service";
+import { DomainListController } from "./domain-list-cache.controller";
 import { DomainListCacheService } from "./domain-list-cache.service";
 import { DomainListPersistenceService } from "./domain-list-persistence.service";
-import { DomainListController } from "./domain-list-cache.controller";
-import { DhcpSnapshotService } from "./dhcp-snapshot.service";
+import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
+import { TechnitiumController } from "./technitium.controller";
+import { TechnitiumService } from "./technitium.service";
+import { TechnitiumNodeConfig } from "./technitium.types";
 
 @Module({
   imports: [
@@ -38,6 +38,20 @@ import { DhcpSnapshotService } from "./dhcp-snapshot.service";
       provide: TECHNITIUM_NODES_TOKEN,
       useFactory: (): TechnitiumNodeConfig[] => {
         const logger = new Logger("TechnitiumConfig");
+        const isTestRunner =
+          process.env.JEST_WORKER_ID !== undefined ||
+          process.env.NODE_ENV === "test";
+        const allowHttpInTests =
+          process.env.ALLOW_TECHNITIUM_HTTP_IN_TESTS === "true";
+
+        if (isTestRunner && !allowHttpInTests) {
+          logger.log(
+            "Detected test environment, skipping Technitium DNS node configuration. " +
+              "Set ALLOW_TECHNITIUM_HTTP_IN_TESTS=true to allow real nodes during tests.",
+          );
+          return [];
+        }
+
         const rawNodes = process.env.TECHNITIUM_NODES;
         if (!rawNodes) {
           logger.warn(
