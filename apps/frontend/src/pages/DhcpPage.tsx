@@ -3951,19 +3951,21 @@ export function DhcpPage() {
           isRefreshing={pullToRefresh.isRefreshing}
         />
 
-        <button
-          type="button"
-          className="drawer-pull"
-          aria-label="Open DHCP scope history"
-          onClick={() => setShowSnapshotDrawer(true)}
-          disabled={!selectedNodeId}
-        >
-          <FontAwesomeIcon
-            icon={faClockRotateLeft}
-            style={{ marginBottom: "0.5rem" }}
-          />
-          DHCP Scope History
-        </button>
+        {activePageTab === "scopes" && (
+          <button
+            type="button"
+            className="drawer-pull"
+            aria-label="Open DHCP scope history"
+            onClick={() => setShowSnapshotDrawer(true)}
+            disabled={!selectedNodeId}
+          >
+            <FontAwesomeIcon
+              icon={faClockRotateLeft}
+              style={{ marginBottom: "0.5rem" }}
+            />
+            DHCP Scope History
+          </button>
+        )}
 
         <header className="dhcp-page__header">
           <div>
