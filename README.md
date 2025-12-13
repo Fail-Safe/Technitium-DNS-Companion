@@ -55,7 +55,11 @@ What the script does:
 - Downloads .env.example into technitium.env if missing
 - Shows (and can run) the docker run command
 
-Then edit technitium.env with your Technitium DNS node URLs/tokens when prompted and launch. For manual docker run or compose instructions, head to [DOCKER.md](DOCKER.md).
+If `technitium.env` does not exist yet, the script will create it and exit so you can edit it. After updating `technitium.env`, rerun the script: it will confirm your desired HTTP/HTTPS ports, show the exact `docker run` command, and only executes it when you press Enter (any other key cancels).
+
+Note: the script requires HTTP and HTTPS to use different host ports (it will re-prompt if you enter the same port for both).
+
+For manual docker run or compose instructions, head to [DOCKER.md](DOCKER.md).
 
 ## Configuration
 

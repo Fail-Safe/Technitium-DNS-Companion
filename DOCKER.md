@@ -27,8 +27,10 @@ powershell -ExecutionPolicy Bypass -File .\docker-quickstart.ps1
   - Verifies Docker is running
   - Downloads `.env.example` into `technitium.env` if missing
   - Shows the exact `docker run` command and can run it for you
+  - Prompts to confirm HTTP/HTTPS ports before running (must be different; it will re-prompt if you choose the same port)
 
-- Edit `technitium.env` with your Technitium node URLs/tokens when prompted, then press Enter to launch.
+- If `technitium.env` didn’t exist, the script will create it and exit so you can edit it.
+- After editing `technitium.env`, rerun the script and press Enter to launch (any other key cancels).
 
 ### Option B: Manual `docker run` (no clone required)
 
@@ -116,6 +118,7 @@ docker compose up -d --build
 ## Troubleshooting
 
 - Container will not start: `docker compose logs` then `docker compose config` to validate env vars.
+- Port bind error ("port is already allocated"): pick different host ports (e.g., `-p 1234:3000 -p 1235:3443`) or stop the other container/service using that port.
 - Cannot connect to Technitium DNS nodes: Check URLs and tokens in `.env`.
 
 Need contributor/dev container instructions? See `DEVELOPMENT.md` or `docker-compose.dev.yml`.
