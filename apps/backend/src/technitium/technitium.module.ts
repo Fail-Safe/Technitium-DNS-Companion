@@ -38,6 +38,7 @@ import { TechnitiumNodeConfig } from "./technitium.types";
       provide: TECHNITIUM_NODES_TOKEN,
       useFactory: (): TechnitiumNodeConfig[] => {
         const logger = new Logger("TechnitiumConfig");
+        const sessionAuthEnabled = process.env.AUTH_SESSION_ENABLED === "true";
         const isTestRunner =
           process.env.JEST_WORKER_ID !== undefined ||
           process.env.NODE_ENV === "test";
@@ -89,18 +90,24 @@ import { TechnitiumNodeConfig } from "./technitium.types";
             continue;
           }
 
-          if (!token) {
+          if (!token && !sessionAuthEnabled) {
             logger.warn(
               `Skipping node "${id}" because neither TECHNITIUM_${sanitizedKey}_TOKEN nor TECHNITIUM_CLUSTER_TOKEN is set.`,
             );
             continue;
           }
 
+          if (!token && sessionAuthEnabled) {
+            logger.warn(
+              `Node "${id}" has no env token configured; AUTH_SESSION_ENABLED=true so it will require user login sessions.`,
+            );
+          }
+
           configs.push({
             id,
             name: name || id, // Use name if provided, otherwise fall back to id
             baseUrl,
-            token,
+            token: token ?? "",
             queryLoggerAppName,
             queryLoggerClassPath,
           });
@@ -128,6 +135,7 @@ import { TechnitiumNodeConfig } from "./technitium.types";
     BuiltInBlockingService,
     DomainListCacheService,
     DhcpSnapshotService,
+    TECHNITIUM_NODES_TOKEN,
   ],
 })
 export class TechnitiumModule {}

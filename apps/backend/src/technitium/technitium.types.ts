@@ -231,6 +231,7 @@ export interface TechnitiumCombinedNodeLogSnapshot {
   fetchedAt: string;
   totalEntries?: number;
   totalPages?: number;
+  durationMs?: number;
   error?: string;
 }
 

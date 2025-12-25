@@ -97,6 +97,9 @@ Changes will:
 # Restart remote container
 ./scripts/remote-dev.sh restart
 
+# Recreate container (reload .env / env vars)
+./scripts/remote-dev.sh recreate
+
 # Stop remote dev environment
 ./scripts/remote-dev.sh stop
 
@@ -109,6 +112,12 @@ Changes will:
 # SSH port forwarding (access via localhost)
 ./scripts/remote-dev.sh forward
 ```
+
+### When to use restart vs recreate vs rebuild
+
+- `restart`: restarts the container processes. Use this for most code changes (especially backend changes). It does **not** reload `.env`.
+- `recreate`: recreates the container so `env_file: .env` (and interpolated env vars) are re-read. Use this after changing `.env` values like `AUTH_SESSION_ENABLED`, proxy targets, ports, tokens, etc.
+- `rebuild`: rebuilds the image and resets volumes. Use this after dependency changes (e.g. package installs) or when the container image itself must change.
 
 ## Typical Workflow
 
@@ -257,6 +266,9 @@ ps aux | grep fswatch
 # Restart container
 ./scripts/remote-dev.sh restart
 
+# If you changed .env, recreate instead
+./scripts/remote-dev.sh recreate
+
 # Check if files actually synced
 ./scripts/remote-dev.sh shell
 ls -la apps/backend/src/
@@ -389,7 +401,7 @@ vi .env
 
 # Restart
 exit
-./scripts/remote-dev.sh restart
+./scripts/remote-dev.sh recreate
 ```
 
 ## Migration from Old Workflow

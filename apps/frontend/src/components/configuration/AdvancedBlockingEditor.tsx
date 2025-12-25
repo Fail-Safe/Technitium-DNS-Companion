@@ -1,596 +1,664 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { FormEvent, KeyboardEvent } from 'react';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faPlus, faMinus, faPencil } from '@fortawesome/free-solid-svg-icons';
+import { faMinus, faPencil, faPlus } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import type { FormEvent, KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
-    AdvancedBlockingConfig,
-    AdvancedBlockingGroup,
-    AdvancedBlockingOverview,
-    AdvancedBlockingUrlEntry,
-    AdvancedBlockingUrlOverride,
-} from '../../types/advancedBlocking';
+  AdvancedBlockingConfig,
+  AdvancedBlockingGroup,
+  AdvancedBlockingOverview,
+  AdvancedBlockingUrlEntry,
+  AdvancedBlockingUrlOverride,
+} from "../../types/advancedBlocking";
 
 interface AdvancedBlockingEditorProps {
-    overview?: AdvancedBlockingOverview;
-    loading: boolean;
-    error?: string;
-    onSave: (nodeId: string, config: AdvancedBlockingConfig) => Promise<void>;
-    onDirtyChange?: (isDirty: boolean) => void;
-    selectedNodeId?: string;
-    onNodeChange?: (nodeId: string) => void;
+  overview?: AdvancedBlockingOverview;
+  loading: boolean;
+  error?: string;
+  onSave: (nodeId: string, config: AdvancedBlockingConfig) => Promise<void>;
+  onDirtyChange?: (isDirty: boolean) => void;
+  selectedNodeId?: string;
+  onNodeChange?: (nodeId: string) => void;
 }
 
 export function AdvancedBlockingEditor({
-    overview,
-    loading,
-    error,
-    onSave,
-    onDirtyChange,
-    selectedNodeId: externalSelectedNodeId,
-    onNodeChange,
+  overview,
+  loading,
+  error,
+  onSave,
+  onDirtyChange,
+  selectedNodeId: externalSelectedNodeId,
+  onNodeChange,
 }: AdvancedBlockingEditorProps) {
-    const nodes = useMemo(() => overview?.nodes ?? [], [overview]);
-    const firstNode = nodes[0];
-    const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string>(() => firstNode?.nodeId ?? '');
+  const nodes = useMemo(() => overview?.nodes ?? [], [overview]);
+  const firstNode = nodes[0];
+  const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string>(
+    () => firstNode?.nodeId ?? "",
+  );
 
-    // Use external selectedNodeId if provided, otherwise use internal state
-    const selectedNodeId = externalSelectedNodeId ?? internalSelectedNodeId;
+  // Use external selectedNodeId if provided, otherwise use internal state
+  const selectedNodeId = externalSelectedNodeId ?? internalSelectedNodeId;
 
-    // Function to change selected node
-    const setSelectedNodeId = useCallback((nodeId: string) => {
-        if (onNodeChange) {
-            onNodeChange(nodeId);
-        } else {
-            setInternalSelectedNodeId(nodeId);
+  // Function to change selected node
+  const setSelectedNodeId = useCallback(
+    (nodeId: string) => {
+      if (onNodeChange) {
+        onNodeChange(nodeId);
+      } else {
+        setInternalSelectedNodeId(nodeId);
+      }
+    },
+    [onNodeChange],
+  );
+
+  const [draftConfig, setDraftConfig] = useState<
+    AdvancedBlockingConfig | undefined
+  >(() => (firstNode?.config ? cloneConfig(firstNode.config) : undefined));
+  const [baseline, setBaseline] = useState<string>(() =>
+    serializeConfig(firstNode?.config),
+  );
+  const [activeGroupName, setActiveGroupName] = useState<string | null>(
+    () => firstNode?.config?.groups[0]?.name ?? null,
+  );
+  const [newGroupName, setNewGroupName] = useState("");
+  const [renameValue, setRenameValue] = useState("");
+  const [status, setStatus] = useState<string | undefined>();
+  const [localError, setLocalError] = useState<string | undefined>();
+  const [saving, setSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [showChangesSummary, setShowChangesSummary] = useState(false);
+
+  useEffect(() => {
+    if (!nodes.some((node) => node.nodeId === selectedNodeId)) {
+      setSelectedNodeId(nodes[0]?.nodeId ?? "");
+    }
+  }, [nodes, selectedNodeId, setSelectedNodeId]);
+
+  useEffect(() => {
+    const nextNode = nodes.find((node) => node.nodeId === selectedNodeId);
+    const config = nextNode?.config;
+
+    if (config) {
+      setDraftConfig(cloneConfig(config));
+      setBaseline(serializeConfig(config));
+      setActiveGroupName((prev) => {
+        if (prev && config.groups.some((group) => group.name === prev)) {
+          return prev;
         }
-    }, [onNodeChange]);
+        return config.groups[0]?.name ?? null;
+      });
+    } else {
+      setDraftConfig(undefined);
+      setBaseline("null");
+      setActiveGroupName(null);
+    }
 
-    const [draftConfig, setDraftConfig] = useState<AdvancedBlockingConfig | undefined>(() =>
-        firstNode?.config ? cloneConfig(firstNode.config) : undefined,
+    setStatus(undefined);
+    setLocalError(undefined);
+  }, [nodes, selectedNodeId]);
+  const selectedNode = useMemo(
+    () => nodes.find((node) => node.nodeId === selectedNodeId),
+    [nodes, selectedNodeId],
+  );
+
+  const activeGroup = useMemo(() => {
+    if (!draftConfig) {
+      return undefined;
+    }
+
+    const current =
+      activeGroupName ?
+        draftConfig.groups.find((group) => group.name === activeGroupName)
+      : undefined;
+
+    return current ?? draftConfig.groups[0];
+  }, [draftConfig, activeGroupName]);
+
+  useEffect(() => {
+    setRenameValue(activeGroup?.name ?? "");
+  }, [activeGroup]);
+
+  useEffect(() => {
+    if (!draftConfig) {
+      return;
+    }
+
+    if (
+      activeGroupName &&
+      !draftConfig.groups.some((group) => group.name === activeGroupName)
+    ) {
+      setActiveGroupName(draftConfig.groups[0]?.name ?? null);
+    }
+  }, [draftConfig, activeGroupName]);
+
+  const serializedDraft = useMemo(
+    () => serializeConfig(draftConfig),
+    [draftConfig],
+  );
+  const isDirty = useMemo(
+    () => serializedDraft !== baseline,
+    [serializedDraft, baseline],
+  );
+
+  // Compute pending changes for display
+  const pendingChanges = useMemo(() => {
+    if (!isDirty || !draftConfig) return [];
+
+    const changes: Array<{
+      type: "added" | "removed" | "modified";
+      category: string;
+      description: string;
+    }> = [];
+
+    // Parse baseline config
+    const baselineConfig =
+      baseline !== "null" ?
+        (JSON.parse(baseline) as AdvancedBlockingConfig)
+      : null;
+
+    if (!baselineConfig) {
+      // All groups are new
+      draftConfig.groups.forEach((group) => {
+        changes.push({
+          type: "added",
+          category: "Group",
+          description: `Added group "${group.name}"`,
+        });
+      });
+      return changes;
+    }
+
+    // Check for added/removed groups
+    const baselineGroupNames = new Set(
+      baselineConfig.groups.map((g) => g.name),
     );
-    const [baseline, setBaseline] = useState<string>(() => serializeConfig(firstNode?.config));
-    const [activeGroupName, setActiveGroupName] = useState<string | null>(
-        () => firstNode?.config?.groups[0]?.name ?? null,
+    const draftGroupNames = new Set(draftConfig.groups.map((g) => g.name));
+
+    // Added groups
+    draftConfig.groups.forEach((group) => {
+      if (!baselineGroupNames.has(group.name)) {
+        changes.push({
+          type: "added",
+          category: "Group",
+          description: `Added group "${group.name}"`,
+        });
+      }
+    });
+
+    // Removed groups
+    baselineConfig.groups.forEach((group) => {
+      if (!draftGroupNames.has(group.name)) {
+        changes.push({
+          type: "removed",
+          category: "Group",
+          description: `Removed group "${group.name}"`,
+        });
+      }
+    });
+
+    // Check for modified groups (only for groups that exist in both)
+    draftConfig.groups.forEach((draftGroup) => {
+      const baselineGroup = baselineConfig.groups.find(
+        (g) => g.name === draftGroup.name,
+      );
+      if (!baselineGroup) return; // Already handled as "added"
+
+      // Check if group was renamed (different object but checking properties)
+      // Since groups are identified by name, renaming would be remove + add
+
+      // Check blocked domains
+      const baselineBlocked = new Set(baselineGroup.blocked || []);
+      const draftBlocked = new Set(draftGroup.blocked || []);
+      const addedBlocked = [...draftBlocked].filter(
+        (d) => !baselineBlocked.has(d),
+      );
+      const removedBlocked = [...baselineBlocked].filter(
+        (d) => !draftBlocked.has(d),
+      );
+
+      addedBlocked.forEach((domain) => {
+        changes.push({
+          type: "added",
+          category: `Group: ${draftGroup.name}`,
+          description: `Blocked domain: ${domain}`,
+        });
+      });
+
+      removedBlocked.forEach((domain) => {
+        changes.push({
+          type: "removed",
+          category: `Group: ${draftGroup.name}`,
+          description: `Unblocked domain: ${domain}`,
+        });
+      });
+
+      // Check allowed domains
+      const baselineAllowed = new Set(baselineGroup.allowed || []);
+      const draftAllowed = new Set(draftGroup.allowed || []);
+      const addedAllowed = [...draftAllowed].filter(
+        (d) => !baselineAllowed.has(d),
+      );
+      const removedAllowed = [...baselineAllowed].filter(
+        (d) => !draftAllowed.has(d),
+      );
+
+      addedAllowed.forEach((domain) => {
+        changes.push({
+          type: "added",
+          category: `Group: ${draftGroup.name}`,
+          description: `Allowed domain: ${domain}`,
+        });
+      });
+
+      removedAllowed.forEach((domain) => {
+        changes.push({
+          type: "removed",
+          category: `Group: ${draftGroup.name}`,
+          description: `Removed allowed domain: ${domain}`,
+        });
+      });
+
+      // Check blocked regex
+      const baselineBlockedRegex = new Set(baselineGroup.blockedRegex || []);
+      const draftBlockedRegex = new Set(draftGroup.blockedRegex || []);
+      const addedBlockedRegex = [...draftBlockedRegex].filter(
+        (d) => !baselineBlockedRegex.has(d),
+      );
+      const removedBlockedRegex = [...baselineBlockedRegex].filter(
+        (d) => !draftBlockedRegex.has(d),
+      );
+
+      addedBlockedRegex.forEach((pattern) => {
+        changes.push({
+          type: "added",
+          category: `Group: ${draftGroup.name}`,
+          description: `Blocked regex: ${pattern}`,
+        });
+      });
+
+      removedBlockedRegex.forEach((pattern) => {
+        changes.push({
+          type: "removed",
+          category: `Group: ${draftGroup.name}`,
+          description: `Removed blocked regex: ${pattern}`,
+        });
+      });
+
+      // Check allowed regex
+      const baselineAllowedRegex = new Set(baselineGroup.allowedRegex || []);
+      const draftAllowedRegex = new Set(draftGroup.allowedRegex || []);
+      const addedAllowedRegex = [...draftAllowedRegex].filter(
+        (d) => !baselineAllowedRegex.has(d),
+      );
+      const removedAllowedRegex = [...baselineAllowedRegex].filter(
+        (d) => !draftAllowedRegex.has(d),
+      );
+
+      addedAllowedRegex.forEach((pattern) => {
+        changes.push({
+          type: "added",
+          category: `Group: ${draftGroup.name}`,
+          description: `Allowed regex: ${pattern}`,
+        });
+      });
+
+      removedAllowedRegex.forEach((pattern) => {
+        changes.push({
+          type: "removed",
+          category: `Group: ${draftGroup.name}`,
+          description: `Removed allowed regex: ${pattern}`,
+        });
+      });
+    });
+
+    // Check global settings changes
+    if (baselineConfig.enableBlocking !== draftConfig.enableBlocking) {
+      changes.push({
+        type: "modified",
+        category: "Global Setting",
+        description: `Enable blocking: ${baselineConfig.enableBlocking} → ${draftConfig.enableBlocking}`,
+      });
+    }
+
+    if (baselineConfig.blockingAnswerTtl !== draftConfig.blockingAnswerTtl) {
+      changes.push({
+        type: "modified",
+        category: "Global Setting",
+        description: `Blocking answer TTL: ${baselineConfig.blockingAnswerTtl != null ? baselineConfig.blockingAnswerTtl + "s" : "not set"} → ${draftConfig.blockingAnswerTtl != null ? draftConfig.blockingAnswerTtl + "s" : "not set"}`,
+      });
+    }
+
+    if (
+      baselineConfig.blockListUrlUpdateIntervalHours !==
+      draftConfig.blockListUrlUpdateIntervalHours
+    ) {
+      changes.push({
+        type: "modified",
+        category: "Global Setting",
+        description: `Update interval: ${baselineConfig.blockListUrlUpdateIntervalHours}h → ${draftConfig.blockListUrlUpdateIntervalHours}h`,
+      });
+    }
+
+    // Check network mappings
+    const baselineNetworkMap = baselineConfig.networkGroupMap || {};
+    const draftNetworkMap = draftConfig.networkGroupMap || {};
+    const allNetworkKeys = new Set([
+      ...Object.keys(baselineNetworkMap),
+      ...Object.keys(draftNetworkMap),
+    ]);
+
+    allNetworkKeys.forEach((key) => {
+      const baselineValue = baselineNetworkMap[key];
+      const draftValue = draftNetworkMap[key];
+
+      if (!baselineValue && draftValue) {
+        changes.push({
+          type: "added",
+          category: "Network Mapping",
+          description: `${key} → ${draftValue}`,
+        });
+      } else if (baselineValue && !draftValue) {
+        changes.push({
+          type: "removed",
+          category: "Network Mapping",
+          description: `${key} → ${baselineValue}`,
+        });
+      } else if (baselineValue !== draftValue) {
+        changes.push({
+          type: "modified",
+          category: "Network Mapping",
+          description: `${key}: ${baselineValue} → ${draftValue}`,
+        });
+      }
+    });
+
+    // Check local endpoint mappings
+    const baselineLocalMap = baselineConfig.localEndPointGroupMap || {};
+    const draftLocalMap = draftConfig.localEndPointGroupMap || {};
+    const allLocalKeys = new Set([
+      ...Object.keys(baselineLocalMap),
+      ...Object.keys(draftLocalMap),
+    ]);
+
+    allLocalKeys.forEach((key) => {
+      const baselineValue = baselineLocalMap[key];
+      const draftValue = draftLocalMap[key];
+
+      if (!baselineValue && draftValue) {
+        changes.push({
+          type: "added",
+          category: "Local Endpoint",
+          description: `${key} → ${draftValue}`,
+        });
+      } else if (baselineValue && !draftValue) {
+        changes.push({
+          type: "removed",
+          category: "Local Endpoint",
+          description: `${key} → ${baselineValue}`,
+        });
+      } else if (baselineValue !== draftValue) {
+        changes.push({
+          type: "modified",
+          category: "Local Endpoint",
+          description: `${key}: ${baselineValue} → ${draftValue}`,
+        });
+      }
+    });
+
+    return changes;
+  }, [isDirty, draftConfig, baseline]);
+
+  useEffect(() => {
+    if (isDirty) {
+      setStatus(undefined);
+    }
+  }, [isDirty]);
+
+  // Notify parent component of dirty state changes
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
+  // Warn user before navigating away with unsaved changes
+  useEffect(() => {
+    if (!isDirty) {
+      return;
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      // Modern browsers require returnValue to be set
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [isDirty]);
+
+  const handleReset = useCallback(() => {
+    const node = nodes.find((item) => item.nodeId === selectedNodeId);
+
+    if (node?.config) {
+      const cloned = cloneConfig(node.config);
+      setDraftConfig(cloned);
+      setBaseline(serializeConfig(node.config));
+      setActiveGroupName(cloned.groups[0]?.name ?? null);
+    } else {
+      setDraftConfig(undefined);
+      setBaseline("null");
+      setActiveGroupName(null);
+    }
+
+    setStatus(undefined);
+    setLocalError(undefined);
+    setNewGroupName("");
+    setRenameValue("");
+  }, [nodes, selectedNodeId]);
+
+  const handleCreateGroup = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!draftConfig) {
+        return;
+      }
+
+      const trimmed = newGroupName.trim();
+      if (!trimmed) {
+        setLocalError("Group name cannot be empty.");
+        return;
+      }
+
+      if (draftConfig.groups.some((group) => group.name === trimmed)) {
+        setLocalError(`Group "${trimmed}" already exists.`);
+        return;
+      }
+
+      const updatedConfig: AdvancedBlockingConfig = {
+        ...draftConfig,
+        groups: [...draftConfig.groups, createEmptyGroup(trimmed)],
+      };
+
+      setDraftConfig(updatedConfig);
+      setActiveGroupName(trimmed);
+      setNewGroupName("");
+      setRenameValue(trimmed);
+      setLocalError(undefined);
+      setStatus(undefined);
+    },
+    [draftConfig, newGroupName],
+  );
+
+  const handleRenameGroup = useCallback(() => {
+    if (!draftConfig || !activeGroup) {
+      return;
+    }
+
+    const trimmed = renameValue.trim();
+    if (!trimmed) {
+      setLocalError("Group name cannot be empty.");
+      return;
+    }
+
+    if (trimmed === activeGroup.name) {
+      return;
+    }
+
+    if (draftConfig.groups.some((group) => group.name === trimmed)) {
+      setLocalError(`Group "${trimmed}" already exists.`);
+      return;
+    }
+
+    const newGroups = draftConfig.groups.map((group) =>
+      group.name === activeGroup.name ? { ...group, name: trimmed } : group,
     );
-    const [newGroupName, setNewGroupName] = useState('');
-    const [renameValue, setRenameValue] = useState('');
-    const [status, setStatus] = useState<string | undefined>();
-    const [localError, setLocalError] = useState<string | undefined>();
-    const [saving, setSaving] = useState(false);
-    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-    const [showChangesSummary, setShowChangesSummary] = useState(false);
-
-    useEffect(() => {
-        if (!nodes.some((node) => node.nodeId === selectedNodeId)) {
-            setSelectedNodeId(nodes[0]?.nodeId ?? '');
-        }
-    }, [nodes, selectedNodeId, setSelectedNodeId]);
-
-    useEffect(() => {
-        const nextNode = nodes.find((node) => node.nodeId === selectedNodeId);
-        const config = nextNode?.config;
-
-        if (config) {
-            setDraftConfig(cloneConfig(config));
-            setBaseline(serializeConfig(config));
-            setActiveGroupName((prev) => {
-                if (prev && config.groups.some((group) => group.name === prev)) {
-                    return prev;
-                }
-                return config.groups[0]?.name ?? null;
-            });
-        } else {
-            setDraftConfig(undefined);
-            setBaseline('null');
-            setActiveGroupName(null);
-        }
-
-        setStatus(undefined);
-        setLocalError(undefined);
-    }, [nodes, selectedNodeId]);
-    const selectedNode = useMemo(
-        () => nodes.find((node) => node.nodeId === selectedNodeId),
-        [nodes, selectedNodeId],
+    const newLocalMap = renameMappingTarget(
+      draftConfig.localEndPointGroupMap,
+      activeGroup.name,
+      trimmed,
     );
-
-    const activeGroup = useMemo(() => {
-        if (!draftConfig) {
-            return undefined;
-        }
-
-        const current = activeGroupName
-            ? draftConfig.groups.find((group) => group.name === activeGroupName)
-            : undefined;
-
-        return current ?? draftConfig.groups[0];
-    }, [draftConfig, activeGroupName]);
-
-    useEffect(() => {
-        setRenameValue(activeGroup?.name ?? '');
-    }, [activeGroup]);
-
-    useEffect(() => {
-        if (!draftConfig) {
-            return;
-        }
-
-        if (activeGroupName && !draftConfig.groups.some((group) => group.name === activeGroupName)) {
-            setActiveGroupName(draftConfig.groups[0]?.name ?? null);
-        }
-    }, [draftConfig, activeGroupName]);
-
-    const serializedDraft = useMemo(() => serializeConfig(draftConfig), [draftConfig]);
-    const isDirty = useMemo(() => serializedDraft !== baseline, [serializedDraft, baseline]);
-
-    // Compute pending changes for display
-    const pendingChanges = useMemo(() => {
-        if (!isDirty || !draftConfig) return [];
-
-        const changes: Array<{
-            type: 'added' | 'removed' | 'modified';
-            category: string;
-            description: string;
-        }> = [];
-
-        // Parse baseline config
-        const baselineConfig = baseline !== 'null' ? JSON.parse(baseline) as AdvancedBlockingConfig : null;
-
-        if (!baselineConfig) {
-            // All groups are new
-            draftConfig.groups.forEach(group => {
-                changes.push({
-                    type: 'added',
-                    category: 'Group',
-                    description: `Added group "${group.name}"`
-                });
-            });
-            return changes;
-        }
-
-        // Check for added/removed groups
-        const baselineGroupNames = new Set(baselineConfig.groups.map(g => g.name));
-        const draftGroupNames = new Set(draftConfig.groups.map(g => g.name));
-
-        // Added groups
-        draftConfig.groups.forEach(group => {
-            if (!baselineGroupNames.has(group.name)) {
-                changes.push({
-                    type: 'added',
-                    category: 'Group',
-                    description: `Added group "${group.name}"`
-                });
-            }
-        });
-
-        // Removed groups
-        baselineConfig.groups.forEach(group => {
-            if (!draftGroupNames.has(group.name)) {
-                changes.push({
-                    type: 'removed',
-                    category: 'Group',
-                    description: `Removed group "${group.name}"`
-                });
-            }
-        });
-
-        // Check for modified groups (only for groups that exist in both)
-        draftConfig.groups.forEach(draftGroup => {
-            const baselineGroup = baselineConfig.groups.find(g => g.name === draftGroup.name);
-            if (!baselineGroup) return; // Already handled as "added"
-
-            // Check if group was renamed (different object but checking properties)
-            // Since groups are identified by name, renaming would be remove + add
-
-            // Check blocked domains
-            const baselineBlocked = new Set(baselineGroup.blocked || []);
-            const draftBlocked = new Set(draftGroup.blocked || []);
-            const addedBlocked = [...draftBlocked].filter(d => !baselineBlocked.has(d));
-            const removedBlocked = [...baselineBlocked].filter(d => !draftBlocked.has(d));
-
-            addedBlocked.forEach(domain => {
-                changes.push({
-                    type: 'added',
-                    category: `Group: ${draftGroup.name}`,
-                    description: `Blocked domain: ${domain}`
-                });
-            });
-
-            removedBlocked.forEach(domain => {
-                changes.push({
-                    type: 'removed',
-                    category: `Group: ${draftGroup.name}`,
-                    description: `Unblocked domain: ${domain}`
-                });
-            });
-
-            // Check allowed domains
-            const baselineAllowed = new Set(baselineGroup.allowed || []);
-            const draftAllowed = new Set(draftGroup.allowed || []);
-            const addedAllowed = [...draftAllowed].filter(d => !baselineAllowed.has(d));
-            const removedAllowed = [...baselineAllowed].filter(d => !draftAllowed.has(d));
-
-            addedAllowed.forEach(domain => {
-                changes.push({
-                    type: 'added',
-                    category: `Group: ${draftGroup.name}`,
-                    description: `Allowed domain: ${domain}`
-                });
-            });
-
-            removedAllowed.forEach(domain => {
-                changes.push({
-                    type: 'removed',
-                    category: `Group: ${draftGroup.name}`,
-                    description: `Removed allowed domain: ${domain}`
-                });
-            });
-
-            // Check blocked regex
-            const baselineBlockedRegex = new Set(baselineGroup.blockedRegex || []);
-            const draftBlockedRegex = new Set(draftGroup.blockedRegex || []);
-            const addedBlockedRegex = [...draftBlockedRegex].filter(d => !baselineBlockedRegex.has(d));
-            const removedBlockedRegex = [...baselineBlockedRegex].filter(d => !draftBlockedRegex.has(d));
-
-            addedBlockedRegex.forEach(pattern => {
-                changes.push({
-                    type: 'added',
-                    category: `Group: ${draftGroup.name}`,
-                    description: `Blocked regex: ${pattern}`
-                });
-            });
-
-            removedBlockedRegex.forEach(pattern => {
-                changes.push({
-                    type: 'removed',
-                    category: `Group: ${draftGroup.name}`,
-                    description: `Removed blocked regex: ${pattern}`
-                });
-            });
-
-            // Check allowed regex
-            const baselineAllowedRegex = new Set(baselineGroup.allowedRegex || []);
-            const draftAllowedRegex = new Set(draftGroup.allowedRegex || []);
-            const addedAllowedRegex = [...draftAllowedRegex].filter(d => !baselineAllowedRegex.has(d));
-            const removedAllowedRegex = [...baselineAllowedRegex].filter(d => !draftAllowedRegex.has(d));
-
-            addedAllowedRegex.forEach(pattern => {
-                changes.push({
-                    type: 'added',
-                    category: `Group: ${draftGroup.name}`,
-                    description: `Allowed regex: ${pattern}`
-                });
-            });
-
-            removedAllowedRegex.forEach(pattern => {
-                changes.push({
-                    type: 'removed',
-                    category: `Group: ${draftGroup.name}`,
-                    description: `Removed allowed regex: ${pattern}`
-                });
-            });
-        });
-
-        // Check global settings changes
-        if (baselineConfig.enableBlocking !== draftConfig.enableBlocking) {
-            changes.push({
-                type: 'modified',
-                category: 'Global Setting',
-                description: `Enable blocking: ${baselineConfig.enableBlocking} → ${draftConfig.enableBlocking}`
-            });
-        }
-
-        if (baselineConfig.blockingAnswerTtl !== draftConfig.blockingAnswerTtl) {
-            changes.push({
-                type: 'modified',
-                category: 'Global Setting',
-                description: `Blocking answer TTL: ${baselineConfig.blockingAnswerTtl != null ? baselineConfig.blockingAnswerTtl + 's' : 'not set'} → ${draftConfig.blockingAnswerTtl != null ? draftConfig.blockingAnswerTtl + 's' : 'not set'}`
-            });
-        }
-
-        if (baselineConfig.blockListUrlUpdateIntervalHours !== draftConfig.blockListUrlUpdateIntervalHours) {
-            changes.push({
-                type: 'modified',
-                category: 'Global Setting',
-                description: `Update interval: ${baselineConfig.blockListUrlUpdateIntervalHours}h → ${draftConfig.blockListUrlUpdateIntervalHours}h`
-            });
-        }
-
-        // Check network mappings
-        const baselineNetworkMap = baselineConfig.networkGroupMap || {};
-        const draftNetworkMap = draftConfig.networkGroupMap || {};
-        const allNetworkKeys = new Set([...Object.keys(baselineNetworkMap), ...Object.keys(draftNetworkMap)]);
-
-        allNetworkKeys.forEach(key => {
-            const baselineValue = baselineNetworkMap[key];
-            const draftValue = draftNetworkMap[key];
-
-            if (!baselineValue && draftValue) {
-                changes.push({
-                    type: 'added',
-                    category: 'Network Mapping',
-                    description: `${key} → ${draftValue}`
-                });
-            } else if (baselineValue && !draftValue) {
-                changes.push({
-                    type: 'removed',
-                    category: 'Network Mapping',
-                    description: `${key} → ${baselineValue}`
-                });
-            } else if (baselineValue !== draftValue) {
-                changes.push({
-                    type: 'modified',
-                    category: 'Network Mapping',
-                    description: `${key}: ${baselineValue} → ${draftValue}`
-                });
-            }
-        });
-
-        // Check local endpoint mappings
-        const baselineLocalMap = baselineConfig.localEndPointGroupMap || {};
-        const draftLocalMap = draftConfig.localEndPointGroupMap || {};
-        const allLocalKeys = new Set([...Object.keys(baselineLocalMap), ...Object.keys(draftLocalMap)]);
-
-        allLocalKeys.forEach(key => {
-            const baselineValue = baselineLocalMap[key];
-            const draftValue = draftLocalMap[key];
-
-            if (!baselineValue && draftValue) {
-                changes.push({
-                    type: 'added',
-                    category: 'Local Endpoint',
-                    description: `${key} → ${draftValue}`
-                });
-            } else if (baselineValue && !draftValue) {
-                changes.push({
-                    type: 'removed',
-                    category: 'Local Endpoint',
-                    description: `${key} → ${baselineValue}`
-                });
-            } else if (baselineValue !== draftValue) {
-                changes.push({
-                    type: 'modified',
-                    category: 'Local Endpoint',
-                    description: `${key}: ${baselineValue} → ${draftValue}`
-                });
-            }
-        });
-
-        return changes;
-    }, [isDirty, draftConfig, baseline]);
-
-    useEffect(() => {
-        if (isDirty) {
-            setStatus(undefined);
-        }
-    }, [isDirty]);
-
-    // Notify parent component of dirty state changes
-    useEffect(() => {
-        onDirtyChange?.(isDirty);
-    }, [isDirty, onDirtyChange]);
-
-    // Warn user before navigating away with unsaved changes
-    useEffect(() => {
-        if (!isDirty) {
-            return;
-        }
-
-        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-            event.preventDefault();
-            // Modern browsers require returnValue to be set
-            event.returnValue = '';
-        };
-
-        window.addEventListener('beforeunload', handleBeforeUnload);
-
-        return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload);
-        };
-    }, [isDirty]);
-
-    const handleReset = useCallback(() => {
-        const node = nodes.find((item) => item.nodeId === selectedNodeId);
-
-        if (node?.config) {
-            const cloned = cloneConfig(node.config);
-            setDraftConfig(cloned);
-            setBaseline(serializeConfig(node.config));
-            setActiveGroupName(cloned.groups[0]?.name ?? null);
-        } else {
-            setDraftConfig(undefined);
-            setBaseline('null');
-            setActiveGroupName(null);
-        }
-
-        setStatus(undefined);
-        setLocalError(undefined);
-        setNewGroupName('');
-        setRenameValue('');
-    }, [nodes, selectedNodeId]);
-
-    const handleCreateGroup = useCallback(
-        (event: FormEvent<HTMLFormElement>) => {
-            event.preventDefault();
-            if (!draftConfig) {
-                return;
-            }
-
-            const trimmed = newGroupName.trim();
-            if (!trimmed) {
-                setLocalError('Group name cannot be empty.');
-                return;
-            }
-
-            if (draftConfig.groups.some((group) => group.name === trimmed)) {
-                setLocalError(`Group "${trimmed}" already exists.`);
-                return;
-            }
-
-            const updatedConfig: AdvancedBlockingConfig = {
-                ...draftConfig,
-                groups: [...draftConfig.groups, createEmptyGroup(trimmed)],
-            };
-
-            setDraftConfig(updatedConfig);
-            setActiveGroupName(trimmed);
-            setNewGroupName('');
-            setRenameValue(trimmed);
-            setLocalError(undefined);
-            setStatus(undefined);
-        },
-        [draftConfig, newGroupName],
+    const newNetworkMap = renameMappingTarget(
+      draftConfig.networkGroupMap,
+      activeGroup.name,
+      trimmed,
     );
 
-    const handleRenameGroup = useCallback(() => {
-        if (!draftConfig || !activeGroup) {
-            return;
+    const updatedConfig: AdvancedBlockingConfig = {
+      ...draftConfig,
+      groups: newGroups,
+      localEndPointGroupMap: newLocalMap,
+      networkGroupMap: newNetworkMap,
+    };
+
+    setDraftConfig(updatedConfig);
+    setActiveGroupName(trimmed);
+    setRenameValue(trimmed);
+    setLocalError(undefined);
+    setStatus(undefined);
+  }, [activeGroup, draftConfig, renameValue]);
+
+  const handleDeleteGroup = useCallback(() => {
+    if (!draftConfig || !activeGroup) {
+      return;
+    }
+
+    setDeleteConfirmOpen(true);
+  }, [activeGroup, draftConfig]);
+
+  const confirmDeleteGroup = useCallback(() => {
+    if (!draftConfig || !activeGroup) {
+      return;
+    }
+
+    const remainingGroups = draftConfig.groups.filter(
+      (group) => group.name !== activeGroup.name,
+    );
+    const newLocalMap = removeMappingTarget(
+      draftConfig.localEndPointGroupMap,
+      activeGroup.name,
+    );
+    const newNetworkMap = removeMappingTarget(
+      draftConfig.networkGroupMap,
+      activeGroup.name,
+    );
+
+    const updatedConfig: AdvancedBlockingConfig = {
+      ...draftConfig,
+      groups: remainingGroups,
+      localEndPointGroupMap: newLocalMap,
+      networkGroupMap: newNetworkMap,
+    };
+
+    setDraftConfig(updatedConfig);
+    setActiveGroupName(remainingGroups[0]?.name ?? null);
+    setRenameValue(remainingGroups[0]?.name ?? "");
+    setLocalError(undefined);
+    setStatus(undefined);
+    setDeleteConfirmOpen(false);
+  }, [activeGroup, draftConfig]);
+
+  const cancelDeleteGroup = useCallback(() => {
+    setDeleteConfirmOpen(false);
+  }, []);
+
+  const renameDirty = useMemo(() => {
+    if (!activeGroup) {
+      return false;
+    }
+    const trimmed = renameValue.trim();
+    return trimmed.length > 0 && trimmed !== activeGroup.name;
+  }, [activeGroup, renameValue]);
+
+  const handleSave = useCallback(async () => {
+    if (!draftConfig || !selectedNodeId) {
+      return;
+    }
+
+    const sanitized = sanitizeConfig(draftConfig);
+    const unknownTargets = findUnknownGroupMappings(sanitized);
+    if (unknownTargets.length > 0) {
+      setLocalError(
+        `Cannot save mappings for undefined group${unknownTargets.length === 1 ? "" : "s"}: ${unknownTargets.join(
+          ", ",
+        )}. Create the group${unknownTargets.length === 1 ? "" : "s"} first.`,
+      );
+      return;
+    }
+
+    setSaving(true);
+    setLocalError(undefined);
+
+    try {
+      await onSave(selectedNodeId, sanitized);
+      setDraftConfig(cloneConfig(sanitized));
+      setBaseline(serializeConfig(sanitized));
+      setStatus("Advanced Blocking config saved.");
+    } catch (saveError) {
+      const message =
+        saveError instanceof Error ?
+          saveError.message
+        : "Failed to save Advanced Blocking config.";
+      setLocalError(message);
+    } finally {
+      setSaving(false);
+    }
+  }, [draftConfig, onSave, selectedNodeId]);
+
+  const updateGroup = useCallback(
+    (
+      groupName: string,
+      updater: (group: AdvancedBlockingGroup) => AdvancedBlockingGroup,
+    ) => {
+      setDraftConfig((prev) => {
+        if (!prev) {
+          return prev;
         }
 
-        const trimmed = renameValue.trim();
-        if (!trimmed) {
-            setLocalError('Group name cannot be empty.');
-            return;
-        }
-
-        if (trimmed === activeGroup.name) {
-            return;
-        }
-
-        if (draftConfig.groups.some((group) => group.name === trimmed)) {
-            setLocalError(`Group "${trimmed}" already exists.`);
-            return;
-        }
-
-        const newGroups = draftConfig.groups.map((group) =>
-            group.name === activeGroup.name ? { ...group, name: trimmed } : group,
+        const index = prev.groups.findIndex(
+          (group) => group.name === groupName,
         );
-        const newLocalMap = renameMappingTarget(draftConfig.localEndPointGroupMap, activeGroup.name, trimmed);
-        const newNetworkMap = renameMappingTarget(draftConfig.networkGroupMap, activeGroup.name, trimmed);
-
-        const updatedConfig: AdvancedBlockingConfig = {
-            ...draftConfig,
-            groups: newGroups,
-            localEndPointGroupMap: newLocalMap,
-            networkGroupMap: newNetworkMap,
-        };
-
-        setDraftConfig(updatedConfig);
-        setActiveGroupName(trimmed);
-        setRenameValue(trimmed);
-        setLocalError(undefined);
-        setStatus(undefined);
-    }, [activeGroup, draftConfig, renameValue]);
-
-    const handleDeleteGroup = useCallback(() => {
-        if (!draftConfig || !activeGroup) {
-            return;
+        if (index === -1) {
+          return prev;
         }
 
-        setDeleteConfirmOpen(true);
-    }, [activeGroup, draftConfig]);
+        const nextGroups = prev.groups.map((group, position) => {
+          if (position !== index) {
+            return group;
+          }
 
-    const confirmDeleteGroup = useCallback(() => {
-        if (!draftConfig || !activeGroup) {
-            return;
-        }
+          return sanitizeGroup(updater(cloneGroup(group)));
+        });
 
-        const remainingGroups = draftConfig.groups.filter((group) => group.name !== activeGroup.name);
-        const newLocalMap = removeMappingTarget(draftConfig.localEndPointGroupMap, activeGroup.name);
-        const newNetworkMap = removeMappingTarget(draftConfig.networkGroupMap, activeGroup.name);
+        return { ...prev, groups: nextGroups };
+      });
+    },
+    [],
+  );
 
-        const updatedConfig: AdvancedBlockingConfig = {
-            ...draftConfig,
-            groups: remainingGroups,
-            localEndPointGroupMap: newLocalMap,
-            networkGroupMap: newNetworkMap,
-        };
-
-        setDraftConfig(updatedConfig);
-        setActiveGroupName(remainingGroups[0]?.name ?? null);
-        setRenameValue(remainingGroups[0]?.name ?? '');
-        setLocalError(undefined);
-        setStatus(undefined);
-        setDeleteConfirmOpen(false);
-    }, [activeGroup, draftConfig]);
-
-    const cancelDeleteGroup = useCallback(() => {
-        setDeleteConfirmOpen(false);
-    }, []);
-
-    const renameDirty = useMemo(() => {
-        if (!activeGroup) {
-            return false;
-        }
-        const trimmed = renameValue.trim();
-        return trimmed.length > 0 && trimmed !== activeGroup.name;
-    }, [activeGroup, renameValue]);
-
-    const handleSave = useCallback(async () => {
-        if (!draftConfig || !selectedNodeId) {
-            return;
-        }
-
-        const sanitized = sanitizeConfig(draftConfig);
-        const unknownTargets = findUnknownGroupMappings(sanitized);
-        if (unknownTargets.length > 0) {
-            setLocalError(
-                `Cannot save mappings for undefined group${unknownTargets.length === 1 ? '' : 's'}: ${unknownTargets.join(
-                    ', ',
-                )}. Create the group${unknownTargets.length === 1 ? '' : 's'} first.`,
-            );
-            return;
-        }
-
-        setSaving(true);
-        setLocalError(undefined);
-
-        try {
-            await onSave(selectedNodeId, sanitized);
-            setDraftConfig(cloneConfig(sanitized));
-            setBaseline(serializeConfig(sanitized));
-            setStatus('Advanced Blocking config saved.');
-        } catch (saveError) {
-            const message = saveError instanceof Error
-                ? saveError.message
-                : 'Failed to save Advanced Blocking config.';
-            setLocalError(message);
-        } finally {
-            setSaving(false);
-        }
-    }, [draftConfig, onSave, selectedNodeId]);
-
-    const updateGroup = useCallback(
-        (groupName: string, updater: (group: AdvancedBlockingGroup) => AdvancedBlockingGroup) => {
-            setDraftConfig((prev) => {
-                if (!prev) {
-                    return prev;
-                }
-
-                const index = prev.groups.findIndex((group) => group.name === groupName);
-                if (index === -1) {
-                    return prev;
-                }
-
-                const nextGroups = prev.groups.map((group, position) => {
-                    if (position !== index) {
-                        return group;
-                    }
-
-                    return sanitizeGroup(updater(cloneGroup(group)));
-                });
-
-                return {
-                    ...prev,
-                    groups: nextGroups,
-                };
-            });
-        },
-        [],
-    );
-
-    return (
-        <section className="configuration-editor configuration-editor--stacked">
-            {/* <header className="configuration-editor__header advanced-blocking-summary__actions">
+  return (
+    <section className="configuration-editor configuration-editor--stacked">
+      {/* <header className="configuration-editor__header advanced-blocking-summary__actions">
                 <div>
                     <h2>Group Management</h2>
                     <p>

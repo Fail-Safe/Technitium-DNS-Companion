@@ -1,0 +1,46 @@
+.background-token-security-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--color-danger-bg);
+  border-bottom: 1px solid var(--color-danger);
+  color: var(--color-danger-text);
+}
+
+.background-token-security-banner--warning {
+  background: var(--color-warning-bg);
+  border-bottom: 1px solid var(--color-warning);
+  color: var(--color-warning-dark);
+}
+
+.background-token-security-banner__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.background-token-security-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.background-token-security-banner__title {
+  margin: 0 0 6px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: inherit;
+}
+
+.background-token-security-banner__message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.background-token-security-banner__message strong {
+  font-weight: 700;
+  color: inherit;
+}

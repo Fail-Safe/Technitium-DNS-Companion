@@ -51,6 +51,8 @@ import type {
   TechnitiumCombinedZoneOverview,
   TechnitiumZoneListEnvelope,
 } from "../types/zones";
+import type { AuthStatus } from "./AuthContext";
+import { useOptionalAuth } from "./AuthContext";
 
 type NodeStatus = "online" | "syncing" | "offline" | "unknown";
 
@@ -183,9 +185,11 @@ interface TechnitiumState {
   loadNodeLogs: (
     nodeId: string,
     filters?: TechnitiumQueryLogFilters,
+    options?: { signal?: AbortSignal },
   ) => Promise<TechnitiumNodeQueryLogEnvelope>;
   loadCombinedLogs: (
     filters?: TechnitiumQueryLogFilters,
+    options?: { signal?: AbortSignal },
   ) => Promise<TechnitiumCombinedQueryLogPage>;
   loadDhcpScopes: (nodeId: string) => Promise<TechnitiumDhcpScopeListEnvelope>;
   loadDhcpScope: (
@@ -284,6 +288,7 @@ const fetchConfiguredNodes = async (): Promise<TechnitiumNode[]> => {
 };
 
 export function TechnitiumProvider({ children }: { children: ReactNode }) {
+  const auth = useOptionalAuth();
   const [nodes, setNodes] = useState<TechnitiumNode[]>([]);
   const [advancedBlocking, setAdvancedBlocking] = useState<
     AdvancedBlockingOverview | undefined
@@ -314,6 +319,36 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
   const nodesRef = useRef<TechnitiumNode[]>([]);
 
+  // Auth status is optional (tests may not wrap AuthProvider)
+  const authStatusRef = useRef<AuthStatus | null>(null);
+  const authRefreshRef = useRef<
+    ((options?: { silent?: boolean }) => Promise<void>) | null
+  >(null);
+  useEffect(() => {
+    authStatusRef.current = auth?.status ?? null;
+    authRefreshRef.current = auth?.refresh ?? null;
+  }, [auth?.status, auth?.refresh]);
+
+  const isNodeAuthenticatedForSession = (nodeId: string): boolean => {
+    const status = authStatusRef.current;
+    if (!status?.sessionAuthEnabled) {
+      return true;
+    }
+
+    // When session auth is enabled, backend tells us which nodes we actually have
+    // verified tokens for.
+    const allowed = status.nodeIds;
+    return Array.isArray(allowed) ? allowed.includes(nodeId) : false;
+  };
+
+  const requireNodeAuth = (nodeId: string): void => {
+    if (!isNodeAuthenticatedForSession(nodeId)) {
+      throw new Error(
+        `Not authenticated for node ${nodeId}. Please sign in again to refresh node tokens.`,
+      );
+    }
+  };
+
   // Track in-flight overview fetch to prevent duplicate requests
   const overviewFetchInProgress = useRef<Promise<void> | null>(null);
 
@@ -340,9 +375,20 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         const updatedNodes = await Promise.all(
           currentNodes.map(async (node) => {
             try {
+              if (!isNodeAuthenticatedForSession(node.id)) {
+                return node;
+              }
+
               const response = await apiFetch(
                 `/nodes/${encodeURIComponent(node.id)}/apps`,
               );
+
+              if (response.status === 401) {
+                // Session may still be valid, but per-node token might have expired.
+                // Refresh /auth/me so we stop calling nodes we can't access.
+                void authRefreshRef.current?.({ silent: true });
+              }
+
               if (response.ok) {
                 const appsData =
                   (await response.json()) as TechnitiumNodeAppsResponse;
@@ -380,10 +426,17 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         return null;
       }
 
+      if (!isNodeAuthenticatedForSession(primaryNode.id)) {
+        return null;
+      }
+
       try {
         const response = await apiFetch(
           `/nodes/${encodeURIComponent(primaryNode.id)}/cluster/settings`,
         );
+        if (response.status === 401) {
+          void authRefreshRef.current?.({ silent: true });
+        }
         if (response.ok) {
           return (await response.json()) as TechnitiumClusterSettings;
         }
@@ -558,9 +611,18 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         const nodesWithOverviews = await Promise.all(
           currentNodes.map(async (node) => {
             try {
+              if (!isNodeAuthenticatedForSession(node.id)) {
+                return { nodeId: node.id, overview: null, reachable: false };
+              }
+
               const response = await apiFetch(
                 `/nodes/${encodeURIComponent(node.id)}/overview`,
               );
+
+              if (response.status === 401) {
+                void authRefreshRef.current?.({ silent: true });
+              }
+
               if (response.ok) {
                 const overview =
                   (await response.json()) as TechnitiumNodeOverview;
@@ -704,7 +766,70 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         }
 
         const snapshot = (await response.json()) as AdvancedBlockingSnapshot;
-        await reloadAdvancedBlocking();
+
+        // The GET `/nodes/advanced-blocking` endpoint is intentionally cached on the backend.
+        // To avoid a confusing "save succeeded but UI didn't change" moment, patch the
+        // in-memory overview with the authoritative snapshot we just received.
+        setAdvancedBlocking((previous) => {
+          if (!previous) {
+            return previous;
+          }
+
+          const nodes = previous.nodes.map((node) =>
+            node.nodeId === snapshot.nodeId ? snapshot : node,
+          );
+
+          const empty: AdvancedBlockingOverview["aggregate"] = {
+            groupCount: 0,
+            blockedDomainCount: 0,
+            allowedDomainCount: 0,
+            blockListUrlCount: 0,
+            allowListUrlCount: 0,
+            adblockListUrlCount: 0,
+            allowedRegexCount: 0,
+            blockedRegexCount: 0,
+            regexAllowListUrlCount: 0,
+            regexBlockListUrlCount: 0,
+            localEndpointMappingCount: 0,
+            networkMappingCount: 0,
+            scheduledNodeCount: 0,
+          };
+
+          const aggregate = nodes.reduce((acc, node) => {
+            const metrics = node.metrics;
+            return {
+              groupCount: acc.groupCount + metrics.groupCount,
+              blockedDomainCount:
+                acc.blockedDomainCount + metrics.blockedDomainCount,
+              allowedDomainCount:
+                acc.allowedDomainCount + metrics.allowedDomainCount,
+              blockListUrlCount:
+                acc.blockListUrlCount + metrics.blockListUrlCount,
+              allowListUrlCount:
+                acc.allowListUrlCount + metrics.allowListUrlCount,
+              adblockListUrlCount:
+                acc.adblockListUrlCount + metrics.adblockListUrlCount,
+              allowedRegexCount:
+                acc.allowedRegexCount + metrics.allowedRegexCount,
+              blockedRegexCount:
+                acc.blockedRegexCount + metrics.blockedRegexCount,
+              regexAllowListUrlCount:
+                acc.regexAllowListUrlCount + metrics.regexAllowListUrlCount,
+              regexBlockListUrlCount:
+                acc.regexBlockListUrlCount + metrics.regexBlockListUrlCount,
+              localEndpointMappingCount:
+                acc.localEndpointMappingCount +
+                metrics.localEndpointMappingCount,
+              networkMappingCount:
+                acc.networkMappingCount + metrics.networkMappingCount,
+              scheduledNodeCount:
+                acc.scheduledNodeCount + metrics.scheduledNodeCount,
+            };
+          }, empty);
+
+          return { fetchedAt: new Date().toISOString(), aggregate, nodes };
+        });
+
         return snapshot;
       } catch (error) {
         throw error instanceof Error ? error : (
@@ -712,7 +837,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
           );
       }
     },
-    [reloadAdvancedBlocking],
+    [],
   );
 
   const buildLogQuery = useCallback((filters?: TechnitiumQueryLogFilters) => {
@@ -756,10 +881,16 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadNodeLogs = useCallback(
-    async (nodeId: string, filters?: TechnitiumQueryLogFilters) => {
+    async (
+      nodeId: string,
+      filters?: TechnitiumQueryLogFilters,
+      options?: { signal?: AbortSignal },
+    ) => {
       if (!nodeId) {
         throw new Error("Node id is required to load logs.");
       }
+
+      requireNodeAuth(nodeId);
 
       const params = buildLogQuery(filters);
       const url = `/nodes/${encodeURIComponent(nodeId)}/logs${
@@ -774,7 +905,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
           }
         : undefined;
 
-      const response = await apiFetch(url, requestOptions);
+      const mergedRequestOptions: RequestInit | undefined =
+        requestOptions || options?.signal ?
+          { ...(requestOptions ?? {}), signal: options?.signal }
+        : undefined;
+
+      const response = await apiFetch(url, mergedRequestOptions);
 
       if (!response.ok) {
         throw new Error(
@@ -788,7 +924,10 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   );
 
   const loadCombinedLogs = useCallback(
-    async (filters?: TechnitiumQueryLogFilters) => {
+    async (
+      filters?: TechnitiumQueryLogFilters,
+      options?: { signal?: AbortSignal },
+    ) => {
       const params = buildLogQuery(filters);
       const url = `/nodes/logs/combined${
         params.size > 0 ? `?${params.toString()}` : ""
@@ -802,7 +941,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
           }
         : undefined;
 
-      const response = await apiFetch(url, requestOptions);
+      const mergedRequestOptions: RequestInit | undefined =
+        requestOptions || options?.signal ?
+          { ...(requestOptions ?? {}), signal: options?.signal }
+        : undefined;
+
+      const response = await apiFetch(url, mergedRequestOptions);
 
       if (!response.ok) {
         throw new Error(
@@ -819,6 +963,8 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     if (!nodeId) {
       throw new Error("Node id is required to load DHCP scopes.");
     }
+
+    requireNodeAuth(nodeId);
 
     const response = await apiFetch(
       `/nodes/${encodeURIComponent(nodeId)}/dhcp/scopes`,
@@ -842,6 +988,8 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       if (!scopeName) {
         throw new Error("Scope name is required to load a DHCP scope.");
       }
+
+      requireNodeAuth(nodeId);
 
       const response = await apiFetch(
         `/nodes/${encodeURIComponent(nodeId)}/dhcp/scopes/${encodeURIComponent(scopeName)}`,
@@ -963,6 +1111,8 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     if (!nodeId) {
       throw new Error("Node id is required to load zones.");
     }
+
+    requireNodeAuth(nodeId);
 
     const response = await apiFetch(
       `/nodes/${encodeURIComponent(nodeId)}/zones`,

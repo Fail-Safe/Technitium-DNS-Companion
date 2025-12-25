@@ -1,9 +1,12 @@
+import { UnauthorizedException } from "@nestjs/common";
+import axios from "axios";
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
+import { AuthRequestContext } from "../auth/auth-request-context";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { TechnitiumService } from "./technitium.service";
-import { TechnitiumDhcpScope } from "./technitium.types";
+import { TechnitiumDhcpScope, TechnitiumNodeConfig } from "./technitium.types";
 
 describe("TechnitiumService buildDhcpScopeFormData", () => {
   let service: TechnitiumService;
@@ -299,13 +302,15 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
           ]),
         );
 
-      const cloneSpy = jest.spyOn(svc, "cloneDhcpScope").mockResolvedValue({
-        sourceNodeId: "src",
-        targetNodeId: "tgt",
-        sourceScopeName: "Parents",
-        targetScopeName: "Parents",
-        enabledOnTarget: false,
-      });
+      const cloneSpy = jest
+        .spyOn(svc, "cloneDhcpScope")
+        .mockResolvedValue({
+          sourceNodeId: "src",
+          targetNodeId: "tgt",
+          sourceScopeName: "Parents",
+          targetScopeName: "Parents",
+          enabledOnTarget: false,
+        });
 
       const result = await svc.bulkSyncDhcpScopes({
         sourceNodeId: "src",
@@ -373,13 +378,15 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
           ]),
         );
 
-      const cloneSpy = jest.spyOn(svc, "cloneDhcpScope").mockResolvedValue({
-        sourceNodeId: "src",
-        targetNodeId: "tgt",
-        sourceScopeName: "Default",
-        targetScopeName: "Default",
-        enabledOnTarget: false,
-      });
+      const cloneSpy = jest
+        .spyOn(svc, "cloneDhcpScope")
+        .mockResolvedValue({
+          sourceNodeId: "src",
+          targetNodeId: "tgt",
+          sourceScopeName: "Default",
+          targetScopeName: "Default",
+          enabledOnTarget: false,
+        });
 
       const result = await svc.bulkSyncDhcpScopes({
         sourceNodeId: "src",
@@ -587,5 +594,50 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
 
       expect(requestSpy).toHaveBeenCalled();
     });
+  });
+});
+
+describe("TechnitiumService request (session auth)", () => {
+  const originalAuthSessionEnabled = process.env.AUTH_SESSION_ENABLED;
+  let service: TechnitiumService;
+
+  beforeEach(() => {
+    process.env.AUTH_SESSION_ENABLED = "true";
+    service = new TechnitiumService([], new DhcpSnapshotService());
+  });
+
+  afterEach(() => {
+    process.env.AUTH_SESSION_ENABLED = originalAuthSessionEnabled;
+    jest.restoreAllMocks();
+    service.onModuleDestroy();
+  });
+
+  it("drops the per-node session token when Technitium returns an invalid-token envelope", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+
+    jest
+      .spyOn(axios, "request")
+      .mockResolvedValue({ data: { status: "invalid-token" } } as never);
+
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+
+    await AuthRequestContext.run({ session }, async () => {
+      await expect(
+        service.request(node, { method: "GET", url: "/api/apps/list" }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    expect(session.tokensByNodeId.node1).toBeUndefined();
   });
 });
