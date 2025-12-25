@@ -329,7 +329,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     authRefreshRef.current = auth?.refresh ?? null;
   }, [auth?.status, auth?.refresh]);
 
-  const isNodeAuthenticatedForSession = (nodeId: string): boolean => {
+  const isNodeAuthenticatedForSession = useCallback((nodeId: string): boolean => {
     const status = authStatusRef.current;
     if (!status?.sessionAuthEnabled) {
       return true;
@@ -339,15 +339,18 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     // verified tokens for.
     const allowed = status.nodeIds;
     return Array.isArray(allowed) ? allowed.includes(nodeId) : false;
-  };
+  }, []);
 
-  const requireNodeAuth = (nodeId: string): void => {
+  const requireNodeAuth = useCallback(
+    (nodeId: string): void => {
     if (!isNodeAuthenticatedForSession(nodeId)) {
       throw new Error(
         `Not authenticated for node ${nodeId}. Please sign in again to refresh node tokens.`,
       );
     }
-  };
+    },
+    [isNodeAuthenticatedForSession],
+  );
 
   // Track in-flight overview fetch to prevent duplicate requests
   const overviewFetchInProgress = useRef<Promise<void> | null>(null);
@@ -409,7 +412,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       // Return current state immediately to avoid blocking
       return currentNodes;
     });
-  }, []); // Empty dependency array - function never changes
+  }, [isNodeAuthenticatedForSession]);
 
   // Cluster role polling state
   const pollingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -454,7 +457,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         configRefreshIntervalSeconds: 900,
         configRetryIntervalSeconds: 60,
       };
-    }, []);
+    }, [isNodeAuthenticatedForSession]);
 
   // Poll cluster state to detect role changes
   const pollClusterState = useCallback(async () => {
@@ -708,7 +711,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
     overviewFetchInProgress.current = promise;
     return promise;
-  }, []);
+  }, [isNodeAuthenticatedForSession]);
 
   // Check node apps once after nodes are loaded
   useEffect(() => {
@@ -920,7 +923,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
       return (await response.json()) as TechnitiumNodeQueryLogEnvelope;
     },
-    [buildLogQuery],
+    [buildLogQuery, requireNodeAuth],
   );
 
   const loadCombinedLogs = useCallback(
@@ -959,7 +962,8 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     [buildLogQuery],
   );
 
-  const loadDhcpScopes = useCallback(async (nodeId: string) => {
+  const loadDhcpScopes = useCallback(
+    async (nodeId: string) => {
     if (!nodeId) {
       throw new Error("Node id is required to load DHCP scopes.");
     }
@@ -977,7 +981,9 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     }
 
     return (await response.json()) as TechnitiumDhcpScopeListEnvelope;
-  }, []);
+    },
+    [requireNodeAuth],
+  );
 
   const loadDhcpScope = useCallback(
     async (nodeId: string, scopeName: string) => {
@@ -1003,7 +1009,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
       return (await response.json()) as TechnitiumDhcpScopeEnvelope;
     },
-    [],
+    [requireNodeAuth],
   );
 
   const createDhcpScope = useCallback(
@@ -1125,7 +1131,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     }
 
     return (await response.json()) as TechnitiumZoneListEnvelope;
-  }, []);
+  }, [requireNodeAuth]);
 
   const loadCombinedZones = useCallback(async () => {
     const response = await apiFetch("/nodes/zones/combined");

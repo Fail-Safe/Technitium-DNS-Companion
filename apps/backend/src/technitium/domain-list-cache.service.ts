@@ -276,17 +276,15 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
                 this.cache.set(node.id, new Map());
               }
 
-              this.cache
-                .get(node.id)!
-                .set(hash, {
-                  url: cached.url,
-                  hash,
-                  domains: new Set(cached.domains),
-                  fetchedAt: cached.fetchedAt,
-                  lineCount: cached.lineCount,
-                  commentCount: cached.commentCount,
-                  errorMessage: cached.errorMessage,
-                });
+              this.cache.get(node.id)!.set(hash, {
+                url: cached.url,
+                hash,
+                domains: new Set(cached.domains),
+                fetchedAt: cached.fetchedAt,
+                lineCount: cached.lineCount,
+                commentCount: cached.commentCount,
+                errorMessage: cached.errorMessage,
+              });
 
               totalLoaded++;
             } else if (cached.patterns) {
@@ -307,18 +305,16 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
                 }
               }
 
-              this.regexCache
-                .get(node.id)!
-                .set(hash, {
-                  url: cached.url,
-                  hash,
-                  patterns,
-                  rawPatterns: cached.patterns,
-                  fetchedAt: cached.fetchedAt,
-                  lineCount: cached.lineCount,
-                  commentCount: cached.commentCount,
-                  errorMessage: cached.errorMessage,
-                });
+              this.regexCache.get(node.id)!.set(hash, {
+                url: cached.url,
+                hash,
+                patterns,
+                rawPatterns: cached.patterns,
+                fetchedAt: cached.fetchedAt,
+                lineCount: cached.lineCount,
+                commentCount: cached.commentCount,
+                errorMessage: cached.errorMessage,
+              });
 
               totalLoaded++;
             }
@@ -335,9 +331,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
   /**
    * Get metadata about all lists configured for a node
    */
-  async getListsMetadata(
-    nodeId: string,
-  ): Promise<{
+  async getListsMetadata(nodeId: string): Promise<{
     blocklists: ListMetadata[];
     allowlists: ListMetadata[];
     regexBlocklists: ListMetadata[];
@@ -1114,9 +1108,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     // Handle regex lists
     if (type === "regex-blocklist" || type === "regex-allowlist") {
       const urls =
-        type === "regex-blocklist" ?
-          this.extractAllUrls(config, "blockListRegexUrls")
-        : this.extractAllUrls(config, "allowListRegexUrls");
+        type === "regex-blocklist"
+          ? this.extractAllUrls(config, "blockListRegexUrls")
+          : this.extractAllUrls(config, "allowListRegexUrls");
 
       const lists = await this.getOrFetchMultipleRegex(nodeId, urls);
       const normalizedQuery = this.normalizeDomain(query).toLowerCase();
@@ -1141,9 +1135,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
     // Handle exact domain lists
     const urls =
-      type === "blocklist" ?
-        this.extractAllUrls(config, "blockListUrls")
-      : this.extractAllUrls(config, "allowListUrls");
+      type === "blocklist"
+        ? this.extractAllUrls(config, "blockListUrls")
+        : this.extractAllUrls(config, "allowListUrls");
 
     const lists = await this.getOrFetchMultiple(nodeId, urls);
     const normalizedQuery = this.normalizeDomain(query).toLowerCase();

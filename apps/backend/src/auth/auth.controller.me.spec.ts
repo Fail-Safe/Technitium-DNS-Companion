@@ -15,17 +15,18 @@ describe("AuthController /auth/me", () => {
   async function createController(getBackgroundSummaryImpl?: jest.Mock) {
     const authServiceMock: Partial<AuthService> = {};
 
+    const getBackgroundPtrTokenValidationSummaryMock =
+      getBackgroundSummaryImpl ??
+      jest.fn().mockReturnValue({
+        configured: false,
+        sessionAuthEnabled: true,
+        validated: false,
+      });
+
     const technitiumServiceMock: Partial<TechnitiumService> = {
       getConfiguredNodeIds: jest.fn().mockReturnValue(["eq14", "eq12"]),
       getBackgroundPtrTokenValidationSummary:
-        getBackgroundSummaryImpl ??
-        jest
-          .fn()
-          .mockReturnValue({
-            configured: false,
-            sessionAuthEnabled: true,
-            validated: false,
-          }),
+        getBackgroundPtrTokenValidationSummaryMock,
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -39,6 +40,7 @@ describe("AuthController /auth/me", () => {
     return {
       controller: moduleRef.get(AuthController),
       technitiumServiceMock: technitiumServiceMock as TechnitiumService,
+      getBackgroundPtrTokenValidationSummaryMock,
     };
   }
 
@@ -61,9 +63,8 @@ describe("AuthController /auth/me", () => {
     const getBackgroundSummaryMock = jest
       .fn()
       .mockReturnValue(backgroundPtrToken);
-    const { controller, technitiumServiceMock } = await createController(
-      getBackgroundSummaryMock,
-    );
+    const { controller, getBackgroundPtrTokenValidationSummaryMock } =
+      await createController(getBackgroundSummaryMock);
 
     const res = withContext(undefined, () => controller.me());
 
@@ -75,9 +76,7 @@ describe("AuthController /auth/me", () => {
       backgroundPtrToken,
     });
 
-    expect(
-      technitiumServiceMock.getBackgroundPtrTokenValidationSummary,
-    ).toHaveBeenCalledTimes(1);
+    expect(getBackgroundPtrTokenValidationSummaryMock).toHaveBeenCalledTimes(1);
   });
 
   it("returns authenticated response with user and nodeIds, and clusterTokenConfigured=false", async () => {

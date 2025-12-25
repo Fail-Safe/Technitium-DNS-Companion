@@ -302,15 +302,13 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
           ]),
         );
 
-      const cloneSpy = jest
-        .spyOn(svc, "cloneDhcpScope")
-        .mockResolvedValue({
-          sourceNodeId: "src",
-          targetNodeId: "tgt",
-          sourceScopeName: "Parents",
-          targetScopeName: "Parents",
-          enabledOnTarget: false,
-        });
+      const cloneSpy = jest.spyOn(svc, "cloneDhcpScope").mockResolvedValue({
+        sourceNodeId: "src",
+        targetNodeId: "tgt",
+        sourceScopeName: "Parents",
+        targetScopeName: "Parents",
+        enabledOnTarget: false,
+      });
 
       const result = await svc.bulkSyncDhcpScopes({
         sourceNodeId: "src",
@@ -378,15 +376,13 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
           ]),
         );
 
-      const cloneSpy = jest
-        .spyOn(svc, "cloneDhcpScope")
-        .mockResolvedValue({
-          sourceNodeId: "src",
-          targetNodeId: "tgt",
-          sourceScopeName: "Default",
-          targetScopeName: "Default",
-          enabledOnTarget: false,
-        });
+      const cloneSpy = jest.spyOn(svc, "cloneDhcpScope").mockResolvedValue({
+        sourceNodeId: "src",
+        targetNodeId: "tgt",
+        sourceScopeName: "Default",
+        targetScopeName: "Default",
+        enabledOnTarget: false,
+      });
 
       const result = await svc.bulkSyncDhcpScopes({
         sourceNodeId: "src",

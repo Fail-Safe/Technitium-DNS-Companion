@@ -10,11 +10,18 @@ export class AuthRequestContextMiddleware implements NestMiddleware {
   constructor(private readonly sessionService: AuthSessionService) {}
 
   use(req: Request, _res: Response, next: NextFunction): void {
-    const cookies = (req as Request & { cookies?: Record<string, string> })
+    const cookiesValue: unknown = (req as unknown as { cookies?: unknown })
       .cookies;
+    const sessionId =
+      typeof cookiesValue === "object" && cookiesValue !== null
+        ? (cookiesValue as Record<string, unknown>)[AUTH_SESSION_COOKIE_NAME]
+        : undefined;
 
-    const sessionId = cookies?.[AUTH_SESSION_COOKIE_NAME];
-    const session = sessionId ? this.sessionService.get(sessionId) : undefined;
+    const resolvedSessionId =
+      typeof sessionId === "string" ? sessionId : undefined;
+    const session = resolvedSessionId
+      ? this.sessionService.get(resolvedSessionId)
+      : undefined;
 
     AuthRequestContext.run({ session }, () => next());
   }

@@ -1,3 +1,4 @@
+import { jest } from "@jest/globals";
 import type { HttpService } from "@nestjs/axios";
 import type { AdvancedBlockingService } from "./advanced-blocking.service";
 import { DomainListCacheService } from "./domain-list-cache.service";
@@ -44,18 +45,27 @@ describe("DomainListCacheService scheduled refresh auth mode", () => {
 
     const refreshListsSpy = jest
       .spyOn(service, "refreshLists")
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockResolvedValue(undefined as any);
 
-    // scheduleNodeRefresh is intentionally private; we call it via `any` for a
-    // focused behavior test.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (service as any).scheduleNodeRefresh("eq14");
+      .mockResolvedValue();
+
+    // scheduleNodeRefresh is intentionally private; call it via a runtime
+    // lookup for a focused behavior test.
+    const schedule = (service as unknown as Record<string, unknown>)[
+      "scheduleNodeRefresh"
+    ];
+    if (typeof schedule !== "function") {
+      throw new Error("scheduleNodeRefresh is not available on service");
+    }
+
+    await (schedule as (nodeId: string) => Promise<void>).call(service, "eq14");
 
     expect(getSnapshotWithAuth).toHaveBeenCalledWith("eq14", "background");
 
     // Trigger the interval.
-    jest.advanceTimersByTime(60_000);
+    const timers = jest as unknown as {
+      advanceTimersByTime: (msToRun: number) => void;
+    };
+    timers.advanceTimersByTime(60_000);
 
     expect(refreshListsSpy).toHaveBeenCalledWith("eq14", {
       authMode: "background",

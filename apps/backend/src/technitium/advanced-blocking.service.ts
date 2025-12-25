@@ -211,30 +211,29 @@ export class AdvancedBlockingService {
     }
 
     const payload = parsed as Record<string, unknown>;
-    const groups =
-      Array.isArray(payload.groups) ?
-        payload.groups
+    const groups = Array.isArray(payload.groups)
+      ? payload.groups
           .map((group) => this.normalizeGroup(group))
           .filter((group): group is AdvancedBlockingGroup => Boolean(group))
       : [];
 
     return {
       enableBlocking:
-        typeof payload.enableBlocking === "boolean" ?
-          payload.enableBlocking
-        : undefined,
+        typeof payload.enableBlocking === "boolean"
+          ? payload.enableBlocking
+          : undefined,
       blockingAnswerTtl:
-        typeof payload.blockingAnswerTtl === "number" ?
-          payload.blockingAnswerTtl
-        : undefined,
+        typeof payload.blockingAnswerTtl === "number"
+          ? payload.blockingAnswerTtl
+          : undefined,
       blockListUrlUpdateIntervalHours:
-        typeof payload.blockListUrlUpdateIntervalHours === "number" ?
-          payload.blockListUrlUpdateIntervalHours
-        : undefined,
+        typeof payload.blockListUrlUpdateIntervalHours === "number"
+          ? payload.blockListUrlUpdateIntervalHours
+          : undefined,
       blockListUrlUpdateIntervalMinutes:
-        typeof payload.blockListUrlUpdateIntervalMinutes === "number" ?
-          payload.blockListUrlUpdateIntervalMinutes
-        : undefined,
+        typeof payload.blockListUrlUpdateIntervalMinutes === "number"
+          ? payload.blockListUrlUpdateIntervalMinutes
+          : undefined,
       localEndPointGroupMap: this.normalizeMapping(
         payload.localEndPointGroupMap,
       ),
@@ -257,17 +256,17 @@ export class AdvancedBlockingService {
     return {
       name,
       enableBlocking:
-        typeof data.enableBlocking === "boolean" ?
-          data.enableBlocking
-        : undefined,
+        typeof data.enableBlocking === "boolean"
+          ? data.enableBlocking
+          : undefined,
       allowTxtBlockingReport:
-        typeof data.allowTxtBlockingReport === "boolean" ?
-          data.allowTxtBlockingReport
-        : undefined,
+        typeof data.allowTxtBlockingReport === "boolean"
+          ? data.allowTxtBlockingReport
+          : undefined,
       blockAsNxDomain:
-        typeof data.blockAsNxDomain === "boolean" ?
-          data.blockAsNxDomain
-        : undefined,
+        typeof data.blockAsNxDomain === "boolean"
+          ? data.blockAsNxDomain
+          : undefined,
       blockingAddresses: this.normalizeStringArray(data.blockingAddresses),
       allowed: this.normalizeStringArray(data.allowed),
       blocked: this.normalizeStringArray(data.blocked),
@@ -393,12 +392,10 @@ export class AdvancedBlockingService {
         .length,
       networkMappingCount: Object.keys(config.networkGroupMap).length,
       scheduledNodeCount:
-        (
-          typeof config.blockListUrlUpdateIntervalHours === "number" ||
-          typeof config.blockListUrlUpdateIntervalMinutes === "number"
-        ) ?
-          1
-        : 0,
+        typeof config.blockListUrlUpdateIntervalHours === "number" ||
+        typeof config.blockListUrlUpdateIntervalMinutes === "number"
+          ? 1
+          : 0,
     };
   }
 

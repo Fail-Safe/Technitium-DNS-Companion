@@ -35,19 +35,19 @@ export class AuthService {
       });
 
       const status =
-        res?.data && typeof res.data === "object" ?
-          (res.data as Record<string, unknown>).status
-        : undefined;
+        res?.data && typeof res.data === "object"
+          ? (res.data as Record<string, unknown>).status
+          : undefined;
 
       if (status === "ok") {
         return { ok: true };
       }
 
       const errorMessage =
-        res?.data && typeof res.data === "object" ?
-          ((res.data as Record<string, unknown>).errorMessage as string) ||
-          ((res.data as Record<string, unknown>).innerErrorMessage as string)
-        : undefined;
+        res?.data && typeof res.data === "object"
+          ? ((res.data as Record<string, unknown>).errorMessage as string) ||
+            ((res.data as Record<string, unknown>).innerErrorMessage as string)
+          : undefined;
 
       return { ok: false, error: errorMessage || "Token was rejected by node" };
     } catch (error) {
@@ -55,9 +55,9 @@ export class AuthService {
         const status = error.response?.status;
         if (typeof status === "number" && status >= 300 && status < 400) {
           const location =
-            typeof error.response?.headers?.location === "string" ?
-              error.response.headers.location
-            : "(missing Location header)";
+            typeof error.response?.headers?.location === "string"
+              ? error.response.headers.location
+              : "(missing Location header)";
           return {
             ok: false,
             error: `Request was redirected (HTTP ${status}) to ${location}. Check baseUrl for node "${args.nodeId}".`,
@@ -152,9 +152,9 @@ export class AuthService {
         });
 
         const status =
-          res?.data && typeof res.data === "object" ?
-            (res.data as Record<string, unknown>).status
-          : undefined;
+          res?.data && typeof res.data === "object"
+            ? (res.data as Record<string, unknown>).status
+            : undefined;
 
         const token = this.extractToken(res.data);
 
@@ -192,10 +192,11 @@ export class AuthService {
         }
 
         const errorMessage =
-          res?.data && typeof res.data === "object" ?
-            ((res.data as Record<string, unknown>).errorMessage as string) ||
-            ((res.data as Record<string, unknown>).innerErrorMessage as string)
-          : undefined;
+          res?.data && typeof res.data === "object"
+            ? ((res.data as Record<string, unknown>).errorMessage as string) ||
+              ((res.data as Record<string, unknown>)
+                .innerErrorMessage as string)
+            : undefined;
 
         results.push({
           nodeId: node.id,

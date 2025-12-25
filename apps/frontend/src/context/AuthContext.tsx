@@ -23,6 +23,7 @@ export type AuthStatus = {
   backgroundPtrToken?: BackgroundPtrTokenValidationSummary;
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function isNodeSessionRequiredButMissing(
   status: AuthStatus | null,
 ): boolean {
@@ -161,6 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthContextValue {
   const value = useContext(AuthContext);
   if (!value) {
@@ -175,6 +177,7 @@ export function useAuth(): AuthContextValue {
  * This is useful for contexts (like TechnitiumContext) that can operate in a
  * limited mode without an AuthProvider (e.g., unit tests).
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useOptionalAuth(): AuthContextValue | null {
   return useContext(AuthContext) ?? null;
 }

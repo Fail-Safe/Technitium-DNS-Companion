@@ -16,8 +16,8 @@ export function NodeSessionExpiredBanner({
   const location = useLocation();
   const navigate = useNavigate();
 
-  const configured = configuredNodeIds ?? [];
-  const sessionNodes = nodeIds ?? [];
+  const configured = useMemo(() => configuredNodeIds ?? [], [configuredNodeIds]);
+  const sessionNodes = useMemo(() => nodeIds ?? [], [nodeIds]);
 
   const missingNodeIds = useMemo(() => {
     const sessionSet = new Set(sessionNodes);

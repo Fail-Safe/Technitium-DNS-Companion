@@ -36,13 +36,14 @@ export class AuthController {
 
     const forwardedProtoHeader = req?.headers?.["x-forwarded-proto"];
     const forwardedProto =
-      typeof forwardedProtoHeader === "string" ? forwardedProtoHeader
-      : Array.isArray(forwardedProtoHeader) ? forwardedProtoHeader[0]
-      : undefined;
+      typeof forwardedProtoHeader === "string"
+        ? forwardedProtoHeader
+        : Array.isArray(forwardedProtoHeader)
+          ? forwardedProtoHeader[0]
+          : undefined;
 
-    const transport =
-      req ?
-        {
+    const transport = req
+      ? {
           requestSecure: req.secure === true,
           httpsEnabled,
           trustProxyEnabled,

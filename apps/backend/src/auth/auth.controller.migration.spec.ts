@@ -12,8 +12,11 @@ describe("AuthController background-token migration", () => {
   async function createController(migrateImpl?: jest.Mock) {
     const authServiceMock: Partial<AuthService> = {};
 
+    const migrateClusterTokenToBackgroundTokenMock = migrateImpl ?? jest.fn();
+
     const technitiumServiceMock: Partial<TechnitiumService> = {
-      migrateClusterTokenToBackgroundToken: migrateImpl ?? jest.fn(),
+      migrateClusterTokenToBackgroundToken:
+        migrateClusterTokenToBackgroundTokenMock,
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -27,6 +30,7 @@ describe("AuthController background-token migration", () => {
     return {
       controller: moduleRef.get(AuthController),
       technitiumServiceMock: technitiumServiceMock as TechnitiumService,
+      migrateClusterTokenToBackgroundTokenMock,
     };
   }
 
@@ -50,14 +54,12 @@ describe("AuthController background-token migration", () => {
       .fn()
       .mockResolvedValue({ username: "u", tokenName: "t", token: "tok" });
 
-    const { controller, technitiumServiceMock } =
+    const { controller, migrateClusterTokenToBackgroundTokenMock } =
       await createController(migrateMock);
 
     const res = await controller.migrateBackgroundToken();
 
     expect(res).toEqual({ username: "u", tokenName: "t", token: "tok" });
-    expect(
-      technitiumServiceMock.migrateClusterTokenToBackgroundToken,
-    ).toHaveBeenCalledTimes(1);
+    expect(migrateClusterTokenToBackgroundTokenMock).toHaveBeenCalledTimes(1);
   });
 });

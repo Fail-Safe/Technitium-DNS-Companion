@@ -15,7 +15,7 @@ const rootPackageJson = JSON.parse(
 function resolveConfigFilePath(inputPath: string): string {
   const absolutePath = resolve(inputPath);
 
-  if (!/[\*\?\[]/.test(inputPath)) {
+  if (!/[[*?]/.test(inputPath)) {
     return absolutePath;
   }
 

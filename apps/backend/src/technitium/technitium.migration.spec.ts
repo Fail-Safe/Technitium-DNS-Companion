@@ -15,7 +15,19 @@ jest.mock("axios", () => {
   return { __esModule: true, default: { request, isAxiosError }, isAxiosError };
 });
 
-type AxiosRequest = { baseURL?: string; url?: string; params?: any };
+type AxiosRequest = {
+  baseURL?: string;
+  url?: string;
+  params?: Record<string, unknown>;
+};
+
+const readStringParam = (
+  params: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined => {
+  const value = params?.[key];
+  return typeof value === "string" ? value : undefined;
+};
 
 const axiosRequestMock = (axios as unknown as { request: jest.Mock }).request;
 
@@ -88,12 +100,12 @@ describe("TechnitiumService migration", () => {
   it("creates a dedicated user and returns a least-privilege token", async () => {
     process.env.TECHNITIUM_CLUSTER_TOKEN = "cluster-token";
 
-    axiosRequestMock.mockImplementation(async (config: AxiosRequest) => {
+    axiosRequestMock.mockImplementation((config: AxiosRequest) => {
       if (
         config.url === "/api/user/session/get" &&
         config.baseURL === node1.baseUrl
       ) {
-        return {
+        return Promise.resolve({
           data: {
             status: "ok",
             info: {
@@ -104,39 +116,43 @@ describe("TechnitiumService migration", () => {
               ],
             },
           },
-        };
+        });
       }
 
       if (config.url === "/api/admin/users/create") {
-        return {
-          data: { status: "ok", response: { username: config.params?.user } },
-        };
+        const username = readStringParam(config.params, "user");
+        return Promise.resolve({
+          data: { status: "ok", response: { username } },
+        });
       }
 
       if (config.url === "/api/admin/users/set") {
-        return {
-          data: { status: "ok", response: { username: config.params?.user } },
-        };
+        const username = readStringParam(config.params, "user");
+        return Promise.resolve({
+          data: { status: "ok", response: { username } },
+        });
       }
 
       if (config.url === "/api/admin/sessions/createToken") {
-        return {
+        const username = readStringParam(config.params, "user");
+        const tokenName = readStringParam(config.params, "tokenName");
+        return Promise.resolve({
           data: {
             status: "ok",
             response: {
-              username: config.params?.user,
-              tokenName: config.params?.tokenName,
+              username,
+              tokenName,
               token: "new-background-token",
             },
           },
-        };
+        });
       }
 
       if (
         config.url === "/api/user/session/get" &&
         config.baseURL === node2.baseUrl
       ) {
-        return {
+        return Promise.resolve({
           data: {
             status: "ok",
             username: "companion-readonly",
@@ -150,7 +166,7 @@ describe("TechnitiumService migration", () => {
               },
             },
           },
-        };
+        });
       }
 
       throw new Error(
@@ -171,12 +187,14 @@ describe("TechnitiumService migration", () => {
 
     let userCreateCount = 0;
 
-    axiosRequestMock.mockImplementation(async (config: AxiosRequest) => {
+    axiosRequestMock.mockImplementation((config: AxiosRequest) => {
       if (
         config.url === "/api/user/session/get" &&
-        config.params?.token === "cluster-token"
+        readStringParam(config.params, "token") === "cluster-token"
       ) {
-        return { data: { status: "ok", info: { clusterInitialized: false } } };
+        return Promise.resolve({
+          data: { status: "ok", info: { clusterInitialized: false } },
+        });
       }
 
       if (config.url === "/api/admin/users/create") {
@@ -189,39 +207,42 @@ describe("TechnitiumService migration", () => {
           };
         }
 
-        return {
-          data: { status: "ok", response: { username: config.params?.user } },
-        };
+        const username = readStringParam(config.params, "user");
+        return Promise.resolve({
+          data: { status: "ok", response: { username } },
+        });
       }
 
       if (config.url === "/api/admin/users/set") {
-        return { data: { status: "ok", response: {} } };
+        return Promise.resolve({ data: { status: "ok", response: {} } });
       }
 
       if (config.url === "/api/admin/sessions/createToken") {
-        return {
+        const username = readStringParam(config.params, "user");
+        const tokenName = readStringParam(config.params, "tokenName");
+        return Promise.resolve({
           data: {
             status: "ok",
             response: {
-              username: config.params?.user,
-              tokenName: config.params?.tokenName,
+              username,
+              tokenName,
               token: "new-background-token",
             },
           },
-        };
+        });
       }
 
       if (
         config.url === "/api/user/session/get" &&
-        config.params?.token !== "cluster-token"
+        readStringParam(config.params, "token") !== "cluster-token"
       ) {
-        return {
+        return Promise.resolve({
           data: {
             status: "ok",
             username: "companion-readonly",
             info: { permissions: { DnsClient: { canView: true } } },
           },
-        };
+        });
       }
 
       throw new Error(
@@ -240,39 +261,44 @@ describe("TechnitiumService migration", () => {
   it("fails if the generated token is too privileged", async () => {
     process.env.TECHNITIUM_CLUSTER_TOKEN = "cluster-token";
 
-    axiosRequestMock.mockImplementation(async (config: AxiosRequest) => {
+    axiosRequestMock.mockImplementation((config: AxiosRequest) => {
       if (config.url === "/api/user/session/get") {
-        return { data: { status: "ok", info: { clusterInitialized: false } } };
+        return Promise.resolve({
+          data: { status: "ok", info: { clusterInitialized: false } },
+        });
       }
 
       if (config.url === "/api/admin/users/create") {
-        return {
-          data: { status: "ok", response: { username: config.params?.user } },
-        };
+        const username = readStringParam(config.params, "user");
+        return Promise.resolve({
+          data: { status: "ok", response: { username } },
+        });
       }
 
       if (config.url === "/api/admin/users/set") {
-        return { data: { status: "ok", response: {} } };
+        return Promise.resolve({ data: { status: "ok", response: {} } });
       }
 
       if (config.url === "/api/admin/sessions/createToken") {
-        return {
+        const username = readStringParam(config.params, "user");
+        const tokenName = readStringParam(config.params, "tokenName");
+        return Promise.resolve({
           data: {
             status: "ok",
             response: {
-              username: config.params?.user,
-              tokenName: config.params?.tokenName,
+              username,
+              tokenName,
               token: "new-background-token",
             },
           },
-        };
+        });
       }
 
       if (
         config.url === "/api/user/session/get" &&
-        config.params?.token === "new-background-token"
+        readStringParam(config.params, "token") === "new-background-token"
       ) {
-        return {
+        return Promise.resolve({
           data: {
             status: "ok",
             username: "companion-readonly",
@@ -283,7 +309,7 @@ describe("TechnitiumService migration", () => {
               },
             },
           },
-        };
+        });
       }
 
       throw new Error(
@@ -301,48 +327,55 @@ describe("TechnitiumService migration", () => {
   it("continues if memberOfGroups enforcement fails, relying on validation", async () => {
     process.env.TECHNITIUM_CLUSTER_TOKEN = "cluster-token";
 
-    axiosRequestMock.mockImplementation(async (config: AxiosRequest) => {
+    axiosRequestMock.mockImplementation((config: AxiosRequest) => {
       if (
         config.url === "/api/user/session/get" &&
-        config.params?.token === "cluster-token"
+        readStringParam(config.params, "token") === "cluster-token"
       ) {
-        return { data: { status: "ok", info: { clusterInitialized: false } } };
+        return Promise.resolve({
+          data: { status: "ok", info: { clusterInitialized: false } },
+        });
       }
 
       if (config.url === "/api/admin/users/create") {
-        return {
-          data: { status: "ok", response: { username: config.params?.user } },
-        };
+        const username = readStringParam(config.params, "user");
+        return Promise.resolve({
+          data: { status: "ok", response: { username } },
+        });
       }
 
       if (config.url === "/api/admin/users/set") {
-        return { data: { status: "error", errorMessage: "Not supported" } };
+        return Promise.resolve({
+          data: { status: "error", errorMessage: "Not supported" },
+        });
       }
 
       if (config.url === "/api/admin/sessions/createToken") {
-        return {
+        const username = readStringParam(config.params, "user");
+        const tokenName = readStringParam(config.params, "tokenName");
+        return Promise.resolve({
           data: {
             status: "ok",
             response: {
-              username: config.params?.user,
-              tokenName: config.params?.tokenName,
+              username,
+              tokenName,
               token: "new-background-token",
             },
           },
-        };
+        });
       }
 
       if (
         config.url === "/api/user/session/get" &&
-        config.params?.token !== "cluster-token"
+        readStringParam(config.params, "token") !== "cluster-token"
       ) {
-        return {
+        return Promise.resolve({
           data: {
             status: "ok",
             username: "companion-readonly",
             info: { permissions: { DnsClient: { canView: true } } },
           },
-        };
+        });
       }
 
       throw new Error(

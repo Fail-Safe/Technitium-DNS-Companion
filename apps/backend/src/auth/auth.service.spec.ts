@@ -2,6 +2,7 @@ import { UnauthorizedException } from "@nestjs/common";
 import axios from "axios";
 import { AuthSessionService } from "./auth-session.service";
 import { AuthService } from "./auth.service";
+import type { TechnitiumNodeConfig } from "../technitium/technitium.types";
 
 type AxiosMock = { get: jest.Mock; isAxiosError: (err: unknown) => boolean };
 
@@ -22,7 +23,17 @@ describe("AuthService.login", () => {
 
   function createService(nodes: Array<{ id: string; baseUrl: string }>) {
     const sessionService = new AuthSessionService();
-    const service = new AuthService(nodes as any, sessionService);
+
+    const nodeConfigs: TechnitiumNodeConfig[] = nodes.map((node) => ({
+      id: node.id,
+      name: node.id,
+      baseUrl: node.baseUrl,
+      token: "",
+      queryLoggerAppName: undefined,
+      queryLoggerClassPath: undefined,
+    }));
+
+    const service = new AuthService(nodeConfigs, sessionService);
     const axiosMock = axios as unknown as AxiosMock;
     return { service, sessionService, axiosMock };
   }
@@ -119,9 +130,9 @@ describe("AuthService.login", () => {
 
     axiosMock.get.mockImplementation((url: string) => {
       if (url === "https://n1/api/user/login") {
-        const err = {
+        const err = Object.assign(new Error("Redirect"), {
           response: { status: 302, headers: { location: "https://n1/login" } },
-        };
+        });
         return Promise.reject(err);
       }
 

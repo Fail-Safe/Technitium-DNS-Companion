@@ -44,7 +44,7 @@ const readSnapshot = (): ReleaseSnapshot | null => {
       return null;
     }
     return parsed;
-  } catch (error) {
+  } catch {
     return null;
   }
 };
@@ -55,7 +55,7 @@ const persistSnapshot = (snapshot: ReleaseSnapshot) => {
   }
   try {
     window.localStorage.setItem(CACHE_KEY, JSON.stringify(snapshot));
-  } catch (error) {
+  } catch {
     // Ignore storage failures (private mode, quota, etc.)
   }
 };
