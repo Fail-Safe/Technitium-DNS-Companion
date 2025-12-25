@@ -1,48 +1,48 @@
-import { useCallback, useEffect, useState, useMemo } from "react";
-import { useTechnitiumState } from "../context/TechnitiumContext";
-import { usePullToRefresh } from "../hooks/usePullToRefresh";
-import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
+import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
+import {
+  faBan,
+  faCheck,
+  faChevronUp,
+  faCircle,
+  faCode,
+  faExclamationTriangle,
+  faGripVertical,
+  faInfoCircle,
+  faList,
+  faMinus,
+  faPencil,
+  faPlus,
+  faSearch,
+  faSquareCheck,
+  faSquareMinus,
+  faTrash,
+  faUsers,
+  faXmark,
+} from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ClusterInfoBanner } from "../components/common/ClusterInfoBanner.tsx";
 import { ConfirmModal } from "../components/common/ConfirmModal";
+import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
 import { AdvancedBlockingEditor } from "../components/configuration/AdvancedBlockingEditor.tsx";
 import { AdvancedBlockingSetupGuide } from "../components/configuration/AdvancedBlockingSetupGuide.tsx";
-import { ListSourceEditor } from "../components/configuration/ListSourceEditor.tsx";
-import { ConfigurationSyncView } from "../components/configuration/ConfigurationSyncView.tsx";
-import { NodeSelector } from "../components/configuration/NodeSelector.tsx";
-import { ConfigurationSkeleton } from "../components/configuration/ConfigurationSkeleton.tsx";
-import { ClusterInfoBanner } from "../components/common/ClusterInfoBanner.tsx";
-import { BlockingMethodSelector } from "../components/configuration/BlockingMethodSelector.tsx";
 import { BlockingConflictBanner } from "../components/configuration/BlockingConflictBanner.tsx";
+import { BlockingMethodSelector } from "../components/configuration/BlockingMethodSelector.tsx";
 import { BuiltInBlockingEditor } from "../components/configuration/BuiltInBlockingEditor.tsx";
-import { useClusterNodes } from "../hooks/usePrimaryNode";
+import { ConfigurationSkeleton } from "../components/configuration/ConfigurationSkeleton.tsx";
+import { ConfigurationSyncView } from "../components/configuration/ConfigurationSyncView.tsx";
+import { ListSourceEditor } from "../components/configuration/ListSourceEditor.tsx";
+import { NodeSelector } from "../components/configuration/NodeSelector.tsx";
+import { apiFetch } from "../config";
+import { useTechnitiumState } from "../context/TechnitiumContext";
 import { useNavigationBlocker } from "../hooks/useNavigationBlocker";
+import { useClusterNodes } from "../hooks/usePrimaryNode";
+import { usePullToRefresh } from "../hooks/usePullToRefresh";
+import type { AdvancedBlockingConfig } from "../types/advancedBlocking";
 import {
   compareStringArrays,
   compareUrlArrays,
 } from "../utils/arrayComparison";
-import { apiFetch } from "../config";
-import type { AdvancedBlockingConfig } from "../types/advancedBlocking";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
-import {
-  faUsers,
-  faPencil,
-  faTrash,
-  faInfoCircle,
-  faPlus,
-  faXmark,
-  faChevronUp,
-  faList,
-  faSearch,
-  faCode,
-  faBan,
-  faSquareCheck,
-  faSquareMinus,
-  faCheck,
-  faCircle,
-  faGripVertical,
-  faMinus,
-  faExclamationTriangle,
-} from "@fortawesome/free-solid-svg-icons";
 import "./ConfigurationPage.css";
 
 type TabMode =
@@ -459,6 +459,14 @@ export function ConfigurationPage() {
     if (
       node1.config!.blockListUrlUpdateIntervalHours !==
       node2.config!.blockListUrlUpdateIntervalHours
+    ) {
+      configDiffsCount++;
+    }
+
+    // Compare blockListUrlUpdateIntervalMinutes
+    if (
+      node1.config!.blockListUrlUpdateIntervalMinutes !==
+      node2.config!.blockListUrlUpdateIntervalMinutes
     ) {
       configDiffsCount++;
     }
