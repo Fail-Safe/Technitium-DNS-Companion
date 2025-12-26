@@ -335,13 +335,15 @@
 
 @media (max-width: 768px) {
   .drawer-pull {
-    top: auto;
-    bottom: 16px;
-    right: 12px;
-    writing-mode: horizontal-tb;
-    text-orientation: initial;
-    padding: 10px 14px;
-    border-radius: 16px;
+    /* Keep the same pinned, vertical affordance on mobile (matches desktop) */
+    top: 50%;
+    right: 0;
+    bottom: auto;
+    transform: translateY(-50%);
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    padding: 10px 9px;
+    border-radius: 12px 0 0 12px;
   }
 }
 

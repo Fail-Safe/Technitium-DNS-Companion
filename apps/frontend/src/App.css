@@ -5162,7 +5162,9 @@ button.danger:disabled {
   background: var(--color-bg-secondary);
   padding: 0.5rem;
   max-width: 100%;
-  min-width: 960px;
+  min-width: 0;
+  width: 100%;
+  overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border-radius: 0.75rem;
   margin-bottom: 1rem;
