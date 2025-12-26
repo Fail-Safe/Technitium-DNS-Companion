@@ -59,9 +59,9 @@ jobs:
             # Set latest tag for default branch
             type=raw,value=latest,enable={{is_default_branch}}
             # Tag with branch name
-            # type=ref,event=branch
+            type=ref,event=branch
             # Tag with PR number
-            # type=ref,event=pr
+            type=ref,event=pr
             # Tag with git tag (v1.0.0)
             type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
             type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
