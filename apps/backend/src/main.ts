@@ -1,15 +1,71 @@
-import "dotenv/config";
-import { NestFactory } from "@nestjs/core";
-import { AppModule } from "./app.module";
 import { Logger } from "@nestjs/common";
-import { readFileSync, existsSync } from "fs";
-import { resolve, join } from "path";
+import { NestFactory } from "@nestjs/core";
 import { NestExpressApplication } from "@nestjs/platform-express";
-import { Request, Response, NextFunction } from "express";
+import "dotenv/config";
+import { NextFunction, Request, Response } from "express";
+import { existsSync, readFileSync, readdirSync } from "fs";
+import { basename, dirname, join, resolve } from "path";
+import { AppModule } from "./app.module";
+
+function resolveConfigFilePath(inputPath: string): string {
+  const absolutePath = resolve(inputPath);
+
+  if (!/[[*?]/.test(inputPath)) {
+    return absolutePath;
+  }
+
+  const directory = dirname(absolutePath);
+  const filePattern = basename(absolutePath);
+
+  if (!existsSync(directory)) {
+    throw new Error(`Directory does not exist: ${directory}`);
+  }
+
+  const regex = new RegExp(
+    "^" +
+      filePattern
+        .replace(/[.+^${}()|\\]/g, "\\$&")
+        .replace(/\*/g, ".*")
+        .replace(/\?/g, ".") +
+      "$",
+    "i",
+  );
+
+  const matches = readdirSync(directory)
+    .filter((name) => regex.test(name))
+    .sort((a, b) => a.localeCompare(b));
+
+  if (matches.length === 0) {
+    throw new Error(`No files matched pattern: ${inputPath}`);
+  }
+
+  return resolve(directory, matches[0]);
+}
 
 async function bootstrap() {
   const logger = new Logger("Bootstrap");
   const httpsEnabled = process.env.HTTPS_ENABLED === "true";
+  const sessionAuthEnabled = process.env.AUTH_SESSION_ENABLED === "true";
+  const trustProxyEnabled = process.env.TRUST_PROXY === "true";
+  const trustProxyHops = Number.parseInt(
+    process.env.TRUST_PROXY_HOPS ?? "1",
+    10,
+  );
+  const trustProxyValue =
+    Number.isFinite(trustProxyHops) && trustProxyHops > 0 ? trustProxyHops : 1;
+
+  if (sessionAuthEnabled && !httpsEnabled && !trustProxyEnabled) {
+    logger.error(
+      "AUTH_SESSION_ENABLED=true requires HTTPS to protect session cookies and login credentials.",
+    );
+    logger.error(
+      "Option A (recommended): Enable built-in HTTPS by setting HTTPS_ENABLED=true and configuring certificate paths.",
+    );
+    logger.error(
+      "Option B: Terminate TLS in a reverse proxy and set TRUST_PROXY=true so the backend can detect HTTPS via X-Forwarded-Proto.",
+    );
+    process.exit(1);
+  }
 
   let httpsOptions: { key: Buffer; cert: Buffer; ca?: Buffer } | undefined;
 
@@ -30,13 +86,13 @@ async function bootstrap() {
 
     try {
       httpsOptions = {
-        cert: readFileSync(resolve(certPath)),
-        key: readFileSync(resolve(keyPath)),
+        cert: readFileSync(resolveConfigFilePath(certPath)),
+        key: readFileSync(resolveConfigFilePath(keyPath)),
       };
 
       // Optional CA certificate chain (for self-signed certs)
       if (caPath) {
-        httpsOptions.ca = readFileSync(resolve(caPath));
+        httpsOptions.ca = readFileSync(resolveConfigFilePath(caPath));
       }
 
       logger.log("HTTPS certificates loaded successfully");
@@ -59,16 +115,20 @@ async function bootstrap() {
     logger: ["error", "warn", "log", "debug", "verbose"],
   });
 
+  if (trustProxyEnabled) {
+    app.set("trust proxy", trustProxyValue);
+    logger.log(
+      `Reverse proxy trust enabled (trust proxy = ${trustProxyValue}).`,
+    );
+  }
+
   // Set global API prefix
   app.setGlobalPrefix("api");
 
   // Serve static frontend files (production mode)
   const frontendPath = resolve(__dirname, "../../frontend/dist");
   if (existsSync(frontendPath)) {
-    app.useStaticAssets(frontendPath, {
-      prefix: "/",
-      index: "index.html",
-    });
+    app.useStaticAssets(frontendPath, { prefix: "/", index: "index.html" });
     logger.log(`Serving frontend from: ${frontendPath}`);
 
     // Handle SPA routing - serve index.html for all non-API routes
@@ -85,14 +145,12 @@ async function bootstrap() {
   }
 
   // Enable CORS if needed (can be configured via environment variables)
-  const corsOrigins = process.env.CORS_ORIGINS?.split(",")
+  const corsOrigins = (process.env.CORS_ORIGINS ?? process.env.CORS_ORIGIN)
+    ?.split(",")
     .map((o) => o.trim())
     .filter(Boolean);
   if (corsOrigins && corsOrigins.length > 0) {
-    app.enableCors({
-      origin: corsOrigins,
-      credentials: true,
-    });
+    app.enableCors({ origin: corsOrigins, credentials: true });
     logger.log(`CORS enabled for origins: ${corsOrigins.join(", ")}`);
   } else if (process.env.NODE_ENV === "development") {
     app.enableCors();
@@ -102,6 +160,17 @@ async function bootstrap() {
   const port = httpsEnabled
     ? process.env.HTTPS_PORT || 3443
     : process.env.PORT || 3000;
+
+  const portNumber =
+    typeof port === "string" ? Number.parseInt(port, 10) : port;
+  if (!httpsEnabled && portNumber === 3443) {
+    logger.warn(
+      "HTTPS is disabled but the backend is listening on port 3443 (commonly used for HTTPS).",
+    );
+    logger.warn(
+      "If your dev proxy (Vite/Nginx/Caddy) is targeting https://localhost:3443, you'll see TLS errors. Either enable HTTPS (HTTPS_ENABLED=true) or proxy to http://localhost:3443 / run HTTP on port 3000.",
+    );
+  }
 
   await app.listen(port);
 

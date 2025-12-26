@@ -27,6 +27,7 @@ export interface AdvancedBlockingConfig {
   enableBlocking?: boolean;
   blockingAnswerTtl?: number;
   blockListUrlUpdateIntervalHours?: number;
+  blockListUrlUpdateIntervalMinutes?: number;
   localEndPointGroupMap: Record<string, string>;
   networkGroupMap: Record<string, string>;
   groups: AdvancedBlockingGroup[];

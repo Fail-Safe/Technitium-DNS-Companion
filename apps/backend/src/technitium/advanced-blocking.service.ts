@@ -1,26 +1,24 @@
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { TechnitiumService } from "./technitium.service";
-import type { TechnitiumNodeSummary } from "./technitium.types";
 import type {
+  AdvancedBlockingCombinedOverview,
   AdvancedBlockingConfig,
   AdvancedBlockingGroup,
+  AdvancedBlockingGroupComparison,
+  AdvancedBlockingGroupComparisonStatus,
+  AdvancedBlockingGroupSettings,
+  AdvancedBlockingGroupSettingsDiff,
   AdvancedBlockingMetrics,
   AdvancedBlockingOverview,
   AdvancedBlockingSnapshot,
   AdvancedBlockingUrlEntry,
   AdvancedBlockingUrlOverride,
-  AdvancedBlockingCombinedOverview,
-  AdvancedBlockingGroupComparison,
-  AdvancedBlockingGroupSettingsDiff,
-  AdvancedBlockingGroupSettings,
-  AdvancedBlockingGroupComparisonStatus,
 } from "./advanced-blocking.types";
+import { TechnitiumService } from "./technitium.service";
+import type { TechnitiumNodeSummary } from "./technitium.types";
 
 interface TechnitiumAppConfigEnvelope {
   status?: string;
-  response?: {
-    config?: string | null;
-  };
+  response?: { config?: string | null };
 }
 
 @Injectable()
@@ -34,21 +32,24 @@ export class AdvancedBlockingService {
   async getOverview(): Promise<AdvancedBlockingOverview> {
     const summaries = await this.technitiumService.listNodes();
     const snapshots = await Promise.all(
-      summaries.map((summary) => this.loadSnapshot(summary)),
+      summaries.map((summary) => this.loadSnapshot(summary, "session")),
     );
     const aggregate = snapshots.reduce(
       (acc, snapshot) => this.combineMetrics(acc, snapshot.metrics),
       this.emptyMetrics(),
     );
 
-    return {
-      fetchedAt: new Date().toISOString(),
-      aggregate,
-      nodes: snapshots,
-    };
+    return { fetchedAt: new Date().toISOString(), aggregate, nodes: snapshots };
   }
 
   async getSnapshot(nodeId: string): Promise<AdvancedBlockingSnapshot> {
+    return this.getSnapshotWithAuth(nodeId, "session");
+  }
+
+  async getSnapshotWithAuth(
+    nodeId: string,
+    authMode: "session" | "background",
+  ): Promise<AdvancedBlockingSnapshot> {
     const summaries = await this.technitiumService.listNodes();
     const summary = summaries.find(
       (node) => node.id.toLowerCase() === nodeId.toLowerCase(),
@@ -60,7 +61,7 @@ export class AdvancedBlockingService {
       );
     }
 
-    return this.loadSnapshot(summary);
+    return this.loadSnapshot(summary, authMode);
   }
 
   async setConfig(
@@ -79,12 +80,8 @@ export class AdvancedBlockingService {
         await this.technitiumService.executeAction(nodeId, {
           method: "POST",
           url: "/api/apps/config/set",
-          params: {
-            name: appName,
-          },
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-          },
+          params: { name: appName },
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: body.toString(),
         });
 
@@ -109,6 +106,7 @@ export class AdvancedBlockingService {
 
   private async loadSnapshot(
     summary: TechnitiumNodeSummary,
+    authMode: "session" | "background",
   ): Promise<AdvancedBlockingSnapshot> {
     const baseSnapshot: AdvancedBlockingSnapshot = {
       nodeId: summary.id,
@@ -120,6 +118,7 @@ export class AdvancedBlockingService {
     try {
       const { envelope, appName } = await this.fetchConfigWithFallback(
         summary.id,
+        authMode,
       );
 
       const rawConfig = envelope?.response?.config;
@@ -130,11 +129,7 @@ export class AdvancedBlockingService {
           this.appNameByNode.set(summary.id, appName);
         }
 
-        return {
-          ...baseSnapshot,
-          config,
-          metrics,
-        };
+        return { ...baseSnapshot, config, metrics };
       }
 
       const config = this.parseConfig(rawConfig);
@@ -143,27 +138,20 @@ export class AdvancedBlockingService {
         this.appNameByNode.set(summary.id, appName);
       }
 
-      return {
-        ...baseSnapshot,
-        config,
-        metrics,
-      };
+      return { ...baseSnapshot, config, metrics };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       this.logger.warn(
         `Failed to load Advanced Blocking config from node "${summary.id}": ${message}`,
       );
-      return {
-        ...baseSnapshot,
-        error: message,
-      };
+      return { ...baseSnapshot, error: message };
     }
   }
 
-  private async fetchConfigWithFallback(nodeId: string): Promise<{
-    envelope: TechnitiumAppConfigEnvelope;
-    appName?: string;
-  }> {
+  private async fetchConfigWithFallback(
+    nodeId: string,
+    authMode: "session" | "background",
+  ): Promise<{ envelope: TechnitiumAppConfigEnvelope; appName?: string }> {
     const appNames = this.resolveAppNameCandidates(nodeId);
     let lastError: Error | undefined;
 
@@ -175,10 +163,9 @@ export class AdvancedBlockingService {
             {
               method: "GET",
               url: "/api/apps/config/get",
-              params: {
-                name: appName,
-              },
+              params: { name: appName },
             },
+            { authMode },
           );
 
         return { envelope, appName };
@@ -242,6 +229,10 @@ export class AdvancedBlockingService {
       blockListUrlUpdateIntervalHours:
         typeof payload.blockListUrlUpdateIntervalHours === "number"
           ? payload.blockListUrlUpdateIntervalHours
+          : undefined,
+      blockListUrlUpdateIntervalMinutes:
+        typeof payload.blockListUrlUpdateIntervalMinutes === "number"
+          ? payload.blockListUrlUpdateIntervalMinutes
           : undefined,
       localEndPointGroupMap: this.normalizeMapping(
         payload.localEndPointGroupMap,
@@ -401,16 +392,15 @@ export class AdvancedBlockingService {
         .length,
       networkMappingCount: Object.keys(config.networkGroupMap).length,
       scheduledNodeCount:
-        typeof config.blockListUrlUpdateIntervalHours === "number" ? 1 : 0,
+        typeof config.blockListUrlUpdateIntervalHours === "number" ||
+        typeof config.blockListUrlUpdateIntervalMinutes === "number"
+          ? 1
+          : 0,
     };
   }
 
   private createEmptyConfig(): AdvancedBlockingConfig {
-    return {
-      localEndPointGroupMap: {},
-      networkGroupMap: {},
-      groups: [],
-    };
+    return { localEndPointGroupMap: {}, networkGroupMap: {}, groups: [] };
   }
 
   private serializeConfig(
@@ -457,6 +447,11 @@ export class AdvancedBlockingService {
     if (config.blockListUrlUpdateIntervalHours !== undefined) {
       payload.blockListUrlUpdateIntervalHours =
         config.blockListUrlUpdateIntervalHours;
+    }
+
+    if (config.blockListUrlUpdateIntervalMinutes !== undefined) {
+      payload.blockListUrlUpdateIntervalMinutes =
+        config.blockListUrlUpdateIntervalMinutes;
     }
 
     return payload;
@@ -598,12 +593,7 @@ export class AdvancedBlockingService {
     const STATUS_PRIORITY: Record<
       AdvancedBlockingGroupComparisonStatus,
       number
-    > = {
-      different: 0,
-      missing: 1,
-      "in-sync": 2,
-      unknown: 3,
-    };
+    > = { different: 0, missing: 1, "in-sync": 2, unknown: 3 };
 
     comparisons.sort((a, b) => {
       const priorityDelta =

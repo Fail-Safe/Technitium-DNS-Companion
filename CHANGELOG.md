@@ -9,6 +9,43 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.1] - 2025-12-24
+
+### Added
+
+- Support for Technitium AdvancedBlockingApp v10+ refresh interval minutes via `blockListUrlUpdateIntervalMinutes`.
+- UI inputs for list source refresh interval in hours + mins.
+
+### Fixed
+
+- List source refresh interval no longer appears stuck due to a cached reload after saving.
+- Minutes input UX: allows clearing the default `0` while typing (prevents "0" from snapping back mid-edit).
+- Added frontend regression test for the minutes input editing behavior.
+
+## [1.2.0] - 2025-12-16
+
+### Added
+
+- Optional session-based authentication behind `AUTH_SESSION_ENABLED=true`, using HttpOnly cookies and server-side session storage.
+- Dedicated `TECHNITIUM_BACKGROUND_TOKEN` support so background PTR/hostname work can run safely in session-auth mode.
+- Guided migration from `TECHNITIUM_CLUSTER_TOKEN` → `TECHNITIUM_BACKGROUND_TOKEN`, including token creation + validation.
+- Backend Jest tests and frontend Vitest/RTL tests covering the new auth + migration flows.
+
+### Changed
+
+- Auth UX only requires the login page when session auth is enabled.
+
+### Fixed
+
+- Reduced/no-op behavior for background PTR warming when it cannot run (e.g., no request/session context), preventing noisy failures.
+- Request-context middleware registration to avoid intermittent auth/session issues across routes.
+
+### Security
+
+- Token capability validation for `TECHNITIUM_BACKGROUND_TOKEN` (must be least-privilege); unsafe/unverifiable tokens disable background PTR warming and surface warnings.
+- Implemented a session-token-first approach using Technitium `/api/user/login` expiring tokens (no long-lived admin API tokens by default), while preserving backwards-compatible env-token “service mode”.
+- When `AUTH_SESSION_ENABLED=true`, the backend requires HTTPS and supports TLS-terminating reverse proxies via `TRUST_PROXY=true`.
+
 ## [1.1.6] - 2025-12-13
 
 ### Added
@@ -93,7 +130,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.1.6...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.1...HEAD
+[1.2.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.1.6...v1.2.0
 [1.1.6]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.1.3...v1.1.4

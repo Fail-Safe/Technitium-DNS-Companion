@@ -4,6 +4,12 @@
 
 Technitium-DNS-Companion is a tool for keeping 2+ Technitium DNS servers in sync. It is designed to be a simple and easy to use, responsive web application that can be used to sync multiple Technitium DNS servers.
 
+## Inquiries/Verbosity
+
+High verbosity is appreciated when suggesting changes or configurations.
+
+Please ask questions of me. I would rather you be more verbose than to make assumptions and changes without understanding my intentions and consulting me first.
+
 ## Performance Optimization
 
 **Performance Features:** Backend optimizations including caching, deduplication, and throttling.

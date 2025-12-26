@@ -29,6 +29,7 @@
     "@nestjs/throttler": "^6.4.0",
     "axios": "^1.13.1",
     "cache-manager": "^6.4.3",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
@@ -39,6 +40,7 @@
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",
+    "@types/cookie-parser": "^1.4.9",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",

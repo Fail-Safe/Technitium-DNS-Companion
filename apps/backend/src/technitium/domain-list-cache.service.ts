@@ -1,20 +1,20 @@
+import { HttpService } from "@nestjs/axios";
 import {
   Injectable,
   Logger,
-  OnModuleInit,
   OnModuleDestroy,
+  OnModuleInit,
 } from "@nestjs/common";
-import { HttpService } from "@nestjs/axios";
-import { firstValueFrom } from "rxjs";
 import { createHash } from "crypto";
+import { firstValueFrom } from "rxjs";
 import { AdvancedBlockingService } from "./advanced-blocking.service";
-import { TechnitiumService } from "./technitium.service";
-import { DomainListPersistenceService } from "./domain-list-persistence.service";
 import type {
   AdvancedBlockingConfig,
   AdvancedBlockingGroup,
   AdvancedBlockingUrlEntry,
 } from "./advanced-blocking.types";
+import { DomainListPersistenceService } from "./domain-list-persistence.service";
+import { TechnitiumService } from "./technitium.service";
 
 // ===== EXPORTED TYPES =====
 
@@ -114,6 +114,8 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
   private readonly configHashes = new Map<string, string>(); // nodeId -> config hash (to detect changes)
   private initializationTimer?: NodeJS.Timeout; // deferred startup timer
 
+  private readonly defaultAuthMode: "session" | "background" = "session";
+
   constructor(
     private readonly httpService: HttpService,
     private readonly advancedBlockingService: AdvancedBlockingService,
@@ -167,7 +169,10 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
   private async scheduleNodeRefresh(nodeId: string): Promise<void> {
     try {
       // Get the node's Advanced Blocking config to read the refresh interval
-      const snapshot = await this.advancedBlockingService.getSnapshot(nodeId);
+      const snapshot = await this.advancedBlockingService.getSnapshotWithAuth(
+        nodeId,
+        "background",
+      );
       const config = snapshot.config;
 
       if (!config) {
@@ -179,7 +184,12 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
       // Get the refresh interval from config (default to 24 hours if not set)
       const intervalHours = config.blockListUrlUpdateIntervalHours ?? 24;
-      const intervalMs = intervalHours * 60 * 60 * 1000;
+      const intervalMinutes = config.blockListUrlUpdateIntervalMinutes ?? 0;
+      const totalMinutes = intervalHours * 60 + intervalMinutes;
+
+      // Technitium's internal timer ticks every minute; avoid accidental 0ms timers.
+      const effectiveMinutes = Math.max(1, totalMinutes);
+      const intervalMs = effectiveMinutes * 60 * 1000;
 
       // Clear any existing timer for this node
       const existingTimer = this.refreshTimers.get(nodeId);
@@ -188,19 +198,21 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       }
 
       this.logger.log(
-        `Scheduling automatic refresh for node ${nodeId} every ${intervalHours} hours`,
+        `Scheduling automatic refresh for node ${nodeId} every ${intervalHours}h ${intervalMinutes}m`,
       );
 
       // Set up the new timer
       const timer = setInterval(() => {
         this.logger.log(`Automatic refresh triggered for node ${nodeId}`);
         // Use void to suppress the async warning - refresh runs in background
-        void this.refreshLists(nodeId).catch((err: unknown) => {
-          this.logger.error(
-            `Failed to auto-refresh lists for node ${nodeId}:`,
-            err,
-          );
-        });
+        void this.refreshLists(nodeId, { authMode: "background" }).catch(
+          (err: unknown) => {
+            this.logger.error(
+              `Failed to auto-refresh lists for node ${nodeId}:`,
+              err,
+            );
+          },
+        );
       }, intervalMs);
 
       this.refreshTimers.set(nodeId, timer);
@@ -325,10 +337,25 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     regexBlocklists: ListMetadata[];
     regexAllowlists: ListMetadata[];
   }> {
-    // Check if config has changed and invalidate cache if needed
-    await this.ensureCacheValid(nodeId);
+    return this.getListsMetadataWithAuth(nodeId, this.defaultAuthMode);
+  }
 
-    const snapshot = await this.advancedBlockingService.getSnapshot(nodeId);
+  private async getListsMetadataWithAuth(
+    nodeId: string,
+    authMode: "session" | "background",
+  ): Promise<{
+    blocklists: ListMetadata[];
+    allowlists: ListMetadata[];
+    regexBlocklists: ListMetadata[];
+    regexAllowlists: ListMetadata[];
+  }> {
+    // Check if config has changed and invalidate cache if needed
+    await this.ensureCacheValid(nodeId, authMode);
+
+    const snapshot = await this.advancedBlockingService.getSnapshotWithAuth(
+      nodeId,
+      authMode,
+    );
     const config = snapshot.config;
 
     if (!config) {
@@ -1172,8 +1199,12 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
   /**
    * Force refresh all lists for a node
    */
-  async refreshLists(nodeId: string): Promise<void> {
+  async refreshLists(
+    nodeId: string,
+    options?: { authMode?: "session" | "background" },
+  ): Promise<void> {
     this.logger.log(`Forcing refresh of all lists for node ${nodeId}`);
+    const authMode = options?.authMode ?? this.defaultAuthMode;
     const nodeCache = this.cache.get(nodeId);
     if (nodeCache) {
       nodeCache.clear();
@@ -1182,7 +1213,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     if (regexNodeCache) {
       regexNodeCache.clear();
     }
-    await this.getListsMetadata(nodeId);
+    await this.getListsMetadataWithAuth(nodeId, authMode);
 
     // Update last refresh time
     this.lastRefreshTimes.set(nodeId, new Date());
@@ -1253,9 +1284,15 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
    * Check if the Advanced Blocking configuration has changed for a node
    * Returns true if config changed (cache should be invalidated)
    */
-  private async checkConfigChanged(nodeId: string): Promise<boolean> {
+  private async checkConfigChanged(
+    nodeId: string,
+    authMode: "session" | "background" = this.defaultAuthMode,
+  ): Promise<boolean> {
     try {
-      const snapshot = await this.advancedBlockingService.getSnapshot(nodeId);
+      const snapshot = await this.advancedBlockingService.getSnapshotWithAuth(
+        nodeId,
+        authMode,
+      );
       const currentHash = this.generateConfigHash(snapshot.config ?? null);
       const previousHash = this.configHashes.get(nodeId);
 
@@ -1282,12 +1319,11 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /**
-   * Ensure cache is valid by checking for config changes
-   * Clears cache if configuration has changed
-   */
-  private async ensureCacheValid(nodeId: string): Promise<void> {
-    const configChanged = await this.checkConfigChanged(nodeId);
+  private async ensureCacheValid(
+    nodeId: string,
+    authMode: "session" | "background" = this.defaultAuthMode,
+  ): Promise<void> {
+    const configChanged = await this.checkConfigChanged(nodeId, authMode);
 
     if (configChanged) {
       this.logger.log(`Config changed for node ${nodeId}, invalidating cache`);

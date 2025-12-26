@@ -6,11 +6,14 @@ import {
   Logger,
   NotFoundException,
   ServiceUnavailableException,
+  UnauthorizedException,
 } from "@nestjs/common";
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
+import * as crypto from "crypto";
 import * as dns from "dns";
 import * as https from "https";
 import { promisify } from "util";
+import { AuthRequestContext } from "../auth/auth-request-context";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
 import {
@@ -73,6 +76,7 @@ interface TechnitiumNodeQueryLogSnapshot {
   fetchedAt: string;
   data?: TechnitiumQueryLogPage;
   error?: string;
+  durationMs?: number;
 }
 
 interface TechnitiumNodeZoneSnapshot {
@@ -215,6 +219,20 @@ interface HostnameCacheEntry {
 @Injectable()
 export class TechnitiumService {
   private readonly logger = new Logger(TechnitiumService.name);
+  private readonly sessionAuthEnabled =
+    process.env.AUTH_SESSION_ENABLED === "true";
+  private readonly backgroundToken =
+    (process.env.TECHNITIUM_BACKGROUND_TOKEN ?? "").trim() || undefined;
+
+  private backgroundTokenValidation:
+    | {
+        validated: true;
+        okForPtr: boolean;
+        username?: string;
+        reason?: string;
+        tooPrivilegedSections?: string[];
+      }
+    | { validated: false } = { validated: false };
   private readonly queryLoggerCache = new Map<
     string,
     TechnitiumQueryLoggerMetadata
@@ -249,6 +267,52 @@ export class TechnitiumService {
     private readonly nodeConfigs: TechnitiumNodeConfig[],
     private readonly dhcpSnapshotService: DhcpSnapshotService,
   ) {
+    // If TECHNITIUM_BACKGROUND_TOKEN is set, validate it so the UI can surface
+    // scope/access issues globally. Only session-auth mode uses it for background PTR.
+    if (this.backgroundToken) {
+      this.validateBackgroundTokenForPtr()
+        .then((result) => {
+          if (!result.okForPtr) {
+            this.logger.warn(
+              `TECHNITIUM_BACKGROUND_TOKEN validation failed: ${result.reason ?? "Token is not suitable."}`,
+            );
+          }
+
+          if (!this.sessionAuthEnabled) {
+            return;
+          }
+
+          // Session auth enabled: gate background PTR tasks on validation.
+          if (!result.okForPtr) {
+            this.logger.warn(
+              `Background PTR hostname resolution disabled: ${result.reason ?? "TECHNITIUM_BACKGROUND_TOKEN is not suitable."}`,
+            );
+            return;
+          }
+
+          this.startPtrTimer();
+        })
+        .catch((error) => {
+          this.backgroundTokenValidation = {
+            validated: true,
+            okForPtr: false,
+            reason: `Failed to validate TECHNITIUM_BACKGROUND_TOKEN permissions: ${error instanceof Error ? error.message : String(error)}`,
+          };
+          this.logger.warn(
+            `Background token validation failed; skipping background PTR hostname resolution: ${error}`,
+          );
+        });
+
+      // In session-auth mode we return early because PTR timers are conditionally started above.
+      if (this.sessionAuthEnabled) {
+        return;
+      }
+    }
+
+    this.startPtrTimer();
+  }
+
+  private startPtrTimer(): void {
     if (this.enableBackgroundTasks) {
       // Start periodic PTR lookup cycle
       this.startPeriodicPtrLookups();
@@ -256,6 +320,51 @@ export class TechnitiumService {
       // Start periodic cache cleanup
       this.startPeriodicCacheCleanup();
     }
+  }
+
+  /**
+   * Exposes the cached validation state for TECHNITIUM_BACKGROUND_TOKEN.
+   * This returns metadata only (never the token).
+   */
+  getBackgroundPtrTokenValidationSummary(): {
+    configured: boolean;
+    sessionAuthEnabled: boolean;
+    validated: boolean;
+    okForPtr?: boolean;
+    username?: string;
+    reason?: string;
+    tooPrivilegedSections?: string[];
+  } {
+    const configured = !!this.backgroundToken;
+    const sessionAuthEnabled = this.sessionAuthEnabled;
+
+    if (!configured) {
+      return {
+        configured,
+        sessionAuthEnabled,
+        validated: true,
+        okForPtr: true,
+      };
+    }
+
+    if (!this.backgroundTokenValidation.validated) {
+      return { configured, sessionAuthEnabled, validated: false };
+    }
+
+    return {
+      configured,
+      sessionAuthEnabled,
+      validated: true,
+      okForPtr: this.backgroundTokenValidation.okForPtr,
+      username: this.backgroundTokenValidation.username,
+      reason: this.backgroundTokenValidation.reason,
+      tooPrivilegedSections:
+        this.backgroundTokenValidation.tooPrivilegedSections,
+    };
+  }
+
+  getConfiguredNodeIds(): string[] {
+    return this.nodeConfigs.map((node) => node.id);
   }
 
   /**
@@ -301,55 +410,66 @@ export class TechnitiumService {
       }>;
     } | null = null;
 
-    // Try to get cluster info from first node
+    // Try to get cluster info from a node we are authenticated to.
+    // In session-auth mode we may only have tokens for a subset of nodes.
     if (this.nodeConfigs.length > 0) {
-      const firstNode = this.nodeConfigs[0];
-      try {
-        // Get full cluster state from first node
-        const response = await this.request<{
-          status: string;
-          info?: {
-            version?: string;
-            clusterInitialized?: boolean;
-            clusterDomain?: string;
-            dnsServerDomain?: string;
-            clusterNodes?: Array<{
-              id: number;
-              name: string;
-              url: string;
-              ipAddress: string;
-              type: "Primary" | "Secondary";
-              state: string;
-            }>;
-          };
-          server?: string;
-        }>(firstNode, {
-          method: "GET",
-          url: "/api/user/session/get",
-          params: {},
-        });
+      const session = AuthRequestContext.getSession();
+      const probeNode = this.sessionAuthEnabled
+        ? this.nodeConfigs.find((node) => !!session?.tokensByNodeId?.[node.id])
+        : this.nodeConfigs[0];
 
-        if (response.status === "ok" && response.info?.clusterInitialized) {
-          const clusterNodes = response.info.clusterNodes || [];
-          sharedClusterInfo = {
-            initialized: true,
-            domain: response.info.clusterDomain,
-            clusterNodes,
-          };
-          this.logger.log(
-            `Cluster detected: ${response.info.clusterDomain} with ${clusterNodes.length} nodes`,
-          );
-          // Log cluster node details for debugging matching issues
-          for (const cn of clusterNodes) {
-            this.logger.debug(
-              `  Cluster node: name="${cn.name}", url="${cn.url}", ip="${cn.ipAddress}", type="${cn.type}"`,
+      if (!probeNode) {
+        // No authenticated nodes available (or no nodes configured)
+        // -> treat as standalone.
+        sharedClusterInfo = null;
+      } else {
+        try {
+          // Get full cluster state from first node
+          const response = await this.request<{
+            status: string;
+            info?: {
+              version?: string;
+              clusterInitialized?: boolean;
+              clusterDomain?: string;
+              dnsServerDomain?: string;
+              clusterNodes?: Array<{
+                id: number;
+                name: string;
+                url: string;
+                ipAddress: string;
+                type: "Primary" | "Secondary";
+                state: string;
+              }>;
+            };
+            server?: string;
+          }>(probeNode, {
+            method: "GET",
+            url: "/api/user/session/get",
+            params: {},
+          });
+
+          if (response.status === "ok" && response.info?.clusterInitialized) {
+            const clusterNodes = response.info.clusterNodes || [];
+            sharedClusterInfo = {
+              initialized: true,
+              domain: response.info.clusterDomain,
+              clusterNodes,
+            };
+            this.logger.log(
+              `Cluster detected: ${response.info.clusterDomain} with ${clusterNodes.length} nodes`,
             );
+            // Log cluster node details for debugging matching issues
+            for (const cn of clusterNodes) {
+              this.logger.debug(
+                `  Cluster node: name="${cn.name}", url="${cn.url}", ip="${cn.ipAddress}", type="${cn.type}"`,
+              );
+            }
           }
+        } catch (error) {
+          this.logger.warn(
+            `Failed to fetch cluster state from probe node ${probeNode.id}, will treat all as standalone: ${error}`,
+          );
         }
-      } catch (error) {
-        this.logger.warn(
-          `Failed to fetch cluster state from first node ${firstNode.id}, will treat all as standalone: ${error}`,
-        );
       }
     }
 
@@ -583,9 +703,9 @@ export class TechnitiumService {
       };
     } catch (error: unknown) {
       const name =
-        error instanceof Error && error.constructor ?
-          error.constructor.name
-        : "Unknown";
+        error instanceof Error && error.constructor
+          ? error.constructor.name
+          : "Unknown";
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
         `Failed to get cluster state for ${nodeId}: ${name} - ${message}`,
@@ -740,15 +860,11 @@ export class TechnitiumService {
       let version = "Unknown";
       let uptime = 0;
       try {
-        const settingsResponse = await axios.get<
+        const settingsEnvelope = await this.request<
           TechnitiumApiResponse<TechnitiumSettingsData>
-        >(`${node.baseUrl}/api/settings/get`, {
-          params: { token: node.token },
-          timeout: 30000,
-          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-        });
+        >(node, { method: "GET", url: "/api/settings/get", params: {} });
         const settingsData = this.unwrapApiResponse(
-          settingsResponse.data,
+          settingsEnvelope,
           nodeId,
           "settings",
         );
@@ -769,15 +885,15 @@ export class TechnitiumService {
       let totalQueries = 0;
       let totalBlockedQueries = 0;
       try {
-        const statsResponse = await axios.get<
+        const statsEnvelope = await this.request<
           TechnitiumApiResponse<TechnitiumDashboardStatsData>
-        >(`${node.baseUrl}/api/dashboard/stats/get`, {
-          params: { token: node.token, type: "LastDay" },
-          timeout: 30000,
-          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        >(node, {
+          method: "GET",
+          url: "/api/dashboard/stats/get",
+          params: { type: "LastDay" },
         });
         const statsData = this.unwrapApiResponse(
-          statsResponse.data,
+          statsEnvelope,
           nodeId,
           "dashboard stats",
         );
@@ -812,6 +928,7 @@ export class TechnitiumService {
   async executeAction<T = unknown>(
     nodeId: string,
     payload: TechnitiumActionPayload,
+    options?: { authMode?: "session" | "background" },
   ): Promise<T> {
     const node = this.findNode(nodeId);
     const config: AxiosRequestConfig = {
@@ -835,7 +952,7 @@ export class TechnitiumService {
       config.data = payload.body;
     }
 
-    return this.request<T>(node, config);
+    return this.request<T>(node, config, options);
   }
 
   /**
@@ -902,10 +1019,10 @@ export class TechnitiumService {
   /**
    * Enrich query log entries with hostnames from DHCP leases and cached PTR lookups.
    */
-  private enrichWithHostnames(
-    entries: TechnitiumQueryLogEntry[],
+  private enrichWithHostnames<T extends TechnitiumQueryLogEntry>(
+    entries: T[],
     ipToHostname: Map<string, string>,
-  ): TechnitiumQueryLogEntry[] {
+  ): T[] {
     return entries.map((entry) => {
       const clientIp = entry.clientIpAddress;
 
@@ -939,6 +1056,13 @@ export class TechnitiumService {
    * Start periodic background PTR lookups for recently seen client IPs.
    */
   private startPeriodicPtrLookups(): void {
+    if (this.sessionAuthEnabled && !this.backgroundToken) {
+      this.logger.log(
+        "Session auth is enabled and TECHNITIUM_BACKGROUND_TOKEN is not set; skipping background PTR hostname resolution.",
+      );
+      return;
+    }
+
     this.stopPeriodicPtrLookups();
     this.logger.log("Starting periodic PTR hostname resolution");
 
@@ -984,6 +1108,522 @@ export class TechnitiumService {
     this.ptrLookupTimer.unref?.();
   }
 
+  private async validateBackgroundTokenForPtr(): Promise<
+    Extract<typeof this.backgroundTokenValidation, { validated: true }>
+  > {
+    if (this.backgroundTokenValidation.validated) {
+      return this.backgroundTokenValidation;
+    }
+
+    if (!this.backgroundToken) {
+      this.backgroundTokenValidation = {
+        validated: true,
+        okForPtr: false,
+        reason: "TECHNITIUM_BACKGROUND_TOKEN is not set.",
+      };
+      return this.backgroundTokenValidation;
+    }
+
+    type Permission = {
+      canView?: boolean;
+      canModify?: boolean;
+      canDelete?: boolean;
+    };
+    type PermissionMap = Record<string, Permission | undefined>;
+    type SessionInfo = {
+      username?: string;
+      displayName?: string;
+      info?: { permissions?: PermissionMap };
+    };
+
+    const node = this.nodeConfigs[0];
+    if (!node) {
+      this.backgroundTokenValidation = {
+        validated: true,
+        okForPtr: false,
+        reason:
+          "No nodes are configured; cannot validate TECHNITIUM_BACKGROUND_TOKEN.",
+      };
+      return this.backgroundTokenValidation;
+    }
+
+    let envelope: unknown;
+    try {
+      envelope = await this.requestWithExplicitToken<
+        TechnitiumApiResponse<SessionInfo>
+      >(
+        node,
+        { method: "GET", url: "/api/user/session/get" },
+        this.backgroundToken,
+      );
+    } catch (error) {
+      const message = (() => {
+        if (error instanceof HttpException) {
+          const response = error.getResponse();
+          return typeof response === "string"
+            ? response
+            : (error.message ?? "Request failed");
+        }
+
+        if (error instanceof Error) {
+          return error.message;
+        }
+
+        return String(error);
+      })();
+
+      this.backgroundTokenValidation = {
+        validated: true,
+        okForPtr: false,
+        reason: `Failed to validate TECHNITIUM_BACKGROUND_TOKEN permissions against node "${node.id}": ${message}`,
+      };
+      return this.backgroundTokenValidation;
+    }
+
+    const envelopeObj =
+      envelope && typeof envelope === "object"
+        ? (envelope as Partial<TechnitiumApiResponse<SessionInfo>>)
+        : undefined;
+
+    if (!envelopeObj || typeof envelopeObj.status !== "string") {
+      this.backgroundTokenValidation = {
+        validated: true,
+        okForPtr: false,
+        reason: `Failed to validate TECHNITIUM_BACKGROUND_TOKEN: unexpected response from node "${node.id}" (expected Technitium API envelope). Check base URL and reverse proxy configuration.`,
+      };
+      return this.backgroundTokenValidation;
+    }
+
+    if (envelopeObj.status !== "ok") {
+      if (envelopeObj.status === "invalid-token") {
+        this.backgroundTokenValidation = {
+          validated: true,
+          okForPtr: false,
+          reason: `TECHNITIUM_BACKGROUND_TOKEN was rejected by node "${node.id}": invalid token.`,
+        };
+        return this.backgroundTokenValidation;
+      }
+
+      const detail =
+        envelopeObj.errorMessage ??
+        envelopeObj.innerErrorMessage ??
+        "unknown error";
+
+      this.backgroundTokenValidation = {
+        validated: true,
+        okForPtr: false,
+        reason: `TECHNITIUM_BACKGROUND_TOKEN validation failed on node "${node.id}": ${detail}.`,
+      };
+      return this.backgroundTokenValidation;
+    }
+
+    const flattened = envelopeObj as unknown as SessionInfo & {
+      status?: string;
+    };
+    const sessionInfo: SessionInfo | undefined =
+      envelopeObj.response !== undefined
+        ? envelopeObj.response
+        : flattened &&
+            (flattened.info || flattened.username || flattened.displayName)
+          ? flattened
+          : undefined;
+
+    if (!sessionInfo) {
+      this.backgroundTokenValidation = {
+        validated: true,
+        okForPtr: false,
+        reason: `Failed to validate TECHNITIUM_BACKGROUND_TOKEN permissions: node "${node.id}" returned status "ok" but no session info payload from /api/user/session/get. This may indicate a proxy altering the Technitium API envelope.`,
+      };
+      return this.backgroundTokenValidation;
+    }
+
+    const permissions = sessionInfo?.info?.permissions ?? {};
+    const dnsClient = permissions["DnsClient"];
+
+    if (!dnsClient?.canView) {
+      this.backgroundTokenValidation = {
+        validated: true,
+        okForPtr: false,
+        username: sessionInfo?.username,
+        reason:
+          "TECHNITIUM_BACKGROUND_TOKEN does not have DnsClient: View permission required for PTR lookups.",
+      };
+      return this.backgroundTokenValidation;
+    }
+
+    const tooPrivilegedSections = Object.entries(permissions)
+      .filter(([, perm]) => !!perm?.canModify || !!perm?.canDelete)
+      .map(([section]) => section)
+      .sort((a, b) => a.localeCompare(b));
+
+    // Administration view is particularly sensitive even if it's "view-only".
+    const adminView = permissions["Administration"]?.canView === true;
+
+    if (tooPrivilegedSections.length > 0 || adminView) {
+      const reasons: string[] = [];
+      if (tooPrivilegedSections.length > 0) {
+        reasons.push(
+          `has Modify/Delete permissions for: ${tooPrivilegedSections.join(", ")}`,
+        );
+      }
+      if (adminView) {
+        reasons.push("has Administration: View permission");
+      }
+
+      this.backgroundTokenValidation = {
+        validated: true,
+        okForPtr: false,
+        username: sessionInfo?.username,
+        tooPrivilegedSections,
+        reason: `TECHNITIUM_BACKGROUND_TOKEN is too privileged (${reasons.join(", ")}). Modify the privileges of the user associated with this token or create a dedicated low-privilege user/token (ideally only DnsClient: View).`,
+      };
+      return this.backgroundTokenValidation;
+    }
+
+    this.backgroundTokenValidation = {
+      validated: true,
+      okForPtr: true,
+      username: sessionInfo?.username,
+    };
+
+    this.logger.log(
+      `Validated TECHNITIUM_BACKGROUND_TOKEN for background PTR hostname resolution (user: ${sessionInfo?.username ?? "unknown"}).`,
+    );
+    return this.backgroundTokenValidation;
+  }
+
+  private async pickPrimaryNodeForAdminToken(
+    token: string,
+  ): Promise<TechnitiumNodeConfig> {
+    if (this.nodeConfigs.length === 0) {
+      throw new ServiceUnavailableException(
+        "No Technitium DNS nodes are configured; cannot perform migration.",
+      );
+    }
+
+    // Try each configured node until we can discover cluster topology.
+    for (const node of this.nodeConfigs) {
+      try {
+        const response = await this.requestWithExplicitToken<{
+          status: string;
+          info?: {
+            clusterInitialized?: boolean;
+            clusterNodes?: Array<{ type?: string; url?: string }>;
+          };
+        }>(
+          node,
+          { method: "GET", url: "/api/user/session/get", params: {} },
+          token,
+        );
+
+        if (response.status !== "ok") {
+          continue;
+        }
+
+        const clusterInitialized = response.info?.clusterInitialized === true;
+        const clusterNodes = response.info?.clusterNodes ?? [];
+
+        if (!clusterInitialized || clusterNodes.length === 0) {
+          // Not clustered (or cannot read clusterNodes) - just use this node.
+          return node;
+        }
+
+        const primaryUrl =
+          clusterNodes.find(
+            (n) => n?.type === "Primary" && typeof n?.url === "string",
+          )?.url ?? null;
+
+        if (!primaryUrl) {
+          return node;
+        }
+
+        try {
+          const primaryOrigin = new URL(primaryUrl).origin;
+          const match = this.nodeConfigs.find((n) => {
+            try {
+              return new URL(n.baseUrl).origin === primaryOrigin;
+            } catch {
+              return false;
+            }
+          });
+
+          return (
+            match ??
+            ({
+              id: "primary",
+              name: "Primary",
+              baseUrl: primaryOrigin,
+              token: "",
+              queryLoggerAppName: undefined,
+              queryLoggerClassPath: undefined,
+            } satisfies TechnitiumNodeConfig)
+          );
+        } catch {
+          return node;
+        }
+      } catch {
+        // Try next node
+      }
+    }
+
+    // Fall back to the first configured node.
+    return this.nodeConfigs[0];
+  }
+
+  private evaluatePtrTokenPolicy(envelope: unknown): {
+    okForPtr: boolean;
+    username?: string;
+    reason?: string;
+    tooPrivilegedSections?: string[];
+  } {
+    type Permission = {
+      canView?: boolean;
+      canModify?: boolean;
+      canDelete?: boolean;
+    };
+    type PermissionMap = Record<string, Permission | undefined>;
+    type SessionInfo = {
+      username?: string;
+      info?: { permissions?: PermissionMap };
+    };
+
+    const envelopeObj =
+      envelope && typeof envelope === "object"
+        ? (envelope as Record<string, unknown>)
+        : undefined;
+
+    const status = envelopeObj?.["status"];
+    if (!envelopeObj || typeof status !== "string") {
+      return {
+        okForPtr: false,
+        reason:
+          "Unexpected response while validating generated token. This may indicate a reverse proxy altering the Technitium API response.",
+      };
+    }
+
+    if (status !== "ok") {
+      if (status === "invalid-token") {
+        return {
+          okForPtr: false,
+          reason: "Generated token was rejected (invalid-token).",
+        };
+      }
+
+      const detail =
+        envelopeObj["errorMessage"] ??
+        envelopeObj["innerErrorMessage"] ??
+        "unknown error";
+      return {
+        okForPtr: false,
+        reason: `Generated token validation failed: ${typeof detail === "string" ? detail : "unknown error"}.`,
+      };
+    }
+
+    const flattened = envelopeObj as unknown as SessionInfo & {
+      response?: unknown;
+    };
+    const sessionInfo: SessionInfo | undefined =
+      flattened &&
+      typeof flattened === "object" &&
+      (flattened.info || flattened.username)
+        ? flattened
+        : flattened && typeof flattened.response === "object"
+          ? (flattened.response as SessionInfo)
+          : undefined;
+
+    if (!sessionInfo) {
+      return {
+        okForPtr: false,
+        reason:
+          "Generated token returned status ok but no session info payload from /api/user/session/get.",
+      };
+    }
+
+    const permissions = sessionInfo.info?.permissions ?? {};
+    const dnsClient = permissions["DnsClient"];
+    if (!dnsClient?.canView) {
+      return {
+        okForPtr: false,
+        username: sessionInfo.username,
+        reason:
+          "Generated token does not have DnsClient: View permission required for PTR lookups.",
+      };
+    }
+
+    const tooPrivilegedSections = Object.entries(permissions)
+      .filter(([, perm]) => !!perm?.canModify || !!perm?.canDelete)
+      .map(([section]) => section)
+      .sort((a, b) => a.localeCompare(b));
+
+    const adminView = permissions["Administration"]?.canView === true;
+    if (tooPrivilegedSections.length > 0 || adminView) {
+      const reasons: string[] = [];
+      if (tooPrivilegedSections.length > 0) {
+        reasons.push(
+          `has Modify/Delete permissions for: ${tooPrivilegedSections.join(", ")}`,
+        );
+      }
+      if (adminView) {
+        reasons.push("has Administration: View permission");
+      }
+
+      return {
+        okForPtr: false,
+        username: sessionInfo.username,
+        tooPrivilegedSections,
+        reason: `Generated token is too privileged (${reasons.join(", ")}).`,
+      };
+    }
+
+    return { okForPtr: true, username: sessionInfo.username };
+  }
+
+  async migrateClusterTokenToBackgroundToken(): Promise<{
+    username: string;
+    tokenName: string;
+    token: string;
+  }> {
+    const clusterToken = (process.env.TECHNITIUM_CLUSTER_TOKEN ?? "").trim();
+    if (!clusterToken) {
+      throw new BadRequestException(
+        "TECHNITIUM_CLUSTER_TOKEN is not configured; migration cannot run.",
+      );
+    }
+
+    const node = await this.pickPrimaryNodeForAdminToken(clusterToken);
+
+    const baseUsername = "companion-readonly";
+    const displayName = "Technitium DNS Companion";
+    const tokenName = "Technitium-DNS-Companion Background";
+
+    let createdUsername: string | undefined;
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const suffix =
+        attempt === 0 ? "" : `-${crypto.randomBytes(3).toString("hex")}`;
+      const username = `${baseUsername}${suffix}`;
+      const password = crypto.randomBytes(18).toString("base64url");
+
+      try {
+        const createUserEnvelope = await this.requestWithExplicitToken<
+          TechnitiumApiResponse<{ displayName?: string; username?: string }>
+        >(
+          node,
+          {
+            method: "GET",
+            url: "/api/admin/users/create",
+            params: { displayName, user: username, pass: password },
+          },
+          clusterToken,
+        );
+
+        this.unwrapApiResponse(
+          createUserEnvelope,
+          node.id,
+          "create migration user",
+        );
+        createdUsername = username;
+        break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (
+          message.toLowerCase().includes("already") &&
+          message.toLowerCase().includes("exist")
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!createdUsername) {
+      throw new ServiceUnavailableException(
+        "Unable to create a dedicated read-only user (username collisions). Try again or delete existing companion users in Technitium.",
+      );
+    }
+
+    // Ensure the user is not placed into any privileged groups.
+    // The default "Everyone" group is expected to be view-only and safe for background lookups.
+    try {
+      const setUserEnvelope = await this.requestWithExplicitToken<
+        TechnitiumApiResponse<{ username?: string }>
+      >(
+        node,
+        {
+          method: "GET",
+          url: "/api/admin/users/set",
+          params: { user: createdUsername, memberOfGroups: "Everyone" },
+        },
+        clusterToken,
+      );
+
+      this.unwrapApiResponse(
+        setUserEnvelope,
+        node.id,
+        "set migration user groups",
+      );
+    } catch (error) {
+      // If we can't enforce group membership (e.g., older TDNS versions or custom auth config),
+      // continue and rely on the least-privilege validation backstop below.
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Migration could not set memberOfGroups for user "${createdUsername}": ${message}`,
+      );
+    }
+
+    const createTokenEnvelope = await this.requestWithExplicitToken<
+      TechnitiumApiResponse<{
+        username: string;
+        tokenName: string;
+        token: string;
+      }>
+    >(
+      node,
+      {
+        method: "GET",
+        url: "/api/admin/sessions/createToken",
+        params: { user: createdUsername, tokenName },
+      },
+      clusterToken,
+    );
+
+    const created = this.unwrapApiResponse(
+      createTokenEnvelope,
+      node.id,
+      "create migration API token",
+    );
+
+    const newToken = created.token;
+    if (!newToken) {
+      throw new ServiceUnavailableException(
+        "Technitium did not return a token value during migration.",
+      );
+    }
+
+    const sessionGetEnvelope = await this.requestWithExplicitToken(
+      node,
+      { method: "GET", url: "/api/user/session/get", params: {} },
+      newToken,
+    );
+
+    const policy = this.evaluatePtrTokenPolicy(sessionGetEnvelope);
+    if (!policy.okForPtr) {
+      throw new ServiceUnavailableException(
+        `Created token did not meet least-privilege requirements: ${policy.reason ?? "unknown reason"}`,
+      );
+    }
+
+    this.logger.log(
+      `Migration created background token user "${createdUsername}" on node "${node.id}" (tokenName: "${tokenName}").`,
+    );
+
+    return {
+      username: createdUsername,
+      tokenName: created.tokenName ?? tokenName,
+      token: newToken,
+    };
+  }
+
   private stopPeriodicPtrLookups(): void {
     if (!this.ptrLookupTimer) {
       return;
@@ -997,6 +1637,51 @@ export class TechnitiumService {
   /**
    * Perform a single PTR lookup for an IP address using Technitium's DNS client.
    */
+  private async requestWithExplicitToken<T>(
+    node: TechnitiumNodeConfig,
+    config: AxiosRequestConfig,
+    token: string,
+  ): Promise<T> {
+    if (!token) {
+      throw new UnauthorizedException(
+        `TECHNITIUM_BACKGROUND_TOKEN is required for background requests to Technitium node "${node.id}".`,
+      );
+    }
+
+    try {
+      const axiosConfig: AxiosRequestConfig = {
+        baseURL: node.baseUrl,
+        timeout: 30_000,
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        ...config,
+      };
+
+      const params = axiosConfig.params as unknown;
+      if (params instanceof URLSearchParams) {
+        if (!params.has("token")) {
+          params.set("token", token);
+        }
+      } else {
+        const paramsObject =
+          params && typeof params === "object"
+            ? (params as Record<string, unknown>)
+            : {};
+
+        if (!("token" in paramsObject)) {
+          axiosConfig.params = { ...paramsObject, token };
+        }
+      }
+
+      const response: AxiosResponse<T> = await axios.request<T>(axiosConfig);
+      return response.data;
+    } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw this.normalizeAxiosError(error, node.id);
+    }
+  }
+
   private async performPtrLookup(
     node: TechnitiumNodeConfig,
     ipAddress: string,
@@ -1018,7 +1703,7 @@ export class TechnitiumService {
       }
 
       // Use Technitium's DNS client API to resolve PTR
-      const envelope = await this.request<TechnitiumApiResponse<any>>(node, {
+      const requestConfig: AxiosRequestConfig = {
         method: "GET",
         url: "/api/dnsClient/resolve",
         params: {
@@ -1028,7 +1713,15 @@ export class TechnitiumService {
           protocol: "Udp",
         },
         timeout: 5000, // 5 second timeout for PTR lookups
-      });
+      };
+
+      const envelope = this.sessionAuthEnabled
+        ? await this.requestWithExplicitToken<TechnitiumApiResponse<any>>(
+            node,
+            requestConfig,
+            this.backgroundToken ?? "",
+          )
+        : await this.request<TechnitiumApiResponse<any>>(node, requestConfig);
 
       const data = this.unwrapApiResponse<TechnitiumPtrLookupResult>(
         envelope as unknown as TechnitiumApiResponse<TechnitiumPtrLookupResult>,
@@ -1353,18 +2046,18 @@ export class TechnitiumService {
       totalMatchingEntries > 0;
 
     const totalPages =
-      effectiveEntriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
-      : 1;
+      effectiveEntriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
+        : 1;
 
     const startIndex =
-      effectiveEntriesPerPage > 0 ?
-        (pageNumber - 1) * effectiveEntriesPerPage
-      : 0;
+      effectiveEntriesPerPage > 0
+        ? (pageNumber - 1) * effectiveEntriesPerPage
+        : 0;
     const endIndex =
-      effectiveEntriesPerPage > 0 ?
-        startIndex + effectiveEntriesPerPage
-      : totalMatchingEntries;
+      effectiveEntriesPerPage > 0
+        ? startIndex + effectiveEntriesPerPage
+        : totalMatchingEntries;
     const paginatedEntries = filteredEntries.slice(startIndex, endIndex);
 
     return {
@@ -1378,6 +2071,61 @@ export class TechnitiumService {
         hasMorePages,
         entries: paginatedEntries,
       },
+    };
+  }
+
+  private async fetchQueryLogEntriesForNode(
+    nodeId: string,
+    filters: TechnitiumQueryLogFilters,
+  ): Promise<{ fetchedAt: string; entries: TechnitiumQueryLogEntry[] }> {
+    const node = this.findNode(nodeId);
+    const queryLogger = await this.resolveQueryLogger(node);
+
+    // Fetch multiple pages from Technitium DNS to get enough data to merge across nodes.
+    const ENTRIES_PER_TECHNITIUM_PAGE = 100;
+    const TOTAL_ENTRIES_TO_FETCH = 500;
+    const PAGES_TO_FETCH = Math.ceil(
+      TOTAL_ENTRIES_TO_FETCH / ENTRIES_PER_TECHNITIUM_PAGE,
+    );
+
+    let fetchedEntries: TechnitiumQueryLogEntry[] = [];
+
+    for (let page = 1; page <= PAGES_TO_FETCH; page++) {
+      const paramsForFetch = {
+        name: queryLogger.name,
+        classPath: queryLogger.classPath,
+        ...this.buildQueryLogParams({
+          ...filters,
+          pageNumber: page,
+          entriesPerPage: ENTRIES_PER_TECHNITIUM_PAGE,
+        }),
+      };
+
+      const envelope = await this.request<
+        TechnitiumApiResponse<TechnitiumQueryLogPage>
+      >(node, {
+        method: "GET",
+        url: "/api/logs/query",
+        params: paramsForFetch,
+      });
+
+      const pageData = this.unwrapApiResponse(envelope, node.id, "query logs");
+      const pageEntries = pageData.entries ?? [];
+
+      fetchedEntries = fetchedEntries.concat(pageEntries);
+
+      if (pageEntries.length < ENTRIES_PER_TECHNITIUM_PAGE) {
+        break;
+      }
+
+      if (fetchedEntries.length >= TOTAL_ENTRIES_TO_FETCH) {
+        break;
+      }
+    }
+
+    return {
+      fetchedAt: new Date().toISOString(),
+      entries: fetchedEntries.slice(0, 500),
     };
   }
 
@@ -1538,13 +2286,25 @@ export class TechnitiumService {
     const snapshots = await Promise.all(
       this.nodeConfigs.map(
         async (node): Promise<TechnitiumNodeQueryLogSnapshot> => {
+          const nodeStartTime = performance.now();
           try {
-            const result = await this.getQueryLogs(node.id, fetchFilters);
+            const { fetchedAt, entries } =
+              await this.fetchQueryLogEntriesForNode(node.id, fetchFilters);
+
+            const data: TechnitiumQueryLogPage = {
+              pageNumber: 1,
+              totalPages: 1,
+              totalEntries: entries.length,
+              totalMatchingEntries: entries.length,
+              entries,
+            };
+
             return {
               nodeId: node.id,
               baseUrl: node.baseUrl,
-              fetchedAt: result.fetchedAt,
-              data: result.data,
+              fetchedAt,
+              data,
+              durationMs: performance.now() - nodeStartTime,
             };
           } catch (error) {
             const message =
@@ -1557,6 +2317,7 @@ export class TechnitiumService {
               baseUrl: node.baseUrl,
               fetchedAt: new Date().toISOString(),
               error: message,
+              durationMs: performance.now() - nodeStartTime,
             };
           }
         },
@@ -1569,7 +2330,7 @@ export class TechnitiumService {
     // BENCHMARK: Start processing timing
     const processingStartTime = performance.now();
 
-    const combinedEntries: TechnitiumCombinedQueryLogEntry[] = [];
+    let combinedEntries: TechnitiumCombinedQueryLogEntry[] = [];
 
     for (const snapshot of snapshots) {
       if (!snapshot.data) {
@@ -1584,6 +2345,10 @@ export class TechnitiumService {
         });
       }
     }
+
+    // Enrich combined entries with hostnames ONCE (DHCP leases are fetched from all nodes once).
+    const ipToHostname = await this.getAllDhcpLeases();
+    combinedEntries = this.enrichWithHostnames(combinedEntries, ipToHostname);
 
     combinedEntries.sort((a, b) => {
       const aTime = Date.parse(a.timestamp ?? "");
@@ -1736,17 +2501,17 @@ export class TechnitiumService {
       anyNodeHitLimit && hasFiltersActive && totalMatchingEntries > 0;
 
     const totalPages =
-      effectiveEntriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
-      : 1;
+      effectiveEntriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
+        : 1;
     const startIndex =
-      effectiveEntriesPerPage > 0 ?
-        (pageNumber - 1) * effectiveEntriesPerPage
-      : 0;
+      effectiveEntriesPerPage > 0
+        ? (pageNumber - 1) * effectiveEntriesPerPage
+        : 0;
     const endIndex =
-      effectiveEntriesPerPage > 0 ?
-        startIndex + effectiveEntriesPerPage
-      : filteredEntries.length;
+      effectiveEntriesPerPage > 0
+        ? startIndex + effectiveEntriesPerPage
+        : filteredEntries.length;
     const paginatedEntries = filteredEntries.slice(startIndex, endIndex);
 
     const nodes: TechnitiumCombinedNodeLogSnapshot[] = snapshots.map(
@@ -1756,6 +2521,7 @@ export class TechnitiumService {
         fetchedAt: snapshot.fetchedAt,
         totalEntries: snapshot.data?.totalEntries,
         totalPages: snapshot.data?.totalPages,
+        durationMs: snapshot.durationMs,
         error: snapshot.error,
       }),
     );
@@ -1789,13 +2555,13 @@ export class TechnitiumService {
 
     // BENCHMARK: Log detailed metrics
     const hitRate =
-      this.queryLogCacheStats.hits + this.queryLogCacheStats.misses > 0 ?
-        (
-          (this.queryLogCacheStats.hits /
-            (this.queryLogCacheStats.hits + this.queryLogCacheStats.misses)) *
-          100
-        ).toFixed(1)
-      : "0.0";
+      this.queryLogCacheStats.hits + this.queryLogCacheStats.misses > 0
+        ? (
+            (this.queryLogCacheStats.hits /
+              (this.queryLogCacheStats.hits + this.queryLogCacheStats.misses)) *
+            100
+          ).toFixed(1)
+        : "0.0";
 
     this.logger.log(
       `[BENCHMARK] getCombinedQueryLogs: ` +
@@ -1842,9 +2608,8 @@ export class TechnitiumService {
     >(node, { method: "GET", url: "/api/zones/list" });
 
     const payload = this.unwrapApiResponse(envelope, node.id, "zone list");
-    const zones =
-      Array.isArray(payload.zones) ?
-        payload.zones.map((zone) => this.sanitizeZoneSummary(zone))
+    const zones = Array.isArray(payload.zones)
+      ? payload.zones.map((zone) => this.sanitizeZoneSummary(zone))
       : [];
 
     const pageNumber =
@@ -2010,9 +2775,8 @@ export class TechnitiumService {
         const totalZones =
           snapshot.data?.totalZones ??
           (snapshot.data ? snapshot.data.zones.length : undefined);
-        const modifiableZones =
-          snapshot.data ?
-            snapshot.data.zones.filter((zone) => zone.internal !== true).length
+        const modifiableZones = snapshot.data
+          ? snapshot.data.zones.filter((zone) => zone.internal !== true).length
           : undefined;
 
         return {
@@ -2078,9 +2842,9 @@ export class TechnitiumService {
     const sourceNode = this.findNode(sourceNodeId);
     const requestedTargetId = request.targetNodeId?.trim();
     const targetNode = this.findNode(
-      requestedTargetId && requestedTargetId.length > 0 ?
-        requestedTargetId
-      : sourceNode.id,
+      requestedTargetId && requestedTargetId.length > 0
+        ? requestedTargetId
+        : sourceNode.id,
     );
     const isLocalClone =
       targetNode.id.toLowerCase() === sourceNode.id.toLowerCase();
@@ -2201,8 +2965,9 @@ export class TechnitiumService {
       request.enableOnTarget ??
       (sourceSummary?.enabled !== undefined ? sourceSummary.enabled : false);
 
-    const enableDisableUrl =
-      desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+    const enableDisableUrl = desiredEnabled
+      ? "/api/dhcp/scopes/enable"
+      : "/api/dhcp/scopes/disable";
 
     const toggleEnvelope = await this.request<
       TechnitiumApiResponse<Record<string, unknown>>
@@ -2306,8 +3071,9 @@ export class TechnitiumService {
     );
 
     const desiredEnabled = request.enabled ?? false;
-    const enableDisableUrl =
-      desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+    const enableDisableUrl = desiredEnabled
+      ? "/api/dhcp/scopes/enable"
+      : "/api/dhcp/scopes/disable";
 
     const toggleEnvelope = await this.request<
       TechnitiumApiResponse<Record<string, unknown>>
@@ -2553,8 +3319,9 @@ export class TechnitiumService {
 
     if (wantsEnabledChange) {
       const desiredEnabled = request.enabled as boolean;
-      const enableDisableUrl =
-        desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+      const enableDisableUrl = desiredEnabled
+        ? "/api/dhcp/scopes/enable"
+        : "/api/dhcp/scopes/disable";
 
       const toggleEnvelope = await this.request<
         TechnitiumApiResponse<Record<string, unknown>>
@@ -2829,8 +3596,9 @@ export class TechnitiumService {
       );
 
       const desiredEnabled = entry.enabled ?? false;
-      const enableDisableUrl =
-        desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+      const enableDisableUrl = desiredEnabled
+        ? "/api/dhcp/scopes/enable"
+        : "/api/dhcp/scopes/disable";
 
       const toggleEnvelope = await this.request<
         TechnitiumApiResponse<Record<string, unknown>>
@@ -2877,13 +3645,13 @@ export class TechnitiumService {
 
     // Filter to specific scopes if requested
     const scopesToSync =
-      scopeNames && scopeNames.length > 0 ?
-        sourceScopes.filter((scope) =>
-          scopeNames.some(
-            (name) => name.toLowerCase() === scope.name?.toLowerCase(),
-          ),
-        )
-      : sourceScopes;
+      scopeNames && scopeNames.length > 0
+        ? sourceScopes.filter((scope) =>
+            scopeNames.some(
+              (name) => name.toLowerCase() === scope.name?.toLowerCase(),
+            ),
+          )
+        : sourceScopes;
 
     if (scopesToSync.length === 0) {
       throw new BadRequestException("No scopes found to sync on source node.");
@@ -3010,15 +3778,14 @@ export class TechnitiumService {
           sourceScopeDetails.get(scopeName.toLowerCase()) ||
           (sourceScope as unknown as import("./technitium.types").TechnitiumDhcpScope);
 
-        const scopeDiff =
-          targetScopeDetails ?
-            this.compareDhcpScopes(sourceScopeDetail, targetScopeDetails)
-          : existingTargetScope ?
-            this.compareDhcpScopes(
-              sourceScopeDetail,
-              existingTargetScope as unknown as import("./technitium.types").TechnitiumDhcpScope,
-            )
-          : undefined;
+        const scopeDiff = targetScopeDetails
+          ? this.compareDhcpScopes(sourceScopeDetail, targetScopeDetails)
+          : existingTargetScope
+            ? this.compareDhcpScopes(
+                sourceScopeDetail,
+                existingTargetScope as unknown as import("./technitium.types").TechnitiumDhcpScope,
+              )
+            : undefined;
 
         // Apply strategy
         if (strategy === "skip-existing" && existsOnTarget) {
@@ -3027,11 +3794,11 @@ export class TechnitiumService {
               scopeName,
               status: "skipped",
               reason:
-                scopeDiff.differences.length > 0 ?
-                  `Scope exists but differs: ${scopeDiff.differences.join(
-                    "; ",
-                  )}. Use overwrite-all or merge-missing to update.`
-                : "Scope exists but differs. Use overwrite-all or merge-missing to update.",
+                scopeDiff.differences.length > 0
+                  ? `Scope exists but differs: ${scopeDiff.differences.join(
+                      "; ",
+                    )}. Use overwrite-all or merge-missing to update.`
+                  : "Scope exists but differs. Use overwrite-all or merge-missing to update.",
             });
             skippedCount++;
             continue;
@@ -3080,9 +3847,7 @@ export class TechnitiumService {
       }
 
       const nodeStatus: import("./technitium.types").DhcpBulkSyncNodeResult["status"] =
-        failedCount === 0 ? "success"
-        : syncedCount > 0 ? "partial"
-        : "failed";
+        failedCount === 0 ? "success" : syncedCount > 0 ? "partial" : "failed";
 
       nodeResults.push({
         targetNodeId,
@@ -3537,6 +4302,7 @@ export class TechnitiumService {
   async request<T>(
     node: TechnitiumNodeConfig,
     config: AxiosRequestConfig,
+    options?: { authMode?: "session" | "background" },
   ): Promise<T> {
     try {
       const axiosConfig: AxiosRequestConfig = {
@@ -3548,27 +4314,138 @@ export class TechnitiumService {
       };
 
       // Add token to request params
+      const session = AuthRequestContext.getSession();
+      const sessionToken = session?.tokensByNodeId?.[node.id];
+      const authMode = options?.authMode ?? "session";
+
+      let effectiveToken: string | undefined;
+      if (this.sessionAuthEnabled) {
+        if (authMode === "background") {
+          // Background timers have no per-user session context; use a dedicated
+          // least-privilege token when configured.
+          effectiveToken = this.backgroundToken;
+          if (!effectiveToken) {
+            throw new UnauthorizedException(
+              `Authentication required for background access to Technitium node "${node.id}". Set TECHNITIUM_BACKGROUND_TOKEN or disable AUTH_SESSION_ENABLED.`,
+            );
+          }
+        } else {
+          // Default: interactive calls must use a per-user session token.
+          effectiveToken = sessionToken;
+          if (!effectiveToken) {
+            throw new UnauthorizedException(
+              `Authentication required for Technitium node "${node.id}".`,
+            );
+          }
+        }
+      } else {
+        // Legacy mode: accept either a request-scoped session token (if any)
+        // or a configured node/cluster token.
+        effectiveToken = sessionToken ?? node.token;
+      }
+
       const params = axiosConfig.params as unknown;
       if (params instanceof URLSearchParams) {
         if (!params.has("token")) {
-          params.set("token", node.token);
+          params.set("token", effectiveToken ?? "");
         }
       } else {
         const paramsObject =
-          params && typeof params === "object" ?
-            (params as Record<string, unknown>)
-          : {};
+          params && typeof params === "object"
+            ? (params as Record<string, unknown>)
+            : {};
 
         if (!("token" in paramsObject)) {
-          axiosConfig.params = { ...paramsObject, token: node.token };
+          axiosConfig.params = { ...paramsObject, token: effectiveToken ?? "" };
         }
       }
       const response: AxiosResponse<T> = await axios.request<T>(axiosConfig);
 
+      // Technitium sometimes responds with HTTP 200 and a JSON envelope whose
+      // status is "invalid-token". In session-auth mode, treat this as an auth
+      // failure and immediately drop the stored per-node token to prevent
+      // repeated background polling 401/invalid-token storms.
+      if (
+        this.sessionAuthEnabled &&
+        this.isTechnitiumInvalidTokenEnvelope(response.data)
+      ) {
+        const session = AuthRequestContext.getSession();
+        if (session?.tokensByNodeId?.[node.id]) {
+          delete session.tokensByNodeId[node.id];
+          this.logger.warn(
+            `Technitium rejected token for node "${node.id}" (invalid-token envelope). Dropped token from session; re-login required for this node.`,
+          );
+        }
+
+        throw new UnauthorizedException(
+          `Technitium token is invalid for node "${node.id}". Please sign in again.`,
+        );
+      }
+
       return response.data;
     } catch (error) {
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
+      // If Technitium rejects the token, drop it from the current session.
+      // This prevents repeated 401 spam and allows the frontend to stop
+      // issuing per-node requests for nodes that are no longer authenticated.
+      if (
+        this.sessionAuthEnabled &&
+        axios.isAxiosError(error) &&
+        error.response?.status === 401 &&
+        this.isLikelyInvalidTokenResponse(error.response.data)
+      ) {
+        const session = AuthRequestContext.getSession();
+        if (session?.tokensByNodeId?.[node.id]) {
+          delete session.tokensByNodeId[node.id];
+          this.logger.warn(
+            `Technitium rejected token for node "${node.id}" (invalid token). Dropped token from session; re-login required for this node.`,
+          );
+        }
+        throw new UnauthorizedException(
+          `Technitium token is invalid for node "${node.id}". Please sign in again.`,
+        );
+      }
+
       throw this.normalizeAxiosError(error, node.id);
     }
+  }
+
+  private isTechnitiumInvalidTokenEnvelope(data: unknown): boolean {
+    if (!data || typeof data !== "object") {
+      return false;
+    }
+
+    const obj = data as Record<string, unknown>;
+    return obj.status === "invalid-token";
+  }
+
+  private isLikelyInvalidTokenResponse(data: unknown): boolean {
+    // Technitium may return either plain text or a JSON envelope.
+    if (typeof data === "string") {
+      return data.toLowerCase().includes("invalid token");
+    }
+
+    if (!data || typeof data !== "object") {
+      return false;
+    }
+
+    const obj = data as Record<string, unknown>;
+    const candidates = [
+      obj.message,
+      obj.error,
+      obj.errorMessage,
+      obj.status,
+      obj.response && typeof obj.response === "object"
+        ? (obj.response as Record<string, unknown>).errorMessage
+        : undefined,
+    ];
+
+    return candidates
+      .filter((value): value is string => typeof value === "string")
+      .some((value) => value.toLowerCase().includes("invalid token"));
   }
 
   private findNode(nodeId: string): TechnitiumNodeConfig {
@@ -3773,21 +4650,21 @@ export class TechnitiumService {
 
     assign(
       "allowOnlyReservedLeases",
-      hasOwn("allowOnlyReservedLeases") ?
-        scope.allowOnlyReservedLeases
-      : undefined,
+      hasOwn("allowOnlyReservedLeases")
+        ? scope.allowOnlyReservedLeases
+        : undefined,
     );
     assign(
       "blockLocallyAdministeredMacAddresses",
-      hasOwn("blockLocallyAdministeredMacAddresses") ?
-        scope.blockLocallyAdministeredMacAddresses
-      : undefined,
+      hasOwn("blockLocallyAdministeredMacAddresses")
+        ? scope.blockLocallyAdministeredMacAddresses
+        : undefined,
     );
     assign(
       "ignoreClientIdentifierOption",
-      hasOwn("ignoreClientIdentifierOption") ?
-        scope.ignoreClientIdentifierOption
-      : undefined,
+      hasOwn("ignoreClientIdentifierOption")
+        ? scope.ignoreClientIdentifierOption
+        : undefined,
     );
 
     return form;
@@ -3899,6 +4776,11 @@ export class TechnitiumService {
     }
 
     if (envelope.status !== "ok") {
+      if (envelope.status === "invalid-token") {
+        throw new UnauthorizedException(
+          `Technitium DNS node "${nodeId}" rejected ${context}: invalid token.`,
+        );
+      }
       const detail =
         envelope.errorMessage ?? envelope.innerErrorMessage ?? "unknown error";
       throw new ServiceUnavailableException(
@@ -3922,9 +4804,9 @@ export class TechnitiumService {
       if (axiosError.response) {
         const { status, data, statusText } = axiosError.response;
         const message =
-          typeof data === "string" ? data : (
-            ((data as Record<string, unknown>)?.message ?? statusText)
-          );
+          typeof data === "string"
+            ? data
+            : ((data as Record<string, unknown>)?.message ?? statusText);
 
         return new HttpException(
           {

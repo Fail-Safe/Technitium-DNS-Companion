@@ -35,21 +35,27 @@ Welcome to the documentation for Technitium DNS Companion. This guide will help 
 Detailed documentation for specific features:
 
 #### Advanced Blocking
+
 - **[features/advanced-blocking/](./features/advanced-blocking/)** - Advanced Blocking app integration
   - Settings synchronization
   - Domain list management
 
 #### Clustering
+
 - **[features/clustering/](./features/clustering/)** - Technitium DNS v14+ clustering support
   - Primary/Secondary role detection
   - Write restriction enforcement
 
 #### Query Logs
+
 - **[features/query-logs/](./features/query-logs/)** - Query log features
   - Server-side filtering
   - Combined log viewing
 
 #### Other Features
+
+- **[features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](./features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)** - Session auth (v1.2+) overview and cluster-token → background-token migration
+- **[features/AUTHENTICATION_DECISION.md](./features/AUTHENTICATION_DECISION.md)** - Authentication approach and token strategy rationale
 - **[features/CONFIG_CHANGE_DETECTION.md](./features/CONFIG_CHANGE_DETECTION.md)** - Unsaved changes detection
 - **[features/DHCP_AGGREGATION.md](./features/DHCP_AGGREGATION.md)** - DHCP scope aggregation
 - **[features/DHCP_BULK_SYNC.md](./features/DHCP_BULK_SYNC.md)** - Bulk DHCP scope operations

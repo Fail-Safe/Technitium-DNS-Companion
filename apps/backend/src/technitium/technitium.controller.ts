@@ -57,9 +57,7 @@ export class TechnitiumController {
     @Query() query: Record<string, string | string[]>,
     @Res({ passthrough: true }) res: Response,
   ) {
-    console.log("🔍 Backend received query params:", query);
     const filters = this.normalizeQueryLogFilters(query);
-    console.log("🔍 Normalized filters:", filters);
 
     if (filters.disableCache) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
