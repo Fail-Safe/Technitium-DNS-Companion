@@ -24,6 +24,23 @@ services:
       # HTTPS_KEY_PATH: /app/certs/privkey.pem
       # HTTPS_CA_PATH: /app/certs/chain.pem  # Optional
 
+      # Authentication (as of v1.2.1)
+      #
+      # Preferred: Technitium-backed session authentication
+      # - Users log in with their Technitium credentials via the Companion UI
+      # - Companion stores Technitium session tokens server-side; browser uses an HttpOnly cookie
+      # - App is expected to be usable only after login (v1.3 direction)
+      #
+      # IMPORTANT: Run over HTTPS when enabling session auth.
+      # - Option A: enable Companion HTTPS above and mount certs below
+      # - Option B: terminate TLS in a reverse proxy and set TRUST_PROXY=true
+      #
+      # v1.2.x only (migration/stop-gap):
+      # AUTH_SESSION_ENABLED: "true"
+      # v1.3+: planned to be removed (session auth always enabled)
+      # TRUST_PROXY: "true"
+      # TRUST_PROXY_HOPS: "1"
+
       # Timezone
       TZ: America/New_York
 
@@ -34,7 +51,15 @@ services:
       # List of node IDs (comma-separated)
       TECHNITIUM_NODES: node1,node2
 
-      # Cluster token (for clustered nodes - recommended)
+      # Legacy env-token mode (still supported)
+      #
+      # In session-auth deployments, TECHNITIUM_*_TOKEN / TECHNITIUM_CLUSTER_TOKEN are OPTIONAL.
+      # If you leave tokens blank, API calls require a logged-in user session.
+      #
+      # Cluster token (legacy env-token mode)
+      # DEPRECATION NOTE: As of v1.3, TECHNITIUM_CLUSTER_TOKEN is planned to be deprecated.
+      # Planned removal: v1.4.
+      # Prefer Technitium-backed login sessions (interactive) + TECHNITIUM_BACKGROUND_TOKEN (background).
       TECHNITIUM_CLUSTER_TOKEN: ${TECHNITIUM_CLUSTER_TOKEN}
 
       # Node 1 Configuration
@@ -48,6 +73,13 @@ services:
       # Legacy per-node tokens (optional - only if not using TECHNITIUM_CLUSTER_TOKEN)
       # TECHNITIUM_NODE1_TOKEN: ${TECHNITIUM_NODE1_TOKEN:-}
       # TECHNITIUM_NODE2_TOKEN: ${TECHNITIUM_NODE2_TOKEN:-}
+
+      # Optional: Background token (read-only) for background jobs when session auth is enabled
+      # If unset, background jobs that require a token may be disabled.
+      # NOTE (planned change): As of v1.3, this is expected to be REQUIRED when
+      # using session auth if you want background features (PTR warming, scheduled sync) to run.
+      # IMPORTANT: Use a low-privilege Technitium user token.
+      # TECHNITIUM_BACKGROUND_TOKEN: ${TECHNITIUM_BACKGROUND_TOKEN:-}
 
     volumes:
       # Mount SSL certificates (if using HTTPS)
