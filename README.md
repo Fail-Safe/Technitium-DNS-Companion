@@ -19,7 +19,7 @@ This project is **not affiliated with Technitium** but is built to complement Te
 - 🛡️ **Advanced Blocking** - Easy management of domain lists
 - 📊 **DHCP Overview** - Compare and sync DHCP scopes across nodes
 
-## Screenshots
+## Web-based User Interface
 
 [Features Light & Dark Mode](https://fail-safe.github.io/Technitium-DNS-Companion/#screenshots)
 
