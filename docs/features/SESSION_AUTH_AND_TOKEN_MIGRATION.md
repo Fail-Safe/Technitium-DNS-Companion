@@ -130,6 +130,46 @@ Look for:
 - Keep `TECHNITIUM_BACKGROUND_TOKEN` private (it is still a credential).
 - If you want to go back to legacy mode (for now), unset `AUTH_SESSION_ENABLED` and reconfigure env tokens.
 
+## Recommended deployment model (practical guidance)
+
+If you want **Technitium to remain the single source of truth for auth + permissions**, the recommended setup is:
+
+- Enable **session auth**: `AUTH_SESSION_ENABLED=true`
+- Run Companion over **HTTPS** (direct HTTPS or TLS-terminating reverse proxy + `TRUST_PROXY=true`)
+- Use Technitium users/permissions to control what a person can do
+- Configure a dedicated, **least-privileged** `TECHNITIUM_BACKGROUND_TOKEN` only for background-only work (currently: PTR hostname resolution)
+
+This keeps “interactive power” tied to the Technitium account the user actually logged in with, while still allowing safe background tasks.
+
+Legacy mode (env tokens only) is still useful for:
+
+- Lab setups where the UI is private/air-gapped
+- Temporary troubleshooting
+
+But it is intentionally less strict: anyone who can reach the Companion UI implicitly inherits the privileges of whatever env token(s) you configured.
+
+## Technitium permissions map (what to grant)
+
+Companion does not implement its own roles. Instead, it relies on Technitium permissions and surfaces errors when an action is denied.
+
+Permission names below are based on the permission sections returned by Technitium in `/api/user/session/get` (example keys: `DnsClient`, `Administration`) and the API endpoints Companion calls. Exact naming/availability may vary by Technitium version/config.
+
+| Companion area / feature                                       | Technitium API endpoint(s) called by Companion                                                                                                                                             | Expected Technitium permission(s)                       | Notes                                                                                                                         |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Sign-in (session auth mode)                                    | `/api/user/login`, `/api/user/session/get`, `/api/user/logout`                                                                                                                             | Technitium user account must be allowed to sign in      | Companion stores node session tokens server-side and uses an HttpOnly cookie in the browser.                                  |
+| Dashboard/Overview totals                                      | `/api/dashboard/stats/get`                                                                                                                                                                 | Dashboard: View (or equivalent)                         | Used for “last day” totals shown in node overview cards.                                                                      |
+| Query Logs (read)                                              | `/api/logs/query`                                                                                                                                                                          | Logs: View (or equivalent)                              | Read-only, but can be high-volume.                                                                                            |
+| DNS Lookup tools                                               | `/api/dnsClient/resolve`                                                                                                                                                                   | `DnsClient`: View                                       | This aligns with the background token validator, which requires `DnsClient: View` for PTR work.                               |
+| DHCP (read)                                                    | `/api/dhcp/scopes/list`, `/api/dhcp/scopes/get`, `/api/dhcp/leases/list`                                                                                                                   | DHCP: View (or equivalent)                              | Exact permission section name depends on Technitium.                                                                          |
+| DHCP (write / sync / clone)                                    | `/api/dhcp/scopes/set`, `/api/dhcp/scopes/delete`                                                                                                                                          | DHCP: Modify/Delete (or equivalent)                     | In cluster mode, writes should target the Primary node.                                                                       |
+| Zones (read / compare)                                         | `/api/zones/list`, `/api/zones/options/get`                                                                                                                                                | Zones: View (or equivalent)                             | Comparison is read-only but touches many endpoints.                                                                           |
+| Advanced Blocking App (read)                                   | `/api/apps/list`, `/api/apps/config/get`                                                                                                                                                   | Apps: View (or equivalent)                              | Depends on Technitium “Apps” permissions.                                                                                     |
+| Advanced Blocking App (write)                                  | `/api/apps/config/set`                                                                                                                                                                     | Apps: Modify (or equivalent)                            | Writes should target the Primary node in cluster mode.                                                                        |
+| Built-in allow/block lists (read)                              | `/api/settings/get`, `/api/allowed/list`, `/api/blocked/list`, `/api/allowed/export`, `/api/blocked/export`                                                                                | Settings: View + (Allow/Block list view permission)     | Technitium may gate allow/block list endpoints under Zones/DNS/Settings depending on version.                                 |
+| Built-in allow/block lists (write)                             | `/api/settings/set`, `/api/settings/forceUpdateBlockLists`, `/api/settings/temporaryDisableBlocking`, `/api/allowed/add`, `/api/allowed/delete`, `/api/blocked/add`, `/api/blocked/delete` | Settings: Modify + (Allow/Block list modify permission) | If users see “permission denied,” the simplest fix is granting the smallest additional privilege needed for that page/action. |
+| Background PTR hostname resolution                             | `/api/dnsClient/resolve` (PTR lookups)                                                                                                                                                     | `DnsClient`: View                                       | Companion explicitly rejects background tokens that are too privileged, and also rejects tokens lacking `DnsClient: View`.    |
+| Cluster-token → background-token migration (session-auth mode) | `/api/admin/users/create`, `/api/admin/users/set`, `/api/admin/sessions/createToken`, `/api/user/session/get`                                                                              | Administration: Modify (and likely View)                | This is intentionally “admin-ish” and meant to be run once to create a dedicated background user/token.                       |
+
 ## Reverse proxy TLS termination (recommended)
 
 If you terminate TLS in a reverse proxy (Caddy/Nginx/Traefik) and run the Companion backend on plain HTTP behind it, set:
