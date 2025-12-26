@@ -1,16 +1,18 @@
 # syntax=docker/dockerfile:1.7
 # Multi-stage build for Technitium DNS Companion (Monorepo)
 
+ARG BUILDPLATFORM
+
 
 # Stage 0: Shared manifest context (reduces repeated COPY invalidations)
-FROM node:22-alpine AS manifest-context
+FROM --platform=$BUILDPLATFORM node:22-alpine AS manifest-context
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json ./apps/backend/
 COPY apps/frontend/package.json ./apps/frontend/
 
 # Stage 1: Build frontend
-FROM node:22-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
 ARG TARGETARCH
 
 WORKDIR /app
@@ -37,7 +39,7 @@ COPY apps/frontend/ ./apps/frontend/
 RUN npm run build --workspace=apps/frontend
 
 # Stage 2: Build backend
-FROM node:22-alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine AS backend-builder
 
 WORKDIR /app
 
@@ -53,6 +55,10 @@ COPY apps/backend/ ./apps/backend/
 
 # Build backend
 RUN npm run build --workspace=apps/backend
+
+# Install production dependencies for backend (copied into final image).
+# Doing this on BUILDPLATFORM avoids running Node under QEMU when producing linux/arm64 images.
+RUN --mount=type=cache,target=/root/.npm cd apps/backend && npm ci --omit=dev
 
 # Stage 3: Production image
 FROM node:22-alpine
@@ -75,8 +81,8 @@ WORKDIR /app
 # Copy manifests from shared context
 COPY --from=manifest-context /app/ ./
 
-# Install production dependencies only for backend
-RUN --mount=type=cache,target=/root/.npm cd apps/backend && npm ci --omit=dev
+# Copy backend production dependencies from builder (avoids running npm under QEMU for linux/arm64 builds)
+COPY --from=backend-builder /app/apps/backend/node_modules ./apps/backend/node_modules
 
 # Copy built backend from builder
 COPY --from=backend-builder /app/apps/backend/dist ./apps/backend/dist

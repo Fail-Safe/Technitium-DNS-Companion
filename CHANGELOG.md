@@ -9,7 +9,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [1.2.1] - 2025-12-24
+## [1.2.2] - 2025-12-26
+
+### Fixed
+
+- Reduced excessive DNS lookups during Query Logs auto-refresh by reusing keep-alive HTTPS agents for Technitium API calls and caching cluster hostname resolution results (#23). (Thanks to @durandguru for the report!)
+
+## [1.2.1] - 2025-12-25
 
 ### Added
 
@@ -122,7 +128,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.1.6...v1.2.1
 [1.1.6]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.1.4...v1.1.5
