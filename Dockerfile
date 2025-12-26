@@ -54,9 +54,9 @@ COPY apps/backend/ ./apps/backend/
 # Build backend
 RUN npm run build --workspace=apps/backend
 
-# Install production dependencies for backend (copied into final image).
-# Doing this on BUILDPLATFORM avoids running Node under QEMU when producing linux/arm64 images.
-RUN --mount=type=cache,target=/root/.npm cd apps/backend && npm ci --omit=dev
+# Prune dev dependencies after build so the final image can copy only production deps.
+# With npm workspaces, dependencies are typically hoisted to /app/node_modules (not apps/backend/node_modules).
+RUN npm prune --omit=dev
 
 # Stage 3: Production image
 FROM node:22-alpine
@@ -79,8 +79,8 @@ WORKDIR /app
 # Copy manifests from shared context
 COPY --from=manifest-context /app/ ./
 
-# Copy backend production dependencies from builder (avoids running npm under QEMU for linux/arm64 builds)
-COPY --from=backend-builder /app/apps/backend/node_modules ./apps/backend/node_modules
+# Copy production dependencies from builder (npm workspaces hoist to /app/node_modules)
+COPY --from=backend-builder /app/node_modules ./node_modules
 
 # Copy built backend from builder
 COPY --from=backend-builder /app/apps/backend/dist ./apps/backend/dist
