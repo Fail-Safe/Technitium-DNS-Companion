@@ -17,7 +17,7 @@ This repo uses **tag-driven releases**.
    - Keep it human-readable and include PR/issue references.
 
 3. **Verify the tag commit contains the changelog entry**
-   - The most common failure mode is tagging a commit that does *not* include the `## [X.Y.Z]` section.
+   - The most common failure mode is tagging a commit that does _not_ include the `## [X.Y.Z]` section.
    - Locally:
      ```bash
      git show vX.Y.Z:CHANGELOG.md | sed -n '1,80p'
@@ -25,6 +25,7 @@ This repo uses **tag-driven releases**.
      If the `X.Y.Z` section isn’t there, you tagged the wrong commit.
 
 4. **Push the release tag**
+
    ```bash
    git tag -a vX.Y.Z -m "vX.Y.Z"
    git push origin vX.Y.Z
