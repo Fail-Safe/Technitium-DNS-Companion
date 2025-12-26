@@ -9,6 +9,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.3] - 2025-12-26
+
+### Fixed
+
+- Fixed Docker images boot-looping due to missing runtime dependencies in npm workspaces (hoisted deps like `@nestjs/common` were not present in the final image). (#26)
+
+### Changed
+
+- CI: generate Docker metadata tags for PR and branch builds to avoid “no tags generated” warnings during PR builds.
+
 ## [1.2.2] - 2025-12-26
 
 ### Fixed
