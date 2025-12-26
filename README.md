@@ -11,6 +11,23 @@ One primary goal of this project is to provide a more mobile-friendly interface 
 
 This project is **not affiliated with Technitium** but is built to complement Technitium DNS server deployments and not to replace functionality.
 
+## Authentication (as of v1.2.1)
+
+As of **v1.2.1**, the preferred authentication mechanism is **Technitium DNS-backed session authentication**:
+
+- Users sign in with their **Technitium DNS username/password** (and 2FA if enabled).
+- The Companion stores Technitium session tokens **server-side** and the browser receives only an **HttpOnly session cookie**.
+- This keeps interactive permissions aligned with the Technitium account the user actually logged in with.
+
+Legacy “env-token mode” (configuring the Companion with long-lived admin API tokens) is still supported (for a limited time), but is no longer the recommended default, nor long-term approach for deployments.
+
+Planned changes:
+
+- **v1.3**: Session auth becomes the standard for interactive UI usage (the `AUTH_SESSION_ENABLED` toggle is planned to be removed). `TECHNITIUM_CLUSTER_TOKEN` is planned to be **deprecated**. Background jobs (e.g., PTR hostname warming, scheduled sync) are expected to require a dedicated `TECHNITIUM_BACKGROUND_TOKEN`.
+- **v1.4**: `TECHNITIUM_CLUSTER_TOKEN` support is planned to be **removed**.
+
+Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)
+
 ## Use Cases
 
 - 📱 **Mobile Management** - Block/unblock domains from your phone
@@ -28,7 +45,8 @@ This project is **not affiliated with Technitium** but is built to complement Te
 - **Docker, OrbStack, or Podman (or similar)** (recommended for easiest deployment)
 - **OR Node.js 22+** (for running directly without Docker)
 - Access to one or more Technitium DNS servers (v13.6 or v14.0+)
-- Admin API token(s) from your Technitium DNS server(s)
+- For **session auth (preferred as of v1.2.1)**: a Technitium user account to sign in with (run Companion over HTTPS)
+- For **legacy env-token mode**: admin API token(s) from your Technitium DNS server(s)
 
 ## Quick Start with Docker (or similar) [Recommended]
 
