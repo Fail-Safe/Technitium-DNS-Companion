@@ -224,6 +224,13 @@ export class TechnitiumService {
   private readonly backgroundToken =
     (process.env.TECHNITIUM_BACKGROUND_TOKEN ?? "").trim() || undefined;
 
+  // Reuse a single Agent so Node can reuse sockets (and DNS results) instead of
+  // resolving/reconnecting for every Technitium request.
+  private readonly httpsAgent = new https.Agent({
+    rejectUnauthorized: false,
+    keepAlive: true,
+  });
+
   private backgroundTokenValidation:
     | {
         validated: true;
@@ -248,6 +255,14 @@ export class TechnitiumService {
   private readonly HOSTNAME_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
   private readonly PTR_LOOKUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
   private readonly MAX_PTR_LOOKUPS_PER_CYCLE = 50; // Limit concurrent PTR queries
+
+  // Hostname → IP resolution cache (used for cluster node matching)
+  private readonly hostnameResolutionCache = new Map<
+    string,
+    { ip: string | undefined; expiresAt: number }
+  >();
+  private readonly HOSTNAME_RESOLUTION_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly HOSTNAME_RESOLUTION_NEGATIVE_TTL_MS = 30 * 1000; // 30 seconds
 
   // Track IPs we've seen in queries for periodic PTR resolution
   private readonly recentClientIps = new Set<string>();
@@ -379,6 +394,12 @@ export class TechnitiumService {
       return hostname;
     }
 
+    const cacheKey = hostname.toLowerCase();
+    const cached = this.hostnameResolutionCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.ip;
+    }
+
     try {
       const resolve4 = promisify(dns.resolve4);
       const ips = await Promise.race([
@@ -387,9 +408,19 @@ export class TechnitiumService {
           setTimeout(() => reject(new Error("DNS timeout")), 2000),
         ),
       ]);
-      return ips && ips.length > 0 ? ips[0] : undefined;
+
+      const ip = ips && ips.length > 0 ? ips[0] : undefined;
+      this.hostnameResolutionCache.set(cacheKey, {
+        ip,
+        expiresAt: Date.now() + this.HOSTNAME_RESOLUTION_CACHE_TTL_MS,
+      });
+      return ip;
     } catch {
-      // DNS resolution failed or timed out - return undefined
+      // DNS resolution failed or timed out - cache negative result briefly to avoid repeated lookups
+      this.hostnameResolutionCache.set(cacheKey, {
+        ip: undefined,
+        expiresAt: Date.now() + this.HOSTNAME_RESOLUTION_NEGATIVE_TTL_MS,
+      });
       return undefined;
     }
   }
@@ -1652,7 +1683,7 @@ export class TechnitiumService {
       const axiosConfig: AxiosRequestConfig = {
         baseURL: node.baseUrl,
         timeout: 30_000,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        httpsAgent: this.httpsAgent,
         ...config,
       };
 
@@ -4309,7 +4340,7 @@ export class TechnitiumService {
         baseURL: node.baseUrl,
         timeout: 30_000, // Increased to 30s for VPN/remote development
         // Accept self-signed certificates for internal Technitium DNS servers
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        httpsAgent: this.httpsAgent,
         ...config,
       };
 

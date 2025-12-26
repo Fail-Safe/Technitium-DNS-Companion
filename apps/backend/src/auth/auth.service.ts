@@ -21,6 +21,11 @@ import type {
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
 
+  private readonly httpsAgent = new https.Agent({
+    rejectUnauthorized: false,
+    keepAlive: true,
+  });
+
   private async verifyTokenForNode(args: {
     nodeId: string;
     baseUrl: string;
@@ -31,7 +36,7 @@ export class AuthService {
         params: { token: args.token },
         timeout: 15_000,
         maxRedirects: 0,
-        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+        httpsAgent: this.httpsAgent,
       });
 
       const status =
@@ -148,7 +153,7 @@ export class AuthService {
           params: { user: username, pass: password, ...(totp ? { totp } : {}) },
           timeout: 30_000,
           maxRedirects: 0,
-          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+          httpsAgent: this.httpsAgent,
         });
 
         const status =
@@ -248,7 +253,7 @@ export class AuthService {
         await axios.get(`${node.baseUrl}/api/user/logout`, {
           params: { token },
           timeout: 15_000,
-          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+          httpsAgent: this.httpsAgent,
         });
       } catch (error) {
         const message =
