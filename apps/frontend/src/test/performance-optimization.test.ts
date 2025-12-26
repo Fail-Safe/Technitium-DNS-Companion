@@ -143,7 +143,7 @@ class VirtualizedList {
 // Mock query log aggregator with performance optimization
 class OptimizedQueryAggregator {
     private logs: QueryLogEntry[] = [];
-    private cache: Map<string, QueryLogEntry[]> = new Map();
+    private cache: Map<string, Map<string, number>> = new Map();
     private cacheValid: boolean = false;
 
     addLogs(newLogs: QueryLogEntry[]): void {
@@ -158,10 +158,8 @@ class OptimizedQueryAggregator {
 
     // Aggregate with caching
     aggregateByDomain(): Map<string, number> {
-        if (this.cacheValid && this.cache.has('byDomain')) {
-            const cached = this.cache.get('byDomain')!;
-            return new Map(cached.map((log) => [log.domain, 1]));
-        }
+        const cached = this.cacheValid ? this.cache.get('byDomain') : undefined;
+        if (cached) return cached;
 
         const aggregated = new Map<string, number>();
 
@@ -169,6 +167,7 @@ class OptimizedQueryAggregator {
             aggregated.set(log.domain, (aggregated.get(log.domain) || 0) + 1);
         }
 
+        this.cache.set('byDomain', aggregated);
         this.cacheValid = true;
 
         return aggregated;
@@ -430,15 +429,11 @@ describe('Performance & Optimization Tests', () => {
 
             aggregator.addLogs(logs);
 
-            const start1 = Date.now();
-            aggregator.aggregateByDomain();
-            const time1 = Date.now() - start1;
+            const aggregated1 = aggregator.aggregateByDomain();
+            const aggregated2 = aggregator.aggregateByDomain(); // Should use cache
 
-            const start2 = Date.now();
-            aggregator.aggregateByDomain(); // Should use cache
-            const time2 = Date.now() - start2;
-
-            expect(time2).toBeLessThanOrEqual(time1);
+            expect(aggregated2).toBe(aggregated1);
+            expect(aggregated2.size).toBe(20);
         });
 
         it('should filter efficiently with large dataset', () => {
