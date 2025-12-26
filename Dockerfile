@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Multi-stage build for Technitium DNS Companion (Monorepo)
 
-ARG BUILDPLATFORM
+ARG BUILDPLATFORM=linux/amd64
 
 
 # Stage 0: Shared manifest context (reduces repeated COPY invalidations)

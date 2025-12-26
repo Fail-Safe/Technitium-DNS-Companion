@@ -44,3 +44,4 @@ jobs:
           tag: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           bodyFile: RELEASE_BODY.md
+          allowUpdates: true
