@@ -13,7 +13,7 @@ COPY apps/frontend/package.json ./apps/frontend/
 
 # Stage 1: Build frontend
 FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
-ARG TARGETARCH
+ARG BUILDPLATFORM
 
 WORKDIR /app
 
@@ -24,13 +24,11 @@ COPY --from=manifest-context /app/ ./
 # --ignore-scripts skips native module compilation (not needed for frontend build)
 # Explicitly install the matching Rollup native build to work around npm optional deps bug
 RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts \
-    && if [ "$TARGETARCH" = "amd64" ]; then \
-    npm install --no-save @rollup/rollup-linux-x64-musl @esbuild/linux-x64; \
-    elif [ "$TARGETARCH" = "arm64" ]; then \
-    npm install --no-save @rollup/rollup-linux-arm64-musl @esbuild/linux-arm64; \
-    else \
-    echo "Skipping Rollup native binary install for arch $TARGETARCH"; \
-    fi
+    && case "$BUILDPLATFORM" in \
+        linux/amd64*) npm install --no-save @rollup/rollup-linux-x64-musl @esbuild/linux-x64 ;; \
+        linux/arm64*) npm install --no-save @rollup/rollup-linux-arm64-musl @esbuild/linux-arm64 ;; \
+        *) echo "Skipping Rollup native binary install for BUILDPLATFORM=$BUILDPLATFORM" ;; \
+      esac
 
 # Copy frontend source
 COPY apps/frontend/ ./apps/frontend/
