@@ -18,6 +18,7 @@ Welcome to the documentation for Technitium DNS Companion. This guide will help 
 ### 🔧 Development
 
 - **[REMOTE_DEVELOPMENT.md](./REMOTE_DEVELOPMENT.md)** - Remote development setup (develop on a server, edit locally)
+- **[RELEASING.md](./RELEASING.md)** - Release process and sanity checklist (tag-driven)
 
 ### ⚡ Performance
 

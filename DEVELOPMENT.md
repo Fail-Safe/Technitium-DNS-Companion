@@ -6,6 +6,7 @@ This guide covers setting up a development environment for Technitium DNS Compan
 
 - **📘 [DOCKER.md](./DOCKER.md)** - Docker deployment guide
 - **💻 [DEVELOPMENT.md](./DEVELOPMENT.md)** - Development setup and guidelines
+- **🏷️ [docs/RELEASING.md](./docs/RELEASING.md)** - Release process and sanity checklist
 - **🏗️ [docs/architecture.md](./docs/architecture.md)** - System design and architecture
 - **🔍 [docs/zone-comparison/](./docs/zone-comparison/)** - Zone comparison logic documentation
 - **🎨 [docs/ui/](./docs/ui/)** - UI component guidelines
