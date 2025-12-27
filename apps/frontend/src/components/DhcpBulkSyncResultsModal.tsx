@@ -182,9 +182,24 @@ export const DhcpBulkSyncResultsModal: React.FC<
                           >
                             {scopeResult.status}
                           </span>
-                          {(scopeResult.reason || scopeResult.error) && (
+                          {(scopeResult.reason ||
+                            scopeResult.error ||
+                            (scopeResult.differences &&
+                              scopeResult.differences.length > 0)) && (
                             <div className="dhcp-bulk-sync-results__scope-message">
-                              {scopeResult.reason || scopeResult.error}
+                              {(scopeResult.reason || scopeResult.error) && (
+                                <div>
+                                  {scopeResult.reason || scopeResult.error}
+                                </div>
+                              )}
+                              {scopeResult.differences &&
+                                scopeResult.differences.length > 0 && (
+                                  <ul className="dhcp-bulk-sync-results__scope-differences">
+                                    {scopeResult.differences.map((diff, i) => (
+                                      <li key={i}>{diff}</li>
+                                    ))}
+                                  </ul>
+                                )}
                             </div>
                           )}
                         </div>

@@ -165,6 +165,7 @@ export interface DhcpBulkSyncScopeResult {
   scopeName: string;
   status: "synced" | "skipped" | "failed";
   reason?: string;
+  differences?: string[];
   error?: string;
 }
 

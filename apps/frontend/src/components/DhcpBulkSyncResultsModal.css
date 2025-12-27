@@ -241,6 +241,15 @@
   color: var(--color-text-secondary);
 }
 
+.dhcp-bulk-sync-results__scope-differences {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.dhcp-bulk-sync-results__scope-differences li {
+  margin: 0.15rem 0;
+}
+
 .dhcp-bulk-sync-results__footer-info {
   margin-top: 1rem;
   font-size: 0.88rem;

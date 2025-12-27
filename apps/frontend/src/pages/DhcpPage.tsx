@@ -711,6 +711,17 @@ export function DhcpPage() {
   const [bulkSyncScopeDetailsLoading, setBulkSyncScopeDetailsLoading] =
     useState<Set<string>>(new Set());
 
+  // Bump this to force bulk sync preview reloads after an operation.
+  const [bulkSyncPreviewRefreshToken, setBulkSyncPreviewRefreshToken] =
+    useState(0);
+
+  const resetBulkSyncPreviewCaches = useCallback(() => {
+    setBulkSyncExpandedScopes(new Set());
+    setBulkSyncSourceScopeDetails(new Map());
+    setBulkSyncTargetScopeDetails(new Map());
+    setBulkSyncScopeDetailsLoading(new Set());
+  }, []);
+
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -2200,7 +2211,12 @@ export function DhcpPage() {
     return () => {
       cancelled = true;
     };
-  }, [activePageTab, bulkSyncSourceNodeId, loadDhcpScopes]);
+  }, [
+    activePageTab,
+    bulkSyncSourceNodeId,
+    bulkSyncPreviewRefreshToken,
+    loadDhcpScopes,
+  ]);
 
   // Load target node scopes for bulk sync preview (to show conflicts)
   useEffect(() => {
@@ -2244,7 +2260,12 @@ export function DhcpPage() {
     return () => {
       cancelled = true;
     };
-  }, [activePageTab, bulkSyncTargetNodeIds, loadDhcpScopes]);
+  }, [
+    activePageTab,
+    bulkSyncTargetNodeIds,
+    bulkSyncPreviewRefreshToken,
+    loadDhcpScopes,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3932,6 +3953,11 @@ export function DhcpPage() {
       });
     }
 
+    // Ping check ("Ping before offer")
+    compareSimple("pingCheckEnabled", "Ping Before Offer");
+    compareSimple("pingCheckTimeout", "Ping Timeout (ms)");
+    compareSimple("pingCheckRetries", "Ping Retries");
+
     // Domain name comparison
     compareSimple("domainName", "Domain Name");
 
@@ -4013,6 +4039,11 @@ export function DhcpPage() {
           }
         }
       }
+
+      // Post-sync: reset preview diff caches and force a reload so we don't keep
+      // showing stale pre-sync diffs in the bulk sync tab.
+      resetBulkSyncPreviewCaches();
+      setBulkSyncPreviewRefreshToken((prev) => prev + 1);
     } catch (error) {
       console.error("Bulk sync failed", error);
       setBulkSyncResult(null);
@@ -4021,6 +4052,11 @@ export function DhcpPage() {
         tone: "error",
         timeout: 6000,
       });
+
+      // Even on failure, clear any cached expanded state so the UI doesn't
+      // misleadingly show a previous run's diff data.
+      resetBulkSyncPreviewCaches();
+      setBulkSyncPreviewRefreshToken((prev) => prev + 1);
     } finally {
       setBulkSyncInProgress(false);
     }
