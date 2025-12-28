@@ -59,6 +59,7 @@ ehthumbs.db
 scripts/remote-dev.sh
 NEXT_STEPS.md
 docker-compose.dev.yml
+docker-compose.prod.test.yml
 docker-entrypoint-dev.sh
 Dockerfile.dev
 NEXT_STEPS.md
