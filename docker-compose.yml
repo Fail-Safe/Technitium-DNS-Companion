@@ -1,8 +1,11 @@
 services:
   technitium-dns-companion:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # Production default: pull the published image.
+    # If you want to build locally instead, comment out `image:` and uncomment `build:`.
+    image: ghcr.io/fail-safe/technitium-dns-companion:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     container_name: technitium-dns-companion
     restart: unless-stopped
 
@@ -60,7 +63,7 @@ services:
       # DEPRECATION NOTE: As of v1.3, TECHNITIUM_CLUSTER_TOKEN is planned to be deprecated.
       # Planned removal: v1.4.
       # Prefer Technitium-backed login sessions (interactive) + TECHNITIUM_BACKGROUND_TOKEN (background).
-      TECHNITIUM_CLUSTER_TOKEN: ${TECHNITIUM_CLUSTER_TOKEN}
+      TECHNITIUM_CLUSTER_TOKEN: ${TECHNITIUM_CLUSTER_TOKEN:-}
 
       # Node 1 Configuration
       TECHNITIUM_NODE1_NAME: "DNS Primary"
@@ -81,12 +84,14 @@ services:
       # IMPORTANT: Use a low-privilege Technitium user token.
       # TECHNITIUM_BACKGROUND_TOKEN: ${TECHNITIUM_BACKGROUND_TOKEN:-}
 
-    volumes:
-      # Mount SSL certificates (if using HTTPS)
-      # - ./certs:/app/certs:ro
-
-      # Optional: Mount config directory
-      # - ./config:/app/config
+    # Optional bind mounts (uncomment as needed)
+    # volumes:
+    #   # Mount SSL certificates (if using HTTPS)
+    #   - ./certs:/app/certs:ro
+    #
+    #   # Optional: Mount config directory
+    #   - ./config:/app/config
+    volumes: []
 
     networks:
       - technitium-dns-companion-network
