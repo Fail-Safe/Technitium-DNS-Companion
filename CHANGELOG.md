@@ -9,6 +9,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.5] - 2025-12-28
+
+### Added
+
+- DNS Lookup (All Domains): added a Text-mode “Exact Match” panel so you can confirm whether a domain exists in any list even when it’s not visible on the current page.
+- DNS Lookup (All Domains): added a Regex preview panel (match count + sample matches) with a Hide/Show toggle persisted to localStorage.
+
+### Changed
+
+- Domain Lists (All Domains): improved paging stability and added optional deterministic ordering via `sort=domain`.
+- Docker Compose: clarified default image usage vs optional local build configuration.
+
+### Fixed
+
+- Reduced backend CPU/memory spikes on “All Domains” by building list `sources` only for the requested page slice.
+
 ## [1.2.4] - 2025-12-27
 
 ### Added
@@ -164,7 +180,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.4...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.5...HEAD
+[1.2.5]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.1...v1.2.2
