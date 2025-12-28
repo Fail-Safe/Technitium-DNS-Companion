@@ -92,6 +92,17 @@ services:
       - technitium-dns-companion-network
 
     # Resource limits (optional)
+    #
+    # IMPORTANT (non-Swarm deployments):
+    # - The `deploy:` section is primarily for Docker Swarm.
+    # - With plain `docker compose up` (non-Swarm), these limits are typically NOT enforced.
+    # - If you want `deploy.resources` to be applied in non-Swarm compose, start with:
+    #     docker compose --compatibility up -d
+    #
+    # Sizing note:
+    # - Production should use less memory than the dev container (no Vite/HMR).
+    # - However, large blocklists / domain-list caching can legitimately increase baseline RAM.
+    # - If you enforce a hard limit that is too low, the Node process may be OOM-killed.
     deploy:
       resources:
         limits:

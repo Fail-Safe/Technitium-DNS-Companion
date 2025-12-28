@@ -569,6 +569,7 @@ describe("TechnitiumContext React Hook Integration", () => {
       expect(result.current.cloneDhcpScope).toBeInstanceOf(Function);
       expect(result.current.updateDhcpScope).toBeInstanceOf(Function);
       expect(result.current.loadZones).toBeInstanceOf(Function);
+      expect(result.current.loadCombinedZoneRecords).toBeInstanceOf(Function);
       expect(result.current.loadCombinedZones).toBeInstanceOf(Function);
     });
 

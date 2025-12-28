@@ -9,6 +9,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.4] - 2025-12-27
+
+### Added
+
+- DHCP Bulk Sync results now include structured per-scope configuration `differences`, rendered as a readable list in the results modal.
+- DHCP Bulk Sync “Sync Preview” now reports Ping Before Offer changes (including timeout and retries) per target node.
+- Added unauthenticated `/api/health` endpoint for Docker health checks (compatible with session-auth mode).
+- Zones: per-zone records search that matches Name + Type + Data.
+- Zones: record data display mode selector (Auto/Raw/Pretty/Parsed) persisted to localStorage.
+
+### Changed
+
+- DHCP bulk sync comparisons now cover the full DHCP scope configuration (including Ping Before Offer fields), preventing false “matches target” scenarios.
+- DHCP Bulk Sync preview state now refreshes after a sync completes so the UI does not keep showing stale pre-sync diffs.
+- Docs: expanded session-auth guidance and documented v1.3/v1.4 planned variable deprecations in `.env.example`, `docker-compose.yml`, and `README.md`.
+- Docker dev/prod health checks now use `/api/health` instead of auth-protected endpoints.
+- Zones: improved cluster-aware rendering (avoid repeating per-node cards in cluster mode).
+- Zones: enhanced node accent styling (20 deterministic accents) and applied accents consistently within node details.
+- Zones: improved record data Auto formatting for nested JSON strings and PTR-style single key/value payloads.
+- Zones: capped zone card grid to a maximum of 3 columns on wide screens for better record readability.
+
+### Fixed
+
+- DHCP Scopes page now renders correctly on small screens (tab switcher overflow) and the DHCP Scope History pull button no longer gets hidden behind the sticky footer.
+- Fixed false Docker “unhealthy” status when session auth is enabled (healthcheck no longer hits `/api/nodes`).
+
 ## [1.2.3] - 2025-12-26
 
 ### Fixed
@@ -138,7 +164,9 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.4...HEAD
+[1.2.4]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.3...v1.2.4
+[1.2.3]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.1.6...v1.2.1
 [1.1.6]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.1.5...v1.1.6

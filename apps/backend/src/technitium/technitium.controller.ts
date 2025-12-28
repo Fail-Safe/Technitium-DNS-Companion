@@ -73,6 +73,17 @@ export class TechnitiumController {
     return this.technitiumService.getCombinedZones();
   }
 
+  @Get("zones/records")
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(10000)
+  getCombinedZoneRecords(@Query("zone") zoneName?: string) {
+    if (zoneName === undefined) {
+      throw new BadRequestException("Query parameter 'zone' is required.");
+    }
+
+    return this.technitiumService.getCombinedZoneRecords(zoneName);
+  }
+
   @Get("advanced-blocking/combined")
   getCombinedAdvancedBlockingConfig() {
     return this.advancedBlockingService.getCombinedAdvancedBlockingConfig();

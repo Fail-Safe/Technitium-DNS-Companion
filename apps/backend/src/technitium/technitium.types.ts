@@ -468,6 +468,38 @@ export interface TechnitiumCombinedZoneOverview {
   zones: TechnitiumZoneComparison[];
 }
 
+export interface TechnitiumZoneRecord {
+  disabled?: boolean;
+  name: string;
+  type: string;
+  ttl?: number;
+  rData?: Record<string, unknown>;
+  dnssecStatus?: string;
+  comments?: string;
+  expiryTtl?: number;
+  lastUsedOn?: string;
+}
+
+export interface TechnitiumZoneRecordsResponse {
+  zone: TechnitiumZoneSummary;
+  records: TechnitiumZoneRecord[];
+}
+
+export interface TechnitiumZoneRecordsNodeSnapshot {
+  nodeId: string;
+  baseUrl: string;
+  fetchedAt: string;
+  zone?: TechnitiumZoneSummary;
+  records?: TechnitiumZoneRecord[];
+  error?: string;
+}
+
+export interface TechnitiumCombinedZoneRecordsOverview {
+  fetchedAt: string;
+  zoneName: string;
+  nodes: TechnitiumZoneRecordsNodeSnapshot[];
+}
+
 export type DhcpBulkSyncStrategy =
   | "skip-existing"
   | "overwrite-all"

@@ -1,3 +1,4 @@
+import type { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { TechnitiumService } from "./technitium.service";
 import type { TechnitiumDhcpScope } from "./technitium.types";
 
@@ -9,8 +10,16 @@ describe("TechnitiumService DHCP scope comparison", () => {
     new TechnitiumService(
       [],
       // The compare method is pure; snapshot service is not used in these tests.
-      {} as unknown as any,
+      {} as unknown as DhcpSnapshotService,
     );
+
+  type CompareResult = { equal: boolean; differences: string[] };
+  type ServiceWithCompare = {
+    compareDhcpScopes: (
+      a: TechnitiumDhcpScope,
+      b: TechnitiumDhcpScope,
+    ) => CompareResult;
+  };
 
   const baseScope = (): TechnitiumDhcpScope => ({
     name: "Test Scope",
@@ -20,7 +29,7 @@ describe("TechnitiumService DHCP scope comparison", () => {
   });
 
   it("treats identical scopes as equal", () => {
-    const service = makeService();
+    const service = makeService() as unknown as ServiceWithCompare;
 
     const a: TechnitiumDhcpScope = {
       ...baseScope(),
@@ -36,17 +45,14 @@ describe("TechnitiumService DHCP scope comparison", () => {
       pingCheckRetries: 2,
     };
 
-    const result = (service as any)["compareDhcpScopes"](a, b) as {
-      equal: boolean;
-      differences: string[];
-    };
+    const result = service.compareDhcpScopes(a, b);
 
     expect(result.equal).toBe(true);
     expect(result.differences).toEqual([]);
   });
 
   it("includes ping check fields in differences", () => {
-    const service = makeService();
+    const service = makeService() as unknown as ServiceWithCompare;
 
     const source: TechnitiumDhcpScope = {
       ...baseScope(),
@@ -62,10 +68,7 @@ describe("TechnitiumService DHCP scope comparison", () => {
       pingCheckRetries: 1,
     };
 
-    const result = (service as any)["compareDhcpScopes"](source, target) as {
-      equal: boolean;
-      differences: string[];
-    };
+    const result = service.compareDhcpScopes(source, target);
 
     expect(result.equal).toBe(false);
 

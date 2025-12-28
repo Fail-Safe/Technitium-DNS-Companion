@@ -49,6 +49,7 @@ import type {
 } from "../types/technitiumLogs";
 import type {
   TechnitiumCombinedZoneOverview,
+  TechnitiumCombinedZoneRecordsOverview,
   TechnitiumZoneListEnvelope,
 } from "../types/zones";
 import type { AuthStatus } from "./AuthContext";
@@ -249,6 +250,9 @@ interface TechnitiumState {
   ) => Promise<DhcpSnapshotMetadata>;
   loadZones: (nodeId: string) => Promise<TechnitiumZoneListEnvelope>;
   loadCombinedZones: () => Promise<TechnitiumCombinedZoneOverview>;
+  loadCombinedZoneRecords: (
+    zoneName: string,
+  ) => Promise<TechnitiumCombinedZoneRecordsOverview>;
 }
 
 const TechnitiumContext = createContext<TechnitiumState | undefined>(undefined);
@@ -329,25 +333,28 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     authRefreshRef.current = auth?.refresh ?? null;
   }, [auth?.status, auth?.refresh]);
 
-  const isNodeAuthenticatedForSession = useCallback((nodeId: string): boolean => {
-    const status = authStatusRef.current;
-    if (!status?.sessionAuthEnabled) {
-      return true;
-    }
+  const isNodeAuthenticatedForSession = useCallback(
+    (nodeId: string): boolean => {
+      const status = authStatusRef.current;
+      if (!status?.sessionAuthEnabled) {
+        return true;
+      }
 
-    // When session auth is enabled, backend tells us which nodes we actually have
-    // verified tokens for.
-    const allowed = status.nodeIds;
-    return Array.isArray(allowed) ? allowed.includes(nodeId) : false;
-  }, []);
+      // When session auth is enabled, backend tells us which nodes we actually have
+      // verified tokens for.
+      const allowed = status.nodeIds;
+      return Array.isArray(allowed) ? allowed.includes(nodeId) : false;
+    },
+    [],
+  );
 
   const requireNodeAuth = useCallback(
     (nodeId: string): void => {
-    if (!isNodeAuthenticatedForSession(nodeId)) {
-      throw new Error(
-        `Not authenticated for node ${nodeId}. Please sign in again to refresh node tokens.`,
-      );
-    }
+      if (!isNodeAuthenticatedForSession(nodeId)) {
+        throw new Error(
+          `Not authenticated for node ${nodeId}. Please sign in again to refresh node tokens.`,
+        );
+      }
     },
     [isNodeAuthenticatedForSession],
   );
@@ -964,23 +971,23 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
   const loadDhcpScopes = useCallback(
     async (nodeId: string) => {
-    if (!nodeId) {
-      throw new Error("Node id is required to load DHCP scopes.");
-    }
+      if (!nodeId) {
+        throw new Error("Node id is required to load DHCP scopes.");
+      }
 
-    requireNodeAuth(nodeId);
+      requireNodeAuth(nodeId);
 
-    const response = await apiFetch(
-      `/nodes/${encodeURIComponent(nodeId)}/dhcp/scopes`,
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to load DHCP scopes for node ${nodeId} (${response.status})`,
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dhcp/scopes`,
       );
-    }
 
-    return (await response.json()) as TechnitiumDhcpScopeListEnvelope;
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load DHCP scopes for node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as TechnitiumDhcpScopeListEnvelope;
     },
     [requireNodeAuth],
   );
@@ -1113,25 +1120,28 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const loadZones = useCallback(async (nodeId: string) => {
-    if (!nodeId) {
-      throw new Error("Node id is required to load zones.");
-    }
+  const loadZones = useCallback(
+    async (nodeId: string) => {
+      if (!nodeId) {
+        throw new Error("Node id is required to load zones.");
+      }
 
-    requireNodeAuth(nodeId);
+      requireNodeAuth(nodeId);
 
-    const response = await apiFetch(
-      `/nodes/${encodeURIComponent(nodeId)}/zones`,
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to load zones for node ${nodeId} (${response.status})`,
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/zones`,
       );
-    }
 
-    return (await response.json()) as TechnitiumZoneListEnvelope;
-  }, [requireNodeAuth]);
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load zones for node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as TechnitiumZoneListEnvelope;
+    },
+    [requireNodeAuth],
+  );
 
   const loadCombinedZones = useCallback(async () => {
     const response = await apiFetch("/nodes/zones/combined");
@@ -1141,6 +1151,23 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     }
 
     return (await response.json()) as TechnitiumCombinedZoneOverview;
+  }, []);
+
+  const loadCombinedZoneRecords = useCallback(async (zoneName: string) => {
+    const trimmedZoneName = zoneName?.trim();
+    if (!trimmedZoneName) {
+      throw new Error("Zone name is required to load zone records.");
+    }
+
+    const response = await apiFetch(
+      `/nodes/zones/records?zone=${encodeURIComponent(trimmedZoneName)}`,
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to load zone records (${response.status})`);
+    }
+
+    return (await response.json()) as TechnitiumCombinedZoneRecordsOverview;
   }, []);
 
   const cloneDhcpScope = useCallback(
@@ -1821,6 +1848,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       updateDhcpSnapshotNote,
       loadZones,
       loadCombinedZones,
+      loadCombinedZoneRecords,
     }),
     [
       nodes,
@@ -1870,6 +1898,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       updateDhcpSnapshotNote,
       loadZones,
       loadCombinedZones,
+      loadCombinedZoneRecords,
     ],
   );
 
