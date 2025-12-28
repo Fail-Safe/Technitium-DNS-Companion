@@ -276,15 +276,17 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
                 this.cache.set(node.id, new Map());
               }
 
-              this.cache.get(node.id)!.set(hash, {
-                url: cached.url,
-                hash,
-                domains: new Set(cached.domains),
-                fetchedAt: cached.fetchedAt,
-                lineCount: cached.lineCount,
-                commentCount: cached.commentCount,
-                errorMessage: cached.errorMessage,
-              });
+              this.cache
+                .get(node.id)!
+                .set(hash, {
+                  url: cached.url,
+                  hash,
+                  domains: new Set(cached.domains),
+                  fetchedAt: cached.fetchedAt,
+                  lineCount: cached.lineCount,
+                  commentCount: cached.commentCount,
+                  errorMessage: cached.errorMessage,
+                });
 
               totalLoaded++;
             } else if (cached.patterns) {
@@ -305,16 +307,18 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
                 }
               }
 
-              this.regexCache.get(node.id)!.set(hash, {
-                url: cached.url,
-                hash,
-                patterns,
-                rawPatterns: cached.patterns,
-                fetchedAt: cached.fetchedAt,
-                lineCount: cached.lineCount,
-                commentCount: cached.commentCount,
-                errorMessage: cached.errorMessage,
-              });
+              this.regexCache
+                .get(node.id)!
+                .set(hash, {
+                  url: cached.url,
+                  hash,
+                  patterns,
+                  rawPatterns: cached.patterns,
+                  fetchedAt: cached.fetchedAt,
+                  lineCount: cached.lineCount,
+                  commentCount: cached.commentCount,
+                  errorMessage: cached.errorMessage,
+                });
 
               totalLoaded++;
             }
@@ -331,7 +335,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
   /**
    * Get metadata about all lists configured for a node
    */
-  async getListsMetadata(nodeId: string): Promise<{
+  async getListsMetadata(
+    nodeId: string,
+  ): Promise<{
     blocklists: ListMetadata[];
     allowlists: ListMetadata[];
     regexBlocklists: ListMetadata[];
@@ -406,6 +412,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     search?: string,
     searchMode?: "text" | "regex",
     typeFilter?: "all" | "allow" | "block",
+    sort?: "domain",
     page: number = 1,
     limit: number = 1000,
   ): Promise<{
@@ -425,6 +432,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     // Check if config has changed and invalidate cache if needed
     await this.ensureCacheValid(nodeId);
 
+    const safePage = Number.isFinite(page) && page > 0 ? page : 1;
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? limit : 1000;
+
     const snapshot = await this.advancedBlockingService.getSnapshot(nodeId);
     const config = snapshot.config;
 
@@ -432,9 +442,66 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       return {
         lastRefreshed: this.lastRefreshTimes.get(nodeId) || null,
         domains: [],
-        pagination: { page, limit, total: 0, totalPages: 0 },
+        pagination: {
+          page: safePage,
+          limit: safeLimit,
+          total: 0,
+          totalPages: 0,
+        },
       };
     }
+
+    // If regex is invalid, fail fast without doing any heavy list work.
+    let compiledRegex: RegExp | null = null;
+    const trimmedSearch = search?.trim() || "";
+    if (trimmedSearch && searchMode === "regex") {
+      try {
+        compiledRegex = new RegExp(trimmedSearch);
+      } catch {
+        return {
+          lastRefreshed: this.lastRefreshTimes.get(nodeId) || null,
+          domains: [],
+          pagination: {
+            page: safePage,
+            limit: safeLimit,
+            total: 0,
+            totalPages: 0,
+          },
+        };
+      }
+    }
+
+    const normalizedTypeFilter = typeFilter || "all";
+    const FLAG_BLOCK = 1;
+    const FLAG_ALLOW = 2;
+
+    const domainMatchesSearch = (domain: string): boolean => {
+      if (!trimmedSearch) return true;
+
+      if (compiledRegex) {
+        return compiledRegex.test(domain);
+      }
+
+      // Text search (case-insensitive substring + parent domain matching)
+      const searchLower = trimmedSearch.toLowerCase();
+      const domainLower = domain.toLowerCase();
+
+      if (domainLower.includes(searchLower)) {
+        return true;
+      }
+
+      if (searchLower.includes(".")) {
+        const searchParts = searchLower.split(".");
+        for (let i = 1; i < searchParts.length; i++) {
+          const parentDomain = searchParts.slice(i).join(".");
+          if (domainLower === parentDomain) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    };
 
     // Build URL-to-groups mappings for both block and allow lists
     const blocklistUrlToGroups = this.buildUrlToGroupsMap(
@@ -454,210 +521,204 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       this.getOrFetchMultiple(nodeId, allowlistUrls),
     ]);
 
-    // Create a map to aggregate domains by domain name
-    const domainMap = new Map<
-      string,
-      {
-        domain: string;
-        type: "allow" | "block";
-        sources: Map<string, Set<string>>; // url -> Set of group names
-      }
-    >();
+    // Build a minimal domain->flags index (avoid storing sources for every domain).
+    const domainFlags = new Map<string, number>();
 
-    // Process blocklists
-    for (const list of blocklists) {
-      const groups = blocklistUrlToGroups.get(list.url) || [];
-      for (const domain of list.domains) {
-        const normalized = this.normalizeDomain(domain);
-        if (!domainMap.has(normalized)) {
-          domainMap.set(normalized, {
-            domain: normalized,
-            type: "block",
-            sources: new Map(),
-          });
+    const setFlag = (domain: string, flag: number) => {
+      if (!domainMatchesSearch(domain)) return;
+      const prev = domainFlags.get(domain) || 0;
+      domainFlags.set(domain, prev | flag);
+    };
+
+    // If we're filtering to only allowed domains, we can skip block-only inputs.
+    if (normalizedTypeFilter !== "allow") {
+      for (const list of blocklists) {
+        for (const domain of list.domains) {
+          const normalized = this.normalizeDomain(domain);
+          setFlag(normalized, FLAG_BLOCK);
         }
-        const entry = domainMap.get(normalized)!;
-        if (!entry.sources.has(list.url)) {
-          entry.sources.set(list.url, new Set());
-        }
-        groups.forEach((g) => entry.sources.get(list.url)!.add(g));
       }
     }
 
-    // Process allowlists (override type to 'allow')
     for (const list of allowlists) {
-      const groups = allowlistUrlToGroups.get(list.url) || [];
       for (const domain of list.domains) {
         const normalized = this.normalizeDomain(domain);
-        if (!domainMap.has(normalized)) {
-          domainMap.set(normalized, {
-            domain: normalized,
-            type: "allow",
-            sources: new Map(),
-          });
-        }
-        const entry = domainMap.get(normalized)!;
-        entry.type = "allow"; // Allow lists take precedence
-        if (!entry.sources.has(list.url)) {
-          entry.sources.set(list.url, new Set());
-        }
-        groups.forEach((g) => entry.sources.get(list.url)!.add(g));
+        setFlag(normalized, FLAG_ALLOW);
       }
     }
 
-    // Add manual entries from each group
+    // Manual entries (and manual regex patterns) from each group
     const groups = Array.isArray(config.groups) ? config.groups : [];
     for (const group of groups) {
-      // Manual blocked domains
-      if (Array.isArray(group.blocked)) {
+      if (Array.isArray(group.blocked) && normalizedTypeFilter !== "allow") {
         for (const domain of group.blocked) {
           const normalized = this.normalizeDomain(domain);
-          if (!domainMap.has(normalized)) {
-            domainMap.set(normalized, {
-              domain: normalized,
-              type: "block",
-              sources: new Map(),
-            });
-          }
-          const entry = domainMap.get(normalized)!;
-          const manualSource = "Manual Entry";
-          if (!entry.sources.has(manualSource)) {
-            entry.sources.set(manualSource, new Set());
-          }
-          entry.sources.get(manualSource)!.add(group.name);
+          setFlag(normalized, FLAG_BLOCK);
         }
       }
 
-      // Manual allowed domains
       if (Array.isArray(group.allowed)) {
         for (const domain of group.allowed) {
           const normalized = this.normalizeDomain(domain);
-          if (!domainMap.has(normalized)) {
-            domainMap.set(normalized, {
-              domain: normalized,
-              type: "allow",
-              sources: new Map(),
-            });
-          }
-          const entry = domainMap.get(normalized)!;
-          entry.type = "allow"; // Allow takes precedence
-          const manualSource = "Manual Entry";
-          if (!entry.sources.has(manualSource)) {
-            entry.sources.set(manualSource, new Set());
-          }
-          entry.sources.get(manualSource)!.add(group.name);
+          setFlag(normalized, FLAG_ALLOW);
         }
       }
 
-      // Regex blocked patterns
-      if (Array.isArray(group.blockedRegex)) {
+      if (
+        Array.isArray(group.blockedRegex) &&
+        normalizedTypeFilter !== "allow"
+      ) {
         for (const pattern of group.blockedRegex) {
           const normalized = this.normalizeDomain(pattern);
-          if (!domainMap.has(normalized)) {
-            domainMap.set(normalized, {
-              domain: normalized,
-              type: "block",
-              sources: new Map(),
-            });
-          }
-          const entry = domainMap.get(normalized)!;
-          const regexSource = "Regex Pattern (Manual)";
-          if (!entry.sources.has(regexSource)) {
-            entry.sources.set(regexSource, new Set());
-          }
-          entry.sources.get(regexSource)!.add(group.name);
+          setFlag(normalized, FLAG_BLOCK);
         }
       }
 
-      // Regex allowed patterns
       if (Array.isArray(group.allowedRegex)) {
         for (const pattern of group.allowedRegex) {
           const normalized = this.normalizeDomain(pattern);
-          if (!domainMap.has(normalized)) {
-            domainMap.set(normalized, {
-              domain: normalized,
-              type: "allow",
-              sources: new Map(),
-            });
-          }
-          const entry = domainMap.get(normalized)!;
-          entry.type = "allow"; // Allow takes precedence
-          const regexSource = "Regex Pattern (Manual)";
-          if (!entry.sources.has(regexSource)) {
-            entry.sources.set(regexSource, new Set());
-          }
-          entry.sources.get(regexSource)!.add(group.name);
+          setFlag(normalized, FLAG_ALLOW);
         }
       }
     }
 
-    // Convert to array and flatten sources
-    let domains = Array.from(domainMap.values()).map((entry) => ({
-      domain: entry.domain,
-      type: entry.type,
-      sources: Array.from(entry.sources.entries()).map(([url, groupsSet]) => ({
-        url,
-        groups: Array.from(groupsSet),
-      })),
-    }));
+    // Compute total and the requested page slice.
+    const startIndex = (safePage - 1) * safeLimit;
+    const endIndex = startIndex + safeLimit;
+    let total = 0;
+    const pageDomains: Array<{ domain: string; type: "allow" | "block" }> = [];
 
-    // Apply type filter
-    if (typeFilter && typeFilter !== "all") {
-      domains = domains.filter((d) => d.type === typeFilter);
-    }
+    if (sort === "domain") {
+      // Deterministic ordering: sort by domain name so page contents remain stable
+      // across refreshes/restarts. This can be expensive for very large result
+      // sets, so it's opt-in.
+      const orderedDomains: string[] = [];
+      for (const [domain, flags] of domainFlags.entries()) {
+        const type: "allow" | "block" =
+          (flags & FLAG_ALLOW) !== 0 ? "allow" : "block";
 
-    // Apply search filter
-    if (search && search.trim()) {
-      const searchTrim = search.trim();
-      if (searchMode === "regex") {
-        try {
-          const regex = new RegExp(searchTrim);
-          domains = domains.filter((d) => regex.test(d.domain));
-        } catch {
-          // Invalid regex - return empty results
-          domains = [];
+        if (normalizedTypeFilter !== "all" && type !== normalizedTypeFilter) {
+          continue;
         }
-      } else {
-        // Text search (case-insensitive substring + parent domain matching)
-        const searchLower = searchTrim.toLowerCase();
-        domains = domains.filter((d) => {
-          const domainLower = d.domain.toLowerCase();
 
-          // Direct substring match
-          if (domainLower.includes(searchLower)) {
-            return true;
-          }
+        orderedDomains.push(domain);
+      }
 
-          // Check if this domain is a parent of the search term (wildcard match)
-          // e.g., searching "cdn3.editmysite.com" should find "editmysite.com"
-          if (searchLower.includes(".")) {
-            const searchParts = searchLower.split(".");
-            for (let i = 1; i < searchParts.length; i++) {
-              const parentDomain = searchParts.slice(i).join(".");
-              if (domainLower === parentDomain) {
-                return true;
-              }
-            }
-          }
+      orderedDomains.sort();
+      total = orderedDomains.length;
 
-          return false;
-        });
+      for (const domain of orderedDomains.slice(startIndex, endIndex)) {
+        const flags = domainFlags.get(domain) || 0;
+        const type: "allow" | "block" =
+          (flags & FLAG_ALLOW) !== 0 ? "allow" : "block";
+        pageDomains.push({ domain, type });
+      }
+    } else {
+      // Fast path: avoids sorting and extra allocations.
+      for (const [domain, flags] of domainFlags.entries()) {
+        const type: "allow" | "block" =
+          (flags & FLAG_ALLOW) !== 0 ? "allow" : "block";
+
+        if (normalizedTypeFilter !== "all" && type !== normalizedTypeFilter) {
+          continue;
+        }
+
+        total++;
+        if (total - 1 >= startIndex && total - 1 < endIndex) {
+          pageDomains.push({ domain, type });
+        }
       }
     }
 
-    // Calculate pagination
-    const total = domains.length;
-    const totalPages = Math.ceil(total / limit);
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
+    const totalPages = Math.ceil(total / safeLimit);
+    const pageDomainSet = new Set(pageDomains.map((d) => d.domain));
 
-    // Apply pagination
-    const paginatedDomains = domains.slice(startIndex, endIndex);
+    // Build sources ONLY for the domains in this page.
+    const sourcesByDomain = new Map<string, Map<string, Set<string>>>();
+    const addSource = (domain: string, url: string, groupNames: string[]) => {
+      if (!pageDomainSet.has(domain)) return;
+      if (!sourcesByDomain.has(domain)) {
+        sourcesByDomain.set(domain, new Map());
+      }
+      const byUrl = sourcesByDomain.get(domain)!;
+      if (!byUrl.has(url)) {
+        byUrl.set(url, new Set());
+      }
+      const set = byUrl.get(url)!;
+      for (const name of groupNames) {
+        if (name) set.add(name);
+      }
+    };
+
+    // URL list sources (block + allow)
+    for (const list of blocklists) {
+      const groupsForUrl = blocklistUrlToGroups.get(list.url) || [];
+      for (const domain of pageDomainSet) {
+        if (list.domains.has(domain)) {
+          addSource(domain, list.url, groupsForUrl);
+        }
+      }
+    }
+
+    for (const list of allowlists) {
+      const groupsForUrl = allowlistUrlToGroups.get(list.url) || [];
+      for (const domain of pageDomainSet) {
+        if (list.domains.has(domain)) {
+          addSource(domain, list.url, groupsForUrl);
+        }
+      }
+    }
+
+    // Manual sources
+    for (const group of groups) {
+      const groupName = group.name;
+
+      if (Array.isArray(group.blocked)) {
+        for (const raw of group.blocked) {
+          const domain = this.normalizeDomain(raw);
+          addSource(domain, "Manual Entry", [groupName]);
+        }
+      }
+
+      if (Array.isArray(group.allowed)) {
+        for (const raw of group.allowed) {
+          const domain = this.normalizeDomain(raw);
+          addSource(domain, "Manual Entry", [groupName]);
+        }
+      }
+
+      if (Array.isArray(group.blockedRegex)) {
+        for (const raw of group.blockedRegex) {
+          const domain = this.normalizeDomain(raw);
+          addSource(domain, "Regex Pattern (Manual)", [groupName]);
+        }
+      }
+
+      if (Array.isArray(group.allowedRegex)) {
+        for (const raw of group.allowedRegex) {
+          const domain = this.normalizeDomain(raw);
+          addSource(domain, "Regex Pattern (Manual)", [groupName]);
+        }
+      }
+    }
+
+    const domains = pageDomains.map((d) => {
+      const byUrl =
+        sourcesByDomain.get(d.domain) || new Map<string, Set<string>>();
+      return {
+        domain: d.domain,
+        type: d.type,
+        sources: Array.from(byUrl.entries()).map(([url, groupsSet]) => ({
+          url,
+          groups: Array.from(groupsSet),
+        })),
+      };
+    });
 
     return {
       lastRefreshed: this.lastRefreshTimes.get(nodeId) || null,
-      domains: paginatedDomains,
-      pagination: { page, limit, total, totalPages },
+      domains,
+      pagination: { page: safePage, limit: safeLimit, total, totalPages },
     };
   }
 
@@ -1108,9 +1169,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     // Handle regex lists
     if (type === "regex-blocklist" || type === "regex-allowlist") {
       const urls =
-        type === "regex-blocklist"
-          ? this.extractAllUrls(config, "blockListRegexUrls")
-          : this.extractAllUrls(config, "allowListRegexUrls");
+        type === "regex-blocklist" ?
+          this.extractAllUrls(config, "blockListRegexUrls")
+        : this.extractAllUrls(config, "allowListRegexUrls");
 
       const lists = await this.getOrFetchMultipleRegex(nodeId, urls);
       const normalizedQuery = this.normalizeDomain(query).toLowerCase();
@@ -1135,9 +1196,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
     // Handle exact domain lists
     const urls =
-      type === "blocklist"
-        ? this.extractAllUrls(config, "blockListUrls")
-        : this.extractAllUrls(config, "allowListUrls");
+      type === "blocklist" ?
+        this.extractAllUrls(config, "blockListUrls")
+      : this.extractAllUrls(config, "allowListUrls");
 
     const lists = await this.getOrFetchMultiple(nodeId, urls);
     const normalizedQuery = this.normalizeDomain(query).toLowerCase();

@@ -1,11 +1,11 @@
 import {
   Controller,
-  Get,
-  Post,
-  Param,
-  Query,
-  ParseIntPipe,
   DefaultValuePipe,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Query,
 } from "@nestjs/common";
 import { DomainListCacheService } from "./domain-list-cache.service";
 
@@ -74,10 +74,7 @@ export class DomainListController {
     if (!query) {
       return { error: "query parameter is required" };
     }
-    return this.domainListService.searchDomains(nodeId, query, {
-      type,
-      limit,
-    });
+    return this.domainListService.searchDomains(nodeId, query, { type, limit });
   }
 
   /**
@@ -95,7 +92,7 @@ export class DomainListController {
   }
 
   /**
-   * GET /api/domain-lists/:nodeId/all-domains?search=query&searchMode=text&type=all&page=1&limit=1000
+   * GET /api/domain-lists/:nodeId/all-domains?search=query&searchMode=text&type=all&page=1&limit=1000&sort=domain
    * Get all domains from all lists for a node (with filtering and pagination)
    */
   @Get(":nodeId/all-domains")
@@ -104,6 +101,7 @@ export class DomainListController {
     @Query("search") search?: string,
     @Query("searchMode") searchMode?: "text" | "regex",
     @Query("type") type?: "all" | "allow" | "block",
+    @Query("sort") sort?: "domain",
     @Query("page") page?: string,
     @Query("limit") limit?: string,
   ) {
@@ -115,6 +113,7 @@ export class DomainListController {
       search,
       searchMode,
       type,
+      sort,
       pageNum,
       limitNum,
     );
