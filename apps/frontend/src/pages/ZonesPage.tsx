@@ -15,6 +15,7 @@ import type {
   TechnitiumZoneRecord,
   TechnitiumZoneStatus,
 } from "../types/zones";
+import { parseKeyValueLine } from "../utils/zoneRecordDataParsing";
 import "./ZonesPage.css";
 
 const NODE_ACCENT_PALETTE_SIZE = 20;
@@ -586,8 +587,6 @@ const formatRecordData = (
   }).join("\n");
 };
 
-const KEY_VALUE_LINE_REGEX = /^(\s*)([^:\n]+):\s(.+)$/;
-
 const renderRecordData = (
   record: TechnitiumZoneRecord,
   mode: RecordDataFormat,
@@ -598,10 +597,10 @@ const renderRecordData = (
   return (
     <>
       {lines.map((line, index) => {
-        const match = KEY_VALUE_LINE_REGEX.exec(line);
+        const parsedKeyValue = parseKeyValueLine(line);
         const showNewline = index < lines.length - 1;
 
-        if (!match) {
+        if (!parsedKeyValue) {
           return (
             <span key={`${index}-${line}`}>
               {line}
@@ -610,7 +609,7 @@ const renderRecordData = (
           );
         }
 
-        const [, indent, key, value] = match;
+        const { indent, key, value } = parsedKeyValue;
         return (
           <span key={`${index}-${indent}-${key}`}>
             {indent}
