@@ -1,9 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import {
-  isNodeSessionRequiredButMissing,
-  useAuth,
-} from "../context/AuthContext";
+import { clearAuthRedirectReason } from "../config";
+import { useAuth } from "../context/AuthContext";
+import { isNodeSessionRequiredButMissing } from "../utils/authSession";
 
 export default function LoginPage() {
   const { status, loading, login } = useAuth();
@@ -19,6 +18,12 @@ export default function LoginPage() {
     const state = location.state as { reason?: unknown } | null;
     return typeof state?.reason === "string" ? state.reason : null;
   }, [location.state]);
+
+  useEffect(() => {
+    if (redirectedReason) {
+      clearAuthRedirectReason();
+    }
+  }, [redirectedReason]);
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -85,6 +90,22 @@ export default function LoginPage() {
         >
           Your Technitium session expired on one or more nodes. Please sign in
           again.
+        </div>
+      )}
+
+      {redirectedReason === "session-expired" && (
+        <div
+          role="status"
+          style={{
+            margin: "0 0 1rem 0",
+            padding: "0.75rem 1rem",
+            border: "1px solid var(--color-border)",
+            borderRadius: "0.75rem",
+            background: "var(--color-bg-secondary)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          Your Companion session expired. Please sign in again.
         </div>
       )}
 

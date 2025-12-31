@@ -80,4 +80,32 @@ describe("Auth routing when node session expires", () => {
       screen.getByRole("heading", { name: "Sign in" }),
     ).toBeInTheDocument();
   });
+
+  it("shows session-expired message when redirected with that reason", () => {
+    mockedAuthStatus = {
+      sessionAuthEnabled: true,
+      authenticated: false,
+      configuredNodeIds: ["node1"],
+      nodeIds: ["node1"],
+    };
+
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/login",
+            state: { from: { pathname: "/logs" }, reason: "session-expired" },
+          },
+        ]}
+      >
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByText("Your Companion session expired. Please sign in again."),
+    ).toBeInTheDocument();
+  });
 });

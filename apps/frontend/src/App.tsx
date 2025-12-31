@@ -11,13 +11,11 @@ import "./App.css";
 import { AppLayout } from "./components/layout/AppLayout";
 import { InstallPrompt } from "./components/pwa/InstallPrompt";
 import { OfflineBanner } from "./components/pwa/OfflineBanner";
-import {
-  AuthProvider,
-  isNodeSessionRequiredButMissing,
-  useAuth,
-} from "./context/AuthContext";
+import { getAuthRedirectReason } from "./config";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 import { TechnitiumProvider } from "./context/TechnitiumContext";
 import { ToastProvider } from "./context/ToastContext";
+import { isNodeSessionRequiredButMissing } from "./utils/authSession";
 
 // Lazy load ALL pages for optimal code splitting
 const OverviewPage = lazy(() => import("./pages/OverviewPage"));
@@ -53,6 +51,20 @@ function RequireAuth() {
       <TechnitiumProvider>
         <Outlet />
       </TechnitiumProvider>
+    );
+  }
+
+  // If any API request observed a 401, we store a redirect reason in
+  // sessionStorage. Redirecting here prevents protected pages (like DNS Logs)
+  // from getting stuck spamming 401s when the auth status hasn't refreshed yet.
+  const redirectReason = getAuthRedirectReason();
+  if (redirectReason) {
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: location, reason: redirectReason }}
+      />
     );
   }
 

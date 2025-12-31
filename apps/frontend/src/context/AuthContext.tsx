@@ -10,7 +10,7 @@ import {
 } from "react";
 import type { BackgroundPtrTokenValidationSummary } from "../components/common/BackgroundTokenSecurityBanner";
 import type { AuthTransportInfo } from "../components/common/TransportSecurityBanner";
-import { apiFetch } from "../config";
+import { apiFetch, getAuthUnauthorizedEventName } from "../config";
 
 export type AuthStatus = {
   sessionAuthEnabled?: boolean;
@@ -22,24 +22,6 @@ export type AuthStatus = {
   transport?: AuthTransportInfo;
   backgroundPtrToken?: BackgroundPtrTokenValidationSummary;
 };
-
-// eslint-disable-next-line react-refresh/only-export-components
-export function isNodeSessionRequiredButMissing(
-  status: AuthStatus | null,
-): boolean {
-  if (!status?.authenticated) return false;
-
-  // In non-session mode, we do not require per-node session tokens.
-  if (status.sessionAuthEnabled === false) return false;
-
-  const configuredNodeCount = status.configuredNodeIds?.length ?? 0;
-  const sessionNodeCount = status.nodeIds?.length ?? 0;
-
-  // When at least one node is configured but not all are currently authenticated
-  // in this session, the common cause is that one or more Technitium session
-  // tokens expired (while the Companion session cookie may still be valid).
-  return configuredNodeCount > 0 && sessionNodeCount < configuredNodeCount;
-}
 
 type AuthContextValue = {
   status: AuthStatus | null;
@@ -54,7 +36,24 @@ type AuthContextValue = {
   logout: () => Promise<void>;
 };
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+// In development, Vite Fast Refresh can reload modules that define contexts.
+// If the Context object identity changes, existing Providers won't match new
+// Consumers, and hooks like useAuth() can throw even though a Provider exists.
+// Cache the context instance on globalThis to keep it stable across HMR.
+type GlobalWithAuthContext = typeof globalThis & {
+  __tdc_auth_context__?: ReturnType<
+    typeof createContext<AuthContextValue | undefined>
+  >;
+};
+
+const globalWithAuthContext = globalThis as GlobalWithAuthContext;
+const AuthContext: ReturnType<
+  typeof createContext<AuthContextValue | undefined>
+> =
+  globalWithAuthContext.__tdc_auth_context__ ??
+  (globalWithAuthContext.__tdc_auth_context__ = createContext<
+    AuthContextValue | undefined
+  >(undefined));
 
 async function safeReadError(response: Response): Promise<string> {
   try {
@@ -125,6 +124,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const onUnauthorized = () => {
+      // sessionStorage updates (used by RequireAuth to redirect) do not trigger
+      // React renders by themselves. Ensure the auth tree re-renders so the
+      // route guard can observe the stored redirect reason immediately.
+      setStatus((prev) => (prev ? { ...prev } : prev));
+
+      // Silent refresh so we don't flash global loading.
+      void refresh({ silent: true });
+    };
+
+    const eventName = getAuthUnauthorizedEventName();
+    window.addEventListener(eventName, onUnauthorized);
+    return () => window.removeEventListener(eventName, onUnauthorized);
   }, [refresh]);
 
   const login = useCallback(

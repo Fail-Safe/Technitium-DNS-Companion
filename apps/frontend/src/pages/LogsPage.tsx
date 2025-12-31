@@ -24,7 +24,9 @@ import {
   SkeletonLogsSummary,
 } from "../components/common/LoadingSkeleton";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
+import { getAuthRedirectReason } from "../config";
 import { useTechnitiumState } from "../context/TechnitiumContext";
+import { useToast } from "../context/ToastContext";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type {
   AdvancedBlockingConfig,
@@ -62,6 +64,12 @@ const REFRESH_OPTIONS = [
   { label: "30 seconds", value: 30 },
   { label: "1 minute", value: 60 },
 ];
+
+// If the browser/network stack gets into a weird state (sleep/VPN drop/offline),
+// fetch() can hang for a long time without resolving/rejecting. That leaves our
+// in-flight guard stuck and stops auto-refresh permanently until a focus/resume
+// event happens. Enforce a hard timeout so the page can self-recover.
+const LOGS_FETCH_TIMEOUT_MS = 25000;
 
 type OptionalColumnKey = "protocol" | "qclass" | "answer" | "responseTime";
 
@@ -115,6 +123,18 @@ const DEDUPLICATE_DOMAINS_STORAGE_KEY = "technitiumLogs.deduplicateDomains";
 const FILTER_TIP_DISMISSED_KEY = "technitiumLogs.filterTipDismissed";
 const SELECTION_TIP_DISMISSED_KEY = "technitiumLogs.selectionTipDismissed";
 const MOBILE_LAYOUT_MODE_KEY = "technitiumLogs.mobileLayoutMode";
+const LOGS_DEBUG_RESUME_STORAGE_KEY = "technitiumLogs.debugResume";
+
+const isLogsResumeDebugEnabled = () => {
+  if (typeof window === "undefined") return false;
+  try {
+    return (
+      window.localStorage.getItem(LOGS_DEBUG_RESUME_STORAGE_KEY) === "true"
+    );
+  } catch {
+    return false;
+  }
+};
 
 const BLOCKED_RESPONSE_KEYWORDS = ["block", "filter", "deny"];
 const EMPTY_RESPONSE_FILTER_VALUE = "__EMPTY__";
@@ -1512,6 +1532,8 @@ export function LogsPage() {
     saveAdvancedBlockingConfig,
   } = useTechnitiumState();
 
+  const { pushToast } = useToast();
+
   const [mode, setMode] = useState<ViewMode>("combined");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("tail");
   const [selectedNodeId, setSelectedNodeId] = useState<string>(
@@ -1564,6 +1586,7 @@ export function LogsPage() {
   // Prevent overlapping log loads (auto-refresh can otherwise stack requests if a call takes longer than refresh interval)
   const logsFetchInFlightRef = useRef<boolean>(false);
   const logsFetchAbortRef = useRef<AbortController | null>(null);
+  const logsResumeDebugToastAtRef = useRef<number>(0);
 
   const [blockDialog, setBlockDialog] = useState<
     BlockDialogState | undefined
@@ -2705,17 +2728,96 @@ export function LogsPage() {
 
     const handleVisibilityChange = () => {
       if (!document.hidden && refreshSeconds > 0) {
+        if (isLogsResumeDebugEnabled()) {
+          console.info("[LogsPage] visibility resume", {
+            at: new Date().toISOString(),
+            refreshSeconds,
+            inFlight: logsFetchInFlightRef.current,
+          });
+        }
+        // Some browsers throttle/suspend network requests in background tabs.
+        // If a log fetch was in-flight when the tab was backgrounded, the promise
+        // may never resolve/reject, leaving logsFetchInFlightRef stuck and
+        // preventing subsequent refresh ticks (which also stalls hostname
+        // enrichment coming from the combined logs endpoint).
+        if (logsFetchInFlightRef.current) {
+          if (isLogsResumeDebugEnabled()) {
+            console.warn(
+              "[LogsPage] Aborting in-flight log fetch on visibility resume (likely background-throttled).",
+              {
+                at: new Date().toISOString(),
+                visibilityState: document.visibilityState,
+                refreshSeconds,
+              },
+            );
+
+            const now = Date.now();
+            if (now - logsResumeDebugToastAtRef.current > 30000) {
+              logsResumeDebugToastAtRef.current = now;
+              pushToast({
+                tone: "info",
+                timeout: 7000,
+                message:
+                  "Logs debug: aborted a stuck in-flight fetch on resume (check console).",
+              });
+            }
+          }
+          logsFetchAbortRef.current?.abort();
+          logsFetchAbortRef.current = null;
+          logsFetchInFlightRef.current = false;
+        }
+        triggerRefresh();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      if (!document.hidden && refreshSeconds > 0) {
+        if (isLogsResumeDebugEnabled()) {
+          console.info("[LogsPage] window focus", {
+            at: new Date().toISOString(),
+            refreshSeconds,
+            inFlight: logsFetchInFlightRef.current,
+          });
+        }
+        if (logsFetchInFlightRef.current) {
+          if (isLogsResumeDebugEnabled()) {
+            console.warn(
+              "[LogsPage] Aborting in-flight log fetch on window focus (likely background-throttled).",
+              {
+                at: new Date().toISOString(),
+                visibilityState: document.visibilityState,
+                refreshSeconds,
+              },
+            );
+
+            const now = Date.now();
+            if (now - logsResumeDebugToastAtRef.current > 30000) {
+              logsResumeDebugToastAtRef.current = now;
+              pushToast({
+                tone: "info",
+                timeout: 7000,
+                message:
+                  "Logs debug: aborted a stuck in-flight fetch on focus (check console).",
+              });
+            }
+          }
+          logsFetchAbortRef.current?.abort();
+          logsFetchAbortRef.current = null;
+          logsFetchInFlightRef.current = false;
+        }
         triggerRefresh();
       }
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
 
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
     };
-  }, [refreshSeconds]);
+  }, [pushToast, refreshSeconds]);
 
   useEffect(() => {
     setIsAutoRefresh(false);
@@ -2852,6 +2954,12 @@ export function LogsPage() {
   useEffect(() => {
     let cancelled = false;
     const abortController = new AbortController();
+
+    let abortedByTimeout = false;
+    const timeoutId = window.setTimeout(() => {
+      abortedByTimeout = true;
+      abortController.abort();
+    }, LOGS_FETCH_TIMEOUT_MS);
 
     // Cancel any previous in-flight request before starting a new one.
     logsFetchAbortRef.current?.abort();
@@ -3038,7 +3146,17 @@ export function LogsPage() {
         }
 
         // Ignore aborts (common when filters change or when auto-refresh ticks while the previous load is still running).
-        if (abortController.signal.aborted) {
+        if (abortController.signal.aborted && !abortedByTimeout) {
+          return;
+        }
+
+        if (abortController.signal.aborted && abortedByTimeout) {
+          setLoadingState("error");
+          setErrorMessage(
+            `Failed to load logs: request timed out after ${Math.round(
+              LOGS_FETCH_TIMEOUT_MS / 1000,
+            )}s (check connection).`,
+          );
           return;
         }
         setLoadingState("error");
@@ -3049,6 +3167,7 @@ export function LogsPage() {
           setNodeSnapshot(undefined);
         }
       } finally {
+        window.clearTimeout(timeoutId);
         // Only clear if this request is still the active one.
         if (!cancelled && logsFetchAbortRef.current === abortController) {
           logsFetchInFlightRef.current = false;
@@ -3060,6 +3179,7 @@ export function LogsPage() {
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
       logsFetchInFlightRef.current = false;
       abortController.abort();
       if (logsFetchAbortRef.current === abortController) {
@@ -3481,7 +3601,12 @@ export function LogsPage() {
 
         {loadingState === "error" && errorMessage && (
           <div className="logs-page__error">
-            Failed to load logs: {errorMessage}
+            {(
+              getAuthRedirectReason() === "session-expired" &&
+              /\(401\)/.test(errorMessage)
+            ) ?
+              <>Companion session expired — redirecting to sign in…</>
+            : <>Failed to load logs: {errorMessage}</>}
           </div>
         )}
 
