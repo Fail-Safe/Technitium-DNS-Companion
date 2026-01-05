@@ -10,7 +10,11 @@ import {
 } from "react";
 import type { BackgroundPtrTokenValidationSummary } from "../components/common/BackgroundTokenSecurityBanner";
 import type { AuthTransportInfo } from "../components/common/TransportSecurityBanner";
-import { apiFetch, getAuthUnauthorizedEventName } from "../config";
+import {
+  apiFetch,
+  getAuthUnauthorizedEventName,
+  triggerAuthRedirect,
+} from "../config";
 
 export type AuthStatus = {
   sessionAuthEnabled?: boolean;
@@ -76,7 +80,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const statusRef = useRef<AuthStatus | null>(null);
+
+  // Used to force a context value identity change when an auth-related event
+  // occurs before `status` has been established (e.g., during initial load).
+  const [authEventNonce, setAuthEventNonce] = useState(0);
+
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const lastPresenceRefreshAtRef = useRef<number>(0);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   const refresh = useCallback(async (options?: { silent?: boolean }) => {
     if (refreshInFlightRef.current) {
@@ -91,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setError(null);
       try {
+        const wasAuthenticated = statusRef.current?.authenticated === true;
         const res = await apiFetch("/auth/me");
         if (!res.ok) {
           setStatus((prev) => ({
@@ -100,6 +116,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         const data = (await res.json()) as AuthStatus;
+
+        // If the user previously had an authenticated Companion session and it
+        // is now gone, treat it as an expiry and use the existing redirect/toast
+        // mechanism so all pages behave consistently.
+        if (
+          data.sessionAuthEnabled === true &&
+          wasAuthenticated &&
+          data.authenticated === false
+        ) {
+          triggerAuthRedirect("session-expired", { path: "/auth/me" });
+        }
+
         setStatus(data);
       } catch (e) {
         setStatus((prev) => ({
@@ -126,10 +154,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  // If the user leaves a tab open past session expiry, they may navigate around
+  // without hitting a new API call right away (e.g., cached state in memory).
+  // Refresh auth whenever the tab becomes active so we redirect promptly.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const maybeRefresh = () => {
+      const now = Date.now();
+      // Throttle: avoid spamming refreshes when focus events bounce.
+      if (now - lastPresenceRefreshAtRef.current < 15_000) {
+        return;
+      }
+      lastPresenceRefreshAtRef.current = now;
+      void refresh({ silent: true });
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        maybeRefresh();
+      }
+    };
+
+    window.addEventListener("focus", maybeRefresh);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", maybeRefresh);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refresh]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const onUnauthorized = () => {
+      // Ensure consumers (like `RequireAuth`) re-render immediately so they can
+      // observe changes like the stored redirect reason.
+      setAuthEventNonce((prev) => prev + 1);
+
       // sessionStorage updates (used by RequireAuth to redirect) do not trigger
       // React renders by themselves. Ensure the auth tree re-renders so the
       // route guard can observe the stored redirect reason immediately.
@@ -173,7 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AuthContextValue>(
     () => ({ status, loading, error, refresh, login, logout }),
-    [status, loading, error, refresh, login, logout],
+    [status, loading, error, refresh, login, logout, authEventNonce],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

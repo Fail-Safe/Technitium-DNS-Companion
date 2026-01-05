@@ -1,128 +1,190 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  getAuthRedirectReason,
+  getAuthRedirectToastShownReason,
+  getAuthUnauthorizedEventName,
+  markAuthRedirectToastShown,
+} from "../config";
 
-type ToastTone = 'info' | 'success' | 'error';
+type ToastTone = "info" | "success" | "error";
 
 interface ToastRecord {
-    id: string;
-    message: string;
-    tone: ToastTone;
+  id: string;
+  message: string;
+  tone: ToastTone;
 }
 
 interface ToastOptions {
-    message: string;
-    tone?: ToastTone;
-    timeout?: number;
+  message: string;
+  tone?: ToastTone;
+  timeout?: number;
 }
 
 interface ToastContextValue {
-    toasts: ToastRecord[];
-    pushToast: (options: ToastOptions) => string;
-    dismissToast: (id: string) => void;
+  toasts: ToastRecord[];
+  pushToast: (options: ToastOptions) => string;
+  dismissToast: (id: string) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-    const [toasts, setToasts] = useState<ToastRecord[]>([]);
-    const timersRef = useRef<Map<string, number>>(new Map());
+  const [toasts, setToasts] = useState<ToastRecord[]>([]);
+  const timersRef = useRef<Map<string, number>>(new Map());
 
-    const dismissToast = useCallback((id: string) => {
-        setToasts((previous) => previous.filter((toast) => toast.id !== id));
+  const dismissToast = useCallback((id: string) => {
+    setToasts((previous) => previous.filter((toast) => toast.id !== id));
 
-        const handle = timersRef.current.get(id);
-        if (handle !== undefined) {
-            window.clearTimeout(handle);
-            timersRef.current.delete(id);
-        }
-    }, []);
+    const handle = timersRef.current.get(id);
+    if (handle !== undefined) {
+      window.clearTimeout(handle);
+      timersRef.current.delete(id);
+    }
+  }, []);
 
-    const pushToast = useCallback(
-        (options: ToastOptions): string => {
-            const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-            const tone: ToastTone = options.tone ?? 'info';
-            const toast: ToastRecord = {
-                id,
-                message: options.message,
-                tone,
-            };
+  const pushToast = useCallback(
+    (options: ToastOptions): string => {
+      const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const tone: ToastTone = options.tone ?? "info";
 
-            setToasts((previous) => [...previous, toast]);
+      // Central rule: if we know we're redirecting to Sign in due to an auth/session
+      // expiry, suppress error toasts to avoid noisy "(401)" spam while navigation
+      // occurs.
+      const redirectReason = getAuthRedirectReason();
+      if (
+        tone === "error" &&
+        (redirectReason === "session-expired" ||
+          redirectReason === "node-session-expired")
+      ) {
+        return id;
+      }
 
-            const duration = options.timeout ?? 5000;
-            if (duration > 0) {
-                const handle = window.setTimeout(() => {
-                    dismissToast(id);
-                }, duration);
-                timersRef.current.set(id, handle);
-            }
+      const toast: ToastRecord = { id, message: options.message, tone };
 
-            return id;
-        },
-        [dismissToast],
-    );
+      setToasts((previous) => [...previous, toast]);
 
-    useEffect(() => {
-        const timers = timersRef.current;
-        return () => {
-            timers.forEach((handle) => window.clearTimeout(handle));
-            timers.clear();
-        };
-    }, []);
+      const duration = options.timeout ?? 5000;
+      if (duration > 0) {
+        const handle = window.setTimeout(() => {
+          dismissToast(id);
+        }, duration);
+        timersRef.current.set(id, handle);
+      }
 
-    const value = useMemo<ToastContextValue>(
-        () => ({
-            toasts,
-            pushToast,
-            dismissToast,
-        }),
-        [toasts, pushToast, dismissToast],
-    );
+      return id;
+    },
+    [dismissToast],
+  );
 
-    return (
-        <ToastContext.Provider value={value}>
-            {children}
-            <ToastViewportContent />
-        </ToastContext.Provider>
-    );
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach((handle) => window.clearTimeout(handle));
+      timers.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const onUnauthorized = () => {
+      const redirectReason = getAuthRedirectReason();
+      if (
+        redirectReason !== "session-expired" &&
+        redirectReason !== "node-session-expired"
+      ) {
+        return;
+      }
+
+      const alreadyShownFor = getAuthRedirectToastShownReason();
+      if (alreadyShownFor === redirectReason) {
+        return;
+      }
+
+      markAuthRedirectToastShown(redirectReason);
+
+      pushToast({
+        message:
+          redirectReason === "node-session-expired" ?
+            "Node session expired — redirecting to Sign in…"
+          : "Session expired — redirecting to Sign in…",
+        tone: "info",
+        timeout: 4500,
+      });
+    };
+
+    const eventName = getAuthUnauthorizedEventName();
+    window.addEventListener(eventName, onUnauthorized);
+    return () => window.removeEventListener(eventName, onUnauthorized);
+  }, [pushToast]);
+
+  const value = useMemo<ToastContextValue>(
+    () => ({ toasts, pushToast, dismissToast }),
+    [toasts, pushToast, dismissToast],
+  );
+
+  return (
+    <ToastContext.Provider value={value}>
+      {children}
+      <ToastViewportContent />
+    </ToastContext.Provider>
+  );
 }
 
 function useToastContext() {
-    const context = useContext(ToastContext);
-    if (!context) {
-        throw new Error('useToast must be used within a ToastProvider');
-    }
-    return context;
+  const context = useContext(ToastContext);
+  if (!context) {
+    throw new Error("useToast must be used within a ToastProvider");
+  }
+  return context;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components -- Hook export is safe for fast refresh.
 export function useToast() {
-    const { pushToast } = useToastContext();
-    return { pushToast };
+  const { pushToast } = useToastContext();
+  return { pushToast };
 }
 
 function ToastViewportContent() {
-    const { toasts, dismissToast } = useToastContext();
+  const { toasts, dismissToast } = useToastContext();
 
-    if (toasts.length === 0) {
-        return null;
-    }
+  if (toasts.length === 0) {
+    return null;
+  }
 
-    return (
-        <div className="toast-stack" role="region" aria-live="polite" aria-label="Notifications">
-            {toasts.map((toast) => (
-                <div key={toast.id} className={`toast toast--${toast.tone}`} role="status">
-                    <span className="toast__message">{toast.message}</span>
-                    <button
-                        type="button"
-                        className="toast__dismiss"
-                        onClick={() => dismissToast(toast.id)}
-                        aria-label="Dismiss notification"
-                    >
-                        Close
-                    </button>
-                </div>
-            ))}
+  return (
+    <div
+      className="toast-stack"
+      role="region"
+      aria-live="polite"
+      aria-label="Notifications"
+    >
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`toast toast--${toast.tone}`}
+          role="status"
+        >
+          <span className="toast__message">{toast.message}</span>
+          <button
+            type="button"
+            className="toast__dismiss"
+            onClick={() => dismissToast(toast.id)}
+            aria-label="Dismiss notification"
+          >
+            Close
+          </button>
         </div>
-    );
+      ))}
+    </div>
+  );
 }
