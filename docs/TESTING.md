@@ -7,22 +7,31 @@ This project uses **Vitest** for unit testing and **Playwright** for E2E testing
 ## Test Types
 
 ### Unit Tests (Vitest)
+
 - Fast execution (~4 seconds for 397 tests)
 - Test business logic, API integration, and React hooks
 - Run in Node.js with jsdom environment
 - Located in `apps/frontend/src/test/`
 
 ### E2E Tests (Playwright)
+
 - Full browser testing (Chromium, Firefox, Safari)
 - Test real user workflows and interactions
-- Require running backend + frontend
+- Run against a deterministic local mock backend + frontend dev server
 - Located in `apps/frontend/e2e/`
+
+### Smoke Tests (Playwright)
+
+- Lightweight, real-browser checks (Chromium + Firefox)
+- Designed for fast “does the app load/render” validation
+- Located in `apps/frontend/e2e/smoke.spec.ts`
 
 ## Setup
 
 ### Installation
 
 Testing dependencies are already installed in `package.json`:
+
 - **vitest** - Fast unit testing framework
 - **@vitest/ui** - Visual test UI dashboard
 - **@testing-library/react** - React component testing utilities
@@ -43,6 +52,7 @@ test: {
 ```
 
 **Setup file** (`src/test/setup.ts`):
+
 - Configures localStorage mock for tests
 - Configures window.matchMedia mock for responsive tests
 - Cleanup hooks for test isolation
@@ -52,55 +62,93 @@ test: {
 ### Unit Tests (Vitest)
 
 #### Run all unit tests once
+
 ```bash
 cd apps/frontend
 npm test -- --run
 ```
 
 #### Watch mode (re-run on file changes)
+
 ```bash
 npm test
 # Press 'q' to quit watch mode
 ```
 
 #### Visual UI dashboard
+
 ```bash
 npm test:ui
 # Opens browser dashboard at http://localhost:51204
 ```
 
 #### Coverage report
+
 ```bash
 npm test:coverage -- --run
 # Generates HTML report in coverage/
 ```
 
 #### Run specific test file
+
 ```bash
 npm test -- TechnitiumContext.test.tsx --run
 ```
 
 ### E2E Tests (Playwright)
 
-**Prerequisites**: Backend and frontend must be running
+`npm run test:e2e` automatically starts:
+
+- a local mock backend on `http://localhost:3000` (served via Vite proxy at `/api`)
+- the frontend Vite dev server on `http://localhost:5173`
+
+This keeps E2E runs deterministic and independent of any real Technitium nodes.
 
 ```bash
+cd apps/frontend
+
 # Run E2E tests
 npm run test:e2e
 
 # Interactive UI mode
 npm run test:e2e:ui
 
-# Run specific browser
+# Run a specific browser
 npm run test:e2e -- --project=chromium
+
+# Attach to an already-running server (skip starting mock backend + Vite)
+E2E_USE_EXISTING_SERVER=true npm run test:e2e
 ```
+
+### Smoke Tests (Playwright)
+
+These run a fast browser-level sanity check against Chromium and/or Firefox.
+
+```bash
+cd apps/frontend
+npm run test:smoke:chromium
+npm run test:smoke:firefox
+```
+
+To target an already-running server or a deployed environment:
+
+```bash
+cd apps/frontend
+E2E_USE_EXISTING_SERVER=true npm run test:smoke:chromium
+```
+
+Notes:
+
+- By default the smoke test expects the app title to include “Technitium” and the top nav to render.
 
 ## Test Files
 
 ### 1. React Hook Integration Tests ⭐ CRITICAL
+
 **File**: `src/test/TechnitiumContext.test.tsx`
 
 **Tests**: 14 comprehensive tests covering React lifecycle behavior
+
 - ✅ **Infinite loop prevention** - Monitors render counts to catch runaway re-renders
 - ✅ **API call monitoring** - Validates each endpoint called exactly once (prevents duplicate requests)
 - ✅ **Hook dependency validation** - Ensures useEffect/useCallback dependencies are correct
@@ -109,6 +157,7 @@ npm run test:e2e -- --project=chromium
 - ✅ **Context method integration** - Validates exported methods work without side effects
 
 **Why This Test Suite Matters**:
+
 - E2E tests don't catch infinite loops in React hooks
 - Unit tests mock fetch but don't render components
 - This layer tests actual React lifecycle behavior
@@ -117,6 +166,7 @@ npm run test:e2e -- --project=chromium
 **Execution**: ~3.7 seconds for all 14 tests
 
 **Coverage**:
+
 - `TechnitiumContext.tsx` - Hook lifecycle behavior
 - Render count monitoring
 - API call count validation
@@ -124,23 +174,28 @@ npm run test:e2e -- --project=chromium
 ---
 
 ### 2. Logs Selection Tests
+
 **File**: `src/test/logs-selection.test.ts`
 
 **Tests**: 6 tests
+
 - Validates that active date range updates correctly
 - Validates that active log types update correctly
 - Handles empty selection scenarios
 - Ensures null-safe date handling
 
 **Coverage**:
+
 - `LogsSelection.tsx` - 100% coverage (38/38 lines)
 
 ---
 
 ### 3. Logs Filtering Tests
+
 **File**: `src/test/logs-filtering.test.ts`
 
 **Tests**: 29 tests
+
 - Filtering logs by domain name
 - Filtering by query type
 - Filtering by protocol
@@ -150,9 +205,11 @@ npm run test:e2e -- --project=chromium
 **Critical Path**: Users must be able to quickly find domains they want to block/allow using various filter combinations.
 
 ### 3. Advanced Blocking Tests
+
 **File**: `src/test/advanced-blocking.test.ts`
 
 **Tests**: 17 tests covering:
+
 - ✅ Metrics aggregation from multiple nodes
 - ✅ Group matching and searching
 - ✅ Domain categorization by group
@@ -163,9 +220,11 @@ npm run test:e2e -- --project=chromium
 **Critical Path**: Users must select correct groups when adding domains; aggregate metrics show overall blocking effectiveness. This is a "non-negotiable" requirement.
 
 ### 4. DHCP Scope Cloning Tests
+
 **File**: `src/test/dhcp-cloning.test.ts`
 
 **Tests**: 28 tests covering:
+
 - ✅ Request validation (required fields, optional fields)
 - ✅ Payload building (minimal, with overrides, with flags)
 - ✅ Override application (single, multiple, edge cases)
@@ -175,9 +234,11 @@ npm run test:e2e -- --project=chromium
 **Critical Path**: Users must clone DHCP scopes between nodes reliably with correct parameter handling and override application.
 
 ### 5. Query Log Aggregation Tests
+
 **File**: `src/test/query-logs-aggregation.test.ts`
 
 **Tests**: 30 tests covering:
+
 - ✅ Multi-node log combining
 - ✅ Client IP to hostname resolution
 - ✅ Filtering on combined logs
@@ -202,6 +263,7 @@ Duration    ~4 seconds
 All tests are passing ✅
 
 **Test Breakdown by Category**:
+
 - React Hook Integration: 14 tests
 - Logs Selection: 6 tests
 - Logs Filtering: 29 tests
@@ -215,6 +277,7 @@ All tests are passing ✅
 ## When to Run Which Tests
 
 ### Run Unit Tests When:
+
 - ✅ Making code changes to any frontend file
 - ✅ Before committing code
 - ✅ After pulling changes from git
@@ -222,6 +285,7 @@ All tests are passing ✅
 - ✅ Fast feedback needed (~4 seconds)
 
 ### Run E2E Tests When:
+
 - ✅ Testing full user workflows
 - ✅ Before deploying to production
 - ✅ After major UI changes
@@ -229,6 +293,7 @@ All tests are passing ✅
 - ⚠️ Note: Slower execution (minutes vs seconds)
 
 ### Best Practice:
+
 Run unit tests frequently during development. Run E2E tests before deployments or when testing complete user journeys.
 
 ---
@@ -236,14 +301,17 @@ Run unit tests frequently during development. Run E2E tests before deployments o
 ## Writing New Tests
 
 ### Test File Structure
-```typescript
-import { describe, it, expect } from 'vitest';
 
-describe('Feature Name', () => {
-  describe('Sub-feature', () => {
-    it('should do something specific', () => {
+```typescript
+import { describe, it, expect } from "vitest";
+
+describe("Feature Name", () => {
+  describe("Sub-feature", () => {
+    it("should do something specific", () => {
       // Arrange: Set up test data
-      const input = { /* ... */ };
+      const input = {
+        /* ... */
+      };
 
       // Act: Execute the code
       const result = someFunction(input);
@@ -268,19 +336,19 @@ describe('Feature Name', () => {
 ### Example: Testing a Filter Function
 
 ```typescript
-describe('Domain Filtering', () => {
+describe("Domain Filtering", () => {
   const entries = [
-    { qname: 'example.com', blocked: false },
-    { qname: 'test.org', blocked: true },
+    { qname: "example.com", blocked: false },
+    { qname: "test.org", blocked: true },
   ];
 
-  it('should filter domains case-insensitively', () => {
-    const filtered = entries.filter(e =>
-      e.qname.toLowerCase().includes('EXAMPLE'.toLowerCase())
+  it("should filter domains case-insensitively", () => {
+    const filtered = entries.filter((e) =>
+      e.qname.toLowerCase().includes("EXAMPLE".toLowerCase()),
     );
 
     expect(filtered).toHaveLength(1);
-    expect(filtered[0].qname).toBe('example.com');
+    expect(filtered[0].qname).toBe("example.com");
   });
 });
 ```
@@ -326,21 +394,25 @@ describe('TechnitiumContext', () => {
 ## Debugging Failed Tests
 
 ### View detailed failure output
+
 ```bash
 npm run test -- --reporter=verbose
 ```
 
 ### Run specific test file
+
 ```bash
 npm run test -- src/test/logs-filtering.test.ts
 ```
 
 ### Run specific test by name
+
 ```bash
 npm run test -- --grep "should filter by domain"
 ```
 
 ### Debug in browser
+
 ```bash
 npm run test -- --inspect-brk
 # Opens DevTools for debugging
@@ -425,6 +497,7 @@ Currently, tests must be run manually. To integrate with GitHub Actions:
 ## Troubleshooting
 
 ### "Cannot find module" errors
+
 ```bash
 # Clear node_modules and reinstall
 rm -rf node_modules
@@ -432,12 +505,14 @@ npm install
 ```
 
 ### Tests hanging
+
 ```bash
 # Try with timeout
 npm run test -- --testTimeout=10000
 ```
 
 ### localStorage/matchMedia errors
+
 The setup file (`src/test/setup.ts`) should handle these mocks. If errors persist:
 
 1. Check that setup file is in `vite.config.ts` setupFiles
