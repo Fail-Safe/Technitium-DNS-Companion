@@ -184,20 +184,54 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // IMPORTANT:
+        // Workbox's default SPA navigation fallback serves `index.html` from the precache.
+        // That behavior can keep an older SPA shell alive across normal reloads (until the SW updates),
+        // which presents as "new UI only appears after hard refresh".
+        //
+        // We disable the precache-backed navigation fallback and instead handle navigations explicitly
+        // with a NetworkFirst strategy.
+        navigateFallbackDenylist: [/./],
         // Cache strategy configuration
         runtimeCaching: [
           {
-            // API calls: Network-first with 5s timeout, fallback to cache
+            // Never cache icon.svg via runtime caching.
+            // If icon.svg ever falls through to the SPA fallback (text/html), caching it breaks PWA icons.
+            urlPattern: ({ url }) => url.pathname === "/icon.svg",
+            handler: "NetworkOnly",
+          },
+          {
+            // Critical: never serve the Technitium Apps list from SW cache.
+            // The Zones page uses this to decide whether to show SplitHorizon/Snapshots UI.
+            // If this endpoint times out and falls back to cache, the UI can appear "missing" until a force refresh.
+            urlPattern: ({ url }) =>
+              /^\/api\/nodes\/[^/]+\/apps$/i.test(url.pathname),
+            handler: "NetworkOnly",
+          },
+          {
+            // SPA navigations (e.g. /zones, /logs): Network-first so reloads pick up latest bundles.
+            urlPattern: ({ request }) => request.mode === "navigate",
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "html-navigations",
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 60 * 60, // 1 hour
+              },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+          {
+            // API calls: Network-first (no timeout fallback).
             urlPattern: /^https?:\/\/.*\/api\/.*/i,
             handler: "NetworkFirst",
             options: {
               cacheName: "api-cache",
-              networkTimeoutSeconds: 5,
               expiration: {
                 maxEntries: 100,
                 maxAgeSeconds: 60 * 5, // 5 minutes
               },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [200] },
             },
           },
           {
@@ -219,7 +253,6 @@ export default defineConfig({
             handler: "NetworkFirst",
             options: {
               cacheName: "html-cache",
-              networkTimeoutSeconds: 3,
               expiration: {
                 maxEntries: 10,
                 maxAgeSeconds: 60 * 60 * 24, // 24 hours

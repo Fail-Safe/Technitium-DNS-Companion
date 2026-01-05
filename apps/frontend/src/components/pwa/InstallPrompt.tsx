@@ -49,6 +49,16 @@ export function InstallPrompt() {
 
     // Listen for the beforeinstallprompt event (Chrome, Edge, etc.)
     const handleBeforeInstallPrompt = (e: BeforeInstallPromptEvent) => {
+      // If the user already dismissed our custom prompt for this session,
+      // do not suppress the browser-provided install UI.
+      try {
+        if (sessionStorage.getItem("install-prompt-dismissed")) {
+          return;
+        }
+      } catch {
+        // ignore storage failures
+      }
+
       e.preventDefault();
       setDeferredPrompt(e);
       setShowPrompt(true);
