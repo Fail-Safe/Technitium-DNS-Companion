@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { apiFetch } from "../config";
+import { apiFetch, triggerAuthRedirect } from "../config";
 import type {
   AdvancedBlockingConfig,
   AdvancedBlockingOverview,
@@ -52,6 +52,13 @@ import type {
   TechnitiumCombinedZoneRecordsOverview,
   TechnitiumZoneListEnvelope,
 } from "../types/zones";
+import type {
+  ZoneSnapshot,
+  ZoneSnapshotCreateRequest,
+  ZoneSnapshotMetadata,
+  ZoneSnapshotRestoreOptions,
+  ZoneSnapshotRestoreResult,
+} from "../types/zoneSnapshots";
 import type { AuthStatus } from "./AuthContext";
 import { useOptionalAuth } from "./AuthContext";
 
@@ -248,6 +255,33 @@ interface TechnitiumState {
     snapshotId: string,
     note?: string,
   ) => Promise<DhcpSnapshotMetadata>;
+
+  listZoneSnapshots: (nodeId: string) => Promise<ZoneSnapshotMetadata[]>;
+  createZoneSnapshot: (
+    nodeId: string,
+    request: ZoneSnapshotCreateRequest,
+  ) => Promise<ZoneSnapshotMetadata>;
+  getZoneSnapshot: (
+    nodeId: string,
+    snapshotId: string,
+  ) => Promise<ZoneSnapshot>;
+  deleteZoneSnapshot: (nodeId: string, snapshotId: string) => Promise<void>;
+  updateZoneSnapshotNote: (
+    nodeId: string,
+    snapshotId: string,
+    note?: string,
+  ) => Promise<ZoneSnapshotMetadata>;
+  setZoneSnapshotPinned: (
+    nodeId: string,
+    snapshotId: string,
+    pinned: boolean,
+  ) => Promise<ZoneSnapshotMetadata>;
+  restoreZoneSnapshot: (
+    nodeId: string,
+    snapshotId: string,
+    options?: ZoneSnapshotRestoreOptions,
+  ) => Promise<ZoneSnapshotRestoreResult>;
+
   loadZones: (nodeId: string) => Promise<TechnitiumZoneListEnvelope>;
   loadCombinedZones: () => Promise<TechnitiumCombinedZoneOverview>;
   loadCombinedZoneRecords: (
@@ -368,6 +402,9 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   const requireNodeAuth = useCallback(
     (nodeId: string): void => {
       if (!isNodeAuthenticatedForSession(nodeId)) {
+        triggerAuthRedirect("node-session-expired", {
+          path: `/nodes/${nodeId}`,
+        });
         throw new Error(
           `Not authenticated for node ${nodeId}. Please sign in again to refresh node tokens.`,
         );
@@ -1568,6 +1605,168 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const listZoneSnapshots = useCallback(async (nodeId: string) => {
+    const response = await apiFetch(
+      `/nodes/${encodeURIComponent(nodeId)}/zones/snapshots`,
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to list zone snapshots for node ${nodeId} (${response.status})`,
+      );
+    }
+
+    return (await response.json()) as ZoneSnapshotMetadata[];
+  }, []);
+
+  const createZoneSnapshot = useCallback(
+    async (nodeId: string, request: ZoneSnapshotCreateRequest) => {
+      const zones = request?.zones ?? [];
+      if (!zones || zones.length === 0) {
+        throw new Error(
+          "At least one zone name is required to create a snapshot.",
+        );
+      }
+
+      const payload: ZoneSnapshotCreateRequest = {
+        zones,
+        origin: request.origin ?? (request.note ? "manual" : request.origin),
+        note: request.note,
+      };
+
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/zones/snapshots`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to create zone snapshot for node ${nodeId} (${response.status}): ${errorText}`,
+        );
+      }
+
+      return (await response.json()) as ZoneSnapshotMetadata;
+    },
+    [],
+  );
+
+  const getZoneSnapshot = useCallback(
+    async (nodeId: string, snapshotId: string) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/zones/snapshots/${encodeURIComponent(snapshotId)}`,
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load zone snapshot ${snapshotId} for node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as ZoneSnapshot;
+    },
+    [],
+  );
+
+  const deleteZoneSnapshot = useCallback(
+    async (nodeId: string, snapshotId: string) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/zones/snapshots/${encodeURIComponent(snapshotId)}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to delete zone snapshot (${response.status}): ${errorText}`,
+        );
+      }
+    },
+    [],
+  );
+
+  const updateZoneSnapshotNote = useCallback(
+    async (nodeId: string, snapshotId: string, note?: string) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/zones/snapshots/${encodeURIComponent(snapshotId)}/note`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note }),
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to update zone snapshot note (${response.status}): ${errorText}`,
+        );
+      }
+
+      return (await response.json()) as ZoneSnapshotMetadata;
+    },
+    [],
+  );
+
+  const setZoneSnapshotPinned = useCallback(
+    async (nodeId: string, snapshotId: string, pinned: boolean) => {
+      const action = pinned ? "pin" : "unpin";
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/zones/snapshots/${encodeURIComponent(snapshotId)}/${action}`,
+        { method: "POST" },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to ${action} zone snapshot for node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as ZoneSnapshotMetadata;
+    },
+    [],
+  );
+
+  const restoreZoneSnapshot = useCallback(
+    async (
+      nodeId: string,
+      snapshotId: string,
+      options?: ZoneSnapshotRestoreOptions,
+    ) => {
+      const payload = {
+        deleteZonesThatDidNotExist:
+          options?.keepNewZones === true ?
+            false
+          : options?.deleteZonesThatDidNotExist,
+        zoneNames: options?.zoneNames,
+        confirm: true,
+      };
+
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/zones/snapshots/${encodeURIComponent(snapshotId)}/restore`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to restore zone snapshot (${response.status}): ${errorText}`,
+        );
+      }
+
+      return (await response.json()) as ZoneSnapshotRestoreResult;
+    },
+    [],
+  );
+
   // ========================================
   // Built-in Blocking Callbacks
   // ========================================
@@ -1863,6 +2062,13 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       getDhcpSnapshot,
       deleteDhcpSnapshot,
       updateDhcpSnapshotNote,
+      listZoneSnapshots,
+      createZoneSnapshot,
+      getZoneSnapshot,
+      deleteZoneSnapshot,
+      updateZoneSnapshotNote,
+      setZoneSnapshotPinned,
+      restoreZoneSnapshot,
       loadZones,
       loadCombinedZones,
       loadCombinedZoneRecords,
@@ -1913,6 +2119,13 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       getDhcpSnapshot,
       deleteDhcpSnapshot,
       updateDhcpSnapshotNote,
+      listZoneSnapshots,
+      createZoneSnapshot,
+      getZoneSnapshot,
+      deleteZoneSnapshot,
+      updateZoneSnapshotNote,
+      setZoneSnapshotPinned,
+      restoreZoneSnapshot,
       loadZones,
       loadCombinedZones,
       loadCombinedZoneRecords,

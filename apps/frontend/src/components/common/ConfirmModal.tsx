@@ -16,6 +16,8 @@ interface ConfirmModalProps {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: ConfirmModalVariant;
+  confirmDisabled?: boolean;
+  cancelDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -30,6 +32,8 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   variant = "warning",
+  confirmDisabled = false,
+  cancelDisabled = false,
   onConfirm,
   onCancel,
 }) => {
@@ -73,13 +77,19 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
         </div>
 
         <div className="confirm-modal__actions">
-          <button type="button" className="btn btn--ghost" onClick={onCancel}>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={onCancel}
+            disabled={cancelDisabled}
+          >
             {cancelLabel}
           </button>
           <button
             type="button"
             className={`btn ${variant === "danger" ? "btn--danger" : "btn--primary"}`}
             onClick={onConfirm}
+            disabled={confirmDisabled}
           >
             {confirmLabel}
           </button>
