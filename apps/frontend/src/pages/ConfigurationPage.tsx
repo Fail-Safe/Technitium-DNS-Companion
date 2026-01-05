@@ -62,6 +62,8 @@ interface ManualDomainMatchDetail {
   groupName: string;
 }
 
+type DomainEntrySortMode = "alpha" | "source";
+
 export function ConfigurationPage() {
   const {
     nodes,
@@ -153,6 +155,34 @@ export function ConfigurationPage() {
     "blocked" | "allowed" | "blockedRegex" | "allowedRegex"
   >("blocked");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  // Domain Management tab: Group entry sorting (display-only)
+  const [domainEntrySortMode, setDomainEntrySortMode] =
+    useState<DomainEntrySortMode>(() => {
+      try {
+        // Migrate from older key (dnsFilteringRegexSortMode) to the newer generic setting.
+        const raw =
+          localStorage.getItem("dnsFilteringDomainEntrySortMode") ??
+          localStorage.getItem("dnsFilteringRegexSortMode");
+        if (raw === "alpha" || raw === "source") return raw;
+      } catch {
+        // ignore
+      }
+      return "alpha";
+    });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "dnsFilteringDomainEntrySortMode",
+        domainEntrySortMode,
+      );
+      // Backwards-compatible write for older builds.
+      localStorage.setItem("dnsFilteringRegexSortMode", domainEntrySortMode);
+    } catch {
+      // ignore
+    }
+  }, [domainEntrySortMode]);
 
   // Domain Management tab: Staged changes tracking
   const [testStagedConfig, setTestStagedConfig] =
@@ -754,6 +784,7 @@ export function ConfigurationPage() {
       group[arrayKey] = updatedArray;
 
       setTestStagedConfig(updatedConfig);
+      setHasUnsavedDomainChanges(true);
 
       // Track the change
       setTestPendingChanges((prev) => [
@@ -783,6 +814,7 @@ export function ConfigurationPage() {
   const handleDrop = async (
     e: React.DragEvent,
     groupName: string | "ALL_GROUPS",
+    dropTarget: "header" | "list" | "other" = "other",
   ) => {
     e.preventDefault();
     const domain = e.dataTransfer.getData("text/plain");
@@ -790,6 +822,17 @@ export function ConfigurationPage() {
     setIsDragging(false);
 
     if (!domain || !testStagedConfig) return;
+
+    // UX: dropping onto the same group header (red X) removes the entry.
+    // Keep list drops no-op for same-group drags to avoid accidental removals.
+    if (
+      groupName !== "ALL_GROUPS" &&
+      dropTarget === "header" &&
+      dragSourceGroup === groupName
+    ) {
+      handleRemoveFromGroup(domain, groupName);
+      return;
+    }
 
     // Clone the staged config
     const updatedConfig = JSON.parse(
@@ -938,8 +981,18 @@ export function ConfigurationPage() {
       domains.forEach((d) => domainSet.add(d));
     });
 
-    return Array.from(domainSet).sort();
-  }, [selectedNodeConfig, testStagedConfig, activeDomainType, activeTab]);
+    const values = Array.from(domainSet);
+    if (domainEntrySortMode !== "alpha") return values;
+    return values.sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+  }, [
+    selectedNodeConfig,
+    testStagedConfig,
+    activeDomainType,
+    activeTab,
+    domainEntrySortMode,
+  ]);
 
   // Filter domains based on search input
   const filteredDomains = useMemo(() => {
@@ -1012,18 +1065,33 @@ export function ConfigurationPage() {
       const group = config?.groups.find((g) => g.name === groupName);
       if (!group) return [];
 
+      const sortForDisplay = (values: string[]): string[] => {
+        // Important: do NOT mutate underlying config arrays.
+        // This is display-only sorting for readability.
+        if (domainEntrySortMode !== "alpha") return values;
+        return [...values].sort((a, b) =>
+          a.localeCompare(b, undefined, { sensitivity: "base" }),
+        );
+      };
+
       switch (activeDomainType) {
         case "blocked":
-          return group.blocked || [];
+          return sortForDisplay(group.blocked || []);
         case "allowed":
-          return group.allowed || [];
+          return sortForDisplay(group.allowed || []);
         case "blockedRegex":
-          return group.blockedRegex || [];
+          return sortForDisplay(group.blockedRegex || []);
         case "allowedRegex":
-          return group.allowedRegex || [];
+          return sortForDisplay(group.allowedRegex || []);
       }
     },
-    [selectedNodeConfig, testStagedConfig, activeDomainType, activeTab],
+    [
+      selectedNodeConfig,
+      testStagedConfig,
+      activeDomainType,
+      activeTab,
+      domainEntrySortMode,
+    ],
   );
 
   // Domain Management tab: Save changes
@@ -1915,6 +1983,44 @@ export function ConfigurationPage() {
                         Groups - Drag & Drop
                       </label>
                       <div
+                        style={{
+                          marginTop: "-0.75rem",
+                          marginBottom: "0.75rem",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                          justifyContent: "flex-end",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: "0.8rem",
+                            color: "var(--color-text-secondary)",
+                          }}
+                        >
+                          Entry sort:
+                        </span>
+                        <select
+                          value={domainEntrySortMode}
+                          onChange={(e) =>
+                            setDomainEntrySortMode(
+                              e.target.value as DomainEntrySortMode,
+                            )
+                          }
+                          style={{
+                            fontSize: "0.8rem",
+                            padding: "0.25rem 0.5rem",
+                            borderRadius: "0.5rem",
+                            border: "1px solid var(--color-border)",
+                            background: "var(--color-bg-secondary)",
+                            color: "var(--color-text-primary)",
+                          }}
+                        >
+                          <option value="alpha">Alpha-sort</option>
+                          <option value="source">Source order</option>
+                        </select>
+                      </div>
+                      <div
                         onDragOver={(e) => {
                           // Allow drop anywhere in this container
                           e.preventDefault();
@@ -1948,7 +2054,7 @@ export function ConfigurationPage() {
                         <div
                           onDragOver={(e) => handleDragOver(e, "ALL_GROUPS")}
                           onDragLeave={handleDragLeave}
-                          onDrop={(e) => handleDrop(e, "ALL_GROUPS")}
+                          onDrop={(e) => void handleDrop(e, "ALL_GROUPS")}
                           className={`all-groups-drop-zone ${dragOverGroup === "ALL_GROUPS" ? "all-groups-drop-zone--dragging-over" : ""}`}
                         >
                           <div className="all-groups-drop-zone__icon">
@@ -2000,7 +2106,9 @@ export function ConfigurationPage() {
                                     handleDragOver(e, groupName)
                                   }
                                   onDragLeave={handleDragLeave}
-                                  onDrop={(e) => handleDrop(e, groupName)}
+                                  onDrop={(e) =>
+                                    handleDrop(e, groupName, "header")
+                                  }
                                   className={`group-drop-zone ${dragOverGroup === groupName ? "group-drop-zone--dragging-over" : ""}`}
                                 >
                                   <div className="group-drop-zone__header">
@@ -2074,7 +2182,9 @@ export function ConfigurationPage() {
                                     handleDragOver(e, groupName)
                                   }
                                   onDragLeave={handleDragLeave}
-                                  onDrop={(e) => handleDrop(e, groupName)}
+                                  onDrop={(e) =>
+                                    handleDrop(e, groupName, "list")
+                                  }
                                   style={{
                                     marginLeft: "0.55rem",
                                     marginRight: "0.55rem",
