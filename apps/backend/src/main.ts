@@ -7,6 +7,8 @@ import { existsSync, readFileSync, readdirSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import { AppModule } from "./app.module";
 
+const ONE_YEAR_IN_SECONDS = 60 * 60 * 24 * 365;
+
 function resolveConfigFilePath(inputPath: string): string {
   const absolutePath = resolve(inputPath);
 
@@ -128,12 +130,50 @@ async function bootstrap() {
   // Serve static frontend files (production mode)
   const frontendPath = resolve(__dirname, "../../frontend/dist");
   if (existsSync(frontendPath)) {
-    app.useStaticAssets(frontendPath, { prefix: "/", index: "index.html" });
+    app.useStaticAssets(frontendPath, {
+      prefix: "/",
+      // We serve index.html via the SPA fallback below so we can control headers.
+      index: false,
+      setHeaders: (res, filePath) => {
+        const fileName = basename(filePath);
+
+        // Critical: never cache the SPA shell, otherwise browsers can keep loading an
+        // older bundle (missing newer UI sections) until a hard refresh.
+        if (fileName === "index.html" || fileName.endsWith(".html")) {
+          res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+          return;
+        }
+
+        // Critical: avoid caching SW bootstrap/manifest files so update checks work reliably.
+        if (
+          fileName === "sw.js" ||
+          fileName === "registerSW.js" ||
+          fileName === "manifest.webmanifest" ||
+          fileName.startsWith("workbox-")
+        ) {
+          res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+          return;
+        }
+
+        // Hashed build assets are safe to cache aggressively.
+        if (filePath.includes(`${join("/", "assets", "")}`)) {
+          res.setHeader(
+            "Cache-Control",
+            `public, max-age=${ONE_YEAR_IN_SECONDS}, immutable`,
+          );
+          return;
+        }
+
+        // Default: require revalidation.
+        res.setHeader("Cache-Control", "no-cache");
+      },
+    });
     logger.log(`Serving frontend from: ${frontendPath}`);
 
     // Handle SPA routing - serve index.html for all non-API routes
     app.use((req: Request, res: Response, next: NextFunction) => {
       if (!req.url.startsWith("/api") && !req.url.match(/\.\w+$/)) {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
         res.sendFile(join(frontendPath, "index.html"));
       } else {
         next();
@@ -157,9 +197,8 @@ async function bootstrap() {
     logger.log("CORS enabled for all origins (development mode)");
   }
 
-  const port = httpsEnabled
-    ? process.env.HTTPS_PORT || 3443
-    : process.env.PORT || 3000;
+  const port =
+    httpsEnabled ? process.env.HTTPS_PORT || 3443 : process.env.PORT || 3000;
 
   const portNumber =
     typeof port === "string" ? Number.parseInt(port, 10) : port;

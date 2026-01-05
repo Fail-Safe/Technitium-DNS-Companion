@@ -9,10 +9,13 @@ import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { DomainListController } from "./domain-list-cache.controller";
 import { DomainListCacheService } from "./domain-list-cache.service";
 import { DomainListPersistenceService } from "./domain-list-persistence.service";
+import { SplitHorizonPtrController } from "./split-horizon-ptr/split-horizon-ptr.controller";
+import { SplitHorizonPtrService } from "./split-horizon-ptr/split-horizon-ptr.service";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
 import { TechnitiumController } from "./technitium.controller";
 import { TechnitiumService } from "./technitium.service";
 import { TechnitiumNodeConfig } from "./technitium.types";
+import { ZoneSnapshotService } from "./zone-snapshot.service";
 
 @Module({
   imports: [
@@ -31,9 +34,11 @@ import { TechnitiumNodeConfig } from "./technitium.types";
     TechnitiumService,
     AdvancedBlockingService,
     BuiltInBlockingService,
+    SplitHorizonPtrService,
     DomainListCacheService,
     DomainListPersistenceService,
     DhcpSnapshotService,
+    ZoneSnapshotService,
     {
       provide: TECHNITIUM_NODES_TOKEN,
       useFactory: (): TechnitiumNodeConfig[] => {
@@ -128,11 +133,13 @@ import { TechnitiumNodeConfig } from "./technitium.types";
     AdvancedBlockingController,
     BuiltInBlockingController,
     DomainListController,
+    SplitHorizonPtrController,
   ],
   exports: [
     TechnitiumService,
     AdvancedBlockingService,
     BuiltInBlockingService,
+    SplitHorizonPtrService,
     DomainListCacheService,
     DhcpSnapshotService,
     TECHNITIUM_NODES_TOKEN,

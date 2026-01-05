@@ -25,6 +25,7 @@ import type {
   TechnitiumQueryLogFilters,
   TechnitiumRenameDhcpScopeRequest,
   TechnitiumUpdateDhcpScopeRequest,
+  ZoneSnapshotOrigin,
 } from "./technitium.types";
 
 @Controller("nodes")
@@ -202,6 +203,98 @@ export class TechnitiumController {
     @Param("snapshotId") snapshotId: string,
   ) {
     return this.technitiumService.setDhcpSnapshotPinned(
+      nodeId,
+      snapshotId,
+      false,
+    );
+  }
+
+  @Post(":nodeId/zones/snapshots")
+  createZoneSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Body()
+    body: { zones?: string[]; origin?: ZoneSnapshotOrigin; note?: string },
+  ) {
+    const origin = body?.origin === "automatic" ? "automatic" : "manual";
+    const zones = body?.zones ?? [];
+    return this.technitiumService.createZoneSnapshot(
+      nodeId,
+      zones,
+      origin,
+      body?.note,
+    );
+  }
+
+  @Get(":nodeId/zones/snapshots")
+  listZoneSnapshots(@Param("nodeId") nodeId: string) {
+    return this.technitiumService.listZoneSnapshots(nodeId);
+  }
+
+  @Get(":nodeId/zones/snapshots/:snapshotId")
+  getZoneSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ) {
+    return this.technitiumService.getZoneSnapshot(nodeId, snapshotId);
+  }
+
+  @Delete(":nodeId/zones/snapshots/:snapshotId")
+  deleteZoneSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ) {
+    return this.technitiumService.deleteZoneSnapshot(nodeId, snapshotId);
+  }
+
+  @Patch(":nodeId/zones/snapshots/:snapshotId/note")
+  updateZoneSnapshotNote(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+    @Body() body: { note?: string },
+  ) {
+    return this.technitiumService.updateZoneSnapshotNote(
+      nodeId,
+      snapshotId,
+      body?.note,
+    );
+  }
+
+  @Post(":nodeId/zones/snapshots/:snapshotId/restore")
+  restoreZoneSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+    @Body()
+    body: {
+      deleteZonesThatDidNotExist?: boolean;
+      confirm?: boolean;
+      zoneNames?: string[];
+    },
+  ) {
+    return this.technitiumService.restoreZoneSnapshot(nodeId, snapshotId, {
+      deleteZonesThatDidNotExist: body?.deleteZonesThatDidNotExist,
+      confirm: body?.confirm,
+      zoneNames: body?.zoneNames,
+    });
+  }
+
+  @Post(":nodeId/zones/snapshots/:snapshotId/pin")
+  pinZoneSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ) {
+    return this.technitiumService.setZoneSnapshotPinned(
+      nodeId,
+      snapshotId,
+      true,
+    );
+  }
+
+  @Post(":nodeId/zones/snapshots/:snapshotId/unpin")
+  unpinZoneSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ) {
+    return this.technitiumService.setZoneSnapshotPinned(
       nodeId,
       snapshotId,
       false,

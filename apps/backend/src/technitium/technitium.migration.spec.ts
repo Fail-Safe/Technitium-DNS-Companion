@@ -8,6 +8,7 @@ import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
 import { TechnitiumService } from "./technitium.service";
 import type { TechnitiumNodeConfig } from "./technitium.types";
+import { ZoneSnapshotService } from "./zone-snapshot.service";
 
 jest.mock("axios", () => {
   const request = jest.fn();
@@ -73,6 +74,7 @@ describe("TechnitiumService migration", () => {
         TechnitiumService,
         { provide: TECHNITIUM_NODES_TOKEN, useValue: nodes },
         { provide: DhcpSnapshotService, useValue: {} },
+        { provide: ZoneSnapshotService, useValue: {} },
       ],
     }).compile();
 
@@ -139,11 +141,7 @@ describe("TechnitiumService migration", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            response: {
-              username,
-              tokenName,
-              token: "new-background-token",
-            },
+            response: { username, tokenName, token: "new-background-token" },
           },
         });
       }
@@ -223,11 +221,7 @@ describe("TechnitiumService migration", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            response: {
-              username,
-              tokenName,
-              token: "new-background-token",
-            },
+            response: { username, tokenName, token: "new-background-token" },
           },
         });
       }
@@ -285,11 +279,7 @@ describe("TechnitiumService migration", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            response: {
-              username,
-              tokenName,
-              token: "new-background-token",
-            },
+            response: { username, tokenName, token: "new-background-token" },
           },
         });
       }
@@ -356,11 +346,7 @@ describe("TechnitiumService migration", () => {
         return Promise.resolve({
           data: {
             status: "ok",
-            response: {
-              username,
-              tokenName,
-              token: "new-background-token",
-            },
+            response: { username, tokenName, token: "new-background-token" },
           },
         });
       }

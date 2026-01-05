@@ -285,6 +285,31 @@ export interface DhcpSnapshot {
   scopes: DhcpSnapshotScopeEntry[];
 }
 
+export type ZoneSnapshotOrigin = "manual" | "automatic";
+
+export interface ZoneSnapshotZoneEntry {
+  zoneName: string;
+  /** True if zone existed when snapshot was taken; false if it did not exist. */
+  existed: boolean;
+  /** RFC1035 zone file text (from /api/zones/export). Present only when existed=true. */
+  zoneFile?: string;
+}
+
+export interface ZoneSnapshotMetadata {
+  id: string;
+  nodeId: string;
+  createdAt: string;
+  zoneCount: number;
+  origin: ZoneSnapshotOrigin;
+  pinned?: boolean;
+  note?: string;
+}
+
+export interface ZoneSnapshot {
+  metadata: ZoneSnapshotMetadata;
+  zones: ZoneSnapshotZoneEntry[];
+}
+
 export interface TechnitiumDhcpStaticRoute {
   destination: string;
   subnetMask: string;

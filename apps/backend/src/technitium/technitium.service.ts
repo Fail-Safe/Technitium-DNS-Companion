@@ -60,7 +60,12 @@ import {
   TechnitiumZoneRecordsNodeSnapshot,
   TechnitiumZoneRecordsResponse,
   TechnitiumZoneSummary,
+  ZoneSnapshot,
+  ZoneSnapshotMetadata,
+  ZoneSnapshotOrigin,
+  ZoneSnapshotZoneEntry,
 } from "./technitium.types";
+import { ZoneSnapshotService } from "./zone-snapshot.service";
 
 interface TechnitiumQueryLoggerMetadata {
   name: string;
@@ -285,6 +290,7 @@ export class TechnitiumService {
     @Inject(TECHNITIUM_NODES_TOKEN)
     private readonly nodeConfigs: TechnitiumNodeConfig[],
     private readonly dhcpSnapshotService: DhcpSnapshotService,
+    private readonly zoneSnapshotService: ZoneSnapshotService,
   ) {
     // If TECHNITIUM_BACKGROUND_TOKEN is set, validate it so the UI can surface
     // scope/access issues globally. Only session-auth mode uses it for background PTR.
@@ -449,8 +455,9 @@ export class TechnitiumService {
     // In session-auth mode we may only have tokens for a subset of nodes.
     if (this.nodeConfigs.length > 0) {
       const session = AuthRequestContext.getSession();
-      const probeNode = this.sessionAuthEnabled
-        ? this.nodeConfigs.find((node) => !!session?.tokensByNodeId?.[node.id])
+      const probeNode =
+        this.sessionAuthEnabled ?
+          this.nodeConfigs.find((node) => !!session?.tokensByNodeId?.[node.id])
         : this.nodeConfigs[0];
 
       if (!probeNode) {
@@ -738,9 +745,9 @@ export class TechnitiumService {
       };
     } catch (error: unknown) {
       const name =
-        error instanceof Error && error.constructor
-          ? error.constructor.name
-          : "Unknown";
+        error instanceof Error && error.constructor ?
+          error.constructor.name
+        : "Unknown";
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
         `Failed to get cluster state for ${nodeId}: ${name} - ${message}`,
@@ -1195,9 +1202,9 @@ export class TechnitiumService {
       const message = (() => {
         if (error instanceof HttpException) {
           const response = error.getResponse();
-          return typeof response === "string"
-            ? response
-            : (error.message ?? "Request failed");
+          return typeof response === "string" ? response : (
+              (error.message ?? "Request failed")
+            );
         }
 
         if (error instanceof Error) {
@@ -1216,9 +1223,9 @@ export class TechnitiumService {
     }
 
     const envelopeObj =
-      envelope && typeof envelope === "object"
-        ? (envelope as Partial<TechnitiumApiResponse<SessionInfo>>)
-        : undefined;
+      envelope && typeof envelope === "object" ?
+        (envelope as Partial<TechnitiumApiResponse<SessionInfo>>)
+      : undefined;
 
     if (!envelopeObj || typeof envelopeObj.status !== "string") {
       this.backgroundTokenValidation = {
@@ -1256,12 +1263,13 @@ export class TechnitiumService {
       status?: string;
     };
     const sessionInfo: SessionInfo | undefined =
-      envelopeObj.response !== undefined
-        ? envelopeObj.response
-        : flattened &&
-            (flattened.info || flattened.username || flattened.displayName)
-          ? flattened
-          : undefined;
+      envelopeObj.response !== undefined ? envelopeObj.response
+      : (
+        flattened &&
+        (flattened.info || flattened.username || flattened.displayName)
+      ) ?
+        flattened
+      : undefined;
 
     if (!sessionInfo) {
       this.backgroundTokenValidation = {
@@ -1423,9 +1431,9 @@ export class TechnitiumService {
     };
 
     const envelopeObj =
-      envelope && typeof envelope === "object"
-        ? (envelope as Record<string, unknown>)
-        : undefined;
+      envelope && typeof envelope === "object" ?
+        (envelope as Record<string, unknown>)
+      : undefined;
 
     const status = envelopeObj?.["status"];
     if (!envelopeObj || typeof status !== "string") {
@@ -1458,13 +1466,15 @@ export class TechnitiumService {
       response?: unknown;
     };
     const sessionInfo: SessionInfo | undefined =
-      flattened &&
-      typeof flattened === "object" &&
-      (flattened.info || flattened.username)
-        ? flattened
-        : flattened && typeof flattened.response === "object"
-          ? (flattened.response as SessionInfo)
-          : undefined;
+      (
+        flattened &&
+        typeof flattened === "object" &&
+        (flattened.info || flattened.username)
+      ) ?
+        flattened
+      : flattened && typeof flattened.response === "object" ?
+        (flattened.response as SessionInfo)
+      : undefined;
 
     if (!sessionInfo) {
       return {
@@ -1698,9 +1708,9 @@ export class TechnitiumService {
         }
       } else {
         const paramsObject =
-          params && typeof params === "object"
-            ? (params as Record<string, unknown>)
-            : {};
+          params && typeof params === "object" ?
+            (params as Record<string, unknown>)
+          : {};
 
         if (!("token" in paramsObject)) {
           axiosConfig.params = { ...paramsObject, token };
@@ -1750,8 +1760,9 @@ export class TechnitiumService {
         timeout: 5000, // 5 second timeout for PTR lookups
       };
 
-      const envelope = this.sessionAuthEnabled
-        ? await this.requestWithExplicitToken<TechnitiumApiResponse<any>>(
+      const envelope =
+        this.sessionAuthEnabled ?
+          await this.requestWithExplicitToken<TechnitiumApiResponse<any>>(
             node,
             requestConfig,
             this.backgroundToken ?? "",
@@ -2081,18 +2092,18 @@ export class TechnitiumService {
       totalMatchingEntries > 0;
 
     const totalPages =
-      effectiveEntriesPerPage > 0
-        ? Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
-        : 1;
+      effectiveEntriesPerPage > 0 ?
+        Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
+      : 1;
 
     const startIndex =
-      effectiveEntriesPerPage > 0
-        ? (pageNumber - 1) * effectiveEntriesPerPage
-        : 0;
+      effectiveEntriesPerPage > 0 ?
+        (pageNumber - 1) * effectiveEntriesPerPage
+      : 0;
     const endIndex =
-      effectiveEntriesPerPage > 0
-        ? startIndex + effectiveEntriesPerPage
-        : totalMatchingEntries;
+      effectiveEntriesPerPage > 0 ?
+        startIndex + effectiveEntriesPerPage
+      : totalMatchingEntries;
     const paginatedEntries = filteredEntries.slice(startIndex, endIndex);
 
     return {
@@ -2536,17 +2547,17 @@ export class TechnitiumService {
       anyNodeHitLimit && hasFiltersActive && totalMatchingEntries > 0;
 
     const totalPages =
-      effectiveEntriesPerPage > 0
-        ? Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
-        : 1;
+      effectiveEntriesPerPage > 0 ?
+        Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
+      : 1;
     const startIndex =
-      effectiveEntriesPerPage > 0
-        ? (pageNumber - 1) * effectiveEntriesPerPage
-        : 0;
+      effectiveEntriesPerPage > 0 ?
+        (pageNumber - 1) * effectiveEntriesPerPage
+      : 0;
     const endIndex =
-      effectiveEntriesPerPage > 0
-        ? startIndex + effectiveEntriesPerPage
-        : filteredEntries.length;
+      effectiveEntriesPerPage > 0 ?
+        startIndex + effectiveEntriesPerPage
+      : filteredEntries.length;
     const paginatedEntries = filteredEntries.slice(startIndex, endIndex);
 
     const nodes: TechnitiumCombinedNodeLogSnapshot[] = snapshots.map(
@@ -2590,13 +2601,13 @@ export class TechnitiumService {
 
     // BENCHMARK: Log detailed metrics
     const hitRate =
-      this.queryLogCacheStats.hits + this.queryLogCacheStats.misses > 0
-        ? (
-            (this.queryLogCacheStats.hits /
-              (this.queryLogCacheStats.hits + this.queryLogCacheStats.misses)) *
-            100
-          ).toFixed(1)
-        : "0.0";
+      this.queryLogCacheStats.hits + this.queryLogCacheStats.misses > 0 ?
+        (
+          (this.queryLogCacheStats.hits /
+            (this.queryLogCacheStats.hits + this.queryLogCacheStats.misses)) *
+          100
+        ).toFixed(1)
+      : "0.0";
 
     this.logger.log(
       `[BENCHMARK] getCombinedQueryLogs: ` +
@@ -2643,8 +2654,9 @@ export class TechnitiumService {
     >(node, { method: "GET", url: "/api/zones/list" });
 
     const payload = this.unwrapApiResponse(envelope, node.id, "zone list");
-    const zones = Array.isArray(payload.zones)
-      ? payload.zones.map((zone) => this.sanitizeZoneSummary(zone))
+    const zones =
+      Array.isArray(payload.zones) ?
+        payload.zones.map((zone) => this.sanitizeZoneSummary(zone))
       : [];
 
     const pageNumber =
@@ -2810,8 +2822,9 @@ export class TechnitiumService {
         const totalZones =
           snapshot.data?.totalZones ??
           (snapshot.data ? snapshot.data.zones.length : undefined);
-        const modifiableZones = snapshot.data
-          ? snapshot.data.zones.filter((zone) => zone.internal !== true).length
+        const modifiableZones =
+          snapshot.data ?
+            snapshot.data.zones.filter((zone) => zone.internal !== true).length
           : undefined;
 
         return {
@@ -2852,12 +2865,12 @@ export class TechnitiumService {
       `zone records for ${zoneName || "(root)"}`,
     );
 
-    const records = Array.isArray(payload.records)
-      ? payload.records
-      : ([] as unknown[]);
+    const records =
+      Array.isArray(payload.records) ? payload.records : ([] as unknown[]);
 
-    const zone = payload.zone
-      ? this.sanitizeZoneSummary(payload.zone)
+    const zone =
+      payload.zone ?
+        this.sanitizeZoneSummary(payload.zone)
       : { name: zoneName };
 
     return {
@@ -2880,8 +2893,9 @@ export class TechnitiumService {
 
       if (clusterEnabled) {
         const primarySummary = summaries.find((summary) => summary.isPrimary);
-        const primaryNode = primarySummary
-          ? this.nodeConfigs.find((node) => node.id === primarySummary.id)
+        const primaryNode =
+          primarySummary ?
+            this.nodeConfigs.find((node) => node.id === primarySummary.id)
           : undefined;
 
         if (primaryNode) {
@@ -2968,9 +2982,9 @@ export class TechnitiumService {
     const sourceNode = this.findNode(sourceNodeId);
     const requestedTargetId = request.targetNodeId?.trim();
     const targetNode = this.findNode(
-      requestedTargetId && requestedTargetId.length > 0
-        ? requestedTargetId
-        : sourceNode.id,
+      requestedTargetId && requestedTargetId.length > 0 ?
+        requestedTargetId
+      : sourceNode.id,
     );
     const isLocalClone =
       targetNode.id.toLowerCase() === sourceNode.id.toLowerCase();
@@ -3091,9 +3105,8 @@ export class TechnitiumService {
       request.enableOnTarget ??
       (sourceSummary?.enabled !== undefined ? sourceSummary.enabled : false);
 
-    const enableDisableUrl = desiredEnabled
-      ? "/api/dhcp/scopes/enable"
-      : "/api/dhcp/scopes/disable";
+    const enableDisableUrl =
+      desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
 
     const toggleEnvelope = await this.request<
       TechnitiumApiResponse<Record<string, unknown>>
@@ -3197,9 +3210,8 @@ export class TechnitiumService {
     );
 
     const desiredEnabled = request.enabled ?? false;
-    const enableDisableUrl = desiredEnabled
-      ? "/api/dhcp/scopes/enable"
-      : "/api/dhcp/scopes/disable";
+    const enableDisableUrl =
+      desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
 
     const toggleEnvelope = await this.request<
       TechnitiumApiResponse<Record<string, unknown>>
@@ -3445,9 +3457,8 @@ export class TechnitiumService {
 
     if (wantsEnabledChange) {
       const desiredEnabled = request.enabled as boolean;
-      const enableDisableUrl = desiredEnabled
-        ? "/api/dhcp/scopes/enable"
-        : "/api/dhcp/scopes/disable";
+      const enableDisableUrl =
+        desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
 
       const toggleEnvelope = await this.request<
         TechnitiumApiResponse<Record<string, unknown>>
@@ -3722,9 +3733,8 @@ export class TechnitiumService {
       );
 
       const desiredEnabled = entry.enabled ?? false;
-      const enableDisableUrl = desiredEnabled
-        ? "/api/dhcp/scopes/enable"
-        : "/api/dhcp/scopes/disable";
+      const enableDisableUrl =
+        desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
 
       const toggleEnvelope = await this.request<
         TechnitiumApiResponse<Record<string, unknown>>
@@ -3771,13 +3781,13 @@ export class TechnitiumService {
 
     // Filter to specific scopes if requested
     const scopesToSync =
-      scopeNames && scopeNames.length > 0
-        ? sourceScopes.filter((scope) =>
-            scopeNames.some(
-              (name) => name.toLowerCase() === scope.name?.toLowerCase(),
-            ),
-          )
-        : sourceScopes;
+      scopeNames && scopeNames.length > 0 ?
+        sourceScopes.filter((scope) =>
+          scopeNames.some(
+            (name) => name.toLowerCase() === scope.name?.toLowerCase(),
+          ),
+        )
+      : sourceScopes;
 
     if (scopesToSync.length === 0) {
       throw new BadRequestException("No scopes found to sync on source node.");
@@ -3904,14 +3914,15 @@ export class TechnitiumService {
           sourceScopeDetails.get(scopeName.toLowerCase()) ||
           (sourceScope as unknown as import("./technitium.types").TechnitiumDhcpScope);
 
-        const scopeDiff = targetScopeDetails
-          ? this.compareDhcpScopes(sourceScopeDetail, targetScopeDetails)
-          : existingTargetScope
-            ? this.compareDhcpScopes(
-                sourceScopeDetail,
-                existingTargetScope as unknown as import("./technitium.types").TechnitiumDhcpScope,
-              )
-            : undefined;
+        const scopeDiff =
+          targetScopeDetails ?
+            this.compareDhcpScopes(sourceScopeDetail, targetScopeDetails)
+          : existingTargetScope ?
+            this.compareDhcpScopes(
+              sourceScopeDetail,
+              existingTargetScope as unknown as import("./technitium.types").TechnitiumDhcpScope,
+            )
+          : undefined;
 
         // Apply strategy
         if (strategy === "skip-existing" && existsOnTarget) {
@@ -3970,7 +3981,9 @@ export class TechnitiumService {
       }
 
       const nodeStatus: import("./technitium.types").DhcpBulkSyncNodeResult["status"] =
-        failedCount === 0 ? "success" : syncedCount > 0 ? "partial" : "failed";
+        failedCount === 0 ? "success"
+        : syncedCount > 0 ? "partial"
+        : "failed";
 
       nodeResults.push({
         targetNodeId,
@@ -4555,9 +4568,9 @@ export class TechnitiumService {
         }
       } else {
         const paramsObject =
-          params && typeof params === "object"
-            ? (params as Record<string, unknown>)
-            : {};
+          params && typeof params === "object" ?
+            (params as Record<string, unknown>)
+          : {};
 
         if (!("token" in paramsObject)) {
           axiosConfig.params = { ...paramsObject, token: effectiveToken ?? "" };
@@ -4642,9 +4655,9 @@ export class TechnitiumService {
       obj.error,
       obj.errorMessage,
       obj.status,
-      obj.response && typeof obj.response === "object"
-        ? (obj.response as Record<string, unknown>).errorMessage
-        : undefined,
+      obj.response && typeof obj.response === "object" ?
+        (obj.response as Record<string, unknown>).errorMessage
+      : undefined,
     ];
 
     return candidates
@@ -4854,24 +4867,347 @@ export class TechnitiumService {
 
     assign(
       "allowOnlyReservedLeases",
-      hasOwn("allowOnlyReservedLeases")
-        ? scope.allowOnlyReservedLeases
-        : undefined,
+      hasOwn("allowOnlyReservedLeases") ?
+        scope.allowOnlyReservedLeases
+      : undefined,
     );
     assign(
       "blockLocallyAdministeredMacAddresses",
-      hasOwn("blockLocallyAdministeredMacAddresses")
-        ? scope.blockLocallyAdministeredMacAddresses
-        : undefined,
+      hasOwn("blockLocallyAdministeredMacAddresses") ?
+        scope.blockLocallyAdministeredMacAddresses
+      : undefined,
     );
     assign(
       "ignoreClientIdentifierOption",
-      hasOwn("ignoreClientIdentifierOption")
-        ? scope.ignoreClientIdentifierOption
-        : undefined,
+      hasOwn("ignoreClientIdentifierOption") ?
+        scope.ignoreClientIdentifierOption
+      : undefined,
     );
 
     return form;
+  }
+
+  private normalizeZoneName(zoneName: string): string {
+    return (zoneName ?? "").trim();
+  }
+
+  private decodeTextBody(data: unknown): string {
+    if (typeof data === "string") {
+      return data;
+    }
+
+    // Axios in Node commonly gives Buffer for arraybuffer.
+    if (Buffer.isBuffer(data)) {
+      return data.toString("utf8");
+    }
+
+    // Fallback for ArrayBuffer.
+    if (data instanceof ArrayBuffer) {
+      return Buffer.from(new Uint8Array(data)).toString("utf8");
+    }
+
+    return String(data ?? "");
+  }
+
+  private async exportZoneFileText(
+    nodeId: string,
+    zoneName: string,
+  ): Promise<string> {
+    const node = this.findNode(nodeId);
+    const normalized = this.normalizeZoneName(zoneName);
+    if (!normalized) {
+      throw new BadRequestException("zoneName is required");
+    }
+
+    const data = await this.request<unknown>(node, {
+      method: "GET",
+      url: "/api/zones/export",
+      params: { zone: normalized },
+      responseType: "arraybuffer",
+      headers: { Accept: "text/plain" },
+    });
+
+    return this.decodeTextBody(data);
+  }
+
+  private async importZoneFileText(
+    nodeId: string,
+    zoneName: string,
+    zoneFile: string,
+    options?: { overwrite?: boolean; overwriteSoaSerial?: boolean },
+  ): Promise<void> {
+    const node = this.findNode(nodeId);
+    const normalized = this.normalizeZoneName(zoneName);
+    if (!normalized) {
+      throw new BadRequestException("zoneName is required");
+    }
+
+    await this.request<unknown>(node, {
+      method: "POST",
+      url: "/api/zones/import",
+      params: {
+        zone: normalized,
+        overwrite: options?.overwrite ?? true,
+        overwriteSoaSerial: options?.overwriteSoaSerial ?? false,
+      },
+      headers: { "Content-Type": "text/plain" },
+      data: zoneFile,
+    });
+  }
+
+  private async deleteZone(nodeId: string, zoneName: string): Promise<void> {
+    const node = this.findNode(nodeId);
+    const normalized = this.normalizeZoneName(zoneName);
+    if (!normalized) {
+      throw new BadRequestException("zoneName is required");
+    }
+
+    await this.request<unknown>(node, {
+      method: "GET",
+      url: "/api/zones/delete",
+      params: { zone: normalized },
+    });
+  }
+
+  private async buildZoneSnapshotEntries(
+    nodeId: string,
+    zoneNames: string[],
+  ): Promise<ZoneSnapshotZoneEntry[]> {
+    const normalized = [
+      ...new Set(
+        zoneNames.map((z) => this.normalizeZoneName(z)).filter(Boolean),
+      ),
+    ];
+
+    if (normalized.length === 0) {
+      throw new BadRequestException("At least one zone name is required.");
+    }
+
+    return Promise.all(
+      normalized.map(async (zoneName) => {
+        try {
+          const zoneFile = await this.exportZoneFileText(nodeId, zoneName);
+          return {
+            zoneName,
+            existed: true,
+            zoneFile,
+          } satisfies ZoneSnapshotZoneEntry;
+        } catch (error) {
+          if (error instanceof HttpException && error.getStatus() === 404) {
+            return { zoneName, existed: false } satisfies ZoneSnapshotZoneEntry;
+          }
+
+          throw error;
+        }
+      }),
+    );
+  }
+
+  async createZoneSnapshot(
+    nodeId: string,
+    zones: string[],
+    origin: ZoneSnapshotOrigin = "manual",
+    note?: string,
+  ): Promise<ZoneSnapshotMetadata> {
+    const node = this.findNode(nodeId);
+    const entries = await this.buildZoneSnapshotEntries(node.id, zones);
+    return this.zoneSnapshotService.saveSnapshot(
+      node.id,
+      entries,
+      origin,
+      note,
+    );
+  }
+
+  async listZoneSnapshots(nodeId: string): Promise<ZoneSnapshotMetadata[]> {
+    const node = this.findNode(nodeId);
+    return this.zoneSnapshotService.listSnapshots(node.id);
+  }
+
+  async getZoneSnapshot(
+    nodeId: string,
+    snapshotId: string,
+  ): Promise<ZoneSnapshot> {
+    const node = this.findNode(nodeId);
+    const snapshot = await this.zoneSnapshotService.getSnapshot(
+      node.id,
+      snapshotId,
+    );
+
+    if (!snapshot) {
+      throw new NotFoundException(
+        `Snapshot ${snapshotId} not found for node ${node.id}.`,
+      );
+    }
+
+    return snapshot;
+  }
+
+  async deleteZoneSnapshot(nodeId: string, snapshotId: string): Promise<void> {
+    const node = this.findNode(nodeId);
+    const deleted = await this.zoneSnapshotService.deleteSnapshot(
+      node.id,
+      snapshotId,
+    );
+
+    if (!deleted) {
+      throw new NotFoundException(
+        `Snapshot ${snapshotId} not found for node ${node.id}.`,
+      );
+    }
+  }
+
+  async updateZoneSnapshotNote(
+    nodeId: string,
+    snapshotId: string,
+    note: string | undefined,
+  ): Promise<ZoneSnapshotMetadata> {
+    const node = this.findNode(nodeId);
+    const metadata = await this.zoneSnapshotService.updateSnapshotNote(
+      node.id,
+      snapshotId,
+      note,
+    );
+
+    if (!metadata) {
+      throw new NotFoundException(
+        `Snapshot ${snapshotId} not found for node ${node.id}.`,
+      );
+    }
+
+    return metadata;
+  }
+
+  async setZoneSnapshotPinned(
+    nodeId: string,
+    snapshotId: string,
+    pinned: boolean,
+  ): Promise<ZoneSnapshotMetadata> {
+    const node = this.findNode(nodeId);
+    const metadata = await this.zoneSnapshotService.setPinned(
+      node.id,
+      snapshotId,
+      pinned,
+    );
+
+    if (!metadata) {
+      throw new NotFoundException(
+        `Snapshot ${snapshotId} not found for node ${node.id}.`,
+      );
+    }
+
+    return metadata;
+  }
+
+  async restoreZoneSnapshot(
+    nodeId: string,
+    snapshotId: string,
+    options?: {
+      deleteZonesThatDidNotExist?: boolean;
+      confirm?: boolean;
+      zoneNames?: string[];
+    },
+  ): Promise<{
+    snapshot: ZoneSnapshotMetadata;
+    restored: number;
+    deleted: number;
+    skipped: number;
+  }> {
+    if (!options?.confirm) {
+      throw new BadRequestException(
+        "Restoring a zone snapshot requires explicit confirmation (confirm=true).",
+      );
+    }
+
+    const node = this.findNode(nodeId);
+    const snapshot = await this.zoneSnapshotService.getSnapshot(
+      node.id,
+      snapshotId,
+    );
+
+    if (!snapshot) {
+      throw new NotFoundException(
+        `Snapshot ${snapshotId} not found for node ${node.id}.`,
+      );
+    }
+
+    if (snapshot.metadata.nodeId !== node.id) {
+      throw new BadRequestException(
+        `Snapshot ${snapshotId} belongs to node ${snapshot.metadata.nodeId}, not ${node.id}.`,
+      );
+    }
+
+    const deleteZonesThatDidNotExist =
+      options?.deleteZonesThatDidNotExist ?? true;
+
+    const selectedZoneNames =
+      Array.isArray(options?.zoneNames) ? options?.zoneNames : undefined;
+    const selectedSet =
+      selectedZoneNames ?
+        new Set(
+          selectedZoneNames
+            .map((z) => this.normalizeZoneName(z))
+            .filter((z) => z.length > 0),
+        )
+      : null;
+
+    if (selectedSet && selectedSet.size === 0) {
+      throw new BadRequestException(
+        "At least one zone name must be selected for restore.",
+      );
+    }
+
+    let restored = 0;
+    let deleted = 0;
+    let skipped = 0;
+
+    const entries =
+      selectedSet ?
+        (snapshot.zones ?? []).filter((entry) =>
+          selectedSet.has(this.normalizeZoneName(entry.zoneName)),
+        )
+      : (snapshot.zones ?? []);
+
+    if (selectedSet && entries.length === 0) {
+      throw new BadRequestException(
+        "None of the selected zones exist in this snapshot.",
+      );
+    }
+
+    for (const entry of entries) {
+      const zoneName = this.normalizeZoneName(entry.zoneName);
+      if (!zoneName) {
+        skipped += 1;
+        continue;
+      }
+
+      if (entry.existed && entry.zoneFile) {
+        await this.importZoneFileText(node.id, zoneName, entry.zoneFile, {
+          overwrite: true,
+          overwriteSoaSerial: false,
+        });
+        restored += 1;
+        continue;
+      }
+
+      if (!entry.existed && deleteZonesThatDidNotExist) {
+        try {
+          await this.deleteZone(node.id, zoneName);
+          deleted += 1;
+        } catch (error) {
+          // If the zone is already gone, treat as a no-op.
+          if (error instanceof HttpException && error.getStatus() === 404) {
+            continue;
+          }
+          throw error;
+        }
+        continue;
+      }
+
+      skipped += 1;
+    }
+
+    return { snapshot: snapshot.metadata, restored, deleted, skipped };
   }
 
   private buildQueryLogParams(
@@ -5008,9 +5344,9 @@ export class TechnitiumService {
       if (axiosError.response) {
         const { status, data, statusText } = axiosError.response;
         const message =
-          typeof data === "string"
-            ? data
-            : ((data as Record<string, unknown>)?.message ?? statusText);
+          typeof data === "string" ? data : (
+            ((data as Record<string, unknown>)?.message ?? statusText)
+          );
 
         return new HttpException(
           {
