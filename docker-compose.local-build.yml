@@ -1,0 +1,15 @@
+# Optional override for docker-compose.yml
+#
+# Purpose:
+# - The default docker-compose.yml pulls the published GHCR image.
+# - If you are testing local code changes (like PWA/Workbox caching fixes), you must build locally.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d --build
+#
+services:
+  technitium-dns-companion:
+    image: technitium-dns-companion:local
+    build:
+      context: .
+      dockerfile: Dockerfile
