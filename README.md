@@ -102,7 +102,7 @@ TECHNITIUM_SECONDARY2_BASE_URL=https://secondary2.home.arpa:53443
 TECHNITIUM_SECONDARY2_TOKEN=shared-cluster-token  # Same token!
 ```
 
-**📄 Example config:** See [`configs/.env.example.v14`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/configs/.env.example.v14)
+**Example config:** See [`configs/.env.example.v14`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/configs/.env.example.v14)
 
 **Cluster Features:**
 
