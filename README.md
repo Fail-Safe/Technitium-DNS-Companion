@@ -130,7 +130,7 @@ TECHNITIUM_NODE3_BASE_URL=https://dns3.yourdomain.com:5380
 TECHNITIUM_NODE3_TOKEN=unique-token-for-node3
 ```
 
-**📄 Example config:** See [`configs/.env.example.v13`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/configs/.env.example.v13)
+**Example config:** See [`configs/.env.example.v13`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/configs/.env.example.v13)
 
 **Standalone Features:**
 
