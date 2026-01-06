@@ -2,36 +2,36 @@
 
 Welcome to the documentation for Technitium DNS Companion. This guide will help you understand, deploy, and contribute to the project.
 
-## 📚 Documentation Structure
+## Documentation Structure
 
-### 🚀 Getting Started
+### Getting Started
 
 - **[../README.md](../README.md)** - Project overview and quick start
 - **[../DOCKER.md](../DOCKER.md)** - Docker deployment guide (production & development)
 - **[../DEVELOPMENT.md](../DEVELOPMENT.md)** - Development setup and contributing guide
 
-### 🏗️ Architecture & Design
+### Architecture & Design
 
 - **[architecture.md](./architecture.md)** - System design, component overview, and architecture decisions
 - **[TESTING.md](./TESTING.md)** - Testing strategy, running tests, and coverage
 
-### 🔧 Development
+### Development
 
 - **[REMOTE_DEVELOPMENT.md](./REMOTE_DEVELOPMENT.md)** - Remote development setup (develop on a server, edit locally)
 - **[RELEASING.md](./RELEASING.md)** - Release process and sanity checklist (tag-driven)
 
-### ⚡ Performance
+### Performance
 
 - **[performance/](./performance/)** - Performance benchmarking and optimization guides
 
-### 🎨 User Interface
+### User Interface
 
 - **[ui/](./ui/)** - UI component guidelines, design patterns, and visual guides
   - Multi-group editor layouts and interactions
   - Query logs improvements and features
   - CSS fixes and responsive design notes
 
-### 🚀 Features
+### Features
 
 Detailed documentation for specific features:
 
@@ -53,6 +53,10 @@ Detailed documentation for specific features:
   - Server-side filtering
   - Combined log viewing
 
+#### Split Horizon
+
+- **[features/split-horizon/SPLIT_HORIZON_PTR_SYNC.md](./features/split-horizon/SPLIT_HORIZON_PTR_SYNC.md)** - SplitHorizon.SimpleAddress → PTR sync (Preview/Apply)
+
 #### Other Features
 
 - **[features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](./features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)** - Session auth (v1.2+) overview, recommended deployment model, Technitium permissions map, and cluster-token → background-token migration
@@ -66,19 +70,19 @@ Detailed documentation for specific features:
 - **[features/PAGINATION_IMPLEMENTATION.md](./features/PAGINATION_IMPLEMENTATION.md)** - Pagination patterns
 - **[features/UNIFIED_SEARCH_UI.md](./features/UNIFIED_SEARCH_UI.md)** - Global search interface
 
-### 🔍 Zone Comparison
+### Zone Comparison
 
 - **[zone-comparison/](./zone-comparison/)** - DNS zone comparison logic and algorithms
   - Zone type matching rules
   - Primary/Secondary relationship validation
   - Configuration comparison strategies
 
-### 📖 Implementation Details
+### Implementation Details
 
 - **[implementation/](./implementation/)** - Technical implementation documentation
   - Query log deduplication and filtering
 
-## 🤝 Contributing
+## Contributing
 
 To contribute to this project:
 
@@ -88,7 +92,7 @@ To contribute to this project:
 4. Add tests for new features (see [TESTING.md](./TESTING.md))
 5. Update documentation when adding features
 
-## 📝 Documentation Guidelines
+## Documentation Guidelines
 
 When adding or updating documentation:
 
@@ -98,7 +102,7 @@ When adding or updating documentation:
 - Use clear section headers and consistent formatting
 - Link between related documents
 
-## 🔗 External Resources
+## External Resources
 
 - **[Technitium DNS Server](https://github.com/TechnitiumSoftware/DnsServer)** - Official Technitium DNS repository
 - **[Technitium API Documentation](https://github.com/TechnitiumSoftware/DnsServer/blob/master/APIDOCS.md)** - Technitium DNS HTTP API reference
