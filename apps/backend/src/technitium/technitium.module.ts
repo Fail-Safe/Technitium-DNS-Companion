@@ -9,6 +9,7 @@ import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { DomainListController } from "./domain-list-cache.controller";
 import { DomainListCacheService } from "./domain-list-cache.service";
 import { DomainListPersistenceService } from "./domain-list-persistence.service";
+import { SplitHorizonPtrStateService } from "./split-horizon-ptr/split-horizon-ptr-state.service";
 import { SplitHorizonPtrController } from "./split-horizon-ptr/split-horizon-ptr.controller";
 import { SplitHorizonPtrService } from "./split-horizon-ptr/split-horizon-ptr.service";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
@@ -35,6 +36,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     AdvancedBlockingService,
     BuiltInBlockingService,
     SplitHorizonPtrService,
+    SplitHorizonPtrStateService,
     DomainListCacheService,
     DomainListPersistenceService,
     DhcpSnapshotService,

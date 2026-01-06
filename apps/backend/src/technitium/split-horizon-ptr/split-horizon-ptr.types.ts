@@ -3,6 +3,7 @@ export type PtrRecordPlanStatus =
   | "create-record"
   | "update-record"
   | "already-correct"
+  | "delete-record"
   | "conflict";
 
 export type SplitHorizonPtrConflictReason =
@@ -11,6 +12,12 @@ export type SplitHorizonPtrConflictReason =
 
 export interface SplitHorizonPtrPreviewRequest {
   zoneName: string;
+  /**
+   * Advanced: when true, the apply step may tag existing PTR records as "managed" by TDC.
+   * This enables safe deletions for adopted records in future runs.
+   * Default: false (safer).
+   */
+  adoptExistingPtrRecords?: boolean;
   /**
    * Prefix length used when computing reverse zones from IPv4 addresses.
    * Must be a multiple of 8 (e.g., 8, 16, 24).
@@ -68,6 +75,7 @@ export type SplitHorizonPtrApplyActionKind =
   | "create-zone"
   | "create-record"
   | "update-record"
+  | "delete-record"
   | "skip-conflict"
   | "noop";
 
@@ -87,6 +95,7 @@ export interface SplitHorizonPtrApplySummary {
   createdZones: number;
   createdRecords: number;
   updatedRecords: number;
+  deletedRecords: number;
   skippedConflicts: number;
   noops: number;
   errors: number;

@@ -146,25 +146,33 @@
 }
 
 .zones-page__ptr-sync-form {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
+  display: grid;
+  width: min(640px, 100%);
+  align-self: flex-start;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "label ."
+    "input actions"
+    "hint hint";
+  column-gap: 1rem;
+  row-gap: 0.35rem;
+  align-items: center;
 }
 
 .zones-page__ptr-sync-field {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  min-width: min(320px, 100%);
+  gap: 0;
+  min-width: 0;
 }
 
 .zones-page__ptr-sync-field--grow {
   flex: 1 1 320px;
+  grid-area: input;
 }
 
 .zones-page__ptr-sync-label {
+  grid-area: label;
   font-size: 0.85rem;
   color: var(--color-text-secondary);
   font-weight: 700;
@@ -189,15 +197,28 @@
 }
 
 .zones-page__ptr-sync-hint {
+  grid-area: hint;
   color: var(--color-text-secondary);
   font-size: 0.8rem;
 }
 
 .zones-page__ptr-sync-actions {
+  grid-area: actions;
   display: flex;
   gap: 0.75rem;
   flex-wrap: wrap;
   align-items: center;
+}
+
+@media (max-width: 720px) {
+  .zones-page__ptr-sync-form {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "label"
+      "input"
+      "hint"
+      "actions";
+  }
 }
 
 .zones-page__ptr-sync-options {

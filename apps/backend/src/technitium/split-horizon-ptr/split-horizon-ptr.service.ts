@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { TechnitiumService } from "../technitium.service";
 import type { TechnitiumZoneRecord } from "../technitium.types";
+import { SplitHorizonPtrStateService } from "./split-horizon-ptr-state.service";
 import type {
   SplitHorizonPtrApplyAction,
   SplitHorizonPtrApplyRequest,
@@ -24,6 +25,7 @@ import {
 
 const SPLIT_HORIZON_APP_NAME = "Split Horizon";
 const SIMPLE_ADDRESS_CLASS_PATH = "SplitHorizon.SimpleAddress";
+const MANAGED_PTR_COMMENT_PREFIX = "TDC split-horizon ptr";
 
 @Injectable()
 export class SplitHorizonPtrService {
@@ -36,7 +38,10 @@ export class SplitHorizonPtrService {
 
   private sourceZonesInFlight?: Promise<SplitHorizonPtrSourceZonesResponse>;
 
-  constructor(private readonly technitiumService: TechnitiumService) {}
+  constructor(
+    private readonly technitiumService: TechnitiumService,
+    private readonly stateService: SplitHorizonPtrStateService,
+  ) {}
 
   async listSourceZones(options?: {
     forceRefresh?: boolean;
@@ -159,6 +164,7 @@ export class SplitHorizonPtrService {
       request.conflictPolicy ?? "skip";
     const dryRun = request.dryRun === true;
     const catalogZoneName = (request.catalogZoneName ?? "").trim();
+    const adoptExistingPtrRecords = request.adoptExistingPtrRecords === true;
 
     const sourceHostnameResolutionByIp = new Map<string, string>();
     const rawResolutions = request.sourceHostnameResolutions ?? [];
@@ -180,6 +186,7 @@ export class SplitHorizonPtrService {
 
     const preview = await this.preview({
       zoneName,
+      adoptExistingPtrRecords,
       ipv4ZonePrefixLength: request.ipv4ZonePrefixLength,
       ipv6ZonePrefixLength: request.ipv6ZonePrefixLength,
     });
@@ -245,6 +252,7 @@ export class SplitHorizonPtrService {
           createdZones: 0,
           createdRecords: 0,
           updatedRecords: 0,
+          deletedRecords: 0,
           skippedConflicts: 0,
           noops: 0,
           errors: 0,
@@ -282,15 +290,37 @@ export class SplitHorizonPtrService {
       preview.plannedZones.some((z) => z.status === "create-zone") ||
       preview.plannedRecords.some(
         (r) => r.status === "create-record" || r.status === "update-record",
+      ) ||
+      preview.plannedRecords.some((r) => r.status === "delete-record");
+
+    if (!dryRun) {
+      // Persist the reverse zones this source zone manages so future runs can discover stale PTRs.
+      // This is best-effort; deletion is still guarded by the record comment marker.
+      const managedZones = Array.from(
+        new Set(
+          preview.plannedRecords
+            .filter((r) => r.status !== "delete-record")
+            .map((r) => (r.ptrZoneName ?? "").trim())
+            .filter(Boolean),
+        ),
       );
+      await this.stateService.mergeManagedReverseZones(
+        nodeId,
+        zoneName,
+        managedZones,
+      );
+    }
 
     if (!dryRun && hasMutations) {
       const zoneNames = Array.from(
-        new Set(
-          preview.plannedZones
+        new Set([
+          ...preview.plannedZones
             .map((z) => (z.zoneName ?? "").trim())
             .filter(Boolean),
-        ),
+          ...preview.plannedRecords
+            .map((r) => (r.ptrZoneName ?? "").trim())
+            .filter(Boolean),
+        ]),
       );
 
       try {
@@ -400,7 +430,12 @@ export class SplitHorizonPtrService {
     // Note: Technitium's PTR record payload field names can vary by version/config.
     // If we can't extract the current target, we still track the owner so we don't
     // accidentally treat it as missing and create a duplicate.
-    type ExistingPtr = { raw?: string; normalized?: string };
+    type ExistingPtr = {
+      raw?: string;
+      normalized?: string;
+      comments?: string;
+      managed?: { sourceZoneName?: string; ip?: string };
+    };
     const existingByZoneLower = new Map<string, Map<string, ExistingPtr[]>>();
 
     const affectedZones = Array.from(
@@ -434,7 +469,17 @@ export class SplitHorizonPtrService {
           if (!ownerRel) continue;
           const ptr = this.extractPtrTarget(rec);
           const entry: ExistingPtr =
-            ptr ? { raw: ptr, normalized: this.normalizeHostname(ptr) } : {};
+            ptr ?
+              {
+                raw: ptr,
+                normalized: this.normalizeHostname(ptr),
+                comments: rec.comments,
+                managed: this.parseManagedPtrComment(rec.comments),
+              }
+            : {
+                comments: rec.comments,
+                managed: this.parseManagedPtrComment(rec.comments),
+              };
           if (!owners.has(ownerRel)) owners.set(ownerRel, []);
           owners.get(ownerRel)!.push(entry);
         }
@@ -501,6 +546,124 @@ export class SplitHorizonPtrService {
       const existingForZone = existingByZoneLower.get(zoneLower) ?? new Map();
       const existingPtrs = existingForZone.get(ownerLower) ?? [];
 
+      if (effectivePlanned.status === "delete-record") {
+        const managedPtrs = existingPtrs.filter((p) => {
+          if (!p.managed?.sourceZoneName) return false;
+          return (
+            p.managed.sourceZoneName.toLowerCase() === zoneName.toLowerCase()
+          );
+        });
+
+        if (managedPtrs.length === 0) {
+          actions.push({
+            kind: "noop",
+            ok: true,
+            ip: planned.ip,
+            ptrZoneName: planned.ptrZoneName,
+            ptrRecordFqdn: ownerFqdn,
+            currentTargetHostname: existingPtrs[0]?.raw,
+            targetHostname: planned.targetHostname,
+            message:
+              "No managed PTR record found to delete (already removed or no longer marked managed).",
+          });
+          continue;
+        }
+
+        if (managedPtrs.length > 1) {
+          if (conflictPolicy === "fail") {
+            throw new BadRequestException(
+              `Existing managed PTR conflict at ${ownerFqdn}: ${managedPtrs.map((p) => p.raw).join(", ")}`,
+            );
+          }
+          actions.push({
+            kind: "skip-conflict",
+            ok: true,
+            ip: planned.ip,
+            ptrZoneName: planned.ptrZoneName,
+            ptrRecordFqdn: ownerFqdn,
+            targetHostname: planned.targetHostname,
+            message: `Skipped deletion due to multiple managed PTR targets: ${managedPtrs.map((p) => p.raw).join(", ")}`,
+          });
+          continue;
+        }
+
+        const current = managedPtrs[0]!;
+        if (!current.raw) {
+          actions.push({
+            kind: "delete-record",
+            ok: false,
+            ip: planned.ip,
+            ptrZoneName: planned.ptrZoneName,
+            ptrRecordFqdn: ownerFqdn,
+            targetHostname: planned.targetHostname,
+            message:
+              "Cannot delete PTR record: existing record target could not be extracted from Technitium response.",
+          });
+          continue;
+        }
+
+        if (dryRun) {
+          actions.push({
+            kind: "delete-record",
+            ok: true,
+            ip: planned.ip,
+            ptrZoneName: planned.ptrZoneName,
+            ptrRecordFqdn: ownerFqdn,
+            currentTargetHostname: current.raw,
+            targetHostname: current.raw,
+            message: "Dry run: would delete PTR record.",
+          });
+          continue;
+        }
+
+        try {
+          const apiOwner = this.stripTrailingDot(ownerFqdn);
+          const apiPtrName = this.stripTrailingDot(current.raw);
+          await this.technitiumService.executeAction(nodeId, {
+            method: "GET",
+            url: "/api/zones/records/delete",
+            params: {
+              domain: apiOwner,
+              zone: effectivePlanned.ptrZoneName,
+              type: "PTR",
+              ptrName: apiPtrName,
+            },
+          });
+
+          actions.push({
+            kind: "delete-record",
+            ok: true,
+            ip: planned.ip,
+            ptrZoneName: planned.ptrZoneName,
+            ptrRecordFqdn: ownerFqdn,
+            currentTargetHostname: current.raw,
+            targetHostname: current.raw,
+            message: `Deleted PTR record (${current.raw}).`,
+          });
+
+          existingForZone.set(
+            ownerLower,
+            existingPtrs.filter((p) => p !== current),
+          );
+          existingByZoneLower.set(zoneLower, existingForZone);
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          actions.push({
+            kind: "delete-record",
+            ok: false,
+            ip: planned.ip,
+            ptrZoneName: planned.ptrZoneName,
+            ptrRecordFqdn: ownerFqdn,
+            currentTargetHostname: current.raw,
+            targetHostname: current.raw,
+            message,
+          });
+        }
+
+        continue;
+      }
+
       // If we already have the desired PTR and it's the only one, treat as noop.
       const hasDesired = existingPtrs.some(
         (p) =>
@@ -508,6 +671,105 @@ export class SplitHorizonPtrService {
           p.normalized.toLowerCase() === normalizedTarget.toLowerCase(),
       );
       if (hasDesired && existingPtrs.length === 1) {
+        const existing = existingPtrs[0]!;
+        const managedForThisSource =
+          existing.managed?.sourceZoneName &&
+          existing.managed.sourceZoneName.toLowerCase() ===
+            zoneName.toLowerCase();
+
+        if (adoptExistingPtrRecords && !managedForThisSource) {
+          const currentRaw = existing.raw;
+          if (!currentRaw) {
+            actions.push({
+              kind: "update-record",
+              ok: false,
+              ip: planned.ip,
+              ptrZoneName: planned.ptrZoneName,
+              ptrRecordFqdn: ownerFqdn,
+              targetHostname: normalizedTarget,
+              message:
+                "Cannot adopt PTR record: existing record target could not be extracted from Technitium response.",
+            });
+            continue;
+          }
+
+          const adoptedComments = this.buildManagedPtrComment(
+            zoneName,
+            planned.ip,
+            existing.comments,
+          );
+
+          if (dryRun) {
+            actions.push({
+              kind: "update-record",
+              ok: true,
+              ip: planned.ip,
+              ptrZoneName: planned.ptrZoneName,
+              ptrRecordFqdn: ownerFqdn,
+              currentTargetHostname: currentRaw,
+              targetHostname: normalizedTarget,
+              message:
+                "Dry run: would adopt (tag) existing PTR record as managed.",
+            });
+            continue;
+          }
+
+          try {
+            const apiOwner = this.stripTrailingDot(ownerFqdn);
+            const apiCurrent = this.stripTrailingDot(currentRaw);
+            const apiTarget = this.stripTrailingDot(
+              this.normalizeHostname(currentRaw),
+            );
+            await this.technitiumService.executeAction(nodeId, {
+              method: "GET",
+              url: "/api/zones/records/update",
+              params: {
+                domain: apiOwner,
+                zone: effectivePlanned.ptrZoneName,
+                type: "PTR",
+                ptrName: apiCurrent,
+                newPtrName: apiTarget,
+                comments: adoptedComments,
+              },
+            });
+
+            actions.push({
+              kind: "update-record",
+              ok: true,
+              ip: planned.ip,
+              ptrZoneName: planned.ptrZoneName,
+              ptrRecordFqdn: ownerFqdn,
+              currentTargetHostname: currentRaw,
+              targetHostname: normalizedTarget,
+              message: "Adopted (tagged) existing PTR record as managed.",
+            });
+
+            existingForZone.set(ownerLower, [
+              {
+                raw: currentRaw,
+                normalized: this.normalizeHostname(currentRaw),
+                comments: adoptedComments,
+                managed: this.parseManagedPtrComment(adoptedComments),
+              },
+            ]);
+            existingByZoneLower.set(zoneLower, existingForZone);
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            actions.push({
+              kind: "update-record",
+              ok: false,
+              ip: planned.ip,
+              ptrZoneName: planned.ptrZoneName,
+              ptrRecordFqdn: ownerFqdn,
+              currentTargetHostname: currentRaw,
+              targetHostname: normalizedTarget,
+              message,
+            });
+          }
+          continue;
+        }
+
         actions.push({
           kind: "noop",
           ok: true,
@@ -566,6 +828,7 @@ export class SplitHorizonPtrService {
         try {
           const apiOwner = this.stripTrailingDot(ownerFqdn);
           const apiTarget = this.stripTrailingDot(normalizedTarget);
+          const comments = this.buildManagedPtrComment(zoneName, planned.ip);
           await this.technitiumService.executeAction(nodeId, {
             method: "GET",
             url: "/api/zones/records/add",
@@ -574,6 +837,7 @@ export class SplitHorizonPtrService {
               zone: effectivePlanned.ptrZoneName,
               type: "PTR",
               ptrName: apiTarget,
+              comments,
             },
           });
 
@@ -589,7 +853,12 @@ export class SplitHorizonPtrService {
 
           // Update in-memory view.
           existingForZone.set(ownerLower, [
-            { raw: normalizedTarget, normalized: normalizedTarget },
+            {
+              raw: normalizedTarget,
+              normalized: normalizedTarget,
+              comments,
+              managed: this.parseManagedPtrComment(comments),
+            },
           ]);
           existingByZoneLower.set(zoneLower, existingForZone);
         } catch (error) {
@@ -629,6 +898,21 @@ export class SplitHorizonPtrService {
           const apiOwner = this.stripTrailingDot(ownerFqdn);
           const apiCurrent = this.stripTrailingDot(current.raw);
           const apiTarget = this.stripTrailingDot(normalizedTarget);
+
+          const managedForThisSource =
+            current.managed?.sourceZoneName &&
+            current.managed.sourceZoneName.toLowerCase() ===
+              zoneName.toLowerCase();
+
+          const nextComments =
+            adoptExistingPtrRecords && !managedForThisSource ?
+              this.buildManagedPtrComment(
+                zoneName,
+                planned.ip,
+                current.comments,
+              )
+            : current.comments;
+
           await this.technitiumService.executeAction(nodeId, {
             method: "GET",
             url: "/api/zones/records/update",
@@ -638,6 +922,12 @@ export class SplitHorizonPtrService {
               type: "PTR",
               ptrName: apiCurrent,
               newPtrName: apiTarget,
+              ...((
+                typeof nextComments === "string" &&
+                nextComments.trim().length > 0
+              ) ?
+                { comments: nextComments }
+              : {}),
             },
           });
 
@@ -653,7 +943,13 @@ export class SplitHorizonPtrService {
           });
 
           existingForZone.set(ownerLower, [
-            { raw: normalizedTarget, normalized: normalizedTarget },
+            {
+              raw: normalizedTarget,
+              normalized: normalizedTarget,
+              comments: nextComments,
+              managed:
+                this.parseManagedPtrComment(nextComments) ?? current.managed,
+            },
           ]);
           existingByZoneLower.set(zoneLower, existingForZone);
         } catch (error) {
@@ -700,6 +996,9 @@ export class SplitHorizonPtrService {
           case "update-record":
             acc.updatedRecords += 1;
             break;
+          case "delete-record":
+            acc.deletedRecords += 1;
+            break;
           case "skip-conflict":
             acc.skippedConflicts += 1;
             break;
@@ -713,6 +1012,7 @@ export class SplitHorizonPtrService {
         createdZones: 0,
         createdRecords: 0,
         updatedRecords: 0,
+        deletedRecords: 0,
         skippedConflicts: 0,
         noops: 0,
         errors: 0,
@@ -744,6 +1044,7 @@ export class SplitHorizonPtrService {
       request.ipv4ZonePrefixLength ?? getDefaultIpv4ZonePrefixLength();
     const ipv6ZonePrefixLength =
       request.ipv6ZonePrefixLength ?? getDefaultIpv6ZonePrefixLength();
+    const adoptExistingPtrRecords = request.adoptExistingPtrRecords === true;
 
     const nodeId = await this.selectPrimaryNodeId();
 
@@ -901,9 +1202,29 @@ export class SplitHorizonPtrService {
       .filter((z) => z.status === "zone-exists")
       .map((z) => z.zoneName);
 
+    const persistedManagedZones =
+      await this.stateService.loadManagedReverseZones(nodeId, zoneName);
+
+    const zonesToInspect = Array.from(
+      new Set([
+        ...zonesNeedingLookup.map((z) => z.toLowerCase()),
+        ...persistedManagedZones.map((z) => z.toLowerCase()),
+      ]),
+    );
+
+    const zoneDisplayNameByLower = new Map<string, string>();
+    for (const z of [...zonesNeedingLookup, ...persistedManagedZones]) {
+      const trimmed = (z ?? "").trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      if (!zoneDisplayNameByLower.has(key))
+        zoneDisplayNameByLower.set(key, trimmed);
+    }
+
     await Promise.all(
-      zonesNeedingLookup.map(async (ptrZoneName) => {
-        const key = ptrZoneName.toLowerCase();
+      zonesToInspect.map(async (zoneLower) => {
+        const ptrZoneName = zoneDisplayNameByLower.get(zoneLower) ?? zoneLower;
+        const key = zoneLower;
         if (ptrZoneRecordsByZoneLower.has(key)) {
           return;
         }
@@ -928,6 +1249,17 @@ export class SplitHorizonPtrService {
         }
       }),
     );
+
+    const desiredOwnersByZoneLower = new Map<string, Set<string>>();
+    for (const record of plannedRecords) {
+      const zoneKey = record.ptrZoneName.toLowerCase();
+      if (!desiredOwnersByZoneLower.has(zoneKey)) {
+        desiredOwnersByZoneLower.set(zoneKey, new Set());
+      }
+      desiredOwnersByZoneLower
+        .get(zoneKey)!
+        .add(record.ptrRecordName.toLowerCase());
+    }
 
     const plannedRecordsWithDiff: SplitHorizonPtrPlannedRecord[] =
       plannedRecords.map((record) => {
@@ -998,11 +1330,64 @@ export class SplitHorizonPtrService {
         if (
           normalizedExisting.toLowerCase() === normalizedPlanned.toLowerCase()
         ) {
-          return { ...record, status: "already-correct" };
+          if (!adoptExistingPtrRecords) {
+            return { ...record, status: "already-correct" };
+          }
+
+          const managed = this.parseManagedPtrComment(existing.comments);
+          const managedForThisSource =
+            managed?.sourceZoneName &&
+            managed.sourceZoneName.toLowerCase() === zoneName.toLowerCase();
+
+          // Advanced adoption mode: allow tagging existing PTR as managed even if target is already correct.
+          return {
+            ...record,
+            status: managedForThisSource ? "already-correct" : "update-record",
+          };
         }
 
         return { ...record, status: "update-record" };
       });
+
+    // Plan deletions: delete only PTRs that were previously created by this tool (managed marker comment)
+    // for this source zone, and that are no longer present in the desired IP set.
+    const deletions: SplitHorizonPtrPlannedRecord[] = [];
+    for (const [
+      zoneLower,
+      zoneRecords,
+    ] of ptrZoneRecordsByZoneLower.entries()) {
+      const ptrZoneName = zoneDisplayNameByLower.get(zoneLower) ?? zoneLower;
+      const desiredOwners =
+        desiredOwnersByZoneLower.get(zoneLower) ?? new Set();
+
+      for (const existing of zoneRecords) {
+        if ((existing.type ?? "").toUpperCase() !== "PTR") continue;
+        const managed = this.parseManagedPtrComment(existing.comments);
+        if (!managed?.sourceZoneName) continue;
+        if (managed.sourceZoneName.toLowerCase() !== zoneName.toLowerCase())
+          continue;
+
+        const ownerRel = this.toRelativeOwnerName(existing.name, ptrZoneName);
+        if (!ownerRel) continue;
+        if (desiredOwners.has(ownerRel.toLowerCase())) continue;
+
+        const target = this.extractPtrTarget(existing);
+        if (!target) {
+          warnings.push(
+            `Skipping deletion candidate for ${existing.name} in zone "${ptrZoneName}": could not extract PTR target from Technitium response.`,
+          );
+          continue;
+        }
+
+        deletions.push({
+          ip: (managed.ip ?? "").trim() || "(unknown)",
+          ptrZoneName,
+          ptrRecordName: ownerRel,
+          targetHostname: this.normalizeHostname(target),
+          status: "delete-record",
+        });
+      }
+    }
 
     return {
       fetchedAt: new Date().toISOString(),
@@ -1014,11 +1399,47 @@ export class SplitHorizonPtrService {
       catalogZones: catalogZones.length > 0 ? catalogZones : undefined,
       sourceRecords,
       plannedZones,
-      plannedRecords: plannedRecordsWithDiff.sort((a, b) =>
+      plannedRecords: [...plannedRecordsWithDiff, ...deletions].sort((a, b) =>
         a.ip.localeCompare(b.ip),
       ),
       warnings: warnings.length > 0 ? warnings : undefined,
     };
+  }
+
+  private buildManagedPtrComment(
+    sourceZoneName: string,
+    ip: string,
+    priorComments?: string,
+  ): string {
+    const base = `${MANAGED_PTR_COMMENT_PREFIX}; sourceZone=${sourceZoneName}; ip=${ip}`;
+    const prior = (priorComments ?? "").trim();
+    if (!prior) return base;
+    return `${base}; priorEnc=${encodeURIComponent(prior)}`;
+  }
+
+  private parseManagedPtrComment(
+    comments: string | undefined,
+  ): { sourceZoneName?: string; ip?: string } | undefined {
+    const raw = (comments ?? "").trim();
+    if (!raw) return undefined;
+
+    const parts = raw.split(";").map((p) => p.trim());
+    if (parts.length === 0) return undefined;
+    if (parts[0].toLowerCase() !== MANAGED_PTR_COMMENT_PREFIX.toLowerCase()) {
+      return undefined;
+    }
+
+    const result: { sourceZoneName?: string; ip?: string } = {};
+    for (const part of parts.slice(1)) {
+      const [k, ...rest] = part.split("=");
+      const key = (k ?? "").trim().toLowerCase();
+      const value = rest.join("=").trim();
+      if (!key || !value) continue;
+      if (key === "sourcezone") result.sourceZoneName = value;
+      if (key === "ip") result.ip = value;
+    }
+
+    return result;
   }
 
   private toRelativeOwnerName(recordName: string, zoneName: string): string {

@@ -3,6 +3,7 @@ export type PtrRecordPlanStatus =
   | "create-record"
   | "update-record"
   | "already-correct"
+  | "delete-record"
   | "conflict";
 
 export type SplitHorizonPtrConflictReason =
@@ -51,12 +52,27 @@ export interface SplitHorizonPtrPreviewResponse {
   warnings?: string[];
 }
 
+export interface SplitHorizonPtrPreviewRequest {
+  zoneName: string;
+  adoptExistingPtrRecords?: boolean;
+  ipv4ZonePrefixLength?: number;
+  ipv6ZonePrefixLength?: number;
+}
+
+export interface SplitHorizonPtrApplyRequest extends SplitHorizonPtrPreviewRequest {
+  conflictPolicy?: SplitHorizonPtrConflictPolicy;
+  catalogZoneName?: string;
+  sourceHostnameResolutions?: Array<{ ip: string; hostname: string }>;
+  dryRun?: boolean;
+}
+
 export type SplitHorizonPtrConflictPolicy = "skip" | "fail";
 
 export interface SplitHorizonPtrApplySummary {
   createdZones: number;
   createdRecords: number;
   updatedRecords: number;
+  deletedRecords: number;
   skippedConflicts: number;
   noops: number;
   errors: number;
@@ -66,6 +82,7 @@ export type SplitHorizonPtrApplyActionKind =
   | "create-zone"
   | "create-record"
   | "update-record"
+  | "delete-record"
   | "skip-conflict"
   | "noop";
 

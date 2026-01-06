@@ -671,6 +671,8 @@ export function ZonesPage() {
   const [ptrShowUnchanged, setPtrShowUnchanged] = useState(false);
   const [ptrSkipUnresolvedConflicts, setPtrSkipUnresolvedConflicts] =
     useState(true);
+  const [ptrAdoptExistingPtrRecords, setPtrAdoptExistingPtrRecords] =
+    useState(false);
   const [ptrSourceHostnameResolutions, setPtrSourceHostnameResolutions] =
     useState<Record<string, string>>({});
   const [ptrPreviewState, setPtrPreviewState] = useState<
@@ -747,7 +749,10 @@ export function ZonesPage() {
       const response = await apiFetch("/split-horizon/ptr/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ zoneName }),
+        body: JSON.stringify({
+          zoneName,
+          adoptExistingPtrRecords: ptrAdoptExistingPtrRecords,
+        }),
       });
 
       if (!response.ok) {
@@ -774,7 +779,7 @@ export function ZonesPage() {
       setPtrPreviewState({ status: "error", error: message });
       pushToast({ message, tone: "error" });
     }
-  }, [ptrSourceZoneName, pushToast]);
+  }, [ptrSourceZoneName, pushToast, ptrAdoptExistingPtrRecords]);
 
   const runPtrApply = useCallback(async () => {
     const zoneName = ptrSourceZoneName.trim();
@@ -829,6 +834,7 @@ export function ZonesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           zoneName,
+          adoptExistingPtrRecords: ptrAdoptExistingPtrRecords,
           conflictPolicy: ptrSkipUnresolvedConflicts ? "skip" : "fail",
           catalogZoneName,
           ...(sourceHostnameResolutions.length > 0 ?
@@ -848,18 +854,19 @@ export function ZonesPage() {
         createdZones,
         createdRecords,
         updatedRecords,
+        deletedRecords,
         skippedConflicts,
         noops,
         errors,
       } = data.summary;
       if (errors > 0) {
         pushToast({
-          message: `PTR sync applied with ${errors} error(s). Updated ${updatedRecords}, created ${createdRecords} (zones ${createdZones}), skipped conflicts ${skippedConflicts}, no-ops ${noops}. See Apply results below.`,
+          message: `PTR sync applied with ${errors} error(s). Updated ${updatedRecords}, created ${createdRecords} (zones ${createdZones}), deleted ${deletedRecords}, skipped conflicts ${skippedConflicts}, no-ops ${noops}. See Apply results below.`,
           tone: "error",
         });
       } else {
         pushToast({
-          message: `PTR sync applied. Updated ${updatedRecords}, created ${createdRecords} (zones ${createdZones}), skipped conflicts ${skippedConflicts}, no-ops ${noops}.`,
+          message: `PTR sync applied. Updated ${updatedRecords}, created ${createdRecords} (zones ${createdZones}), deleted ${deletedRecords}, skipped conflicts ${skippedConflicts}, no-ops ${noops}.`,
           tone: "success",
         });
       }
@@ -876,6 +883,7 @@ export function ZonesPage() {
     pushToast,
     ptrSkipUnresolvedConflicts,
     ptrSourceHostnameResolutions,
+    ptrAdoptExistingPtrRecords,
   ]);
 
   useEffect(() => {
@@ -1422,13 +1430,14 @@ export function ZonesPage() {
             </div>
 
             <div className="zones-page__ptr-sync-form">
+              <label
+                className="zones-page__ptr-sync-label"
+                htmlFor="ptr-source-zone"
+              >
+                Forward zone name
+              </label>
+
               <div className="zones-page__ptr-sync-field zones-page__ptr-sync-field--grow">
-                <label
-                  className="zones-page__ptr-sync-label"
-                  htmlFor="ptr-source-zone"
-                >
-                  Forward zone name
-                </label>
                 <input
                   id="ptr-source-zone"
                   type="text"
@@ -1450,14 +1459,6 @@ export function ZonesPage() {
                     />
                   ))}
                 </datalist>
-                <small className="zones-page__ptr-sync-hint">
-                  {ptrSourceZoneCandidatesState === "loading" ?
-                    "Loading zone suggestions… "
-                  : ""}
-                  Suggestions show zones with SplitHorizon.SimpleAddress
-                  records. Defaults: IPv4 /24 reverse zones, IPv6 /64 reverse
-                  zones.
-                </small>
               </div>
 
               <div className="zones-page__ptr-sync-actions">
@@ -1486,6 +1487,14 @@ export function ZonesPage() {
                   {ptrApplyState.status === "loading" ? "Applying…" : "Apply"}
                 </button>
               </div>
+
+              <small className="zones-page__ptr-sync-hint">
+                {ptrSourceZoneCandidatesState === "loading" ?
+                  "Loading zone suggestions… "
+                : ""}
+                Suggestions show zones with SplitHorizon.SimpleAddress records.
+                Defaults: IPv4 /24 reverse zones, IPv6 /64 reverse zones.
+              </small>
             </div>
 
             <div className="zones-page__ptr-sync-options">
@@ -1512,7 +1521,31 @@ export function ZonesPage() {
                 />
                 Skip unresolved conflicts
               </label>
+
+              <label className="zones-page__ptr-sync-checkbox">
+                <input
+                  type="checkbox"
+                  checked={ptrAdoptExistingPtrRecords}
+                  onChange={(event) =>
+                    setPtrAdoptExistingPtrRecords(event.target.checked)
+                  }
+                  disabled={
+                    ptrPreviewState.status !== "loaded" ||
+                    ptrApplyState.status === "loading"
+                  }
+                />
+                Advanced: adopt existing PTR records
+              </label>
             </div>
+
+            {ptrAdoptExistingPtrRecords ?
+              <div className="zones-page__ptr-sync-warnings" role="status">
+                Advanced option enabled: existing PTR records may be tagged as
+                managed by Technitium DNS Companion. Once adopted, those PTRs
+                can be deleted in later runs if the Split Horizon mapping no
+                longer includes them.
+              </div>
+            : null}
 
             {ptrPreviewState.status === "error" ?
               <div className="zones-page__ptr-sync-error" role="status">
@@ -1533,6 +1566,9 @@ export function ZonesPage() {
                 ).length;
                 const plannedUpdate = plannedRecords.filter(
                   (record) => record.status === "update-record",
+                ).length;
+                const plannedDelete = plannedRecords.filter(
+                  (record) => record.status === "delete-record",
                 ).length;
                 const plannedNoop = plannedRecords.filter(
                   (record) => record.status === "already-correct",
@@ -1581,6 +1617,8 @@ export function ZonesPage() {
                     case "create-record":
                       return "badge badge--success";
                     case "update-record":
+                      return "badge badge--warning";
+                    case "delete-record":
                       return "badge badge--warning";
                     case "already-correct":
                       return "badge badge--muted";
@@ -1631,7 +1669,8 @@ export function ZonesPage() {
                         </span>
                         <span className="zones-page__ptr-sync-metric-value">
                           Create {plannedCreate} • Update {plannedUpdate} • No
-                          change {plannedNoop} • Conflicts {plannedConflict}
+                          change {plannedNoop} • Delete {plannedDelete} •
+                          Conflicts {plannedConflict}
                         </span>
                       </div>
                     </div>
@@ -1825,6 +1864,8 @@ export function ZonesPage() {
                                             "Create"
                                           : record.status === "update-record" ?
                                             "Update"
+                                          : record.status === "delete-record" ?
+                                            "Delete"
                                           : (
                                             record.status === "already-correct"
                                           ) ?
@@ -1935,6 +1976,8 @@ export function ZonesPage() {
                   <strong>{ptrApplyState.data.summary.createdRecords}</strong>,
                   updated records{" "}
                   <strong>{ptrApplyState.data.summary.updatedRecords}</strong>,
+                  deleted records{" "}
+                  <strong>{ptrApplyState.data.summary.deletedRecords}</strong>,
                   skipped conflicts{" "}
                   <strong>{ptrApplyState.data.summary.skippedConflicts}</strong>
                   , no-ops <strong>{ptrApplyState.data.summary.noops}</strong>,
@@ -1954,6 +1997,8 @@ export function ZonesPage() {
                         return "Create record";
                       case "update-record":
                         return "Update record";
+                      case "delete-record":
+                        return "Delete record";
                       case "skip-conflict":
                         return "Skip conflict";
                       case "noop":
@@ -1972,6 +2017,8 @@ export function ZonesPage() {
                       case "create-record":
                       case "update-record":
                         return "badge badge--success";
+                      case "delete-record":
+                        return "badge badge--warning";
                       case "skip-conflict":
                         return "badge badge--warning";
                       case "noop":
