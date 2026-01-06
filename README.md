@@ -30,11 +30,11 @@ Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_
 
 ## Use Cases
 
-- 📱 **Mobile Management** - Block/unblock domains from your phone
-- 🔍 **Multi-Node Visibility** - See query logs from all DNS servers in one place
-- ⚖️ **Configuration Comparison** - Visualize consistency across DNS nodes
-- 🛡️ **Advanced Blocking** - Easy management of domain lists
-- 📊 **DHCP Overview** - Compare and sync DHCP scopes across nodes
+- **Mobile Management** - Block/unblock domains from your phone
+- **Multi-Node Visibility** - See query logs from all DNS servers in one place
+- **Configuration Comparison** - Visualize consistency across DNS nodes
+- **Advanced Blocking** - Easy management of domain lists
+- **DHCP Overview** - Compare and sync DHCP scopes across nodes
 
 ## Web-based User Interface
 
@@ -106,11 +106,11 @@ TECHNITIUM_SECONDARY2_TOKEN=shared-cluster-token  # Same token!
 
 **Cluster Features:**
 
-- ✅ Automatic cluster detection
-- ✅ Primary/Secondary role awareness
-- ✅ Write operations restricted to Primary node
-- ✅ Automatic cluster role change detection (every 30 seconds)
-- ✅ Sync tab hidden (not needed with native clustering)
+- Automatic cluster detection
+- Primary/Secondary role awareness
+- Write operations restricted to Primary node
+- Automatic cluster role change detection (every 30 seconds)
+- Sync tab hidden (not needed with native clustering)
 
 #### Technitium DNS v13.6 (Standalone Nodes)
 
@@ -134,10 +134,10 @@ TECHNITIUM_NODE3_TOKEN=unique-token-for-node3
 
 **Standalone Features:**
 
-- ✅ All nodes shown as "Standalone"
-- ✅ No write restrictions (all nodes can be modified)
-- ✅ Sync tab available for manual synchronization
-- ✅ Zone comparison helps identify differences
+- All nodes shown as "Standalone"
+- No write restrictions (all nodes can be modified)
+- Sync tab available for manual synchronization
+- Zone comparison helps identify differences
 
 **Production**: See [DOCKER.md](./DOCKER.md) for complete Docker deployment configuration.
 
@@ -145,21 +145,21 @@ TECHNITIUM_NODE3_TOKEN=unique-token-for-node3
 
 ### Core Functionality
 
-- ✅ **Multi-Node Management** - Monitor and manage multiple servers from one interface
-- ✅ **Query Logs** - View combined query logs from all configured nodes
-- ✅ **Advanced Blocking** - Manage domain allow/block lists (requires Advanced Blocking App)
+- **Multi-Node Management** - Monitor and manage multiple servers from one interface
+- **Query Logs** - View combined query logs from all configured nodes
+- **Advanced Blocking** - Manage domain allow/block lists (requires Advanced Blocking App)
 
 ### Analysis & Comparison
 
-- ✅ **Zone Comparison** - Compare DNS zones across nodes and identify differences
-- ✅ **DHCP Management** - View and clone DHCP scopes across nodes
-- ✅ **Auto-Detection** - Automatically detects which apps are installed on each node
+- **Zone Comparison** - Compare DNS zones across nodes and identify differences
+- **DHCP Management** - View and clone DHCP scopes across nodes
+- **Auto-Detection** - Automatically detects which apps are installed on each node
 
 ### User Experience
 
-- ✅ **Responsive UI** - Mobile-friendly interface built with React and TailwindCSS
-- ✅ **Cluster Support** - Automatic detection and support for Technitium DNS v14+ clustering
-- ✅ **Touch-Optimized** - Designed for easy use on smartphones and tablets
+- **Responsive UI** - Mobile-friendly interface built with React and TailwindCSS
+- **Cluster Support** - Automatic detection and support for Technitium DNS v14+ clustering
+- **Touch-Optimized** - Designed for easy use on smartphones and tablets
 
 ## License
 
