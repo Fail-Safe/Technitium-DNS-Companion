@@ -211,35 +211,55 @@ export class AdvancedBlockingService {
     }
 
     const payload = parsed as Record<string, unknown>;
-    const groups = Array.isArray(payload.groups)
-      ? payload.groups
+    const groups =
+      Array.isArray(payload.groups) ?
+        payload.groups
           .map((group) => this.normalizeGroup(group))
           .filter((group): group is AdvancedBlockingGroup => Boolean(group))
       : [];
 
     return {
       enableBlocking:
-        typeof payload.enableBlocking === "boolean"
-          ? payload.enableBlocking
-          : undefined,
-      blockingAnswerTtl:
-        typeof payload.blockingAnswerTtl === "number"
-          ? payload.blockingAnswerTtl
-          : undefined,
+        typeof payload.enableBlocking === "boolean" ?
+          payload.enableBlocking
+        : undefined,
+      blockingAnswerTtl: this.normalizeInteger(payload.blockingAnswerTtl),
       blockListUrlUpdateIntervalHours:
-        typeof payload.blockListUrlUpdateIntervalHours === "number"
-          ? payload.blockListUrlUpdateIntervalHours
-          : undefined,
+        typeof payload.blockListUrlUpdateIntervalHours === "number" ?
+          payload.blockListUrlUpdateIntervalHours
+        : undefined,
       blockListUrlUpdateIntervalMinutes:
-        typeof payload.blockListUrlUpdateIntervalMinutes === "number"
-          ? payload.blockListUrlUpdateIntervalMinutes
-          : undefined,
+        typeof payload.blockListUrlUpdateIntervalMinutes === "number" ?
+          payload.blockListUrlUpdateIntervalMinutes
+        : undefined,
       localEndPointGroupMap: this.normalizeMapping(
         payload.localEndPointGroupMap,
       ),
       networkGroupMap: this.normalizeMapping(payload.networkGroupMap),
       groups,
     };
+  }
+
+  private normalizeInteger(value: unknown): number | undefined {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? Math.trunc(value) : undefined;
+    }
+
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        return undefined;
+      }
+
+      const parsed = Number.parseInt(trimmed, 10);
+      if (Number.isNaN(parsed)) {
+        return undefined;
+      }
+
+      return parsed;
+    }
+
+    return undefined;
   }
 
   private normalizeGroup(raw: unknown): AdvancedBlockingGroup | undefined {
@@ -256,17 +276,17 @@ export class AdvancedBlockingService {
     return {
       name,
       enableBlocking:
-        typeof data.enableBlocking === "boolean"
-          ? data.enableBlocking
-          : undefined,
+        typeof data.enableBlocking === "boolean" ?
+          data.enableBlocking
+        : undefined,
       allowTxtBlockingReport:
-        typeof data.allowTxtBlockingReport === "boolean"
-          ? data.allowTxtBlockingReport
-          : undefined,
+        typeof data.allowTxtBlockingReport === "boolean" ?
+          data.allowTxtBlockingReport
+        : undefined,
       blockAsNxDomain:
-        typeof data.blockAsNxDomain === "boolean"
-          ? data.blockAsNxDomain
-          : undefined,
+        typeof data.blockAsNxDomain === "boolean" ?
+          data.blockAsNxDomain
+        : undefined,
       blockingAddresses: this.normalizeStringArray(data.blockingAddresses),
       allowed: this.normalizeStringArray(data.allowed),
       blocked: this.normalizeStringArray(data.blocked),
@@ -392,10 +412,12 @@ export class AdvancedBlockingService {
         .length,
       networkMappingCount: Object.keys(config.networkGroupMap).length,
       scheduledNodeCount:
-        typeof config.blockListUrlUpdateIntervalHours === "number" ||
-        typeof config.blockListUrlUpdateIntervalMinutes === "number"
-          ? 1
-          : 0,
+        (
+          typeof config.blockListUrlUpdateIntervalHours === "number" ||
+          typeof config.blockListUrlUpdateIntervalMinutes === "number"
+        ) ?
+          1
+        : 0,
     };
   }
 
@@ -442,6 +464,13 @@ export class AdvancedBlockingService {
 
     if (config.enableBlocking !== undefined) {
       payload.enableBlocking = config.enableBlocking;
+    }
+
+    const blockingAnswerTtl = this.normalizeInteger(
+      (config as unknown as Record<string, unknown>).blockingAnswerTtl,
+    );
+    if (blockingAnswerTtl !== undefined) {
+      payload.blockingAnswerTtl = blockingAnswerTtl;
     }
 
     if (config.blockListUrlUpdateIntervalHours !== undefined) {

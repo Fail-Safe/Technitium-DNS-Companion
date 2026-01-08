@@ -66,6 +66,7 @@ export interface AdvancedBlockingOverview {
 
 export interface AdvancedBlockingUpdateRequest {
   config: AdvancedBlockingConfig;
+  snapshotNote?: string;
 }
 
 /**
