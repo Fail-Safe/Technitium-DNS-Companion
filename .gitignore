@@ -56,6 +56,7 @@ ehthumbs.db
 /backups
 
 # Local development files
+.dev-data/
 scripts/remote-dev.sh
 NEXT_STEPS.md
 docker-compose.dev.yml
