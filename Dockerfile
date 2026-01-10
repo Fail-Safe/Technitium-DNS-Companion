@@ -5,14 +5,14 @@ ARG BUILDPLATFORM=linux/amd64
 
 
 # Stage 0: Shared manifest context (reduces repeated COPY invalidations)
-FROM --platform=$BUILDPLATFORM node:22-alpine AS manifest-context
+FROM --platform=$BUILDPLATFORM node:22-alpine3.21 AS manifest-context
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json ./apps/backend/
 COPY apps/frontend/package.json ./apps/frontend/
 
 # Stage 1: Build frontend
-FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine3.21 AS frontend-builder
 ARG BUILDPLATFORM
 
 WORKDIR /app
@@ -37,7 +37,7 @@ COPY apps/frontend/ ./apps/frontend/
 RUN npm run build --workspace=apps/frontend
 
 # Stage 2: Build backend
-FROM --platform=$BUILDPLATFORM node:22-alpine AS backend-builder
+FROM --platform=$BUILDPLATFORM node:22-alpine3.21 AS backend-builder
 
 WORKDIR /app
 
@@ -59,7 +59,7 @@ RUN npm run build --workspace=apps/backend
 RUN npm prune --omit=dev
 
 # Stage 3: Production image
-FROM node:22-alpine
+FROM node:22-alpine3.21
 
 ARG BUILD_VERSION=unknown
 ARG BUILD_REVISION=unknown
@@ -75,6 +75,9 @@ LABEL \
     org.opencontainers.image.revision="$BUILD_REVISION"
 
 WORKDIR /app
+
+# Pull in latest Alpine security fixes for base packages
+RUN apk upgrade --no-cache
 
 # Copy manifests from shared context
 COPY --from=manifest-context /app/ ./
