@@ -207,9 +207,8 @@ async function bootstrap() {
     logger.log("CORS enabled for all origins (development mode)");
   }
 
-  const port = httpsEnabled
-    ? process.env.HTTPS_PORT || 3443
-    : process.env.PORT || 3000;
+  const port =
+    httpsEnabled ? process.env.HTTPS_PORT || 3443 : process.env.PORT || 3000;
 
   const portNumber =
     typeof port === "string" ? Number.parseInt(port, 10) : port;

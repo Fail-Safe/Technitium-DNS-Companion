@@ -468,8 +468,9 @@ export class SplitHorizonPtrService {
           ).toLowerCase();
           if (!ownerRel) continue;
           const ptr = this.extractPtrTarget(rec);
-          const entry: ExistingPtr = ptr
-            ? {
+          const entry: ExistingPtr =
+            ptr ?
+              {
                 raw: ptr,
                 normalized: this.normalizeHostname(ptr),
                 comments: rec.comments,
@@ -496,13 +497,16 @@ export class SplitHorizonPtrService {
     // 3) Apply record changes.
     for (const planned of preview.plannedRecords) {
       const resolvedTarget =
-        planned.status === "conflict" &&
-        planned.conflictReason === "multiple-source-hostnames"
-          ? sourceHostnameResolutionByIp.get(planned.ip)
-          : undefined;
+        (
+          planned.status === "conflict" &&
+          planned.conflictReason === "multiple-source-hostnames"
+        ) ?
+          sourceHostnameResolutionByIp.get(planned.ip)
+        : undefined;
 
-      const effectivePlanned: SplitHorizonPtrPlannedRecord = resolvedTarget
-        ? {
+      const effectivePlanned: SplitHorizonPtrPlannedRecord =
+        resolvedTarget ?
+          {
             ...planned,
             status: "create-record",
             targetHostname: resolvedTarget,
@@ -803,18 +807,19 @@ export class SplitHorizonPtrService {
 
       if (dryRun) {
         actions.push({
-          kind: shouldCreate
-            ? "create-record"
-            : shouldUpdate
-              ? "update-record"
-              : "noop",
+          kind:
+            shouldCreate ? "create-record"
+            : shouldUpdate ? "update-record"
+            : "noop",
           ok: true,
           ip: planned.ip,
           ptrZoneName: planned.ptrZoneName,
           ptrRecordFqdn: ownerFqdn,
           targetHostname: planned.targetHostname,
           message: `Dry run: would ${
-            shouldCreate ? "create" : shouldUpdate ? "update" : "noop"
+            shouldCreate ? "create"
+            : shouldUpdate ? "update"
+            : "noop"
           }`,
         });
         continue;
@@ -901,13 +906,13 @@ export class SplitHorizonPtrService {
               zoneName.toLowerCase();
 
           const nextComments =
-            adoptExistingPtrRecords && !managedForThisSource
-              ? this.buildManagedPtrComment(
-                  zoneName,
-                  planned.ip,
-                  current.comments,
-                )
-              : current.comments;
+            adoptExistingPtrRecords && !managedForThisSource ?
+              this.buildManagedPtrComment(
+                zoneName,
+                planned.ip,
+                current.comments,
+              )
+            : current.comments;
 
           await this.technitiumService.executeAction(nodeId, {
             method: "GET",
@@ -918,10 +923,12 @@ export class SplitHorizonPtrService {
               type: "PTR",
               ptrName: apiCurrent,
               newPtrName: apiTarget,
-              ...(typeof nextComments === "string" &&
-              nextComments.trim().length > 0
-                ? { comments: nextComments }
-                : {}),
+              ...((
+                typeof nextComments === "string" &&
+                nextComments.trim().length > 0
+              ) ?
+                { comments: nextComments }
+              : {}),
             },
           });
 
@@ -1229,9 +1236,9 @@ export class SplitHorizonPtrService {
           );
           ptrZoneRecordsByZoneLower.set(
             key,
-            Array.isArray(ptrEnvelope.data.records)
-              ? ptrEnvelope.data.records
-              : [],
+            Array.isArray(ptrEnvelope.data.records) ?
+              ptrEnvelope.data.records
+            : [],
           );
         } catch (error) {
           const message =
@@ -1590,9 +1597,8 @@ export class SplitHorizonPtrService {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return {
         addresses: [],
-        warnings: warnings.length
-          ? warnings
-          : ["APP record data was not an object."],
+        warnings:
+          warnings.length ? warnings : ["APP record data was not an object."],
       };
     }
 
