@@ -25,6 +25,17 @@ export interface QueryLogSqliteStatus {
   ready: boolean;
   retentionHours: number;
   pollIntervalMs: number;
+  responseCache?: {
+    enabled: boolean;
+    ttlMs: number;
+    maxEntries: number;
+    size: number;
+    hits: number;
+    misses: number;
+    expired: number;
+    evictions: number;
+    sets: number;
+  };
 }
 
 type StoredLogRow = { nodeId: string; baseUrl: string; data: string };
@@ -71,6 +82,34 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     ) || 20000,
   );
 
+  // Response caching (small TTL) for stored log endpoints.
+  // These endpoints may be polled frequently (e.g. 3s auto-refresh). Even a short
+  // cache reduces repeated JSON parsing + hostname enrichment overhead substantially.
+  private readonly responseCacheTtlMs = Math.max(
+    0,
+    Number.parseInt(
+      process.env.QUERY_LOG_SQLITE_RESPONSE_CACHE_TTL_MS ?? "15000",
+      10,
+    ) || 15000,
+  );
+  private readonly responseCacheMaxEntries = Math.max(
+    1,
+    Number.parseInt(
+      process.env.QUERY_LOG_SQLITE_RESPONSE_CACHE_MAX_ENTRIES ?? "150",
+      10,
+    ) || 150,
+  );
+  private readonly responseCache = new Map<
+    string,
+    { expiresAt: number; value: unknown }
+  >();
+
+  private responseCacheHits = 0;
+  private responseCacheMisses = 0;
+  private responseCacheExpired = 0;
+  private responseCacheEvictions = 0;
+  private responseCacheSets = 0;
+
   // Track per-node cursor based on the newest timestamp we've successfully ingested.
   private readonly lastIngestedTsByNode = new Map<string, number>();
 
@@ -89,6 +128,17 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       ready: this.getIsEnabled(),
       retentionHours: this.retentionHours,
       pollIntervalMs: this.pollIntervalMs,
+      responseCache: {
+        enabled: this.responseCacheTtlMs > 0,
+        ttlMs: this.responseCacheTtlMs,
+        maxEntries: this.responseCacheMaxEntries,
+        size: this.responseCache.size,
+        hits: this.responseCacheHits,
+        misses: this.responseCacheMisses,
+        expired: this.responseCacheExpired,
+        evictions: this.responseCacheEvictions,
+        sets: this.responseCacheSets,
+      },
     };
   }
 
@@ -318,9 +368,8 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           const qnameLc = qname ? qname.toLowerCase() : null;
 
           const clientIpAddress = entry.clientIpAddress ?? null;
-          const clientIpLc = clientIpAddress
-            ? clientIpAddress.toLowerCase()
-            : null;
+          const clientIpLc =
+            clientIpAddress ? clientIpAddress.toLowerCase() : null;
 
           const clientName = entry.clientName ?? null;
           const clientNameLc = clientName ? clientName.toLowerCase() : null;
@@ -445,6 +494,68 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     return createHash("sha1").update(key).digest("hex");
   }
 
+  private buildResponseCacheKey(
+    kind: "combined" | "node",
+    filters: TechnitiumQueryLogFilters,
+    nodeId?: string,
+  ): string {
+    // Exclude disableCache from the cache key; it controls whether we use the cache at all.
+    const { disableCache: _disableCache, ...rest } = filters ?? {};
+
+    // Stable stringify by sorting keys.
+    const normalized: Record<string, unknown> = {};
+    for (const key of Object.keys(rest).sort()) {
+      normalized[key] = (rest as Record<string, unknown>)[key];
+    }
+
+    const hash = createHash("sha1")
+      .update(JSON.stringify(normalized))
+      .digest("hex");
+
+    return `${kind}:${nodeId ?? "-"}:${hash}`;
+  }
+
+  private getFromResponseCache<T>(key: string): T | null {
+    if (this.responseCacheTtlMs <= 0) return null;
+
+    const entry = this.responseCache.get(key);
+    if (!entry) {
+      this.responseCacheMisses += 1;
+      return null;
+    }
+
+    if (entry.expiresAt <= Date.now()) {
+      this.responseCache.delete(key);
+      this.responseCacheExpired += 1;
+      this.responseCacheMisses += 1;
+      return null;
+    }
+
+    this.responseCacheHits += 1;
+    return entry.value as T;
+  }
+
+  private setResponseCache<T>(key: string, value: T): void {
+    if (this.responseCacheTtlMs <= 0) return;
+
+    this.responseCache.set(key, {
+      expiresAt: Date.now() + this.responseCacheTtlMs,
+      value,
+    });
+
+    this.responseCacheSets += 1;
+
+    // Simple bound: evict oldest insertion(s) if we exceed max.
+    while (this.responseCache.size > this.responseCacheMaxEntries) {
+      const oldestKey = this.responseCache.keys().next().value as
+        | string
+        | undefined;
+      if (!oldestKey) break;
+      this.responseCache.delete(oldestKey);
+      this.responseCacheEvictions += 1;
+    }
+  }
+
   private buildWindowBounds(filters: TechnitiumQueryLogFilters): {
     startTs: number;
     endTs: number;
@@ -456,8 +567,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const endTs = filters.end ? Date.parse(filters.end) : now;
 
     return {
-      startTs: Number.isFinite(startTs)
-        ? Math.max(retentionStart, startTs)
+      startTs:
+        Number.isFinite(startTs) ?
+          Math.max(retentionStart, startTs)
         : retentionStart,
       endTs: Number.isFinite(endTs) ? endTs : now,
     };
@@ -593,6 +705,22 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       throw new Error("SQLite query log storage is not enabled.");
     }
 
+    const db = this.db;
+
+    const disableCache = !!filters.disableCache;
+    const cacheKey =
+      !disableCache ?
+        this.buildResponseCacheKey("combined", filters)
+      : undefined;
+
+    if (cacheKey) {
+      const cached =
+        this.getFromResponseCache<TechnitiumCombinedQueryLogPage>(cacheKey);
+      if (cached) {
+        return cached;
+      }
+    }
+
     const pageNumber = Math.max(filters.pageNumber ?? 1, 1);
     const entriesPerPage = filters.entriesPerPage ?? 50;
     const descendingOrder = filters.descendingOrder ?? true;
@@ -648,9 +776,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const totalPages =
-      entriesPerPage > 0
-        ? Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
-        : 1;
+      entriesPerPage > 0 ?
+        Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
+      : 1;
     const offset = entriesPerPage > 0 ? (pageNumber - 1) * entriesPerPage : 0;
 
     const sortDir = descendingOrder ? "DESC" : "ASC";
@@ -703,7 +831,35 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const enriched =
       await this.technitiumService.enrichQueryLogEntriesWithHostnames(entries);
 
-    return {
+    const nodeSnapshots = this.nodeConfigs.map((node) => {
+      const nodeWindowWhere = this.buildWhereClause({}, window, node.id);
+      const nodeTotalEntriesRow = db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM query_log_entries ${nodeWindowWhere.whereSql}`,
+        )
+        .get(...nodeWindowWhere.params) as { count: number };
+      const nodeTotalEntries = nodeTotalEntriesRow?.count ?? 0;
+
+      const nodeTotalPages =
+        entriesPerPage > 0 ?
+          nodeTotalEntries > 0 ?
+            Math.ceil(nodeTotalEntries / entriesPerPage)
+          : 0
+        : 0;
+
+      return {
+        nodeId: node.id,
+        baseUrl: node.baseUrl,
+        fetchedAt:
+          this.lastPollAtByNode.get(node.id) ?? new Date().toISOString(),
+        totalEntries: nodeTotalEntries,
+        totalPages: nodeTotalPages,
+        durationMs: undefined,
+        error: undefined,
+      };
+    });
+
+    const result: TechnitiumCombinedQueryLogPage = {
       fetchedAt: new Date().toISOString(),
       pageNumber,
       entriesPerPage,
@@ -714,17 +870,14 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       totalEntries,
       descendingOrder,
       entries: enriched,
-      nodes: this.nodeConfigs.map((node) => ({
-        nodeId: node.id,
-        baseUrl: node.baseUrl,
-        fetchedAt:
-          this.lastPollAtByNode.get(node.id) ?? new Date().toISOString(),
-        totalEntries: undefined,
-        totalPages: undefined,
-        durationMs: undefined,
-        error: undefined,
-      })),
+      nodes: nodeSnapshots,
     };
+
+    if (cacheKey) {
+      this.setResponseCache(cacheKey, result);
+    }
+
+    return result;
   }
 
   async getStoredNodeLogs(
@@ -733,6 +886,22 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
   ): Promise<TechnitiumStatusEnvelopeForStoredNodeLogs> {
     if (!this.db) {
       throw new Error("SQLite query log storage is not enabled.");
+    }
+
+    const disableCache = !!filters.disableCache;
+    const cacheKey =
+      !disableCache ?
+        this.buildResponseCacheKey("node", filters, nodeId)
+      : undefined;
+
+    if (cacheKey) {
+      const cached =
+        this.getFromResponseCache<TechnitiumStatusEnvelopeForStoredNodeLogs>(
+          cacheKey,
+        );
+      if (cached) {
+        return cached;
+      }
     }
 
     const pageNumber = Math.max(filters.pageNumber ?? 1, 1);
@@ -789,9 +958,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const totalPages =
-      entriesPerPage > 0
-        ? Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
-        : 1;
+      entriesPerPage > 0 ?
+        Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
+      : 1;
     const offset = entriesPerPage > 0 ? (pageNumber - 1) * entriesPerPage : 0;
 
     const sortDir = descendingOrder ? "DESC" : "ASC";
@@ -851,12 +1020,18 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       entries: enriched,
     };
 
-    return {
+    const result: TechnitiumStatusEnvelopeForStoredNodeLogs = {
       nodeId,
       fetchedAt: new Date().toISOString(),
       data,
       duplicatesRemoved,
     };
+
+    if (cacheKey) {
+      this.setResponseCache(cacheKey, result);
+    }
+
+    return result;
   }
 }
 

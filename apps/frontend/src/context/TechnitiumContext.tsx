@@ -1121,13 +1121,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         params.size > 0 ? `?${params.toString()}` : ""
       }`;
 
-      const requestOptions =
-        filters?.disableCache ?
-          {
-            cache: "no-store" as const,
-            headers: { "Cache-Control": "no-store" },
-          }
-        : undefined;
+      // Always avoid browser/edge caching for logs; staleness here is user-visible.
+      // The `disableCache` query param is reserved for backend cache bypass.
+      const requestOptions = {
+        cache: "no-store" as const,
+        headers: { "Cache-Control": "no-store" },
+      };
 
       const mergedRequestOptions: RequestInit | undefined =
         requestOptions || options?.signal ?
@@ -1157,13 +1156,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         params.size > 0 ? `?${params.toString()}` : ""
       }`;
 
-      const requestOptions =
-        filters?.disableCache ?
-          {
-            cache: "no-store" as const,
-            headers: { "Cache-Control": "no-store" },
-          }
-        : undefined;
+      // Always avoid browser/edge caching for logs; staleness here is user-visible.
+      // The `disableCache` query param is reserved for backend cache bypass.
+      const requestOptions = {
+        cache: "no-store" as const,
+        headers: { "Cache-Control": "no-store" },
+      };
 
       const mergedRequestOptions: RequestInit | undefined =
         requestOptions || options?.signal ?
@@ -1217,13 +1215,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         params.size > 0 ? `?${params.toString()}` : ""
       }`;
 
-      const requestOptions =
-        filters?.disableCache ?
-          {
-            cache: "no-store" as const,
-            headers: { "Cache-Control": "no-store" },
-          }
-        : undefined;
+      // Always avoid browser/edge caching for logs; staleness here is user-visible.
+      // The `disableCache` query param is reserved for backend cache bypass.
+      const requestOptions = {
+        cache: "no-store" as const,
+        headers: { "Cache-Control": "no-store" },
+      };
 
       const mergedRequestOptions: RequestInit | undefined =
         requestOptions || options?.signal ?
@@ -1253,13 +1250,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         params.size > 0 ? `?${params.toString()}` : ""
       }`;
 
-      const requestOptions =
-        filters?.disableCache ?
-          {
-            cache: "no-store" as const,
-            headers: { "Cache-Control": "no-store" },
-          }
-        : undefined;
+      // Always avoid browser/edge caching for logs; staleness here is user-visible.
+      // The `disableCache` query param is reserved for backend cache bypass.
+      const requestOptions = {
+        cache: "no-store" as const,
+        headers: { "Cache-Control": "no-store" },
+      };
 
       const mergedRequestOptions: RequestInit | undefined =
         requestOptions || options?.signal ?

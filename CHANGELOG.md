@@ -9,6 +9,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-01-10
+
+### Added
+
+- Query Logs: Paginated rows-per-page setting in “Table settings” (25/50/100/200), defaulting to 25.
+- Query Logs: subtle “Source” pills to show whether results are Live (Nodes) or Stored (SQLite), plus an optional DB cache hit-rate pill when available.
+- Query Logs (Stored/SQLite): response cache stats surfaced via the storage status endpoint (hits/misses/evictions/expired/size).
+
+### Changed
+
+- Query Logs: improved header stickiness by using a scroll-container approach (more reliable in Firefox).
+- Frontend: header now measures itself and sets `--app-header-height` for consistent sticky offsets.
+
+### Fixed
+
+- Query Logs: paginated requests no longer force backend cache bypass; stored (SQLite) views can now benefit from short-TTL response caching.
+- Query Logs: paging (Prev/Next/jump) pauses auto-refresh so the inspected page doesn’t reshuffle while you’re reading it.
+- Query Logs: prevent “jump to top” when paging by keeping the current table visible during subsequent loads.
+
 ## [1.3.0] - 2026-01-09
 
 ### Added
@@ -215,7 +234,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.5...v1.3.0
 [1.2.5]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.3...v1.2.4

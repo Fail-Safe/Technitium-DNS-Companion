@@ -80,4 +80,16 @@ export interface TechnitiumQueryLogStorageStatus {
   ready: boolean;
   retentionHours: number;
   pollIntervalMs: number;
+
+  responseCache?: {
+    enabled: boolean;
+    ttlMs: number;
+    maxEntries: number;
+    size: number;
+    hits: number;
+    misses: number;
+    expired: number;
+    evictions: number;
+    sets: number;
+  };
 }

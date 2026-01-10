@@ -3318,6 +3318,65 @@ button.secondary:disabled,
   contain: layout;
 }
 
+.logs-page__summary-line {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 420px;
+  min-width: 260px;
+}
+
+.logs-page__summary-pills {
+  display: inline-flex;
+  gap: 0.5rem;
+  margin-left: 0.6rem;
+  vertical-align: middle;
+}
+
+/* When pills are inside a flex summary line, push them to the right edge. */
+.logs-page__summary-line .logs-page__summary-pills {
+  margin-left: auto;
+}
+
+.logs-page__meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.3;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.logs-page__meta-pill--stored {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.25);
+  color: var(--color-text-primary);
+}
+
+.logs-page__meta-pill--live {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.25);
+  color: var(--color-text-primary);
+}
+
+.logs-page__meta-pill--cache {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.25);
+  color: var(--color-text-primary);
+}
+
+.logs-page__meta-pill--dedupe {
+  background: rgba(107, 114, 128, 0.12);
+  border-color: rgba(107, 114, 128, 0.25);
+  color: var(--color-text-primary);
+}
+
 .logs-page__summary.refreshing {
   opacity: 0.7;
 }
@@ -3746,10 +3805,11 @@ button.secondary:disabled,
   background: var(--color-bg-secondary);
   border-radius: 1rem;
   border: 1px solid var(--color-border);
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: auto;
   box-shadow: 0 10px 24px rgba(30, 42, 64, 0.04);
   min-height: 400px;
+  /* Keep header sticky within the table area (reliable in Firefox). */
+  max-height: 65vh;
   position: relative;
 }
 
@@ -3775,12 +3835,6 @@ button.secondary:disabled,
   font-size: 0.92rem;
   table-layout: fixed;
   /* Fixed widths prevent column resizing on content change */
-
-  /* CSS Performance optimizations */
-  contain: layout style;
-  /* Isolate layout and style calculations from parent/siblings */
-  will-change: contents;
-  /* Hint to browser that contents will change frequently */
 }
 
 .logs-page__table thead {
@@ -3789,6 +3843,14 @@ button.secondary:disabled,
   letter-spacing: 0.04em;
   font-size: 0.75rem;
   color: var(--color-text-secondary);
+}
+
+.logs-page__table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  background: var(--color-bg-tertiary);
+  box-shadow: 0 1px 0 var(--color-border);
 }
 
 .logs-page__table th,
@@ -7074,6 +7136,7 @@ button.danger:disabled {
       background: transparent;
       border: 1px solid var(--color-border);
       color: var(--color-text-primary);
+      margin-left: auto;
     }
 
     .dhcp-page__clone-actions button.secondary:hover {

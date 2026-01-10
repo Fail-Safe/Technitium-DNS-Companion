@@ -46,7 +46,8 @@ type DisplayMode = "paginated" | "tail";
 
 type LoadingState = "idle" | "loading" | "refreshing" | "error";
 
-const DEFAULT_ENTRIES_PER_PAGE = 50;
+const DEFAULT_ENTRIES_PER_PAGE = 25;
+const PAGINATED_ROWS_PER_PAGE_OPTIONS = [25, 50, 100, 200];
 const DEFAULT_TAIL_BUFFER_SIZE = 50;
 const TAIL_BUFFER_SIZE_OPTIONS = [
   { label: "50 entries", value: 50 },
@@ -120,6 +121,8 @@ const DEFAULT_COLUMN_VISIBILITY: ColumnVisibility = {
 
 const COLUMN_VISIBILITY_STORAGE_KEY = "technitiumLogs.columnVisibility";
 const TAIL_BUFFER_SIZE_STORAGE_KEY = "technitiumLogs.tailBufferSize";
+const PAGINATED_ROWS_PER_PAGE_STORAGE_KEY =
+  "technitiumLogs.paginatedRowsPerPage";
 const DEDUPLICATE_DOMAINS_STORAGE_KEY = "technitiumLogs.deduplicateDomains";
 const FILTER_TIP_DISMISSED_KEY = "technitiumLogs.filterTipDismissed";
 const SELECTION_TIP_DISMISSED_KEY = "technitiumLogs.selectionTipDismissed";
@@ -1448,6 +1451,31 @@ const loadTailBufferSize = (): number => {
   return DEFAULT_TAIL_BUFFER_SIZE;
 };
 
+const loadPaginatedRowsPerPage = (): number => {
+  if (typeof window === "undefined") {
+    return DEFAULT_ENTRIES_PER_PAGE;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(
+      PAGINATED_ROWS_PER_PAGE_STORAGE_KEY,
+    );
+    if (stored) {
+      const parsed = parseInt(stored, 10);
+      if (
+        !Number.isNaN(parsed) &&
+        PAGINATED_ROWS_PER_PAGE_OPTIONS.includes(parsed)
+      ) {
+        return parsed;
+      }
+    }
+  } catch (error) {
+    console.warn("Failed to load paginated rows-per-page setting", error);
+  }
+
+  return DEFAULT_ENTRIES_PER_PAGE;
+};
+
 const loadDeduplicateDomains = (): boolean => {
   if (typeof window === "undefined") {
     return false;
@@ -1825,9 +1853,18 @@ export function LogsPage() {
   const [combinedPage, setCombinedPage] = useState<
     TechnitiumCombinedQueryLogPage | undefined
   >();
+  const [combinedNodeSnapshots, setCombinedNodeSnapshots] = useState<
+    TechnitiumCombinedNodeLogSnapshot[]
+  >([]);
   const [nodeSnapshot, setNodeSnapshot] = useState<
     TechnitiumNodeQueryLogEnvelope | undefined
   >();
+
+  useEffect(() => {
+    if (mode !== "combined") {
+      setCombinedNodeSnapshots([]);
+    }
+  }, [mode]);
   const [refreshSeconds, setRefreshSeconds] = useState<number>(
     TAIL_MODE_DEFAULT_REFRESH,
   );
@@ -1847,6 +1884,26 @@ export function LogsPage() {
     useState<TechnitiumQueryLogStorageStatus | null>(null);
   const storedLogsReady = queryLogStorageStatus?.ready === true;
   const queryLogRetentionHours = queryLogStorageStatus?.retentionHours ?? 24;
+
+  const logsSourceKind =
+    displayMode === "tail" ? "live"
+    : storedLogsReady ? "stored"
+    : "live";
+
+  const logsSourceLabel =
+    logsSourceKind === "stored" ? "Stored (SQLite)" : "Live (Nodes)";
+  const logsSourceTitle =
+    logsSourceKind === "stored" ?
+      "Stored logs are served from Companion's SQLite store (fast + cacheable)."
+    : "Live logs are fetched directly from the Technitium DNS nodes.";
+
+  const storedResponseCache = queryLogStorageStatus?.responseCache;
+  const storedResponseCacheLookups =
+    (storedResponseCache?.hits ?? 0) + (storedResponseCache?.misses ?? 0);
+  const storedResponseCacheHitRatePercent =
+    storedResponseCache && storedResponseCacheLookups > 0 ?
+      Math.round((storedResponseCache.hits / storedResponseCacheLookups) * 100)
+    : null;
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -1895,9 +1952,16 @@ export function LogsPage() {
   );
   const [tailBufferSize, setTailBufferSize] =
     useState<number>(loadTailBufferSize);
+  const [paginatedRowsPerPage, setPaginatedRowsPerPage] = useState<number>(
+    loadPaginatedRowsPerPage,
+  );
   const [deduplicateDomains, setDeduplicateDomains] = useState<boolean>(
     loadDeduplicateDomains,
   );
+
+  // After the first successful load, keep the existing table visible during subsequent loads.
+  // This avoids window scroll jumps when paging (Prev/Next) by preventing large layout shrink.
+  const hasLoadedAnyLogsRef = useRef<boolean>(false);
 
   // Prevent overlapping log loads (auto-refresh can otherwise stack requests if a call takes longer than refresh interval)
   const logsFetchInFlightRef = useRef<boolean>(false);
@@ -2420,6 +2484,27 @@ export function LogsPage() {
       );
     } catch (error) {
       console.warn("Failed to save tail buffer size to localStorage", error);
+    }
+  }, []);
+
+  const handlePaginatedRowsPerPageChange = useCallback((next: number) => {
+    if (!PAGINATED_ROWS_PER_PAGE_OPTIONS.includes(next)) {
+      return;
+    }
+
+    setPageNumber(1);
+    setPaginatedRowsPerPage(next);
+
+    try {
+      window.localStorage.setItem(
+        PAGINATED_ROWS_PER_PAGE_STORAGE_KEY,
+        String(next),
+      );
+    } catch (error) {
+      console.warn(
+        "Failed to save paginated rows-per-page setting to localStorage",
+        error,
+      );
     }
   }, []);
 
@@ -3397,7 +3482,7 @@ export function LogsPage() {
     const load = async () => {
       const nextLoadingState =
         displayMode === "tail" ? "refreshing"
-        : isAutoRefresh ? "refreshing"
+        : isAutoRefresh || hasLoadedAnyLogsRef.current ? "refreshing"
         : "loading";
       setLoadingState(nextLoadingState);
       setErrorMessage(undefined);
@@ -3415,12 +3500,12 @@ export function LogsPage() {
           const filterParams = {
             pageNumber: effectivePageNumber,
             entriesPerPage:
-              displayMode === "tail" ? tailBufferSize : (
-                DEFAULT_ENTRIES_PER_PAGE
-              ),
+              displayMode === "tail" ? tailBufferSize : paginatedRowsPerPage,
             descendingOrder: true,
             deduplicateDomains,
-            disableCache: true, // Always disable cache (stale data causes issues in paginated mode)
+            // Only bypass backend caching in tail mode (real-time view).
+            // For paginated browsing, allowing backend caching avoids expensive recomputation on every refresh.
+            disableCache: displayMode === "tail" ? true : undefined,
             // In tail mode, fetch all entries without filters (client-side filtering applied later)
             // In paginated mode, apply server-side filters
             ...(displayMode !== "tail" &&
@@ -3452,6 +3537,10 @@ export function LogsPage() {
           if (logsTableContextMenuOpenRef.current) {
             setLoadingState("idle");
             return;
+          }
+
+          if (data.nodes?.length) {
+            setCombinedNodeSnapshots(data.nodes);
           }
 
           if (displayMode === "tail") {
@@ -3503,12 +3592,11 @@ export function LogsPage() {
             {
               pageNumber: effectivePageNumber,
               entriesPerPage:
-                displayMode === "tail" ? tailBufferSize : (
-                  DEFAULT_ENTRIES_PER_PAGE
-                ),
+                displayMode === "tail" ? tailBufferSize : paginatedRowsPerPage,
               descendingOrder: true,
               deduplicateDomains,
-              disableCache: true, // Always disable cache (stale data causes issues in paginated mode)
+              // Only bypass backend caching in tail mode (real-time view).
+              disableCache: displayMode === "tail" ? true : undefined,
               // In tail mode, fetch all entries without filters (client-side filtering applied later)
               // In paginated mode, apply server-side filters
               ...(displayMode !== "tail" &&
@@ -3590,6 +3678,7 @@ export function LogsPage() {
         }
 
         if (!cancelled) {
+          hasLoadedAnyLogsRef.current = true;
           setLoadingState("idle");
         }
       } catch (error) {
@@ -3643,6 +3732,7 @@ export function LogsPage() {
     mode,
     selectedNodeId,
     pageNumber,
+    paginatedRowsPerPage,
     refreshTick,
     isAutoRefresh,
     storedLogsReady,
@@ -4009,13 +4099,20 @@ export function LogsPage() {
     return false;
   }, [displayMode, mode, combinedPage, nodeSnapshot]);
 
-  const handlePrevPage = () => {
+  const pauseAutoRefreshForManualPaging = useCallback(() => {
+    // Manual paging implies the user is inspecting a specific page.
+    // Pause auto-refresh so new rows don't reshuffle/replace what they're looking at.
     setIsAutoRefresh(false);
+    setRefreshSeconds(0);
+  }, [setIsAutoRefresh, setRefreshSeconds]);
+
+  const handlePrevPage = () => {
+    pauseAutoRefreshForManualPaging();
     setPageNumber((prev) => Math.max(1, prev - 1));
   };
 
   const handleNextPage = () => {
-    setIsAutoRefresh(false);
+    pauseAutoRefreshForManualPaging();
     setPageNumber((prev) => Math.min(totalPages, prev + 1));
   };
 
@@ -4046,14 +4143,13 @@ export function LogsPage() {
     }
 
     const clamped = Math.min(totalPages, Math.max(1, next));
-    setIsAutoRefresh(false);
+    pauseAutoRefreshForManualPaging();
     setPageNumber(clamped);
     closePageJump();
   }, [
     closePageJump,
     pageJumpValue,
-    setPageNumber,
-    setIsAutoRefresh,
+    pauseAutoRefreshForManualPaging,
     totalPages,
   ]);
 
@@ -4240,8 +4336,24 @@ export function LogsPage() {
                   <strong>Buffer size:</strong> {tailBuffer.length} /{" "}
                   {tailBufferSize}
                 </div>
-                <div>
+                <div className="logs-page__summary-line">
                   <strong>Mode:</strong> Live Tail
+                  <span className="logs-page__summary-pills">
+                    <span
+                      className={`logs-page__meta-pill logs-page__meta-pill--${logsSourceKind}`}
+                      title={logsSourceTitle}
+                    >
+                      {logsSourceLabel}
+                    </span>
+                    {duplicatesRemoved > 0 && (
+                      <span
+                        className="logs-page__meta-pill logs-page__meta-pill--dedupe"
+                        title="Duplicates removed by domain deduplication"
+                      >
+                        Deduped {duplicatesRemoved.toLocaleString()}
+                      </span>
+                    )}
+                  </span>
                 </div>
                 <div>
                   <strong>Last update:</strong>{" "}
@@ -4272,9 +4384,9 @@ export function LogsPage() {
                   {totalEntries.toLocaleString()}
                 </div>
                 <div>
-                  <strong>Rows per page:</strong> {DEFAULT_ENTRIES_PER_PAGE}
+                  <strong>Rows per page:</strong> {paginatedRowsPerPage}
                 </div>
-                <div>
+                <div className="logs-page__summary-line">
                   <strong>Fetched:</strong>{" "}
                   {mode === "combined" ?
                     combinedPage?.fetchedAt ?
@@ -4283,21 +4395,38 @@ export function LogsPage() {
                   : nodeSnapshot?.fetchedAt ?
                     new Date(nodeSnapshot.fetchedAt).toLocaleString()
                   : "—"}
+                  <span className="logs-page__summary-pills">
+                    <span
+                      className={`logs-page__meta-pill logs-page__meta-pill--${logsSourceKind}`}
+                      title={logsSourceTitle}
+                    >
+                      {logsSourceLabel}
+                    </span>
+                    {storedLogsReady && storedResponseCache?.enabled && (
+                      <span
+                        className="logs-page__meta-pill logs-page__meta-pill--cache"
+                        title={`SQLite stored-log response cache (server-side). TTL=${Math.round(storedResponseCache.ttlMs / 1000)}s, Size=${storedResponseCache.size}/${storedResponseCache.maxEntries}, Hits=${storedResponseCache.hits}, Misses=${storedResponseCache.misses}, Evictions=${storedResponseCache.evictions}`}
+                      >
+                        DB Cache
+                        {storedResponseCacheHitRatePercent !== null ?
+                          ` ${storedResponseCacheHitRatePercent}%`
+                        : ""}
+                      </span>
+                    )}
+                    {duplicatesRemoved > 0 && (
+                      <span
+                        className="logs-page__meta-pill logs-page__meta-pill--dedupe"
+                        title="Duplicates removed by domain deduplication"
+                      >
+                        Deduped {duplicatesRemoved.toLocaleString()}
+                      </span>
+                    )}
+                  </span>
                 </div>
                 {isFilteringActive && (
                   <div>
                     <strong>Matching entries:</strong>{" "}
                     {totalMatchingEntries.toLocaleString()}
-                  </div>
-                )}
-                {duplicatesRemoved > 0 && (
-                  <div className="logs-page__duplicate-info">
-                    <strong>
-                      <FontAwesomeIcon icon={faRotate} /> Duplicates removed:
-                    </strong>{" "}
-                    <span className="logs-page__duplicate-count">
-                      {duplicatesRemoved.toLocaleString()}
-                    </span>
                   </div>
                 )}
               </>
@@ -5058,6 +5187,45 @@ export function LogsPage() {
                       </div>
 
                       <header style={{ marginTop: "2rem" }}>
+                        <h3>Paginated Settings</h3>
+                        <p>Configure page size for paginated browsing.</p>
+                      </header>
+                      <div className="logs-page__settings-options">
+                        <label className="logs-page__settings-option">
+                          <div style={{ width: "100%" }}>
+                            <span className="logs-page__settings-option-label">
+                              Rows per page
+                            </span>
+                            <select
+                              value={paginatedRowsPerPage}
+                              onChange={(e) =>
+                                handlePaginatedRowsPerPageChange(
+                                  Number(e.target.value),
+                                )
+                              }
+                              style={{
+                                marginTop: "0.5rem",
+                                padding: "0.5rem",
+                                borderRadius: "0.5rem",
+                                border: "1px solid #dce3ee",
+                                width: "100%",
+                              }}
+                            >
+                              {PAGINATED_ROWS_PER_PAGE_OPTIONS.map((value) => (
+                                <option key={value} value={value}>
+                                  {value}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="logs-page__settings-option-description">
+                              Applies to Paginated mode only. Changing this will
+                              reset to page 1.
+                            </span>
+                          </div>
+                        </label>
+                      </div>
+
+                      <header style={{ marginTop: "2rem" }}>
                         <h3>Live Tail Settings</h3>
                         <p>Configure the buffer size for live tail mode.</p>
                       </header>
@@ -5276,11 +5444,11 @@ export function LogsPage() {
 
         }
 
-        {mode === "combined" && combinedPage?.nodes?.length ?
+        {mode === "combined" && combinedNodeSnapshots.length > 0 ?
           <section className="logs-page__nodes">
             <h2>Node snapshots</h2>
             <ul>
-              {combinedPage.nodes.map(
+              {combinedNodeSnapshots.map(
                 (snapshot: TechnitiumCombinedNodeLogSnapshot) => (
                   <li key={snapshot.nodeId}>
                     <strong>{snapshot.nodeId}</strong> —{" "}
