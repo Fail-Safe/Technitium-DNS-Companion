@@ -1,13 +1,5 @@
 import type { ReactNode } from "react";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BackgroundPtrTokenValidationSummary } from "../components/common/BackgroundTokenSecurityBanner";
 import type { AuthTransportInfo } from "../components/common/TransportSecurityBanner";
 import {
@@ -15,6 +7,7 @@ import {
   getAuthUnauthorizedEventName,
   triggerAuthRedirect,
 } from "../config";
+import { AuthContext } from "./authContextInstance";
 
 export type AuthStatus = {
   sessionAuthEnabled?: boolean;
@@ -23,11 +16,12 @@ export type AuthStatus = {
   nodeIds?: string[];
   configuredNodeIds?: string[];
   clusterTokenConfigured?: boolean;
+  clusterTokenUsage?: { usedForNodeIds: string[] };
   transport?: AuthTransportInfo;
   backgroundPtrToken?: BackgroundPtrTokenValidationSummary;
 };
 
-type AuthContextValue = {
+export type AuthContextValue = {
   status: AuthStatus | null;
   loading: boolean;
   error: string | null;
@@ -39,25 +33,6 @@ type AuthContextValue = {
   }) => Promise<void>;
   logout: () => Promise<void>;
 };
-
-// In development, Vite Fast Refresh can reload modules that define contexts.
-// If the Context object identity changes, existing Providers won't match new
-// Consumers, and hooks like useAuth() can throw even though a Provider exists.
-// Cache the context instance on globalThis to keep it stable across HMR.
-type GlobalWithAuthContext = typeof globalThis & {
-  __tdc_auth_context__?: ReturnType<
-    typeof createContext<AuthContextValue | undefined>
-  >;
-};
-
-const globalWithAuthContext = globalThis as GlobalWithAuthContext;
-const AuthContext: ReturnType<
-  typeof createContext<AuthContextValue | undefined>
-> =
-  globalWithAuthContext.__tdc_auth_context__ ??
-  (globalWithAuthContext.__tdc_auth_context__ = createContext<
-    AuthContextValue | undefined
-  >(undefined));
 
 async function safeReadError(response: Response): Promise<string> {
   try {
@@ -204,7 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const eventName = getAuthUnauthorizedEventName();
     window.addEventListener(eventName, onUnauthorized);
     return () => window.removeEventListener(eventName, onUnauthorized);
-  }, [refresh]);
+  }, [refresh, setAuthEventNonce]);
 
   const login = useCallback(
     async (args: { username: string; password: string; totp?: string }) => {
@@ -233,30 +208,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [refresh]);
 
-  const value = useMemo<AuthContextValue>(
-    () => ({ status, loading, error, refresh, login, logout }),
-    [status, loading, error, refresh, login, logout, authEventNonce],
-  );
+  const value = useMemo<AuthContextValue>(() => {
+    // Ensure the context value identity changes for auth-related events even
+    // when `status` is still null and other exposed fields haven't changed.
+    void authEventNonce;
+    return { status, loading, error, refresh, login, logout };
+  }, [status, loading, error, refresh, login, logout, authEventNonce]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-// eslint-disable-next-line react-refresh/only-export-components
-export function useAuth(): AuthContextValue {
-  const value = useContext(AuthContext);
-  if (!value) {
-    throw new Error("useAuth must be used within AuthProvider");
-  }
-  return value;
-}
-
-/**
- * Optional form of useAuth.
- *
- * This is useful for contexts (like TechnitiumContext) that can operate in a
- * limited mode without an AuthProvider (e.g., unit tests).
- */
-// eslint-disable-next-line react-refresh/only-export-components
-export function useOptionalAuth(): AuthContextValue | null {
-  return useContext(AuthContext) ?? null;
 }

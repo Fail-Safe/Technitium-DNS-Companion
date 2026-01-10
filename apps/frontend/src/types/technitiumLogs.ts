@@ -11,6 +11,7 @@ export interface TechnitiumQueryLogFilters {
   qname?: string;
   qtype?: string;
   qclass?: string;
+  statusFilter?: "blocked" | "allowed";
   deduplicateDomains?: boolean;
   disableCache?: boolean;
 }
@@ -72,4 +73,11 @@ export interface TechnitiumCombinedQueryLogPage {
   descendingOrder: boolean;
   entries: TechnitiumCombinedQueryLogEntry[];
   nodes: TechnitiumCombinedNodeLogSnapshot[];
+}
+
+export interface TechnitiumQueryLogStorageStatus {
+  enabled: boolean;
+  ready: boolean;
+  retentionHours: number;
+  pollIntervalMs: number;
 }

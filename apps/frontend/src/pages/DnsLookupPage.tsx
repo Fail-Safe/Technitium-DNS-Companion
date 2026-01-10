@@ -10,8 +10,8 @@ import React, { useCallback, useState } from "react";
 import { ClusterInfoBanner } from "../components/common/ClusterInfoBanner";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
 import { apiFetch } from "../config";
-import { useTechnitiumState } from "../context/TechnitiumContext";
-import { useToast } from "../context/ToastContext";
+import { useTechnitiumState } from "../context/useTechnitiumState";
+import { useToast } from "../context/useToast";
 import { useIsClusterEnabled, usePrimaryNode } from "../hooks/usePrimaryNode";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type {

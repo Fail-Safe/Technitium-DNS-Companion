@@ -22,6 +22,8 @@ export const DhcpBulkSyncModal: React.FC<DhcpBulkSyncModalProps> = ({
 }) => {
   const [sourceNodeId, setSourceNodeId] = useState<string>("");
   const [enableOnTarget, setEnableOnTarget] = useState<boolean>(false);
+  const [preserveOfferDelayTime, setPreserveOfferDelayTime] =
+    useState<boolean>(true);
 
   // Reset form when modal opens
   useEffect(() => {
@@ -31,6 +33,7 @@ export const DhcpBulkSyncModal: React.FC<DhcpBulkSyncModalProps> = ({
         setSourceNodeId(availableNodes[0].id);
       }
       setEnableOnTarget(false);
+      setPreserveOfferDelayTime(true);
     }
   }, [isOpen, availableNodes, selectedNode.id]);
 
@@ -46,6 +49,7 @@ export const DhcpBulkSyncModal: React.FC<DhcpBulkSyncModalProps> = ({
       targetNodeIds: [selectedNode.id],
       strategy: "overwrite-all",
       enableOnTarget,
+      preserveOfferDelayTime,
     };
 
     onConfirm(request);
@@ -159,6 +163,26 @@ export const DhcpBulkSyncModal: React.FC<DhcpBulkSyncModalProps> = ({
                 <div className="dhcp-bulk-sync-modal__option-description">
                   Enable synced scopes immediately on target nodes (regardless
                   of source state)
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <div className="field-group">
+            <label className="dhcp-bulk-sync-modal__option-item">
+              <input
+                type="checkbox"
+                checked={preserveOfferDelayTime}
+                onChange={(e) => setPreserveOfferDelayTime(e.target.checked)}
+                className="dhcp-bulk-sync-modal__checkbox"
+              />
+              <div className="dhcp-bulk-sync-modal__option-content">
+                <div className="dhcp-bulk-sync-modal__option-name">
+                  Preserve offer delay time on targets
+                </div>
+                <div className="dhcp-bulk-sync-modal__option-description">
+                  Keep each target scope's existing Offer Delay Time (ms). New
+                  scopes copy Offer Delay Time from the source.
                 </div>
               </div>
             </label>

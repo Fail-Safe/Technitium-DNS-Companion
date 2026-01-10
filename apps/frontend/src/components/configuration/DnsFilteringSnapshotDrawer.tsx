@@ -1,41 +1,51 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "../../context/useToast";
 import type {
-  DhcpSnapshot,
-  DhcpSnapshotMetadata,
-  DhcpSnapshotRestoreOptions,
-  DhcpSnapshotRestoreResult,
-} from "../../types/dhcp";
-import "./DhcpSnapshotDrawer.css";
+  DnsFilteringSnapshot,
+  DnsFilteringSnapshotMetadata,
+  DnsFilteringSnapshotMethod,
+  DnsFilteringSnapshotRestoreResult,
+} from "../../types/dnsFilteringSnapshots";
+import "../dhcp/DhcpSnapshotDrawer.css";
 
-interface DhcpSnapshotDrawerProps {
+interface DnsFilteringSnapshotDrawerProps {
   isOpen: boolean;
   nodeId?: string;
   nodeName?: string;
-  nodeScopeCount?: number;
+  method: DnsFilteringSnapshotMethod;
   onClose: () => void;
-  listSnapshots: (nodeId: string) => Promise<DhcpSnapshotMetadata[]>;
-  createSnapshot: (nodeId: string) => Promise<DhcpSnapshotMetadata>;
+
+  listSnapshots: (
+    nodeId: string,
+    method: DnsFilteringSnapshotMethod,
+  ) => Promise<DnsFilteringSnapshotMetadata[]>;
+  createSnapshot: (
+    nodeId: string,
+    request: {
+      method: DnsFilteringSnapshotMethod;
+      origin?: "manual" | "automatic";
+      note?: string;
+    },
+  ) => Promise<DnsFilteringSnapshotMetadata>;
   restoreSnapshot: (
     nodeId: string,
     snapshotId: string,
-    options?: DhcpSnapshotRestoreOptions,
-  ) => Promise<DhcpSnapshotRestoreResult>;
+  ) => Promise<DnsFilteringSnapshotRestoreResult>;
   setSnapshotPinned: (
     nodeId: string,
     snapshotId: string,
     pinned: boolean,
-  ) => Promise<DhcpSnapshotMetadata>;
+  ) => Promise<DnsFilteringSnapshotMetadata>;
   getSnapshotDetail: (
     nodeId: string,
     snapshotId: string,
-  ) => Promise<DhcpSnapshot>;
+  ) => Promise<DnsFilteringSnapshot>;
   deleteSnapshot: (nodeId: string, snapshotId: string) => Promise<void>;
   updateSnapshotNote: (
     nodeId: string,
     snapshotId: string,
     note?: string,
-  ) => Promise<DhcpSnapshotMetadata>;
+  ) => Promise<DnsFilteringSnapshotMetadata>;
   onRestoreSuccess?: (nodeId: string) => Promise<void> | void;
 }
 
@@ -57,16 +67,126 @@ const formatRelative = (value: string): string => {
   return `${Math.round(delta / 86_400_000)} d ago`;
 };
 
-const formatArray = (values?: string[]): string => {
-  if (!values || values.length === 0) return "—";
-  return values.join(", ");
+const methodLabel = (method: DnsFilteringSnapshotMethod): string => {
+  return method === "built-in" ? "Built-in" : "Advanced";
 };
 
-export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
+const summarizeCounts = (
+  snapshot?: DnsFilteringSnapshot | null,
+  meta?: DnsFilteringSnapshotMetadata | null,
+): Array<{ label: string; value: string }> => {
+  const resolvedMeta = snapshot?.metadata ?? meta;
+  if (!resolvedMeta) return [];
+
+  const allowed =
+    typeof resolvedMeta.allowedCount === "number" ?
+      resolvedMeta.allowedCount
+    : snapshot?.builtIn?.allowedDomains?.length;
+  const blocked =
+    typeof resolvedMeta.blockedCount === "number" ?
+      resolvedMeta.blockedCount
+    : snapshot?.builtIn?.blockedDomains?.length;
+  const groups =
+    typeof resolvedMeta.groupCount === "number" ?
+      resolvedMeta.groupCount
+    : snapshot?.advancedBlocking?.config?.groups?.length;
+
+  const counts: Array<{ label: string; value: string }> = [];
+  if (typeof allowed === "number") {
+    counts.push({ label: "Allowed", value: allowed.toLocaleString() });
+  }
+  if (typeof blocked === "number") {
+    counts.push({ label: "Blocked", value: blocked.toLocaleString() });
+  }
+  if (typeof groups === "number") {
+    counts.push({ label: "Groups", value: groups.toLocaleString() });
+  }
+  return counts;
+};
+
+const renderExpandableNote = (
+  note: string,
+  options: {
+    expanded: boolean;
+    onToggle: () => void;
+    previewLines?: number;
+    previewChars?: number;
+  },
+) => {
+  const trimmed = note.trim();
+  const previewLines = options.previewLines ?? 5;
+  const previewChars = options.previewChars ?? 240;
+
+  const lines = trimmed.split("\n");
+  const isMultiLine = lines.length > 1;
+
+  if (options.expanded) {
+    return (
+      <>
+        <span style={{ whiteSpace: "pre-wrap" }}>{trimmed}</span>
+        <div>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={options.onToggle}
+          >
+            Collapse
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  if (isMultiLine) {
+    const needsToggle = lines.length > previewLines;
+    const preview = lines.slice(0, previewLines).join("\n");
+    return (
+      <>
+        <span style={{ whiteSpace: "pre-wrap" }}>
+          {needsToggle ? `${preview}\n…` : preview}
+        </span>
+        {needsToggle && (
+          <div>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={options.onToggle}
+            >
+              Expand
+            </button>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  if (trimmed.length > previewChars) {
+    return (
+      <>
+        <span>{`${trimmed.slice(0, previewChars)}…`}</span>
+        <div>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={options.onToggle}
+          >
+            Expand
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  return <span>{trimmed}</span>;
+};
+
+export const DnsFilteringSnapshotDrawer: React.FC<
+  DnsFilteringSnapshotDrawerProps
+> = ({
   isOpen,
   nodeId,
   nodeName,
-  nodeScopeCount,
+  method,
   onClose,
   listSnapshots,
   createSnapshot,
@@ -78,40 +198,50 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
   onRestoreSuccess,
 }) => {
   const { pushToast } = useToast();
-  const [snapshots, setSnapshots] = useState<DhcpSnapshotMetadata[]>([]);
+  const [snapshots, setSnapshots] = useState<DnsFilteringSnapshotMetadata[]>(
+    [],
+  );
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [pinningId, setPinningId] = useState<string | null>(null);
-  const [keepExtras, setKeepExtras] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+
   const [animateIn, setAnimateIn] = useState(false);
   const [animateOut, setAnimateOut] = useState(false);
   const [isRendered, setIsRendered] = useState(isOpen);
+
   const [restoreDialogSnapshotId, setRestoreDialogSnapshotId] = useState<
     string | null
   >(null);
+
   const [viewSnapshotId, setViewSnapshotId] = useState<string | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
   const [viewError, setViewError] = useState<string | null>(null);
   const [snapshotDetails, setSnapshotDetails] = useState<
-    Map<string, DhcpSnapshot>
+    Map<string, DnsFilteringSnapshot>
   >(() => new Map());
+
   const [deleteDialogSnapshotId, setDeleteDialogSnapshotId] = useState<
     string | null
   >(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const [noteEditingId, setNoteEditingId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState<string>("");
   const [noteSavingId, setNoteSavingId] = useState<string | null>(null);
 
+  const [expandedNoteIds, setExpandedNoteIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [expandedViewNote, setExpandedViewNote] = useState(false);
+
   const sortedSnapshots = useMemo(() => {
     return [...snapshots].sort((a, b) => {
       if (Boolean(a.pinned) !== Boolean(b.pinned)) {
-        return a.pinned ? -1 : 1; // Pinned snapshots first
+        return a.pinned ? -1 : 1;
       }
-
       return b.createdAt.localeCompare(a.createdAt);
     });
   }, [snapshots]);
@@ -126,25 +256,24 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const data = await listSnapshots(nodeId);
+      const data = await listSnapshots(nodeId, method);
       setSnapshots(data);
       setRefreshedAt(new Date().toISOString());
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Failed to load snapshots.";
+      const message = err instanceof Error ? err.message : "Failed to load.";
       setError(message);
       pushToast({ message, tone: "error", timeout: 6000 });
     } finally {
       setLoading(false);
     }
-  }, [listSnapshots, nodeId, pushToast]);
+  }, [listSnapshots, method, nodeId, pushToast]);
 
   useEffect(() => {
     if (isOpen && nodeId) {
       refresh();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, nodeId]);
+  }, [isOpen, nodeId, method]);
 
   useEffect(() => {
     setViewSnapshotId(null);
@@ -153,7 +282,13 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
     setDeleteDialogSnapshotId(null);
     setNoteEditingId(null);
     setNoteDraft("");
-  }, [nodeId]);
+    setExpandedNoteIds(new Set());
+    setExpandedViewNote(false);
+  }, [nodeId, method]);
+
+  useEffect(() => {
+    setExpandedViewNote(false);
+  }, [viewSnapshotId]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -176,7 +311,6 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
       return () => window.clearTimeout(timer);
     }
 
-    // trigger exit animation before unmount
     setAnimateIn(false);
     setAnimateOut(true);
     const timeout = window.setTimeout(() => {
@@ -190,41 +324,21 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
 
   const handleCreateSnapshot = async () => {
     if (!nodeId) return;
-    if ((nodeScopeCount ?? 0) === 0) {
-      pushToast({
-        message:
-          "No scopes to snapshot on this node yet. Add a scope first, then capture a snapshot.",
-        tone: "info",
-        timeout: 5000,
-      });
-      return;
-    }
     setCreating(true);
     try {
-      await createSnapshot(nodeId);
+      await createSnapshot(nodeId, { method, origin: "manual" });
       await refresh();
       pushToast({
         message: "Snapshot created",
         tone: "success",
         timeout: 4000,
       });
-    } catch (error) {
-      const rawMessage =
-        error instanceof Error ? error.message : "Failed to create snapshot.";
-      const friendlyMessage =
-        rawMessage.includes("no scopes") ?
-          "This node has no scopes to snapshot. Add a scope first, then try again."
-        : "Could not create snapshot. Please retry.";
-      pushToast({ message: friendlyMessage, tone: "error", timeout: 6000 });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to create.";
+      pushToast({ message, tone: "error", timeout: 6000 });
     } finally {
       setCreating(false);
     }
-  };
-
-  const handleRestore = async (snapshotId: string) => {
-    if (!nodeId) return;
-    setKeepExtras(true);
-    setRestoreDialogSnapshotId(snapshotId);
   };
 
   const handlePinToggle = async (snapshotId: string, pinned: boolean) => {
@@ -240,13 +354,16 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
         tone: "success",
         timeout: 3000,
       });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to update pin state.";
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to pin.";
       pushToast({ message, tone: "error", timeout: 6000 });
     } finally {
       setPinningId(null);
     }
+  };
+
+  const handleRestore = async (snapshotId: string) => {
+    setRestoreDialogSnapshotId(snapshotId);
   };
 
   const handleRestoreConfirm = async () => {
@@ -255,10 +372,21 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
 
     setRestoringId(snapshotId);
     try {
-      const result = await restoreSnapshot(nodeId, snapshotId, { keepExtras });
+      const result = await restoreSnapshot(nodeId, snapshotId);
       await refresh();
+
+      const parts: string[] = [];
+      if (result.restoredAllowed > 0 || result.restoredBlocked > 0) {
+        parts.push(
+          `Restored ${result.restoredAllowed.toLocaleString()} allowed, ${result.restoredBlocked.toLocaleString()} blocked`,
+        );
+      }
+      if (result.restoredGroups > 0) {
+        parts.push(`Restored ${result.restoredGroups.toLocaleString()} groups`);
+      }
+
       pushToast({
-        message: `Restored ${result.restored} scope${result.restored === 1 ? "" : "s"}${keepExtras ? "" : `, deleted ${result.deleted}`}`,
+        message: parts.length > 0 ? parts.join(" • ") : "Snapshot restored",
         tone: "success",
         timeout: 5000,
       });
@@ -266,22 +394,17 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
       if (onRestoreSuccess) {
         try {
           await onRestoreSuccess(nodeId);
-        } catch (restoreRefreshError) {
-          console.warn("Failed to refresh after restore", restoreRefreshError);
+        } catch (refreshErr) {
+          console.warn("Failed to refresh after restore", refreshErr);
         }
       }
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to restore snapshot.";
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to restore.";
       pushToast({ message, tone: "error", timeout: 6000 });
     } finally {
       setRestoringId(null);
       setRestoreDialogSnapshotId(null);
     }
-  };
-
-  const handleRestoreCancel = () => {
-    setRestoreDialogSnapshotId(null);
   };
 
   const handleViewSnapshot = async (snapshotId: string) => {
@@ -301,11 +424,9 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
         next.set(snapshotId, detail);
         return next;
       });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to load snapshot.";
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to load.";
       setViewError(message);
-      pushToast({ message, tone: "error", timeout: 6000 });
     } finally {
       setViewLoading(false);
     }
@@ -343,9 +464,8 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
         tone: "success",
         timeout: 4000,
       });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to delete snapshot.";
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to delete.";
       pushToast({ message, tone: "error", timeout: 6000 });
     } finally {
       setDeletingId(null);
@@ -353,7 +473,7 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
     }
   };
 
-  const startEditNote = (snapshot: DhcpSnapshotMetadata) => {
+  const startEditNote = (snapshot: DnsFilteringSnapshotMetadata) => {
     setNoteEditingId(snapshot.id);
     setNoteDraft(snapshot.note ?? "");
   };
@@ -361,41 +481,34 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
   const cancelEditNote = () => {
     setNoteEditingId(null);
     setNoteDraft("");
+    setNoteSavingId(null);
   };
 
   const saveNote = async (snapshotId: string) => {
     if (!nodeId) return;
     setNoteSavingId(snapshotId);
     try {
-      const updated = await updateSnapshotNote(
-        nodeId,
-        snapshotId,
-        noteDraft.trim() || undefined,
-      );
+      const updated = await updateSnapshotNote(nodeId, snapshotId, noteDraft);
       setSnapshots((prev) =>
-        prev.map((snap) =>
-          snap.id === snapshotId ? { ...snap, ...updated } : snap,
-        ),
+        prev.map((snap) => (snap.id === snapshotId ? updated : snap)),
       );
       setSnapshotDetails((prev) => {
+        if (!prev.has(snapshotId)) return prev;
         const next = new Map(prev);
-        const detail = next.get(snapshotId);
-        if (detail) {
+        const existing = next.get(snapshotId);
+        if (existing) {
           next.set(snapshotId, {
-            ...detail,
-            metadata: { ...detail.metadata, ...updated },
+            ...existing,
+            metadata: { ...existing.metadata, note: updated.note },
           });
         }
         return next;
       });
-      setNoteEditingId(null);
-      setNoteDraft("");
-      pushToast({ message: "Note saved", tone: "success", timeout: 3500 });
-    } catch (error) {
+      pushToast({ message: "Note saved", tone: "success", timeout: 3000 });
+      cancelEditNote();
+    } catch (err) {
       const message =
-        error instanceof Error ?
-          error.message
-        : "Failed to save snapshot note.";
+        err instanceof Error ? err.message : "Failed to save note.";
       pushToast({ message, tone: "error", timeout: 6000 });
     } finally {
       setNoteSavingId(null);
@@ -415,7 +528,9 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
       >
         <div className="modal__header snapshot-drawer__header">
           <div className="snapshot-drawer__header-text">
-            <div className="snapshot-drawer__eyebrow">DHCP Scope History</div>
+            <div className="snapshot-drawer__eyebrow">
+              DNS Filtering History
+            </div>
             <div className="snapshot-drawer__title-row">
               {nodeId && (
                 <span
@@ -429,6 +544,9 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                   Node: {nodeName || nodeId}
                 </span>
               )}
+              <span className="snapshot-drawer__pill-quiet">
+                {methodLabel(method)} method
+              </span>
               {refreshedAt && (
                 <span className="snapshot-drawer__updated-pill">
                   Updated {formatRelative(refreshedAt)}
@@ -472,37 +590,34 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                           Restore snapshot?
                         </h3>
                         <p className="snapshot-drawer__dialog-subtext">
-                          Choose whether to keep scopes that are not part of
-                          this snapshot. This applies only to this restore
-                          action.
+                          Restoring will overwrite the current{" "}
+                          {methodLabel(method)} DNS filtering state on this
+                          node.
                         </p>
                       </div>
                       <button
                         type="button"
                         className="modal__close"
-                        onClick={handleRestoreCancel}
+                        onClick={() => setRestoreDialogSnapshotId(null)}
                         aria-label="Close"
                       >
                         ×
                       </button>
                     </div>
 
-                    <label className="snapshot-drawer__checkbox-card">
-                      <input
-                        type="checkbox"
-                        checked={keepExtras}
-                        onChange={(event) =>
-                          setKeepExtras(event.target.checked)
-                        }
-                      />
-                      Scopes not in the snapshot should be kept
-                    </label>
+                    <div className="snapshot-drawer__section-gap">
+                      <span>
+                        This is a destructive operation. Consider pinning a
+                        snapshot of the current state first.
+                      </span>
+                    </div>
 
                     <div className="snapshot-drawer__dialog-actions">
                       <button
                         type="button"
                         className="btn btn--ghost"
-                        onClick={handleRestoreCancel}
+                        onClick={() => setRestoreDialogSnapshotId(null)}
+                        disabled={restoringId === restoreDialogSnapshotId}
                       >
                         Cancel
                       </button>
@@ -545,12 +660,21 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                                 (snap) => snap.id === viewSnapshotId,
                               );
                             if (!meta) return null;
+                            const counts = summarizeCounts(
+                              viewedSnapshot,
+                              meta,
+                            );
                             return (
                               <>
                                 <span>
                                   Created {formatDateTime(meta.createdAt)}
                                 </span>
-                                <span>Scopes: {meta.scopeCount}</span>
+                                <span>{methodLabel(meta.method)} method</span>
+                                {counts.map((c) => (
+                                  <span key={c.label}>
+                                    {c.label}: {c.value}
+                                  </span>
+                                ))}
                                 {meta.pinned && <span>📌 Pinned</span>}
                               </>
                             );
@@ -581,111 +705,61 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                       <div className="snapshot-drawer__scopes">
                         <div className="snapshot-drawer__note-card">
                           <strong>Note</strong>
-                          <span>
+                          <div>
                             {(
                               viewedSnapshot.metadata.note &&
                               viewedSnapshot.metadata.note.trim().length > 0
                             ) ?
-                              viewedSnapshot.metadata.note
-                            : "No note"}
-                          </span>
+                              renderExpandableNote(
+                                viewedSnapshot.metadata.note,
+                                {
+                                  expanded: expandedViewNote,
+                                  onToggle: () =>
+                                    setExpandedViewNote(
+                                      (previous) => !previous,
+                                    ),
+                                  previewLines: 8,
+                                  previewChars: 320,
+                                },
+                              )
+                            : <span>No note</span>}
+                          </div>
                         </div>
 
-                        <div className="snapshot-drawer__section-stack">
-                          {viewedSnapshot.scopes.map((entry) => {
-                            const leaseParts: string[] = [];
-                            const scope = entry.scope;
-                            if (scope.leaseTimeDays)
-                              leaseParts.push(`${scope.leaseTimeDays}d`);
-                            if (scope.leaseTimeHours)
-                              leaseParts.push(`${scope.leaseTimeHours}h`);
-                            if (scope.leaseTimeMinutes)
-                              leaseParts.push(`${scope.leaseTimeMinutes}m`);
+                        {viewedSnapshot.metadata.method === "built-in" && (
+                          <div className="snapshot-drawer__note-card">
+                            <strong>Built-in settings</strong>
+                            <span>
+                              {viewedSnapshot.builtIn?.settings ?
+                                `Blocking: ${viewedSnapshot.builtIn.settings.enableBlocking ? "enabled" : "disabled"} • Type: ${viewedSnapshot.builtIn.settings.blockingType ?? "—"}`
+                              : "—"}
+                            </span>
+                          </div>
+                        )}
 
-                            return (
-                              <div
-                                key={scope.name}
-                                className="snapshot-drawer__scope-card"
-                              >
-                                <div className="snapshot-drawer__scope-header">
-                                  <div className="snapshot-drawer__scope-title">
-                                    <strong className="snapshot-drawer__scope-name">
-                                      {scope.name}
-                                    </strong>
-                                    <span
-                                      className={`snapshot-drawer__pill ${
-                                        entry.enabled ?
-                                          "snapshot-drawer__pill--enabled"
-                                        : "snapshot-drawer__pill--disabled"
-                                      }`}
-                                    >
-                                      <span
-                                        aria-hidden
-                                        className="snapshot-drawer__pill-dot"
-                                        style={{
-                                          background:
-                                            entry.enabled ? "#16a34a" : (
-                                              "#94a3b8"
-                                            ),
-                                        }}
-                                      />
-                                      {entry.enabled ? "Enabled" : "Disabled"}
-                                    </span>
-                                  </div>
-                                  <span className="snapshot-drawer__scope-meta">
-                                    Lease:{" "}
-                                    {leaseParts.length ?
-                                      leaseParts.join(" ")
-                                    : "Default"}
-                                  </span>
-                                </div>
+                        {viewedSnapshot.metadata.method ===
+                          "advanced-blocking" && (
+                          <div className="snapshot-drawer__note-card">
+                            <strong>Groups</strong>
+                            <span>
+                              {(() => {
+                                const groups =
+                                  viewedSnapshot.advancedBlocking?.config
+                                    ?.groups ?? [];
+                                if (groups.length === 0) return "No groups";
+                                const names = groups
+                                  .map((g) => g.name)
+                                  .slice(0, 12);
+                                const extra = groups.length - names.length;
+                                return `${names.join(", ")}${extra > 0 ? ` (+${extra} more)` : ""}`;
+                              })()}
+                            </span>
+                          </div>
+                        )}
 
-                                <div className="snapshot-drawer__grid">
-                                  <div>
-                                    <strong>Range:</strong>{" "}
-                                    {scope.startingAddress} –{" "}
-                                    {scope.endingAddress}
-                                  </div>
-                                  <div>
-                                    <strong>Subnet:</strong> {scope.subnetMask}
-                                  </div>
-                                  <div>
-                                    <strong>Router:</strong>{" "}
-                                    {scope.routerAddress || "—"}
-                                  </div>
-                                  <div>
-                                    <strong>DNS servers:</strong>{" "}
-                                    {formatArray(scope.dnsServers)}
-                                  </div>
-                                  <div>
-                                    <strong>Domain:</strong>{" "}
-                                    {scope.domainName || "—"}
-                                  </div>
-                                  <div>
-                                    <strong>Search list:</strong>{" "}
-                                    {formatArray(scope.domainSearchList)}
-                                  </div>
-                                  <div>
-                                    <strong>WINS servers:</strong>{" "}
-                                    {formatArray(scope.winsServers)}
-                                  </div>
-                                  <div>
-                                    <strong>NTP servers:</strong>{" "}
-                                    {formatArray(scope.ntpServers)}
-                                  </div>
-                                </div>
-
-                                <details>
-                                  <summary className="snapshot-drawer__options-summary">
-                                    Full DHCP options
-                                  </summary>
-                                  <pre className="snapshot-drawer__options-pre">
-                                    {JSON.stringify(scope, null, 2)}
-                                  </pre>
-                                </details>
-                              </div>
-                            );
-                          })}
+                        <div className="snapshot-drawer__hint">
+                          Snapshot detail view is intentionally summarized to
+                          avoid rendering huge lists.
                         </div>
                       </div>
                     )}
@@ -710,8 +784,7 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                           Delete snapshot?
                         </h3>
                         <p className="snapshot-drawer__dialog-subtext">
-                          This cannot be undone. Pinned status does not prevent
-                          deletion here.
+                          This cannot be undone.
                         </p>
                       </div>
                       <button
@@ -747,22 +820,16 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                   </div>
                 </div>
               )}
+
               <div className="snapshot-drawer__actions">
                 <div className="snapshot-drawer__actions-group">
                   <button
                     type="button"
                     className="btn btn--primary"
                     onClick={handleCreateSnapshot}
-                    disabled={
-                      creating || loading || (nodeScopeCount ?? 0) === 0
-                    }
-                    title={
-                      (nodeScopeCount ?? 0) === 0 ?
-                        "This node has no scopes to snapshot"
-                      : undefined
-                    }
+                    disabled={loading || creating}
                   >
-                    {creating ? "Creating..." : "Create snapshot"}
+                    {creating ? "Creating…" : "Create snapshot"}
                   </button>
                   <button
                     type="button"
@@ -773,12 +840,6 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                     {loading ? "Refreshing..." : "Refresh"}
                   </button>
                 </div>
-              </div>
-
-              <div className="snapshot-drawer__warning">
-                Restoring with "Keep scopes" unchecked will delete any scopes
-                that do not exist in the snapshot. Pinned snapshots are kept
-                even when retention is enforced.
               </div>
 
               {loading && (
@@ -805,8 +866,9 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                 <div className="snapshot-drawer__empty">
                   <strong>No snapshots yet</strong>
                   <span>
-                    Capture the current DHCP scopes to enable quick rollback.
-                    Pinned snapshots never expire during retention cleanup.
+                    Capture the current DNS filtering state to enable quick
+                    rollback. Pinned snapshots never expire during retention
+                    cleanup.
                   </span>
                 </div>
               )}
@@ -822,144 +884,169 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                     </span>
                   </div>
 
-                  {sortedSnapshots.map((snapshot) => (
-                    <div key={snapshot.id} className="snapshot-drawer__item">
-                      <div className="snapshot-drawer__item-header">
-                        <div className="snapshot-drawer__item-main">
-                          <div className="snapshot-drawer__item-meta">
-                            <span className="snapshot-drawer__time-primary">
-                              {formatRelative(snapshot.createdAt)}
-                            </span>
-                            <span className="snapshot-drawer__time-secondary">
-                              {formatDateTime(snapshot.createdAt)}
-                            </span>
-                            {snapshot.pinned && (
-                              <span className="snapshot-drawer__pin">
-                                <span aria-hidden="true">📌</span>
-                                Pinned
+                  {sortedSnapshots.map((snap) => {
+                    const isNoteEditing = noteEditingId === snap.id;
+                    const isNoteSaving = noteSavingId === snap.id;
+                    const counts = summarizeCounts(null, snap);
+                    const originLabel =
+                      snap.origin === "automatic" ? "Auto" : "Manual";
+                    const isNoteExpanded = expandedNoteIds.has(snap.id);
+
+                    return (
+                      <div key={snap.id} className="snapshot-drawer__item">
+                        <div className="snapshot-drawer__item-header">
+                          <div className="snapshot-drawer__item-main">
+                            <div className="snapshot-drawer__item-meta">
+                              <span className="snapshot-drawer__time-primary">
+                                {formatRelative(snap.createdAt)}
                               </span>
-                            )}
-                          </div>
-                          <div className="snapshot-drawer__scope-count">
-                            <span>Scopes: {snapshot.scopeCount}</span>
-                            <span className="snapshot-drawer__pill-quiet">
-                              {snapshot.origin === "automatic" ?
-                                "Auto"
-                              : "Manual"}
-                            </span>
-                          </div>
-                          <div className="snapshot-drawer__snapshot-id">
-                            <span>Snap ID: {snapshot.id}</span>
-                          </div>
-                          <div className="snapshot-drawer__note-box">
-                            <div className="snapshot-drawer__note-header">
-                              <strong>Note</strong>
-                              {noteEditingId !== snapshot.id && (
-                                <button
-                                  type="button"
-                                  className="btn btn--ghost snapshot-drawer__note-edit"
-                                  onClick={() => startEditNote(snapshot)}
-                                >
-                                  {snapshot.note ? "Edit note" : "Add note"}
-                                </button>
+                              <span className="snapshot-drawer__time-secondary">
+                                {formatDateTime(snap.createdAt)}
+                              </span>
+                              {snap.pinned && (
+                                <span className="snapshot-drawer__pin">
+                                  <span aria-hidden="true">📌</span>
+                                  Pinned
+                                </span>
                               )}
                             </div>
-                            {noteEditingId === snapshot.id ?
-                              <div className="snapshot-drawer__section-gap">
-                                <textarea
-                                  value={noteDraft}
-                                  onChange={(event) =>
-                                    setNoteDraft(event.target.value)
-                                  }
-                                  rows={3}
-                                  className="snapshot-drawer__textarea"
-                                />
-                                <div className="snapshot-drawer__note-actions">
-                                  <button
-                                    type="button"
-                                    className="btn btn--ghost"
-                                    onClick={cancelEditNote}
-                                    disabled={noteSavingId === snapshot.id}
-                                  >
-                                    Cancel
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="btn btn--secondary"
-                                    onClick={() => saveNote(snapshot.id)}
-                                    disabled={noteSavingId === snapshot.id}
-                                  >
-                                    {noteSavingId === snapshot.id ?
-                                      "Saving…"
-                                    : "Save note"}
-                                  </button>
-                                </div>
-                              </div>
-                            : <div className="snapshot-drawer__pill-muted">
-                                {(
-                                  snapshot.note &&
-                                  snapshot.note.trim().length > 0
-                                ) ?
-                                  <span>{snapshot.note}</span>
-                                : <span className="snapshot-drawer__italic">
-                                    No note
+
+                            <div className="snapshot-drawer__scope-count">
+                              {counts.length > 0 ?
+                                counts.map((c) => (
+                                  <span key={c.label}>
+                                    {c.label}: {c.value}
                                   </span>
-                                }
+                                ))
+                              : <span>—</span>}
+                              <span className="snapshot-drawer__pill-quiet">
+                                {originLabel}
+                              </span>
+                            </div>
+
+                            <div className="snapshot-drawer__snapshot-id">
+                              <span>Snap ID: {snap.id}</span>
+                            </div>
+
+                            <div className="snapshot-drawer__note-box">
+                              <div className="snapshot-drawer__note-header">
+                                <strong>Note</strong>
+                                {noteEditingId !== snap.id && (
+                                  <button
+                                    type="button"
+                                    className="btn btn--ghost snapshot-drawer__note-edit"
+                                    onClick={() => startEditNote(snap)}
+                                    disabled={Boolean(noteEditingId)}
+                                  >
+                                    {snap.note ? "Edit note" : "Add note"}
+                                  </button>
+                                )}
                               </div>
-                            }
+
+                              {isNoteEditing ?
+                                <div className="snapshot-drawer__section-gap">
+                                  <textarea
+                                    value={noteDraft}
+                                    onChange={(event) =>
+                                      setNoteDraft(event.target.value)
+                                    }
+                                    rows={3}
+                                    className="snapshot-drawer__textarea"
+                                    placeholder="What changed?"
+                                    disabled={isNoteSaving}
+                                  />
+                                  <div className="snapshot-drawer__note-actions">
+                                    <button
+                                      type="button"
+                                      className="btn btn--ghost"
+                                      onClick={cancelEditNote}
+                                      disabled={isNoteSaving}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn--secondary"
+                                      onClick={() => saveNote(snap.id)}
+                                      disabled={isNoteSaving}
+                                    >
+                                      {isNoteSaving ? "Saving…" : "Save note"}
+                                    </button>
+                                  </div>
+                                </div>
+                              : <div className="snapshot-drawer__pill-muted">
+                                  {snap.note && snap.note.trim().length > 0 ?
+                                    renderExpandableNote(snap.note, {
+                                      expanded: isNoteExpanded,
+                                      onToggle: () =>
+                                        setExpandedNoteIds((previous) => {
+                                          const next = new Set(previous);
+                                          if (next.has(snap.id)) {
+                                            next.delete(snap.id);
+                                          } else {
+                                            next.add(snap.id);
+                                          }
+                                          return next;
+                                        }),
+                                      previewLines: 5,
+                                      previewChars: 240,
+                                    })
+                                  : <span className="snapshot-drawer__italic">
+                                      No note
+                                    </span>
+                                  }
+                                </div>
+                              }
+                            </div>
+                          </div>
+
+                          <div className="snapshot-drawer__actions-column">
+                            <button
+                              type="button"
+                              className="btn btn--ghost snapshot-drawer__action-btn"
+                              onClick={() =>
+                                handlePinToggle(snap.id, Boolean(snap.pinned))
+                              }
+                              disabled={pinningId === snap.id}
+                              aria-label={
+                                snap.pinned ? "Unpin snapshot" : "Pin snapshot"
+                              }
+                            >
+                              {pinningId === snap.id ?
+                                "Updating…"
+                              : snap.pinned ?
+                                "Unpin"
+                              : "Pin"}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--ghost snapshot-drawer__action-btn"
+                              onClick={() => handleViewSnapshot(snap.id)}
+                            >
+                              View
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--secondary snapshot-drawer__action-btn snapshot-drawer__action-btn--restore"
+                              onClick={() => handleRestore(snap.id)}
+                              disabled={restoringId === snap.id}
+                            >
+                              {restoringId === snap.id ?
+                                "Restoring..."
+                              : "Restore"}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--ghost snapshot-drawer__action-btn snapshot-drawer__action-btn--danger"
+                              onClick={() => handleDeleteSnapshot(snap.id)}
+                            >
+                              Delete
+                            </button>
                           </div>
                         </div>
-                        <div className="snapshot-drawer__actions-column">
-                          <button
-                            type="button"
-                            className="btn btn--ghost snapshot-drawer__action-btn"
-                            onClick={() =>
-                              handlePinToggle(
-                                snapshot.id,
-                                Boolean(snapshot.pinned),
-                              )
-                            }
-                            disabled={pinningId === snapshot.id}
-                            aria-label={
-                              snapshot.pinned ? "Unpin snapshot" : (
-                                "Pin snapshot"
-                              )
-                            }
-                          >
-                            {pinningId === snapshot.id ?
-                              "Updating…"
-                            : snapshot.pinned ?
-                              "Unpin"
-                            : "Pin"}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--ghost snapshot-drawer__action-btn"
-                            onClick={() => handleViewSnapshot(snapshot.id)}
-                          >
-                            View
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--secondary snapshot-drawer__action-btn snapshot-drawer__action-btn--restore"
-                            onClick={() => handleRestore(snapshot.id)}
-                            disabled={restoringId === snapshot.id}
-                          >
-                            {restoringId === snapshot.id ?
-                              "Restoring..."
-                            : "Restore"}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--ghost snapshot-drawer__action-btn snapshot-drawer__action-btn--danger"
-                            onClick={() => handleDeleteSnapshot(snapshot.id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>

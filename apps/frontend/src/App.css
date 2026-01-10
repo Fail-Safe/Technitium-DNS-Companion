@@ -2583,10 +2583,11 @@ button.secondary:disabled,
 .btn--danger:hover:not(:disabled) {
   background: var(--color-danger-text);
 }
+
 .logs-page {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 0.5rem;
 }
 
 .logs-page__header {
@@ -3007,6 +3008,40 @@ button.secondary:disabled,
   align-items: center;
 }
 
+.logs-page__pager-page-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.logs-page__pager-page-button:hover {
+  color: var(--color-text-primary);
+}
+
+.logs-page__pager-page-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.logs-page__pager-page-input {
+  width: 4.5ch;
+  padding: 0.2rem 0.35rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font: inherit;
+  min-width: 3.5rem;
+}
+
+.logs-page__pager-page-total {
+  color: var(--color-text-secondary);
+}
+
 .logs-page__pager button {
   padding: 0.35rem 0.65rem;
   border-radius: 0.65rem;
@@ -3048,6 +3083,7 @@ button.secondary:disabled,
   justify-content: space-between;
   padding: 0.75rem 1rem;
   gap: 1rem;
+  min-height: 2.75rem;
 }
 
 .logs-page__statistics-toggle {
@@ -3064,6 +3100,7 @@ button.secondary:disabled,
   transition: color 0.2s ease;
   flex: 1;
   text-align: left;
+  min-width: 0;
 }
 
 .logs-page__statistics-toggle:hover {
@@ -3086,6 +3123,17 @@ button.secondary:disabled,
   opacity: 1;
   transition: opacity 0.25s ease;
   will-change: opacity;
+  min-width: 0;
+}
+
+@media (min-width: 769px) {
+  .logs-page__statistics-summary {
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
 }
 
 .logs-page__statistics-summary strong {
@@ -3262,8 +3310,8 @@ button.secondary:disabled,
   border: 1px solid var(--color-border);
   border-radius: 0.85rem;
   color: var(--color-text-secondary);
-  /* Fixed height to prevent layout shift */
-  min-height: 60px;
+  /* Keep a stable height during skeleton/loading swaps */
+  min-height: 48px;
   /* Only transition opacity, not height */
   transition: opacity 0.15s ease;
   /* Ensure content doesn't overflow during initial load */
@@ -3468,6 +3516,7 @@ button.secondary:disabled,
   border-radius: 0.65rem;
   border: 1px solid var(--color-border);
   min-width: 180px;
+  max-height: 32px;
   font-size: 0.95rem;
 }
 
@@ -3508,6 +3557,15 @@ button.secondary:disabled,
   border-top: 1px solid var(--color-border-light);
 }
 
+.logs-page__date-presets--disabled {
+  opacity: 0.9;
+}
+
+.logs-page__date-preset-disabled {
+  display: inline-flex;
+  cursor: not-allowed;
+}
+
 .logs-page__date-preset {
   border: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
@@ -3521,13 +3579,18 @@ button.secondary:disabled,
   white-space: nowrap;
 }
 
-.logs-page__date-preset:hover {
+.logs-page__date-preset:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.logs-page__date-preset:hover:not(:disabled) {
   background: var(--color-bg-tertiary);
   border-color: var(--color-border-light);
   color: var(--color-text-primary);
 }
 
-.logs-page__date-preset:active {
+.logs-page__date-preset:active:not(:disabled) {
   background: var(--color-border-light);
   transform: translateY(1px);
 }
@@ -3538,7 +3601,7 @@ button.secondary:disabled,
   color: var(--color-danger-text);
 }
 
-.logs-page__date-preset--clear:hover {
+.logs-page__date-preset--clear:hover:not(:disabled) {
   background: var(--color-danger-bg);
   border-color: var(--color-danger);
   color: var(--color-danger-text);
@@ -3751,6 +3814,38 @@ button.secondary:disabled,
 
 .logs-page__table tbody tr:hover {
   background: var(--color-bg-primary);
+}
+
+.logs-page__context-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+}
+
+.logs-page__context-menu {
+  position: fixed;
+  min-width: 10rem;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  box-shadow: 0 12px 28px rgba(30, 42, 64, 0.12);
+  padding: 0.25rem;
+}
+
+.logs-page__context-menu-item {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--color-text-primary);
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.6rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.logs-page__context-menu-item:hover {
+  background: var(--color-bg-tertiary);
 }
 
 .logs-page__loading,
@@ -10034,10 +10129,11 @@ button.danger:disabled {
 
   /* Show quick filters on mobile when visible (no --mobile-hidden class) */
   .logs-page__quick-filters:not(.logs-page__quick-filters--mobile-hidden) {
-    display: block !important;
+    display: inline-flex !important;
     opacity: 1;
     max-height: 3000px;
     animation: slideDown 0.2s ease;
+    gap: 0.5rem;
   }
 
   /* Filters section (Node, Page, Auto-refresh) - keep visible on mobile */

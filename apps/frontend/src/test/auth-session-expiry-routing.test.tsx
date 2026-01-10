@@ -11,10 +11,11 @@ let mockedAuthStatus: {
   nodeIds: string[];
 } | null = null;
 
-vi.mock("../context/AuthContext", async () => {
-  const actual = await vi.importActual<typeof import("../context/AuthContext")>(
-    "../context/AuthContext",
-  );
+vi.mock("../context/useAuth", async () => {
+  const actual =
+    await vi.importActual<typeof import("../context/useAuth")>(
+      "../context/useAuth",
+    );
 
   return {
     ...actual,

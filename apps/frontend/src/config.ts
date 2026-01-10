@@ -25,6 +25,21 @@ const AUTH_UNAUTHORIZED_EVENT = "technitium.auth.unauthorized";
 const AUTH_REDIRECT_REASON_KEY = "technitium.auth.redirectReason";
 const AUTH_REDIRECT_TOAST_SHOWN_KEY = "technitium.auth.redirectToastShown";
 
+const NETWORK_ERROR_EVENT = "technitium.network.error";
+const NETWORK_RECOVERED_EVENT = "technitium.network.recovered";
+
+let lastNetworkErrorAt: number | null = null;
+
+const isAbortError = (error: unknown): boolean => {
+  if (!error || (typeof error !== "object" && typeof error !== "function")) {
+    return false;
+  }
+
+  // fetch() aborts typically throw a DOMException with name "AbortError"
+  const maybeName = (error as { name?: unknown }).name;
+  return maybeName === "AbortError";
+};
+
 export type AuthRedirectReason = "session-expired" | "node-session-expired";
 
 export const triggerAuthRedirect = (
@@ -50,6 +65,61 @@ export const triggerAuthRedirect = (
   }
 };
 
+export type ApiFetchErrorKind = "network";
+
+export class ApiFetchError extends Error {
+  readonly kind: ApiFetchErrorKind;
+  readonly url: string;
+  readonly path: string;
+  readonly originalError: unknown;
+
+  constructor(args: {
+    kind: ApiFetchErrorKind;
+    message: string;
+    url: string;
+    path: string;
+    originalError: unknown;
+  }) {
+    super(args.message);
+    this.name = "ApiFetchError";
+    this.kind = args.kind;
+    this.url = args.url;
+    this.path = args.path;
+    this.originalError = args.originalError;
+  }
+}
+
+export const isApiFetchError = (error: unknown): error is ApiFetchError =>
+  error instanceof ApiFetchError;
+
+export const isApiFetchNetworkError = (error: unknown): boolean =>
+  isApiFetchError(error) && error.kind === "network";
+
+export const triggerNetworkError = (detail: {
+  url: string;
+  path: string;
+  online?: boolean;
+}): void => {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent(NETWORK_ERROR_EVENT, { detail }));
+  } catch {
+    // ignore
+  }
+};
+
+export const triggerNetworkRecovered = (detail: {
+  url: string;
+  path: string;
+}): void => {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new CustomEvent(NETWORK_RECOVERED_EVENT, { detail }));
+  } catch {
+    // ignore
+  }
+};
+
 /**
  * Make an API request with the correct base URL
  */
@@ -70,15 +140,49 @@ export const apiFetch = (
     headers: { ...(options?.headers || {}) },
   };
 
-  return fetch(url, mergedOptions).then((response) => {
-    // If the Companion session cookie expires mid-session, the backend will return 401.
-    // Trigger an auth refresh so route guards can redirect back to /login.
-    if (response.status === 401 && !cleanPath.startsWith("/auth/")) {
-      triggerAuthRedirect("session-expired", { path: cleanPath });
-    }
+  return fetch(url, mergedOptions)
+    .then((response) => {
+      if (lastNetworkErrorAt !== null) {
+        lastNetworkErrorAt = null;
+        triggerNetworkRecovered({ url, path: cleanPath });
+      }
 
-    return response;
-  });
+      // If the Companion session cookie expires mid-session, the backend will return 401.
+      // Trigger an auth refresh so route guards can redirect back to /login.
+      if (response.status === 401 && !cleanPath.startsWith("/auth/")) {
+        triggerAuthRedirect("session-expired", { path: cleanPath });
+      }
+
+      return response;
+    })
+    .catch((error: unknown) => {
+      // Aborted requests are expected during typeahead/search (new request cancels the prior).
+      // Do not treat these as connectivity issues.
+      if (mergedOptions.signal?.aborted || isAbortError(error)) {
+        throw error;
+      }
+
+      // Fetch rejects on network errors (offline, DNS failures, connection reset,
+      // ERR_NETWORK_CHANGED, CORS issues, etc). We emit a global event so the UI
+      // can react consistently (e.g., show a single toast and back off polling).
+      if (lastNetworkErrorAt === null) {
+        lastNetworkErrorAt = Date.now();
+      }
+
+      triggerNetworkError({
+        url,
+        path: cleanPath,
+        online: typeof navigator !== "undefined" ? navigator.onLine : undefined,
+      });
+
+      throw new ApiFetchError({
+        kind: "network",
+        message: "Network request failed",
+        url,
+        path: cleanPath,
+        originalError: error,
+      });
+    });
 };
 
 export const getAuthRedirectReason = (): string | null => {
@@ -103,6 +207,11 @@ export const clearAuthRedirectReason = (): void => {
 
 export const getAuthUnauthorizedEventName = (): string =>
   AUTH_UNAUTHORIZED_EVENT;
+
+export const getNetworkErrorEventName = (): string => NETWORK_ERROR_EVENT;
+
+export const getNetworkRecoveredEventName = (): string =>
+  NETWORK_RECOVERED_EVENT;
 
 export const getAuthRedirectToastShownReason = (): string | null => {
   if (typeof window === "undefined") return null;

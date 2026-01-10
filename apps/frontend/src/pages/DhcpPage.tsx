@@ -13,8 +13,8 @@ import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndica
 import { DhcpSnapshotDrawer } from "../components/dhcp/DhcpSnapshotDrawer";
 import { DhcpBulkSyncModal } from "../components/DhcpBulkSyncModal";
 import { DhcpBulkSyncResultsModal } from "../components/DhcpBulkSyncResultsModal";
-import { useTechnitiumState } from "../context/TechnitiumContext";
-import { useToast } from "../context/ToastContext";
+import { useTechnitiumState } from "../context/useTechnitiumState";
+import { useToast } from "../context/useToast";
 import { useNavigationBlocker } from "../hooks/useNavigationBlocker";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type {
@@ -569,6 +569,8 @@ export function DhcpPage() {
   const [newScopeNameTouched, setNewScopeNameTouched] =
     useState<boolean>(false);
   const [enableOnTarget, setEnableOnTarget] = useState<boolean>(true);
+  const [preserveOfferDelayTime, setPreserveOfferDelayTime] =
+    useState<boolean>(true);
   const [cloneState, setCloneState] = useState<CloneState>("idle");
   const [cloneMessage, setCloneMessage] = useState<string | undefined>();
   const [cloneError, setCloneError] = useState<string | undefined>();
@@ -687,6 +689,8 @@ export function DhcpPage() {
     useState<DhcpBulkSyncStrategy>("skip-existing");
   const [bulkSyncEnableOnTarget, setBulkSyncEnableOnTarget] =
     useState<boolean>(false);
+  const [bulkSyncPreserveOfferDelayTime, setBulkSyncPreserveOfferDelayTime] =
+    useState<boolean>(true);
 
   // Bulk sync preview state
   const [bulkSyncSourceScopes, setBulkSyncSourceScopes] = useState<
@@ -3211,6 +3215,7 @@ export function DhcpPage() {
           newScopeName:
             trimmedNewScopeName.length > 0 ? trimmedNewScopeName : undefined,
           enableOnTarget,
+          preserveOfferDelayTime,
           overrides: Object.keys(overrides).length > 0 ? overrides : undefined,
         },
       );
@@ -4068,6 +4073,7 @@ export function DhcpPage() {
       targetNodeIds: bulkSyncTargetNodeIds,
       strategy: bulkSyncStrategy,
       enableOnTarget: bulkSyncEnableOnTarget,
+      preserveOfferDelayTime: bulkSyncPreserveOfferDelayTime,
     };
 
     await performBulkSync(request);
@@ -6436,6 +6442,34 @@ export function DhcpPage() {
                                   </label>
                                 </div>
 
+                                {cloneMode === "remote" && (
+                                  <div className="field-group field-group--inline">
+                                    <label
+                                      className="checkbox"
+                                      htmlFor="dhcp-preserve-offer-delay"
+                                    >
+                                      <input
+                                        id="dhcp-preserve-offer-delay"
+                                        name="preserveOfferDelayTime"
+                                        type="checkbox"
+                                        checked={preserveOfferDelayTime}
+                                        onChange={(event) =>
+                                          setPreserveOfferDelayTime(
+                                            event.target.checked,
+                                          )
+                                        }
+                                      />
+                                      <span>
+                                        Preserve Offer Delay Time on target
+                                      </span>
+                                    </label>
+                                    <p className="field-hint">
+                                      Keeps the existing target Offer Delay Time
+                                      (ms) when overwriting a scope.
+                                    </p>
+                                  </div>
+                                )}
+
                                 <Divider className="dhcp-page__clone-divider" />
 
                                 <div className="dhcp-page__clone-section-header">
@@ -7662,6 +7696,30 @@ export function DhcpPage() {
                           <div className="dhcp-bulk-sync-modal__option-description">
                             Enable synced scopes immediately on target nodes
                             (regardless of source state)
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+
+                    <div className="field-group">
+                      <label className="dhcp-bulk-sync-modal__option-item">
+                        <input
+                          type="checkbox"
+                          checked={bulkSyncPreserveOfferDelayTime}
+                          onChange={(e) =>
+                            setBulkSyncPreserveOfferDelayTime(e.target.checked)
+                          }
+                          className="dhcp-bulk-sync-modal__checkbox"
+                          disabled={bulkSyncInProgress}
+                        />
+                        <div className="dhcp-bulk-sync-modal__option-content">
+                          <div className="dhcp-bulk-sync-modal__option-name">
+                            Preserve Offer Delay Time on targets
+                          </div>
+                          <div className="dhcp-bulk-sync-modal__option-description">
+                            Keeps each target scope's existing Offer Delay Time
+                            (ms). New scopes copy Offer Delay Time from the
+                            source.
                           </div>
                         </div>
                       </label>

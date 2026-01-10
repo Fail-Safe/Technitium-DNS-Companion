@@ -137,7 +137,6 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(port, () => {
-  // eslint-disable-next-line no-console
   console.log(`[e2e-mock-backend] listening on http://localhost:${port}`);
 });
 

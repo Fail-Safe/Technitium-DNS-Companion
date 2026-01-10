@@ -14,7 +14,11 @@ interface AdvancedBlockingEditorProps {
   overview?: AdvancedBlockingOverview;
   loading: boolean;
   error?: string;
-  onSave: (nodeId: string, config: AdvancedBlockingConfig) => Promise<void>;
+  onSave: (
+    nodeId: string,
+    config: AdvancedBlockingConfig,
+    snapshotNote?: string,
+  ) => Promise<void>;
   onDirtyChange?: (isDirty: boolean) => void;
   selectedNodeId?: string;
   onNodeChange?: (nodeId: string) => void;
@@ -204,6 +208,64 @@ export function AdvancedBlockingEditor({
 
       // Check if group was renamed (different object but checking properties)
       // Since groups are identified by name, renaming would be remove + add
+
+      const formatOptionalBoolean = (value?: boolean) => {
+        if (value === undefined) {
+          return "not set";
+        }
+        return value ? "true" : "false";
+      };
+
+      const normalizeStringArray = (values?: string[]) =>
+        (values ?? [])
+          .map((v) => v?.trim())
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b));
+
+      // Check group settings changes (Group Settings section)
+      if (baselineGroup.enableBlocking !== draftGroup.enableBlocking) {
+        changes.push({
+          type: "modified",
+          category: `Group Settings: ${draftGroup.name}`,
+          description: `Enable blocking for this group: ${formatOptionalBoolean(baselineGroup.enableBlocking)} → ${formatOptionalBoolean(draftGroup.enableBlocking)}`,
+        });
+      }
+
+      if (
+        baselineGroup.allowTxtBlockingReport !==
+        draftGroup.allowTxtBlockingReport
+      ) {
+        changes.push({
+          type: "modified",
+          category: `Group Settings: ${draftGroup.name}`,
+          description: `Allow TXT blocking report: ${formatOptionalBoolean(baselineGroup.allowTxtBlockingReport)} → ${formatOptionalBoolean(draftGroup.allowTxtBlockingReport)}`,
+        });
+      }
+
+      if (baselineGroup.blockAsNxDomain !== draftGroup.blockAsNxDomain) {
+        changes.push({
+          type: "modified",
+          category: `Group Settings: ${draftGroup.name}`,
+          description: `Respond with NXDOMAIN: ${formatOptionalBoolean(baselineGroup.blockAsNxDomain)} → ${formatOptionalBoolean(draftGroup.blockAsNxDomain)}`,
+        });
+      }
+
+      const baselineBlockingAddresses = normalizeStringArray(
+        baselineGroup.blockingAddresses,
+      );
+      const draftBlockingAddresses = normalizeStringArray(
+        draftGroup.blockingAddresses,
+      );
+      if (
+        JSON.stringify(baselineBlockingAddresses) !==
+        JSON.stringify(draftBlockingAddresses)
+      ) {
+        changes.push({
+          type: "modified",
+          category: `Group Settings: ${draftGroup.name}`,
+          description: `Blocking addresses: ${baselineBlockingAddresses.length > 0 ? baselineBlockingAddresses.join(", ") : "(none)"} → ${draftBlockingAddresses.length > 0 ? draftBlockingAddresses.join(", ") : "(none)"}`,
+        });
+      }
 
       // Check blocked domains
       const baselineBlocked = new Set(baselineGroup.blocked || []);
@@ -406,6 +468,22 @@ export function AdvancedBlockingEditor({
 
     return changes;
   }, [isDirty, draftConfig, baseline]);
+
+  const snapshotNote = useMemo(() => {
+    if (pendingChanges.length === 0) {
+      return undefined;
+    }
+
+    const items = pendingChanges
+      .map((change) => change.description.trim())
+      .filter((description) => description.length > 0);
+
+    if (items.length === 0) {
+      return undefined;
+    }
+
+    return `Pending changes (${items.length}):\n${items.map((item) => `- ${item}`).join("\n")}`;
+  }, [pendingChanges]);
 
   useEffect(() => {
     if (isDirty) {
@@ -610,7 +688,7 @@ export function AdvancedBlockingEditor({
     setLocalError(undefined);
 
     try {
-      await onSave(selectedNodeId, sanitized);
+      await onSave(selectedNodeId, sanitized, snapshotNote);
       setDraftConfig(cloneConfig(sanitized));
       setBaseline(serializeConfig(sanitized));
       setStatus("Advanced Blocking config saved.");
@@ -623,7 +701,7 @@ export function AdvancedBlockingEditor({
     } finally {
       setSaving(false);
     }
-  }, [draftConfig, onSave, selectedNodeId]);
+  }, [draftConfig, onSave, selectedNodeId, snapshotNote]);
 
   const updateGroup = useCallback(
     (
@@ -1702,6 +1780,7 @@ function sanitizeConfig(
 ): AdvancedBlockingConfig {
   return {
     enableBlocking: config.enableBlocking,
+    blockingAnswerTtl: config.blockingAnswerTtl,
     blockListUrlUpdateIntervalHours: config.blockListUrlUpdateIntervalHours,
     blockListUrlUpdateIntervalMinutes: config.blockListUrlUpdateIntervalMinutes,
     localEndPointGroupMap: sanitizeMap(config.localEndPointGroupMap),
@@ -1893,6 +1972,7 @@ function sanitizeUrlOverride(
 function cloneConfig(config: AdvancedBlockingConfig): AdvancedBlockingConfig {
   return {
     enableBlocking: config.enableBlocking,
+    blockingAnswerTtl: config.blockingAnswerTtl,
     blockListUrlUpdateIntervalHours: config.blockListUrlUpdateIntervalHours,
     blockListUrlUpdateIntervalMinutes: config.blockListUrlUpdateIntervalMinutes,
     localEndPointGroupMap: { ...config.localEndPointGroupMap },

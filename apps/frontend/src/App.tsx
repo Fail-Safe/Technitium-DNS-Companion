@@ -12,9 +12,10 @@ import { AppLayout } from "./components/layout/AppLayout";
 import { InstallPrompt } from "./components/pwa/InstallPrompt";
 import { OfflineBanner } from "./components/pwa/OfflineBanner";
 import { getAuthRedirectReason } from "./config";
-import { AuthProvider, useAuth } from "./context/AuthContext";
+import { AuthProvider } from "./context/AuthContext";
 import { TechnitiumProvider } from "./context/TechnitiumContext";
 import { ToastProvider } from "./context/ToastContext";
+import { useAuth } from "./context/useAuth";
 import { isNodeSessionRequiredButMissing } from "./utils/authSession";
 
 // Lazy load ALL pages for optimal code splitting

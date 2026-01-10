@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useLocation } from "react-router-dom";
-import { useAuth } from "../../context/AuthContext";
+import { useAuth } from "../../context/useAuth";
 import { BackgroundTokenSecurityBanner } from "../common/BackgroundTokenSecurityBanner";
 import { NodeSessionExpiredBanner } from "../common/NodeSessionExpiredBanner";
 import { TransportSecurityBanner } from "../common/TransportSecurityBanner";
@@ -32,6 +32,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       <BackgroundTokenSecurityBanner
         backgroundPtrToken={status?.backgroundPtrToken}
         clusterTokenConfigured={status?.clusterTokenConfigured}
+        clusterTokenUsage={status?.clusterTokenUsage}
         authenticated={status?.authenticated ?? false}
       />
       <main className={mainClassName}>{children}</main>

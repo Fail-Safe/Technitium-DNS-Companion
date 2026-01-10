@@ -1,13 +1,5 @@
 import type { ReactNode } from "react";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, triggerAuthRedirect } from "../config";
 import type {
   AdvancedBlockingConfig,
@@ -43,9 +35,17 @@ import type {
   TechnitiumUpdateDhcpScopeRequest,
 } from "../types/dhcp";
 import type {
+  DnsFilteringSnapshot,
+  DnsFilteringSnapshotMetadata,
+  DnsFilteringSnapshotMethod,
+  DnsFilteringSnapshotOrigin,
+  DnsFilteringSnapshotRestoreResult,
+} from "../types/dnsFilteringSnapshots";
+import type {
   TechnitiumCombinedQueryLogPage,
   TechnitiumNodeQueryLogEnvelope,
   TechnitiumQueryLogFilters,
+  TechnitiumQueryLogStorageStatus,
 } from "../types/technitiumLogs";
 import type {
   TechnitiumCombinedZoneOverview,
@@ -60,7 +60,8 @@ import type {
   ZoneSnapshotRestoreResult,
 } from "../types/zoneSnapshots";
 import type { AuthStatus } from "./AuthContext";
-import { useOptionalAuth } from "./AuthContext";
+import { TechnitiumContext } from "./technitiumContextInstance";
+import { useOptionalAuth } from "./useAuth";
 
 type NodeStatus = "online" | "syncing" | "offline" | "unknown";
 
@@ -117,7 +118,7 @@ export interface TechnitiumNode {
   isPrimary?: boolean; // True if this node is the Primary in the cluster
 }
 
-interface TechnitiumState {
+export interface TechnitiumState {
   nodes: TechnitiumNode[];
   advancedBlocking?: AdvancedBlockingOverview;
   loadingAdvancedBlocking: boolean;
@@ -127,6 +128,7 @@ interface TechnitiumState {
   saveAdvancedBlockingConfig: (
     nodeId: string,
     config: AdvancedBlockingConfig,
+    snapshotNote?: string,
   ) => Promise<AdvancedBlockingSnapshot | undefined>;
   // Built-in Blocking state
   builtInBlocking?: BuiltInBlockingOverview;
@@ -199,6 +201,18 @@ interface TechnitiumState {
     filters?: TechnitiumQueryLogFilters,
     options?: { signal?: AbortSignal },
   ) => Promise<TechnitiumCombinedQueryLogPage>;
+  loadQueryLogStorageStatus: (options?: {
+    signal?: AbortSignal;
+  }) => Promise<TechnitiumQueryLogStorageStatus>;
+  loadStoredNodeLogs: (
+    nodeId: string,
+    filters?: TechnitiumQueryLogFilters,
+    options?: { signal?: AbortSignal },
+  ) => Promise<TechnitiumNodeQueryLogEnvelope>;
+  loadStoredCombinedLogs: (
+    filters?: TechnitiumQueryLogFilters,
+    options?: { signal?: AbortSignal },
+  ) => Promise<TechnitiumCombinedQueryLogPage>;
   loadDhcpScopes: (nodeId: string) => Promise<TechnitiumDhcpScopeListEnvelope>;
   loadDhcpScope: (
     nodeId: string,
@@ -256,6 +270,41 @@ interface TechnitiumState {
     note?: string,
   ) => Promise<DhcpSnapshotMetadata>;
 
+  listDnsFilteringSnapshots: (
+    nodeId: string,
+    method: DnsFilteringSnapshotMethod,
+  ) => Promise<DnsFilteringSnapshotMetadata[]>;
+  createDnsFilteringSnapshot: (
+    nodeId: string,
+    request: {
+      method: DnsFilteringSnapshotMethod;
+      origin?: DnsFilteringSnapshotOrigin;
+      note?: string;
+    },
+  ) => Promise<DnsFilteringSnapshotMetadata>;
+  getDnsFilteringSnapshot: (
+    nodeId: string,
+    snapshotId: string,
+  ) => Promise<DnsFilteringSnapshot>;
+  deleteDnsFilteringSnapshot: (
+    nodeId: string,
+    snapshotId: string,
+  ) => Promise<void>;
+  updateDnsFilteringSnapshotNote: (
+    nodeId: string,
+    snapshotId: string,
+    note?: string,
+  ) => Promise<DnsFilteringSnapshotMetadata>;
+  setDnsFilteringSnapshotPinned: (
+    nodeId: string,
+    snapshotId: string,
+    pinned: boolean,
+  ) => Promise<DnsFilteringSnapshotMetadata>;
+  restoreDnsFilteringSnapshot: (
+    nodeId: string,
+    snapshotId: string,
+  ) => Promise<DnsFilteringSnapshotRestoreResult>;
+
   listZoneSnapshots: (nodeId: string) => Promise<ZoneSnapshotMetadata[]>;
   createZoneSnapshot: (
     nodeId: string,
@@ -288,25 +337,6 @@ interface TechnitiumState {
     zoneName: string,
   ) => Promise<TechnitiumCombinedZoneRecordsOverview>;
 }
-
-// In development, Vite Fast Refresh can reload modules that define contexts.
-// If the Context object identity changes, existing Providers won't match new
-// Consumers, and hooks can throw even though a Provider exists.
-// Cache the context instance on globalThis to keep it stable across HMR.
-type GlobalWithTechnitiumContext = typeof globalThis & {
-  __tdc_technitium_context__?: ReturnType<
-    typeof createContext<TechnitiumState | undefined>
-  >;
-};
-
-const globalWithTechnitiumContext = globalThis as GlobalWithTechnitiumContext;
-const TechnitiumContext: ReturnType<
-  typeof createContext<TechnitiumState | undefined>
-> =
-  globalWithTechnitiumContext.__tdc_technitium_context__ ??
-  (globalWithTechnitiumContext.__tdc_technitium_context__ = createContext<
-    TechnitiumState | undefined
-  >(undefined));
 
 // Load nodes from backend API (configured on server side via environment variables)
 const fetchConfiguredNodes = async (): Promise<TechnitiumNode[]> => {
@@ -383,6 +413,38 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     authStatusRef.current = auth?.status ?? null;
     authRefreshRef.current = auth?.refresh ?? null;
   }, [auth?.status, auth?.refresh]);
+
+  const logThrottleRef = useRef<Map<string, number>>(new Map());
+  const logThrottled = useCallback(
+    (
+      key: string,
+      level: "error" | "warn" | "log",
+      message: string,
+      error?: unknown,
+      ttlMs = 60_000,
+    ) => {
+      const now = Date.now();
+      const last = logThrottleRef.current.get(key) ?? 0;
+      if (now - last < ttlMs) {
+        return;
+      }
+      logThrottleRef.current.set(key, now);
+      // Intentionally avoid spamming long stacks on transient network issues.
+      if (error !== undefined) {
+        console[level](message, error);
+      } else {
+        console[level](message);
+      }
+    },
+    [],
+  );
+
+  const isSessionAuthUnauthenticated = useCallback((): boolean => {
+    const status = authStatusRef.current;
+    return (
+      status?.sessionAuthEnabled === true && status.authenticated === false
+    );
+  }, []);
 
   const isNodeAuthenticatedForSession = useCallback(
     (nodeId: string): boolean => {
@@ -462,7 +524,13 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
                 };
               }
             } catch (error) {
-              console.error(`Failed to check apps for node ${node.id}:`, error);
+              logThrottled(
+                `node-apps-${node.id}`,
+                "warn",
+                `Failed to check apps for node ${node.id}:`,
+                error,
+                60_000,
+              );
             }
             return node;
           }),
@@ -473,12 +541,36 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       // Return current state immediately to avoid blocking
       return currentNodes;
     });
-  }, [isNodeAuthenticatedForSession]);
+  }, [isNodeAuthenticatedForSession, logThrottled]);
 
   // Cluster role polling state
   const pollingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousPrimaryIdRef = useRef<string | undefined>(undefined);
   const isPollingSetupRef = useRef<boolean>(false);
+
+  const clusterPollFailureCountRef = useRef<number>(0);
+  const clusterPollBackoffUntilRef = useRef<number>(0);
+
+  const shouldSkipClusterPoll = useCallback((): boolean => {
+    if (isSessionAuthUnauthenticated()) {
+      return true;
+    }
+
+    // Avoid background-tab polling (reduces console spam + pointless work).
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState === "hidden"
+    ) {
+      return true;
+    }
+
+    // If the browser knows we're offline, don't hammer the API.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return true;
+    }
+
+    return Date.now() < clusterPollBackoffUntilRef.current;
+  }, [isSessionAuthUnauthenticated]);
 
   // Fetch cluster settings from Primary node
   const fetchClusterSettings =
@@ -522,6 +614,10 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
   // Poll cluster state to detect role changes
   const pollClusterState = useCallback(async () => {
+    if (shouldSkipClusterPoll()) {
+      return;
+    }
+
     const currentNodes = nodesRef.current;
     if (currentNodes.length === 0) {
       return;
@@ -538,6 +634,21 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     try {
       // Refresh nodes to get latest cluster state
       const response = await apiFetch("/nodes");
+
+      if (response.status === 401) {
+        // Session expired; AuthContext/RequireAuth will handle redirect.
+        // Back off so we don't spam the server and console while auth refresh runs.
+        clusterPollFailureCountRef.current = Math.min(
+          clusterPollFailureCountRef.current + 1,
+          10,
+        );
+        clusterPollBackoffUntilRef.current =
+          Date.now() +
+          Math.min(300_000, 15_000 * clusterPollFailureCountRef.current);
+        void authRefreshRef.current?.({ silent: true });
+        return;
+      }
+
       if (!response.ok) {
         return;
       }
@@ -593,16 +704,43 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
       // Update the previous Primary ID for next poll
       previousPrimaryIdRef.current = currentPrimaryId;
+
+      // Reset backoff on success
+      clusterPollFailureCountRef.current = 0;
+      clusterPollBackoffUntilRef.current = 0;
     } catch (error) {
-      console.error("Failed to poll cluster state:", error);
+      clusterPollFailureCountRef.current = Math.min(
+        clusterPollFailureCountRef.current + 1,
+        10,
+      );
+      clusterPollBackoffUntilRef.current =
+        Date.now() +
+        Math.min(300_000, 5_000 * clusterPollFailureCountRef.current);
+      logThrottled(
+        "cluster-poll-failed",
+        "warn",
+        "Failed to poll cluster state (will retry with backoff):",
+        error,
+        60_000,
+      );
     }
-  }, []);
+  }, [logThrottled, shouldSkipClusterPoll]);
 
   // Set up cluster role polling when clustering is enabled
   useEffect(() => {
     const isClusterEnabled = nodes.some(
       (node) => node.clusterState?.initialized === true,
     );
+
+    // If session auth is enabled and we are not authenticated, do not poll.
+    if (isSessionAuthUnauthenticated()) {
+      if (pollingTimerRef.current) {
+        clearInterval(pollingTimerRef.current);
+        pollingTimerRef.current = null;
+      }
+      isPollingSetupRef.current = false;
+      return;
+    }
 
     // If clustering is disabled, clean up and exit
     if (!isClusterEnabled) {
@@ -657,7 +795,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       // Only log, don't actually stop polling unless clustering is disabled
       // This prevents React StrictMode double-mount from restarting polling
     };
-  }, [nodes, fetchClusterSettings, pollClusterState]);
+  }, [
+    nodes,
+    fetchClusterSettings,
+    pollClusterState,
+    isSessionAuthUnauthenticated,
+  ]);
 
   // Fetch node overviews (statistics)
   const fetchNodeOverviews = useCallback(async () => {
@@ -685,6 +828,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
               if (response.status === 401) {
                 void authRefreshRef.current?.({ silent: true });
+                return { nodeId: node.id, overview: null, reachable: false };
               }
 
               if (response.ok) {
@@ -694,9 +838,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
               }
               return { nodeId: node.id, overview: null, reachable: false };
             } catch (error) {
-              console.error(
+              logThrottled(
+                `node-overview-${node.id}`,
+                "warn",
                 `Failed to fetch overview for node ${node.id}:`,
                 error,
+                60_000,
               );
               return { nodeId: node.id, overview: null, reachable: false };
             }
@@ -732,9 +879,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
             }
           }
         } catch (error) {
-          console.error(
+          logThrottled(
+            "combined-zones-sync-check",
+            "warn",
             "Failed to fetch combined zones for sync check:",
             error,
+            60_000,
           );
         }
 
@@ -764,7 +914,13 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
           }),
         );
       } catch (error) {
-        console.error("Failed to fetch node overviews:", error);
+        logThrottled(
+          "fetch-node-overviews",
+          "warn",
+          "Failed to fetch node overviews:",
+          error,
+          60_000,
+        );
       } finally {
         overviewFetchInProgress.current = null;
       }
@@ -772,7 +928,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
     overviewFetchInProgress.current = promise;
     return promise;
-  }, [isNodeAuthenticatedForSession]);
+  }, [isNodeAuthenticatedForSession, logThrottled]);
 
   // Check node apps once after nodes are loaded
   useEffect(() => {
@@ -812,14 +968,18 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const saveAdvancedBlockingConfig = useCallback(
-    async (nodeId: string, config: AdvancedBlockingConfig) => {
+    async (
+      nodeId: string,
+      config: AdvancedBlockingConfig,
+      snapshotNote?: string,
+    ) => {
       try {
         const response = await apiFetch(
           `/nodes/${encodeURIComponent(nodeId)}/advanced-blocking`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ config }),
+            body: JSON.stringify({ config, snapshotNote }),
           },
         );
 
@@ -1015,6 +1175,102 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       if (!response.ok) {
         throw new Error(
           `Failed to load combined query logs (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as TechnitiumCombinedQueryLogPage;
+    },
+    [buildLogQuery],
+  );
+
+  const loadQueryLogStorageStatus = useCallback(
+    async (options?: { signal?: AbortSignal }) => {
+      const response = await apiFetch("/nodes/logs/storage", {
+        signal: options?.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load query log storage status (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as TechnitiumQueryLogStorageStatus;
+    },
+    [],
+  );
+
+  const loadStoredNodeLogs = useCallback(
+    async (
+      nodeId: string,
+      filters?: TechnitiumQueryLogFilters,
+      options?: { signal?: AbortSignal },
+    ) => {
+      if (!nodeId) {
+        throw new Error("Node id is required to load logs.");
+      }
+
+      requireNodeAuth(nodeId);
+
+      const params = buildLogQuery(filters);
+      const url = `/nodes/${encodeURIComponent(nodeId)}/logs/stored${
+        params.size > 0 ? `?${params.toString()}` : ""
+      }`;
+
+      const requestOptions =
+        filters?.disableCache ?
+          {
+            cache: "no-store" as const,
+            headers: { "Cache-Control": "no-store" },
+          }
+        : undefined;
+
+      const mergedRequestOptions: RequestInit | undefined =
+        requestOptions || options?.signal ?
+          { ...(requestOptions ?? {}), signal: options?.signal }
+        : undefined;
+
+      const response = await apiFetch(url, mergedRequestOptions);
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load stored query logs for node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as TechnitiumNodeQueryLogEnvelope;
+    },
+    [buildLogQuery, requireNodeAuth],
+  );
+
+  const loadStoredCombinedLogs = useCallback(
+    async (
+      filters?: TechnitiumQueryLogFilters,
+      options?: { signal?: AbortSignal },
+    ) => {
+      const params = buildLogQuery(filters);
+      const url = `/nodes/logs/combined/stored${
+        params.size > 0 ? `?${params.toString()}` : ""
+      }`;
+
+      const requestOptions =
+        filters?.disableCache ?
+          {
+            cache: "no-store" as const,
+            headers: { "Cache-Control": "no-store" },
+          }
+        : undefined;
+
+      const mergedRequestOptions: RequestInit | undefined =
+        requestOptions || options?.signal ?
+          { ...(requestOptions ?? {}), signal: options?.signal }
+        : undefined;
+
+      const response = await apiFetch(url, mergedRequestOptions);
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load stored combined query logs (${response.status})`,
         );
       }
 
@@ -1254,6 +1510,10 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
       if (request.enableOnTarget !== undefined) {
         payload.enableOnTarget = request.enableOnTarget;
+      }
+
+      if (request.preserveOfferDelayTime !== undefined) {
+        payload.preserveOfferDelayTime = request.preserveOfferDelayTime;
       }
 
       if (request.overrides) {
@@ -1601,6 +1861,148 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       }
 
       return (await response.json()) as DhcpSnapshotMetadata;
+    },
+    [],
+  );
+
+  const listDnsFilteringSnapshots = useCallback(
+    async (nodeId: string, method: DnsFilteringSnapshotMethod) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots?method=${encodeURIComponent(method)}`,
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to list DNS filtering snapshots for node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as DnsFilteringSnapshotMetadata[];
+    },
+    [],
+  );
+
+  const createDnsFilteringSnapshot = useCallback(
+    async (
+      nodeId: string,
+      request: {
+        method: DnsFilteringSnapshotMethod;
+        origin?: DnsFilteringSnapshotOrigin;
+        note?: string;
+      },
+    ) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to create DNS filtering snapshot for node ${nodeId} (${response.status}): ${errorText}`,
+        );
+      }
+
+      return (await response.json()) as DnsFilteringSnapshotMetadata;
+    },
+    [],
+  );
+
+  const getDnsFilteringSnapshot = useCallback(
+    async (nodeId: string, snapshotId: string) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots/${encodeURIComponent(snapshotId)}`,
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load DNS filtering snapshot ${snapshotId} for node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as DnsFilteringSnapshot;
+    },
+    [],
+  );
+
+  const deleteDnsFilteringSnapshot = useCallback(
+    async (nodeId: string, snapshotId: string) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots/${encodeURIComponent(snapshotId)}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to delete DNS filtering snapshot (${response.status}): ${errorText}`,
+        );
+      }
+    },
+    [],
+  );
+
+  const updateDnsFilteringSnapshotNote = useCallback(
+    async (nodeId: string, snapshotId: string, note?: string) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots/${encodeURIComponent(snapshotId)}/note`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note }),
+        },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to update DNS filtering snapshot note (${response.status}): ${errorText}`,
+        );
+      }
+
+      return (await response.json()) as DnsFilteringSnapshotMetadata;
+    },
+    [],
+  );
+
+  const setDnsFilteringSnapshotPinned = useCallback(
+    async (nodeId: string, snapshotId: string, pinned: boolean) => {
+      const action = pinned ? "pin" : "unpin";
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots/${encodeURIComponent(snapshotId)}/${action}`,
+        { method: "POST" },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to ${action} DNS filtering snapshot for node ${nodeId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as DnsFilteringSnapshotMetadata;
+    },
+    [],
+  );
+
+  const restoreDnsFilteringSnapshot = useCallback(
+    async (nodeId: string, snapshotId: string) => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots/${encodeURIComponent(snapshotId)}/restore`,
+        { method: "POST" },
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to restore DNS filtering snapshot (${response.status}): ${errorText}`,
+        );
+      }
+
+      return (await response.json()) as DnsFilteringSnapshotRestoreResult;
     },
     [],
   );
@@ -2047,6 +2449,9 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       // Other
       loadNodeLogs,
       loadCombinedLogs,
+      loadQueryLogStorageStatus,
+      loadStoredNodeLogs,
+      loadStoredCombinedLogs,
       loadDhcpScopes,
       loadDhcpScope,
       createDhcpScope,
@@ -2062,6 +2467,13 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       getDhcpSnapshot,
       deleteDhcpSnapshot,
       updateDhcpSnapshotNote,
+      listDnsFilteringSnapshots,
+      createDnsFilteringSnapshot,
+      restoreDnsFilteringSnapshot,
+      setDnsFilteringSnapshotPinned,
+      getDnsFilteringSnapshot,
+      deleteDnsFilteringSnapshot,
+      updateDnsFilteringSnapshotNote,
       listZoneSnapshots,
       createZoneSnapshot,
       getZoneSnapshot,
@@ -2104,6 +2516,9 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       // Other
       loadNodeLogs,
       loadCombinedLogs,
+      loadQueryLogStorageStatus,
+      loadStoredNodeLogs,
+      loadStoredCombinedLogs,
       loadDhcpScopes,
       loadDhcpScope,
       createDhcpScope,
@@ -2119,6 +2534,13 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       getDhcpSnapshot,
       deleteDhcpSnapshot,
       updateDhcpSnapshotNote,
+      listDnsFilteringSnapshots,
+      createDnsFilteringSnapshot,
+      restoreDnsFilteringSnapshot,
+      setDnsFilteringSnapshotPinned,
+      getDnsFilteringSnapshot,
+      deleteDnsFilteringSnapshot,
+      updateDnsFilteringSnapshotNote,
       listZoneSnapshots,
       createZoneSnapshot,
       getZoneSnapshot,
@@ -2137,15 +2559,4 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       {children}
     </TechnitiumContext.Provider>
   );
-}
-
-// eslint-disable-next-line react-refresh/only-export-components
-export function useTechnitiumState() {
-  const context = useContext(TechnitiumContext);
-  if (!context) {
-    throw new Error(
-      "useTechnitiumState must be used within a TechnitiumProvider",
-    );
-  }
-  return context;
 }

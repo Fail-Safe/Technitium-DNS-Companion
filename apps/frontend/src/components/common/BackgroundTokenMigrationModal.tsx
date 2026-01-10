@@ -5,6 +5,24 @@ import Divider from "./Divider";
 
 type MigrationResult = { username: string; tokenName: string; token: string };
 
+function formatMigrationError(status: number, message: string): string {
+  const normalized = message.toLowerCase();
+
+  if (
+    status === 403 ||
+    normalized.includes("access was denied") ||
+    normalized.includes("denied permission")
+  ) {
+    return (
+      "Migration was denied by Technitium (insufficient permissions). " +
+      "Your TECHNITIUM_CLUSTER_TOKEN appears to be read-only / low-privilege and cannot create users or API tokens. " +
+      "Temporarily use an admin-capable token for migration, or manually create a least-privilege Technitium user/token and set TECHNITIUM_BACKGROUND_TOKEN."
+    );
+  }
+
+  return message;
+}
+
 export function BackgroundTokenMigrationModal({
   isOpen,
   onClose,
@@ -93,7 +111,8 @@ export function BackgroundTokenMigrationModal({
       });
 
       if (!res.ok) {
-        throw new Error(await safeReadError(res));
+        const message = await safeReadError(res);
+        throw new Error(formatMigrationError(res.status, message));
       }
 
       const data = (await res.json()) as MigrationResult;
@@ -196,6 +215,11 @@ export function BackgroundTokenMigrationModal({
               <strong>TECHNITIUM_CLUSTER_TOKEN</strong> to create a dedicated,
               read-only Technitium DNS user and a new API token intended for
               background PTR lookups.
+            </p>
+            <p className="background-token-migration-modal__text">
+              This requires a <strong>TECHNITIUM_CLUSTER_TOKEN</strong> with
+              permission to create users and API tokens. If you configured a
+              read-only token, this will fail with “Access was denied”.
             </p>
             <p className="background-token-migration-modal__text">
               The token will be shown only <strong>once</strong>! Copy it

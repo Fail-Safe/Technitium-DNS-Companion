@@ -10,8 +10,8 @@ import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndica
 import { ZoneSnapshotDrawer } from "../components/zones/ZoneSnapshotDrawer";
 import { ZonesPageSkeleton } from "../components/zones/ZonesPageSkeleton";
 import { apiFetch } from "../config";
-import { useTechnitiumState } from "../context/TechnitiumContext";
-import { useToast } from "../context/ToastContext";
+import { useTechnitiumState } from "../context/useTechnitiumState";
+import { useToast } from "../context/useToast";
 import { useIsClusterEnabled, usePrimaryNode } from "../hooks/usePrimaryNode";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type {

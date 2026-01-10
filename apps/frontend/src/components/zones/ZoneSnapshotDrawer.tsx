@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useToast } from "../../context/ToastContext";
+import { useToast } from "../../context/useToast";
 import type {
   ZoneSnapshot,
   ZoneSnapshotCreateRequest,
@@ -373,7 +373,7 @@ export const ZoneSnapshotDrawer: React.FC<ZoneSnapshotDrawerProps> = ({
     setNoteDraft("");
     setCreateZonesDraft((initialZones ?? []).filter(Boolean).join("\n"));
     setCreateNoteDraft("");
-  }, [nodeId]);
+  }, [nodeId, initialZones]);
 
   const isActive = animateIn && !animateOut;
 

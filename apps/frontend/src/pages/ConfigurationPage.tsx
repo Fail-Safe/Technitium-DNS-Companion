@@ -4,6 +4,7 @@ import {
   faCheck,
   faChevronUp,
   faCircle,
+  faClockRotateLeft,
   faCode,
   faExclamationTriangle,
   faGripVertical,
@@ -31,10 +32,12 @@ import { BlockingMethodSelector } from "../components/configuration/BlockingMeth
 import { BuiltInBlockingEditor } from "../components/configuration/BuiltInBlockingEditor.tsx";
 import { ConfigurationSkeleton } from "../components/configuration/ConfigurationSkeleton.tsx";
 import { ConfigurationSyncView } from "../components/configuration/ConfigurationSyncView.tsx";
+import { DnsFilteringSnapshotDrawer } from "../components/configuration/DnsFilteringSnapshotDrawer";
 import { ListSourceEditor } from "../components/configuration/ListSourceEditor.tsx";
 import { NodeSelector } from "../components/configuration/NodeSelector.tsx";
 import { apiFetch } from "../config";
-import { useTechnitiumState } from "../context/TechnitiumContext";
+import { useTechnitiumState } from "../context/useTechnitiumState";
+import { useToast } from "../context/useToast";
 import { useNavigationBlocker } from "../hooks/useNavigationBlocker";
 import { useClusterNodes } from "../hooks/usePrimaryNode";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
@@ -65,6 +68,8 @@ interface ManualDomainMatchDetail {
 type DomainEntrySortMode = "alpha" | "source";
 
 export function ConfigurationPage() {
+  const { pushToast } = useToast();
+
   const {
     nodes,
     advancedBlocking,
@@ -79,6 +84,13 @@ export function ConfigurationPage() {
     selectedBlockingMethod,
     reloadBlockingStatus,
     setSelectedBlockingMethod,
+    listDnsFilteringSnapshots,
+    createDnsFilteringSnapshot,
+    restoreDnsFilteringSnapshot,
+    setDnsFilteringSnapshotPinned,
+    getDnsFilteringSnapshot,
+    deleteDnsFilteringSnapshot,
+    updateDnsFilteringSnapshotNote,
   } = useTechnitiumState();
 
   // Cluster information
@@ -124,6 +136,59 @@ export function ConfigurationPage() {
     allowed: number;
     blocked: number;
   } | null>(null);
+
+  const [dnsFilteringSnapshotsOpen, setDnsFilteringSnapshotsOpen] =
+    useState(false);
+
+  const builtInSnapshotNodeId = selectedNodeId || nodes[0]?.id || "";
+  const dnsFilteringSnapshotNodeId =
+    selectedBlockingMethod === "built-in" ?
+      builtInSnapshotNodeId
+    : selectedNodeId;
+
+  const selectedNodeName = useMemo(() => {
+    if (!dnsFilteringSnapshotNodeId) return undefined;
+    const node = nodes.find((n) => n.id === dnsFilteringSnapshotNodeId);
+    return node?.name;
+  }, [nodes, dnsFilteringSnapshotNodeId]);
+
+  const isSelectedNodeAdvancedBlockingCapable = useMemo(() => {
+    const node = nodes.find((n) => n.id === selectedNodeId);
+    return Boolean(node?.hasAdvancedBlocking);
+  }, [nodes, selectedNodeId]);
+
+  const dnsFilteringSnapshotMethod =
+    selectedBlockingMethod === "built-in" ?
+      ("built-in" as const)
+    : ("advanced-blocking" as const);
+
+  const canOpenDnsFilteringSnapshots =
+    dnsFilteringSnapshotMethod === "built-in" ?
+      Boolean(dnsFilteringSnapshotNodeId)
+    : Boolean(
+        dnsFilteringSnapshotNodeId && isSelectedNodeAdvancedBlockingCapable,
+      );
+
+  const dnsFilteringSnapshotsPullTitle =
+    !dnsFilteringSnapshotNodeId ? "Select a node"
+    : (
+      dnsFilteringSnapshotMethod === "advanced-blocking" &&
+      !isSelectedNodeAdvancedBlockingCapable
+    ) ?
+      "Advanced Blocking app not installed on this node"
+    : "";
+
+  const handleOpenDnsFilteringSnapshots = useCallback(() => {
+    if (canOpenDnsFilteringSnapshots) {
+      setDnsFilteringSnapshotsOpen(true);
+      return;
+    }
+
+    const message =
+      dnsFilteringSnapshotsPullTitle ||
+      "Select a node to view DNS filtering history.";
+    pushToast({ message, tone: "info", timeout: 5000 });
+  }, [canOpenDnsFilteringSnapshots, dnsFilteringSnapshotsPullTitle, pushToast]);
 
   const handleBuiltInCountsChange = useCallback(
     (counts: { allowed: number; blocked: number }) => {
@@ -546,8 +611,12 @@ export function ConfigurationPage() {
   );
 
   const handleSaveAdvancedBlocking = useCallback(
-    async (nodeId: string, config: AdvancedBlockingConfig) => {
-      await saveAdvancedBlockingConfig(nodeId, config);
+    async (
+      nodeId: string,
+      config: AdvancedBlockingConfig,
+      snapshotNote?: string,
+    ) => {
+      await saveAdvancedBlockingConfig(nodeId, config, snapshotNote);
     },
     [saveAdvancedBlockingConfig],
   );
@@ -1098,8 +1167,21 @@ export function ConfigurationPage() {
   const handleTestSave = useCallback(async () => {
     if (!testStagedConfig || !selectedNodeId) return;
 
+    const pendingNoteItems = testPendingChanges
+      .map((change) => change.description?.trim())
+      .filter((value): value is string => Boolean(value && value.length > 0));
+
+    const snapshotNote =
+      pendingNoteItems.length > 0 ?
+        `Pending changes (${pendingNoteItems.length}):\n${pendingNoteItems.map((item) => `- ${item}`).join("\n")}`
+      : undefined;
+
     try {
-      await saveAdvancedBlockingConfig(selectedNodeId, testStagedConfig);
+      await saveAdvancedBlockingConfig(
+        selectedNodeId,
+        testStagedConfig,
+        snapshotNote,
+      );
       await reloadAdvancedBlocking();
       setHasUnsavedDomainChanges(false);
       setTestPendingChanges([]);
@@ -1110,6 +1192,7 @@ export function ConfigurationPage() {
   }, [
     testStagedConfig,
     selectedNodeId,
+    testPendingChanges,
     saveAdvancedBlockingConfig,
     reloadAdvancedBlocking,
   ]);
@@ -1252,6 +1335,22 @@ export function ConfigurationPage() {
         threshold={pullToRefresh.threshold}
         isRefreshing={pullToRefresh.isRefreshing}
       />
+
+      <button
+        type="button"
+        className="drawer-pull"
+        aria-label="Open DNS filtering history"
+        aria-disabled={!canOpenDnsFilteringSnapshots}
+        onClick={handleOpenDnsFilteringSnapshots}
+        title={dnsFilteringSnapshotsPullTitle}
+      >
+        <FontAwesomeIcon
+          icon={faClockRotateLeft}
+          style={{ marginBottom: "0.5rem" }}
+        />
+        DNS Filtering History
+      </button>
+
       <section ref={pullToRefresh.containerRef} className="configuration">
         <header className="configuration__header">
           <div>
@@ -1579,6 +1678,42 @@ export function ConfigurationPage() {
                               `/${allDomainsForType.length}`}
                             )
                           </span>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.5rem",
+                              justifyContent: "flex-end",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: "0.8rem",
+                                color: "var(--color-text-secondary)",
+                              }}
+                            >
+                              Entry sort:
+                            </span>
+                            <select
+                              value={domainEntrySortMode}
+                              onChange={(e) =>
+                                setDomainEntrySortMode(
+                                  e.target.value as DomainEntrySortMode,
+                                )
+                              }
+                              style={{
+                                fontSize: "0.8rem",
+                                padding: "0.25rem 0.5rem",
+                                borderRadius: "0.5rem",
+                                border: "1px solid var(--color-border)",
+                                background: "var(--color-bg-secondary)",
+                                color: "var(--color-text-primary)",
+                              }}
+                            >
+                              <option value="alpha">Alpha</option>
+                              <option value="source">Source Order</option>
+                            </select>
+                          </div>
                         </div>
                         <div className="domain-list-card__body">
                           {filteredDomains.length === 0 ?
@@ -1983,44 +2118,6 @@ export function ConfigurationPage() {
                         Groups - Drag & Drop
                       </label>
                       <div
-                        style={{
-                          marginTop: "-0.75rem",
-                          marginBottom: "0.75rem",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.5rem",
-                          justifyContent: "flex-end",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: "0.8rem",
-                            color: "var(--color-text-secondary)",
-                          }}
-                        >
-                          Entry sort:
-                        </span>
-                        <select
-                          value={domainEntrySortMode}
-                          onChange={(e) =>
-                            setDomainEntrySortMode(
-                              e.target.value as DomainEntrySortMode,
-                            )
-                          }
-                          style={{
-                            fontSize: "0.8rem",
-                            padding: "0.25rem 0.5rem",
-                            borderRadius: "0.5rem",
-                            border: "1px solid var(--color-border)",
-                            background: "var(--color-bg-secondary)",
-                            color: "var(--color-text-primary)",
-                          }}
-                        >
-                          <option value="alpha">Alpha-sort</option>
-                          <option value="source">Source order</option>
-                        </select>
-                      </div>
-                      <div
                         onDragOver={(e) => {
                           // Allow drop anywhere in this container
                           e.preventDefault();
@@ -2382,6 +2479,29 @@ export function ConfigurationPage() {
           </section>
         }
       </section>
+
+      <DnsFilteringSnapshotDrawer
+        isOpen={dnsFilteringSnapshotsOpen}
+        nodeId={dnsFilteringSnapshotNodeId}
+        nodeName={selectedNodeName}
+        method={dnsFilteringSnapshotMethod}
+        onClose={() => setDnsFilteringSnapshotsOpen(false)}
+        listSnapshots={listDnsFilteringSnapshots}
+        createSnapshot={createDnsFilteringSnapshot}
+        restoreSnapshot={restoreDnsFilteringSnapshot}
+        setSnapshotPinned={setDnsFilteringSnapshotPinned}
+        getSnapshotDetail={getDnsFilteringSnapshot}
+        deleteSnapshot={deleteDnsFilteringSnapshot}
+        updateSnapshotNote={updateDnsFilteringSnapshotNote}
+        onRestoreSuccess={async () => {
+          if (dnsFilteringSnapshotMethod === "built-in") {
+            await reloadBuiltInBlocking();
+          } else {
+            await reloadAdvancedBlocking();
+          }
+          await reloadBlockingStatus();
+        }}
+      />
 
       {/* Edit Domain Modal */}
       {editingDomain && (

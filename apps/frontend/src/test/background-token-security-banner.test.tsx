@@ -113,6 +113,46 @@ describe("BackgroundTokenSecurityBanner", () => {
     vi.unstubAllGlobals();
   });
 
+  it("shows actionable error when migration is denied", async () => {
+    const user = userEvent.setup();
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            message:
+              "Migration failed: TECHNITIUM_CLUSTER_TOKEN was denied permission to create users/tokens.",
+          }),
+          { status: 403, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <BackgroundTokenSecurityBanner
+        authenticated={true}
+        clusterTokenConfigured={true}
+        backgroundPtrToken={{
+          configured: false,
+          sessionAuthEnabled: true,
+          validated: false,
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Migrate" }));
+    await user.click(screen.getByRole("button", { name: "Create token" }));
+
+    expect(
+      await screen.findByText(/insufficient permissions/i),
+    ).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent ?? "").toMatch(/TECHNITIUM_BACKGROUND_TOKEN/i);
+
+    vi.unstubAllGlobals();
+  });
+
   it("does not show migration CTA when clusterTokenConfigured is undefined", () => {
     const { container } = render(
       <BackgroundTokenSecurityBanner

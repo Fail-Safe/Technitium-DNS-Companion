@@ -25,8 +25,8 @@ import {
 } from "../components/common/LoadingSkeleton";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
 import { getAuthRedirectReason } from "../config";
-import { useTechnitiumState } from "../context/TechnitiumContext";
-import { useToast } from "../context/ToastContext";
+import { useTechnitiumState } from "../context/useTechnitiumState";
+import { useToast } from "../context/useToast";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type {
   AdvancedBlockingConfig,
@@ -37,6 +37,7 @@ import type {
   TechnitiumCombinedQueryLogEntry,
   TechnitiumCombinedQueryLogPage,
   TechnitiumNodeQueryLogEnvelope,
+  TechnitiumQueryLogStorageStatus,
 } from "../types/technitiumLogs";
 
 type ViewMode = "combined" | "node";
@@ -158,12 +159,14 @@ interface FloatingLiveToggleProps {
   isLive: boolean;
   refreshSeconds: number;
   onToggle: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  pausedTitle?: string;
 }
 
 function FloatingLiveToggle({
   isLive,
   refreshSeconds,
   onToggle,
+  pausedTitle,
 }: FloatingLiveToggleProps) {
   return (
     <button
@@ -171,7 +174,9 @@ function FloatingLiveToggle({
       className={`logs-page__floating-live-toggle ${isLive ? "logs-page__floating-live-toggle--live" : "logs-page__floating-live-toggle--paused"}`}
       onClick={onToggle}
       aria-label={isLive ? "Pause live updates" : "Resume live updates"}
-      title={isLive ? "Pause live updates" : "Resume live updates"}
+      title={
+        isLive ? "Pause live updates" : (pausedTitle ?? "Resume live updates")
+      }
       style={
         isLive ?
           ({
@@ -603,6 +608,8 @@ const buildTableColumns = (
         return (
           <div
             className="logs-page__client-info"
+            data-copy-ip={hasIp ? entry.clientIpAddress : undefined}
+            data-copy-hostname={hasHostname ? entry.clientName : undefined}
             onClick={(e) => onClientClick(entry, e.shiftKey)}
             role="button"
             tabIndex={0}
@@ -656,7 +663,10 @@ const buildTableColumns = (
         const { icon, className } = classifyResponseType(entry.responseType);
 
         return (
-          <span className={`logs-page__response-badge ${className}`}>
+          <span
+            className={`logs-page__response-badge ${className}`}
+            data-copy-value={label}
+          >
             <span className="logs-page__response-badge-icon" aria-hidden="true">
               {icon}
             </span>
@@ -674,19 +684,21 @@ const buildTableColumns = (
       render: (entry) => {
         const formattedTime = formatResponseRtt(entry.responseRtt);
         const tooltip = getResponseTimeTooltip(entry);
+        const copyValue = formattedTime === "—" ? undefined : formattedTime;
 
         if (tooltip) {
           return (
             <span
               data-tooltip-id="response-time-tooltip"
               data-tooltip-content={tooltip}
+              data-copy-value={copyValue}
             >
               {formattedTime}
             </span>
           );
         }
 
-        return formattedTime;
+        return <span data-copy-value={copyValue}>{formattedTime}</span>;
       },
     },
     {
@@ -707,6 +719,7 @@ const buildTableColumns = (
           <button
             type="button"
             className={`badge logs-page__status-button ${statusClass}`}
+            data-copy-value={label}
             onClick={(event) => {
               event.stopPropagation();
               onStatusClick(entry);
@@ -1510,7 +1523,12 @@ const LogTableRow = React.memo<LogTableRowProps>(
             : "logs-page__cell";
 
           return (
-            <td key={column.id} className={cellClass} title={title}>
+            <td
+              key={column.id}
+              className={cellClass}
+              title={title}
+              data-column-id={column.id}
+            >
               {content}
             </td>
           );
@@ -1527,12 +1545,274 @@ export function LogsPage() {
     nodes,
     loadCombinedLogs,
     loadNodeLogs,
+    loadQueryLogStorageStatus,
+    loadStoredCombinedLogs,
+    loadStoredNodeLogs,
     advancedBlocking,
     reloadAdvancedBlocking,
     saveAdvancedBlockingConfig,
   } = useTechnitiumState();
 
   const { pushToast } = useToast();
+
+  type LogsTableContextMenuItem = { label: string; value: string };
+
+  type LogsTableContextMenuState = {
+    x: number;
+    y: number;
+    items: LogsTableContextMenuItem[];
+  };
+
+  const [logsTableContextMenu, setLogsTableContextMenu] =
+    useState<LogsTableContextMenuState | null>(null);
+  const logsTableContextMenuRef = useRef<HTMLDivElement | null>(null);
+  const logsTableContextMenuOpenRef = useRef<boolean>(false);
+
+  const logsTableContextMenuResumeRef = useRef<{
+    shouldResume: boolean;
+    previousRefreshSeconds: number;
+  } | null>(null);
+  const logsRefreshSecondsRef = useRef<number>(0);
+  const setLogsRefreshSecondsRef = useRef<React.Dispatch<
+    React.SetStateAction<number>
+  > | null>(null);
+  const setLogsIsAutoRefreshRef = useRef<React.Dispatch<
+    React.SetStateAction<boolean>
+  > | null>(null);
+
+  const closeLogsTableContextMenu = useCallback(() => {
+    setLogsTableContextMenu(null);
+
+    const resumeState = logsTableContextMenuResumeRef.current;
+    if (resumeState?.shouldResume) {
+      logsTableContextMenuResumeRef.current = null;
+
+      const resumeTo = resumeState.previousRefreshSeconds;
+      if (resumeTo > 0) {
+        setLogsRefreshSecondsRef.current?.(resumeTo);
+      }
+    }
+  }, []);
+
+  const pauseLiveRefreshForLogsContextMenu = useCallback(() => {
+    const currentSeconds = logsRefreshSecondsRef.current;
+
+    if (currentSeconds > 0) {
+      logsTableContextMenuResumeRef.current = {
+        shouldResume: true,
+        previousRefreshSeconds: currentSeconds,
+      };
+      // Pause immediately.
+      setLogsIsAutoRefreshRef.current?.(false);
+      setLogsRefreshSecondsRef.current?.(0);
+      return;
+    }
+
+    logsTableContextMenuResumeRef.current = null;
+  }, []);
+
+  const copyTextToClipboard = useCallback(async (text: string) => {
+    if (text.length === 0) {
+      return;
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+    } catch {
+      // Fallback below.
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }, []);
+
+  const extractContextMenuItemsFromTarget = useCallback(
+    (target: EventTarget | null): LogsTableContextMenuItem[] | null => {
+      if (!target || !(target instanceof HTMLElement)) {
+        return null;
+      }
+
+      const cell = target.closest("td");
+      if (!cell || !cell.closest("tbody")) {
+        return null;
+      }
+
+      const columnId = (cell as HTMLElement).dataset.columnId;
+
+      if (columnId === "client") {
+        const container = (cell as HTMLElement).querySelector(
+          ".logs-page__client-info",
+        );
+        if (!container) {
+          return null;
+        }
+
+        const ip = container.getAttribute("data-copy-ip")?.trim() ?? "";
+        const hostname =
+          container.getAttribute("data-copy-hostname")?.trim() ?? "";
+
+        if (ip.length > 0 && hostname.length > 0) {
+          return [
+            { label: "Copy IP", value: ip },
+            { label: "Copy Hostname", value: hostname },
+          ];
+        }
+
+        if (ip.length > 0) {
+          return [{ label: "Copy IP", value: ip }];
+        }
+
+        if (hostname.length > 0) {
+          return [{ label: "Copy Hostname", value: hostname }];
+        }
+
+        return null;
+      }
+
+      // Prefer explicit copy value inside the cell (Response, Status, Response Time, etc.)
+      const explicitInCell = (cell as HTMLElement).querySelector(
+        "[data-copy-value]",
+      );
+      if (explicitInCell) {
+        const value =
+          explicitInCell.getAttribute("data-copy-value")?.trim() ?? "";
+
+        if (columnId === "responseTime" && value === "—") {
+          return null;
+        }
+
+        return value.length > 0 && value !== "—" ?
+            [{ label: "Copy", value }]
+          : null;
+      }
+
+      const value = (cell as HTMLElement).innerText.trim();
+
+      if (columnId === "responseTime" && value === "—") {
+        return null;
+      }
+
+      return value.length > 0 && value !== "—" ?
+          [{ label: "Copy", value }]
+        : null;
+    },
+    [],
+  );
+
+  const handleLogsTableContextMenu = useCallback(
+    (event: React.MouseEvent) => {
+      // Allow native browser context menu via modifier.
+      if (event.shiftKey) {
+        closeLogsTableContextMenu();
+        return;
+      }
+
+      const items = extractContextMenuItemsFromTarget(event.target);
+      if (!items || items.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      pauseLiveRefreshForLogsContextMenu();
+      setLogsTableContextMenu({ x: event.clientX, y: event.clientY, items });
+    },
+    [
+      closeLogsTableContextMenu,
+      extractContextMenuItemsFromTarget,
+      pauseLiveRefreshForLogsContextMenu,
+    ],
+  );
+
+  const handleCopyFromContextMenu = useCallback(
+    async (value: string) => {
+      if (!value) {
+        return;
+      }
+
+      await copyTextToClipboard(value);
+      closeLogsTableContextMenu();
+    },
+    [closeLogsTableContextMenu, copyTextToClipboard],
+  );
+
+  useEffect(() => {
+    logsTableContextMenuOpenRef.current = Boolean(logsTableContextMenu);
+  }, [logsTableContextMenu]);
+
+  useEffect(() => {
+    if (!logsTableContextMenu) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeLogsTableContextMenu();
+      }
+    };
+
+    const handleCloseOnViewportChange = () => {
+      closeLogsTableContextMenu();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleCloseOnViewportChange);
+    window.addEventListener("scroll", handleCloseOnViewportChange, true);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleCloseOnViewportChange);
+      window.removeEventListener("scroll", handleCloseOnViewportChange, true);
+    };
+  }, [closeLogsTableContextMenu, logsTableContextMenu]);
+
+  useEffect(() => {
+    if (!logsTableContextMenu || !logsTableContextMenuRef.current) {
+      return;
+    }
+
+    const rect = logsTableContextMenuRef.current.getBoundingClientRect();
+    const padding = 8;
+
+    let nextX = logsTableContextMenu.x;
+    let nextY = logsTableContextMenu.y;
+
+    if (nextX + rect.width + padding > window.innerWidth) {
+      nextX = Math.max(padding, window.innerWidth - rect.width - padding);
+    }
+
+    if (nextY + rect.height + padding > window.innerHeight) {
+      nextY = Math.max(padding, window.innerHeight - rect.height - padding);
+    }
+
+    if (nextX === logsTableContextMenu.x && nextY === logsTableContextMenu.y) {
+      return;
+    }
+
+    setLogsTableContextMenu((current) => {
+      if (!current) {
+        return current;
+      }
+
+      if (current.x === nextX && current.y === nextY) {
+        return current;
+      }
+
+      return { ...current, x: nextX, y: nextY };
+    });
+  }, [logsTableContextMenu]);
 
   const [mode, setMode] = useState<ViewMode>("combined");
   const [displayMode, setDisplayMode] = useState<DisplayMode>("tail");
@@ -1553,6 +1833,42 @@ export function LogsPage() {
   );
   const [refreshTick, setRefreshTick] = useState<number>(0);
   const [isAutoRefresh, setIsAutoRefresh] = useState<boolean>(false);
+
+  useEffect(() => {
+    logsRefreshSecondsRef.current = refreshSeconds;
+  }, [refreshSeconds]);
+
+  useEffect(() => {
+    setLogsRefreshSecondsRef.current = setRefreshSeconds;
+    setLogsIsAutoRefreshRef.current = setIsAutoRefresh;
+  }, [setRefreshSeconds, setIsAutoRefresh]);
+
+  const [queryLogStorageStatus, setQueryLogStorageStatus] =
+    useState<TechnitiumQueryLogStorageStatus | null>(null);
+  const storedLogsReady = queryLogStorageStatus?.ready === true;
+  const queryLogRetentionHours = queryLogStorageStatus?.retentionHours ?? 24;
+
+  useEffect(() => {
+    const abortController = new AbortController();
+
+    loadQueryLogStorageStatus({ signal: abortController.signal })
+      .then((status) => setQueryLogStorageStatus(status))
+      .catch((error: unknown) => {
+        if (
+          error &&
+          typeof error === "object" &&
+          "name" in error &&
+          (error as { name?: string }).name === "AbortError"
+        ) {
+          return;
+        }
+
+        // Treat errors as "not ready" so the UI stays safe.
+        setQueryLogStorageStatus(null);
+      });
+
+    return () => abortController.abort();
+  }, [loadQueryLogStorageStatus]);
 
   // Tail mode state
   const [tailBuffer, setTailBuffer] = useState<
@@ -1608,6 +1924,62 @@ export function LogsPage() {
   const [qtypeFilter, setQtypeFilter] = useState<string>("all");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+
+  // If an End Date/Time is set, results are no longer "current".
+  // Auto-pause live refresh while an end date is active, and restore when cleared.
+  const endDateAutoPauseActiveRef = useRef<boolean>(false);
+  const endDateAutoResumeSecondsRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const hasEndDate = endDate.trim().length > 0;
+    const isLive = refreshSeconds > 0;
+
+    if (hasEndDate) {
+      if (isLive) {
+        endDateAutoPauseActiveRef.current = true;
+        endDateAutoResumeSecondsRef.current = refreshSeconds;
+        setIsAutoRefresh(false);
+        setRefreshSeconds(0);
+      }
+
+      return;
+    }
+
+    if (!endDateAutoPauseActiveRef.current) {
+      return;
+    }
+
+    // Don't resume while the logs context menu is open; it owns pause/resume.
+    if (logsTableContextMenuOpenRef.current) {
+      return;
+    }
+
+    const resumeSeconds = endDateAutoResumeSecondsRef.current;
+    endDateAutoPauseActiveRef.current = false;
+    endDateAutoResumeSecondsRef.current = null;
+
+    if (refreshSeconds === 0 && typeof resumeSeconds === "number") {
+      setRefreshSeconds(resumeSeconds);
+    }
+  }, [endDate, refreshSeconds, setIsAutoRefresh, setRefreshSeconds]);
+
+  // Date presets and End Date/Time are inherently non-live views.
+  // If an end date is set, force paginated mode (tail mode is always "now").
+  useEffect(() => {
+    const hasEndDate = endDate.trim().length > 0;
+    if (!hasEndDate) {
+      return;
+    }
+
+    if (displayMode !== "tail") {
+      return;
+    }
+
+    setDisplayMode("paginated");
+    setTailBuffer([]);
+    setTailNewestTimestamp(null);
+    setTailPaused(false);
+  }, [displayMode, endDate]);
   const [filterTipDismissed, setFilterTipDismissed] = useState<boolean>(
     loadFilterTipDismissed,
   );
@@ -1640,9 +2012,18 @@ export function LogsPage() {
 
   const handleClientClick = useCallback(
     (entry: TechnitiumCombinedQueryLogEntry, shiftKey: boolean) => {
-      // Prefer hostname over IP address for filtering
+      const hostname = entry.clientName?.trim() || "";
+      const ip = entry.clientIpAddress?.trim() || "";
+
+      // In paginated mode, filtering is done server-side against the SQLite store.
+      // Stored logs persist the best-known client hostname, so prefer hostname
+      // when it exists (fallback to IP).
       const filterValue =
-        entry.clientName?.trim() || entry.clientIpAddress?.trim() || "";
+        displayMode === "paginated" ?
+          hostname && hostname !== ip ?
+            hostname
+          : ip || hostname
+        : hostname || ip;
 
       if (!filterValue) {
         return;
@@ -1657,7 +2038,7 @@ export function LogsPage() {
         setDomainFilter("");
       }
     },
-    [],
+    [displayMode],
   );
 
   const handleDomainClick = useCallback(
@@ -2074,6 +2455,46 @@ export function LogsPage() {
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   }, []);
 
+  const parseDateInputMs = useCallback((value: string): number | null => {
+    if (!value) return null;
+    const ms = new Date(value).getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }, []);
+
+  const clampDateRange = useCallback(
+    (nextStart: string, nextEnd: string) => {
+      const nowMs = Date.now();
+      const retentionStartMs = nowMs - queryLogRetentionHours * 60 * 60 * 1000;
+
+      const startMsRaw = parseDateInputMs(nextStart);
+      const endMsRaw = parseDateInputMs(nextEnd);
+
+      // Clamp end first (end cannot be in the future).
+      let endMs = endMsRaw;
+      if (endMs !== null) {
+        endMs = Math.min(nowMs, Math.max(retentionStartMs, endMs));
+      }
+
+      // Clamp start within retention window, and never after end.
+      let startMs = startMsRaw;
+      if (startMs !== null) {
+        const maxStartMs = endMs ?? nowMs;
+        startMs = Math.min(maxStartMs, Math.max(retentionStartMs, startMs));
+      }
+
+      // If both are set and clamping caused inversion, align start to end.
+      if (startMs !== null && endMs !== null && startMs > endMs) {
+        startMs = endMs;
+      }
+
+      setStartDate(
+        startMs !== null ? formatDateForInput(new Date(startMs)) : "",
+      );
+      setEndDate(endMs !== null ? formatDateForInput(new Date(endMs)) : "");
+    },
+    [formatDateForInput, parseDateInputMs, queryLogRetentionHours],
+  );
+
   const formatDateForApi = useCallback((dateString: string): string => {
     if (!dateString) return "";
     // Convert from datetime-local format (YYYY-MM-DDTHH:mm) to ISO 8601
@@ -2087,8 +2508,10 @@ export function LogsPage() {
       switch (preset) {
         case "last-hour": {
           const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-          setStartDate(formatDateForInput(oneHourAgo));
-          setEndDate(formatDateForInput(now));
+          clampDateRange(
+            formatDateForInput(oneHourAgo),
+            formatDateForInput(now),
+          );
           break;
         }
 
@@ -2096,8 +2519,10 @@ export function LogsPage() {
           const twentyFourHoursAgo = new Date(
             now.getTime() - 24 * 60 * 60 * 1000,
           );
-          setStartDate(formatDateForInput(twentyFourHoursAgo));
-          setEndDate(formatDateForInput(now));
+          clampDateRange(
+            formatDateForInput(twentyFourHoursAgo),
+            formatDateForInput(now),
+          );
           break;
         }
 
@@ -2110,8 +2535,10 @@ export function LogsPage() {
             0,
             0,
           );
-          setStartDate(formatDateForInput(startOfToday));
-          setEndDate(formatDateForInput(now));
+          clampDateRange(
+            formatDateForInput(startOfToday),
+            formatDateForInput(now),
+          );
           break;
         }
 
@@ -2132,18 +2559,19 @@ export function LogsPage() {
             59,
             59,
           );
-          setStartDate(formatDateForInput(startOfYesterday));
-          setEndDate(formatDateForInput(endOfYesterday));
+          clampDateRange(
+            formatDateForInput(startOfYesterday),
+            formatDateForInput(endOfYesterday),
+          );
           break;
         }
 
         case "clear":
-          setStartDate("");
-          setEndDate("");
+          clampDateRange("", "");
           break;
       }
     },
-    [formatDateForInput],
+    [clampDateRange, formatDateForInput],
   );
 
   const blockDialogSnapshot = useMemo(() => {
@@ -2979,6 +3407,11 @@ export function LogsPage() {
         const effectivePageNumber = displayMode === "tail" ? 1 : pageNumber;
 
         if (mode === "combined") {
+          const combinedLogsLoader =
+            displayMode === "tail" ? loadCombinedLogs
+            : storedLogsReady ? loadStoredCombinedLogs
+            : loadCombinedLogs;
+
           const filterParams = {
             pageNumber: effectivePageNumber,
             entriesPerPage:
@@ -3006,11 +3439,18 @@ export function LogsPage() {
               qtypeFilter !== "all" && { qtype: qtypeFilter }),
           };
 
-          const data = await loadCombinedLogs(filterParams, {
+          const data = await combinedLogsLoader(filterParams, {
             signal: abortController.signal,
           });
 
           if (cancelled) {
+            return;
+          }
+
+          // If the user opened the custom context menu mid-refresh, don't apply
+          // incoming results (it can cause the table to jump under the cursor).
+          if (logsTableContextMenuOpenRef.current) {
+            setLoadingState("idle");
             return;
           }
 
@@ -3053,7 +3493,12 @@ export function LogsPage() {
             setNodeSnapshot(undefined);
           }
         } else if (selectedNodeId) {
-          const data = await loadNodeLogs(
+          const nodeLogsLoader =
+            displayMode === "tail" ? loadNodeLogs
+            : storedLogsReady ? loadStoredNodeLogs
+            : loadNodeLogs;
+
+          const data = await nodeLogsLoader(
             selectedNodeId,
             {
               pageNumber: effectivePageNumber,
@@ -3087,6 +3532,13 @@ export function LogsPage() {
           );
 
           if (cancelled) {
+            return;
+          }
+
+          // If the user opened the custom context menu mid-refresh, don't apply
+          // incoming results (it can cause the table to jump under the cursor).
+          if (logsTableContextMenuOpenRef.current) {
+            setLoadingState("idle");
             return;
           }
 
@@ -3193,8 +3645,11 @@ export function LogsPage() {
     pageNumber,
     refreshTick,
     isAutoRefresh,
+    storedLogsReady,
     loadCombinedLogs,
+    loadStoredCombinedLogs,
     loadNodeLogs,
+    loadStoredNodeLogs,
     displayMode,
     tailPaused,
     mergeTailEntries,
@@ -3564,6 +4019,57 @@ export function LogsPage() {
     setPageNumber((prev) => Math.min(totalPages, prev + 1));
   };
 
+  const [pageJumpOpen, setPageJumpOpen] = useState<boolean>(false);
+  const [pageJumpValue, setPageJumpValue] = useState<string>("");
+  const pageJumpInputRef = useRef<HTMLInputElement | null>(null);
+
+  const openPageJump = useCallback(() => {
+    setPageJumpValue(String(pageNumber));
+    setPageJumpOpen(true);
+  }, [pageNumber]);
+
+  const closePageJump = useCallback(() => {
+    setPageJumpOpen(false);
+  }, []);
+
+  const commitPageJump = useCallback(() => {
+    const raw = pageJumpValue.trim();
+    if (!raw) {
+      closePageJump();
+      return;
+    }
+
+    const next = Number.parseInt(raw, 10);
+    if (!Number.isFinite(next)) {
+      closePageJump();
+      return;
+    }
+
+    const clamped = Math.min(totalPages, Math.max(1, next));
+    setIsAutoRefresh(false);
+    setPageNumber(clamped);
+    closePageJump();
+  }, [
+    closePageJump,
+    pageJumpValue,
+    setPageNumber,
+    setIsAutoRefresh,
+    totalPages,
+  ]);
+
+  useEffect(() => {
+    if (!pageJumpOpen) {
+      return;
+    }
+
+    const id = window.requestAnimationFrame(() => {
+      pageJumpInputRef.current?.focus();
+      pageJumpInputRef.current?.select();
+    });
+
+    return () => window.cancelAnimationFrame(id);
+  }, [pageJumpOpen]);
+
   const handleModeChange = (nextMode: ViewMode) => {
     setIsAutoRefresh(false);
     setMode(nextMode);
@@ -3592,10 +4098,10 @@ export function LogsPage() {
         <header className="logs-page__header">
           <div className="logs-page__header-title">
             <h1>Query Logs</h1>
-            <p className="logs-page__subtitle">
+            {/* <p className="logs-page__subtitle">
               Review DNS query activity across Technitium DNS nodes and inspect
               combined views for parity checks.
-            </p>
+            </p> */}
           </div>
         </header>
 
@@ -3839,7 +4345,11 @@ export function LogsPage() {
               name="start-date-filter"
               type="datetime-local"
               value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
+              min={formatDateForInput(
+                new Date(Date.now() - queryLogRetentionHours * 60 * 60 * 1000),
+              )}
+              max={endDate || formatDateForInput(new Date())}
+              onChange={(event) => clampDateRange(event.target.value, endDate)}
               placeholder="Start date/time"
             />
           </label>
@@ -3850,7 +4360,18 @@ export function LogsPage() {
               name="end-date-filter"
               type="datetime-local"
               value={endDate}
-              onChange={(event) => setEndDate(event.target.value)}
+              min={
+                startDate ||
+                formatDateForInput(
+                  new Date(
+                    Date.now() - queryLogRetentionHours * 60 * 60 * 1000,
+                  ),
+                )
+              }
+              max={formatDateForInput(new Date())}
+              onChange={(event) =>
+                clampDateRange(startDate, event.target.value)
+              }
               placeholder="End date/time"
             />
           </label>
@@ -3860,7 +4381,11 @@ export function LogsPage() {
               id="client-filter"
               name="client-filter"
               type="text"
-              placeholder="Contains… (or click client)"
+              placeholder={
+                displayMode === "paginated" ?
+                  "Hostname/IP contains… (or click client)"
+                : "Contains… (or click client)"
+              }
               value={clientFilter}
               onChange={(event) => setClientFilter(event.target.value)}
             />
@@ -3935,39 +4460,106 @@ export function LogsPage() {
           >
             Clear filters
           </button>
-          <div className="logs-page__date-presets">
-            <button
-              type="button"
-              className="logs-page__date-preset"
-              onClick={() => applyDatePreset("last-hour")}
-              title="Show logs from the last hour"
-            >
-              Last Hour
-            </button>
-            <button
-              type="button"
-              className="logs-page__date-preset"
-              onClick={() => applyDatePreset("last-24h")}
-              title="Show logs from the last 24 hours"
-            >
-              Last 24h
-            </button>
-            <button
-              type="button"
-              className="logs-page__date-preset"
-              onClick={() => applyDatePreset("today")}
-              title="Show logs from today"
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              className="logs-page__date-preset"
-              onClick={() => applyDatePreset("yesterday")}
-              title="Show logs from yesterday"
-            >
-              Yesterday
-            </button>
+          <div
+            className={`logs-page__date-presets ${storedLogsReady ? "" : "logs-page__date-presets--disabled"}`}
+            aria-disabled={!storedLogsReady}
+          >
+            {storedLogsReady ?
+              <button
+                type="button"
+                className="logs-page__date-preset"
+                onClick={() => applyDatePreset("last-24h")}
+                title="Show logs from the last 24 hours"
+              >
+                Last 24h
+              </button>
+            : <span
+                className="logs-page__date-preset-disabled"
+                title="Requires stored logs (SQLite)"
+              >
+                <button
+                  type="button"
+                  className="logs-page__date-preset"
+                  disabled
+                  aria-disabled="true"
+                >
+                  Last 24h
+                </button>
+              </span>
+            }
+
+            {storedLogsReady ?
+              <button
+                type="button"
+                className="logs-page__date-preset"
+                onClick={() => applyDatePreset("last-hour")}
+                title="Show logs from the last hour"
+              >
+                Last Hour
+              </button>
+            : <span
+                className="logs-page__date-preset-disabled"
+                title="Requires stored logs (SQLite)"
+              >
+                <button
+                  type="button"
+                  className="logs-page__date-preset"
+                  disabled
+                  aria-disabled="true"
+                >
+                  Last Hour
+                </button>
+              </span>
+            }
+
+            {storedLogsReady ?
+              <button
+                type="button"
+                className="logs-page__date-preset"
+                onClick={() => applyDatePreset("yesterday")}
+                title="Show logs from yesterday"
+              >
+                Yesterday
+              </button>
+            : <span
+                className="logs-page__date-preset-disabled"
+                title="Requires stored logs (SQLite)"
+              >
+                <button
+                  type="button"
+                  className="logs-page__date-preset"
+                  disabled
+                  aria-disabled="true"
+                >
+                  Yesterday
+                </button>
+              </span>
+            }
+
+            {storedLogsReady ?
+              <button
+                type="button"
+                className="logs-page__date-preset"
+                onClick={() => applyDatePreset("today")}
+                title="Show logs from today"
+              >
+                Today
+              </button>
+            : <span
+                className="logs-page__date-preset-disabled"
+                title="Requires stored logs (SQLite)"
+              >
+                <button
+                  type="button"
+                  className="logs-page__date-preset"
+                  disabled
+                  aria-disabled="true"
+                >
+                  Today
+                </button>
+              </span>
+            }
+
             {(startDate || endDate) && (
               <button
                 type="button"
@@ -4148,7 +4740,47 @@ export function LogsPage() {
                         Prev
                       </button>
                       <span>
-                        {pageNumber} / {totalPages}
+                        {pageJumpOpen ?
+                          <span className="logs-page__pager-page-jump">
+                            <input
+                              ref={pageJumpInputRef}
+                              className="logs-page__pager-page-input"
+                              type="number"
+                              inputMode="numeric"
+                              min={1}
+                              max={totalPages}
+                              value={pageJumpValue}
+                              onChange={(event) =>
+                                setPageJumpValue(event.target.value)
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  commitPageJump();
+                                  return;
+                                }
+
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  closePageJump();
+                                }
+                              }}
+                              onBlur={() => commitPageJump()}
+                              aria-label={`Jump to page (1 to ${totalPages})`}
+                            />
+                            <span className="logs-page__pager-page-total">
+                              / {totalPages}
+                            </span>
+                          </span>
+                        : <button
+                            type="button"
+                            className="logs-page__pager-page-button"
+                            onClick={openPageJump}
+                            title="Jump to page"
+                          >
+                            {pageNumber} / {totalPages}
+                          </button>
+                        }
                         {hasMorePages && (
                           <span
                             className="logs-page__more-results-warning"
@@ -4212,7 +4844,11 @@ export function LogsPage() {
                   }}
                   title={
                     refreshSeconds === 0 ?
-                      "Click to resume auto-refresh"
+                      endDate.trim().length > 0 ?
+                        "Auto-refresh paused because End Date/Time is set. Clear it to resume."
+                      : logsTableContextMenu ?
+                        "Auto-refresh paused while the context menu is open."
+                      : "Click to resume auto-refresh"
                     : "Click to pause auto-refresh"
                   }
                 >
@@ -4502,6 +5138,7 @@ export function LogsPage() {
             // Table view (desktop or compact-table mode on mobile)
           : <div
               className={`logs-page__table-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
+              onContextMenu={handleLogsTableContextMenu}
             >
               <table className="logs-page__table">
                 <colgroup>
@@ -4597,6 +5234,44 @@ export function LogsPage() {
                   }
                 </tbody>
               </table>
+
+              {logsTableContextMenu ?
+                <div
+                  className="logs-page__context-menu-overlay"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    closeLogsTableContextMenu();
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    closeLogsTableContextMenu();
+                  }}
+                >
+                  <div
+                    ref={logsTableContextMenuRef}
+                    className="logs-page__context-menu"
+                    style={{
+                      left: logsTableContextMenu.x,
+                      top: logsTableContextMenu.y,
+                    }}
+                    role="menu"
+                    onMouseDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                  >
+                    {logsTableContextMenu.items.map((item) => (
+                      <button
+                        key={`${item.label}-${item.value}`}
+                        type="button"
+                        className="logs-page__context-menu-item"
+                        onClick={() => handleCopyFromContextMenu(item.value)}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              : null}
             </div>
 
         }
@@ -4992,6 +5667,13 @@ export function LogsPage() {
           <FloatingLiveToggle
             isLive={refreshSeconds > 0}
             refreshSeconds={refreshSeconds}
+            pausedTitle={
+              endDate.trim().length > 0 ?
+                "Paused because End Date/Time is set. Clear it to resume."
+              : logsTableContextMenu ?
+                "Paused while the context menu is open."
+              : undefined
+            }
             onToggle={(event) => {
               event.preventDefault();
               event.stopPropagation();

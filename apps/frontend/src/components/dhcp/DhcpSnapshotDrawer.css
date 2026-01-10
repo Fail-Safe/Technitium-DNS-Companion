@@ -333,6 +333,21 @@
   box-shadow: none;
 }
 
+.drawer-pull[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.drawer-pull[aria-disabled="true"]:hover {
+  transform: translateY(-50%);
+  box-shadow: none;
+}
+
+.drawer-pull[aria-disabled="true"]:active {
+  transform: translateY(-50%);
+}
+
 @media (max-width: 768px) {
   .drawer-pull {
     /* Keep the same pinned, vertical affordance on mobile (matches desktop) */

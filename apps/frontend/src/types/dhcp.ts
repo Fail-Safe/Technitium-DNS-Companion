@@ -97,6 +97,7 @@ export interface TechnitiumCloneDhcpScopeRequest {
   targetNodeId?: string;
   newScopeName?: string;
   enableOnTarget?: boolean;
+  preserveOfferDelayTime?: boolean;
   overrides?: TechnitiumDhcpScopeOverrides;
 }
 
@@ -159,6 +160,7 @@ export interface DhcpBulkSyncRequest {
   strategy: DhcpBulkSyncStrategy;
   scopeNames?: string[]; // Optional: sync only specific scopes
   enableOnTarget?: boolean;
+  preserveOfferDelayTime?: boolean;
 }
 
 export interface DhcpBulkSyncScopeResult {

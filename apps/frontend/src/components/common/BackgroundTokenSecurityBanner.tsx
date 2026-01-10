@@ -15,18 +15,26 @@ export type BackgroundPtrTokenValidationSummary = {
 export function BackgroundTokenSecurityBanner({
   backgroundPtrToken,
   clusterTokenConfigured,
+  clusterTokenUsage,
   authenticated,
 }: {
   backgroundPtrToken: BackgroundPtrTokenValidationSummary | undefined;
   clusterTokenConfigured: boolean | undefined;
+  clusterTokenUsage?: { usedForNodeIds: string[] };
   authenticated: boolean;
 }) {
   const [migrationOpen, setMigrationOpen] = useState(false);
 
+  const sessionAuthEnabled = backgroundPtrToken?.sessionAuthEnabled ?? true;
+
+  const showClusterTokenDeprecatedBanner = clusterTokenConfigured === true;
+
+  const clusterFallbackNodeIds =
+    clusterTokenUsage?.usedForNodeIds?.filter(Boolean) ?? [];
+  const clusterTokenIsBeingUsedAsFallback = clusterFallbackNodeIds.length > 0;
+
   const showMigrationCta =
-    authenticated &&
-    clusterTokenConfigured === true &&
-    (backgroundPtrToken?.sessionAuthEnabled ?? true);
+    authenticated && showClusterTokenDeprecatedBanner && sessionAuthEnabled;
 
   const showUnsafeBackgroundTokenBanner =
     backgroundPtrToken?.configured === true &&
@@ -55,36 +63,62 @@ export function BackgroundTokenSecurityBanner({
     unsafeDetails,
   ]);
 
-  if (!showMigrationCta && !showUnsafeBackgroundTokenBanner) {
+  if (!showClusterTokenDeprecatedBanner && !showUnsafeBackgroundTokenBanner) {
     return null;
   }
 
   return (
     <>
-      {showMigrationCta ?
+      {showClusterTokenDeprecatedBanner ?
         <div
           className="background-token-security-banner background-token-security-banner--warning"
           role="status"
         >
           <div className="background-token-security-banner__content">
             <p className="background-token-security-banner__title">
-              TECHNITIUM_CLUSTER_TOKEN is deprecated and will be removed in a
-              future release
+              TECHNITIUM_CLUSTER_TOKEN is deprecated and will be removed in the
+              v1.4 release
             </p>
             <p className="background-token-security-banner__message">
-              Migrate to a dedicated read-only{" "}
-              <strong>TECHNITIUM_BACKGROUND_TOKEN</strong> so background PTR
-              lookups can run without an admin token.
+              {showMigrationCta ?
+                <>
+                  Migrate to a dedicated read-only{" "}
+                  <strong>TECHNITIUM_BACKGROUND_TOKEN</strong> so background PTR
+                  lookups can run without an admin token.
+                </>
+              : <>
+                  {clusterTokenIsBeingUsedAsFallback ?
+                    <>
+                      This token is currently being used as a fallback for:{" "}
+                      <strong>{clusterFallbackNodeIds.join(", ")}</strong>.
+                      Enable <strong>AUTH_SESSION_ENABLED=true</strong> and set
+                      a least-privilege{" "}
+                      <strong>TECHNITIUM_BACKGROUND_TOKEN</strong> to adopt
+                      Technitium login/RBAC, then remove{" "}
+                      <strong>TECHNITIUM_CLUSTER_TOKEN</strong>.
+                    </>
+                  : <>
+                      This token is configured but may no longer be needed.
+                      Remove <strong>TECHNITIUM_CLUSTER_TOKEN</strong> to
+                      prepare for v1.4. Background jobs use{" "}
+                      <strong>TECHNITIUM_BACKGROUND_TOKEN</strong> in
+                      session-auth mode.
+                    </>
+                  }
+                </>
+              }
             </p>
           </div>
-          <div className="background-token-security-banner__actions">
-            <button
-              className="btn btn--secondary"
-              onClick={() => setMigrationOpen(true)}
-            >
-              Migrate
-            </button>
-          </div>
+          {showMigrationCta ?
+            <div className="background-token-security-banner__actions">
+              <button
+                className="btn btn--secondary"
+                onClick={() => setMigrationOpen(true)}
+              >
+                Migrate
+              </button>
+            </div>
+          : null}
         </div>
       : null}
 

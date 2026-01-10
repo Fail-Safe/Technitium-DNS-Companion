@@ -65,13 +65,12 @@
 .domain-management-right {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1rem;
 }
 
 /* === Form Label === */
 .form-label {
   display: block;
-  margin-bottom: 0.5rem;
   font-weight: 600;
   font-size: 0.9rem;
   color: var(--color-text-primary);
@@ -81,6 +80,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  margin-top: 3rem;
 }
 
 /* === Alert Boxes === */

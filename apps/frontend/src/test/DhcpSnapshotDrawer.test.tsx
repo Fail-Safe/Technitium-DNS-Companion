@@ -7,7 +7,7 @@ import { DhcpSnapshotDrawer } from "../components/dhcp/DhcpSnapshotDrawer";
 import type { DhcpSnapshot, DhcpSnapshotMetadata } from "../types/dhcp";
 
 const pushToast = vi.fn();
-vi.mock("../context/ToastContext", () => ({ useToast: () => ({ pushToast }) }));
+vi.mock("../context/useToast", () => ({ useToast: () => ({ pushToast }) }));
 
 type DrawerMocks = {
   listSnapshots?: ReturnType<typeof vi.fn>;

@@ -18,8 +18,8 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useTechnitiumState } from "../../context/TechnitiumContext";
-import { useToast } from "../../context/ToastContext";
+import { useTechnitiumState } from "../../context/useTechnitiumState";
+import { useToast } from "../../context/useToast";
 import {
   useBlockListCatalog,
   type HageziListInfo,
@@ -204,7 +204,7 @@ export function BuiltInBlockingEditor({
     temporaryDisableBlocking,
     reEnableBlocking,
     forceBlockListUpdate,
-    createDhcpSnapshot,
+    createDnsFilteringSnapshot,
   } = useTechnitiumState();
   const { pushToast } = useToast();
   const {
@@ -1047,7 +1047,10 @@ export function BuiltInBlockingEditor({
     try {
       // Capture an automatic snapshot for rollback before applying changes
       try {
-        await createDhcpSnapshot(selectedNodeId, "automatic");
+        await createDnsFilteringSnapshot(selectedNodeId, {
+          method: "built-in",
+          origin: "automatic",
+        });
       } catch (snapshotError) {
         console.warn("Failed to capture automatic snapshot", snapshotError);
         pushToast({
@@ -1182,6 +1185,7 @@ export function BuiltInBlockingEditor({
   }, [
     selectedNodeId,
     isDirty,
+    createDnsFilteringSnapshot,
     customAddressError,
     draftSettings,
     settings,
@@ -1196,7 +1200,6 @@ export function BuiltInBlockingEditor({
     deleteBlockedDomain,
     loadSettings,
     loadDomains,
-    createDhcpSnapshot,
     onRefresh,
     pushToast,
   ]);
@@ -1350,36 +1353,45 @@ export function BuiltInBlockingEditor({
           <h2>Built-in Blocking</h2>
           <p>Manage global allow and block lists for DNS filtering.</p>
         </div>
-        {snapshot && (
-          <div className="built-in-blocking-editor__metrics">
-            <div className="built-in-blocking-editor__metric">
-              <span className="built-in-blocking-editor__metric-value">
-                {draftBlockedDomains.size.toLocaleString()}
-              </span>
-              <span className="built-in-blocking-editor__metric-label">
-                Blocked
-              </span>
+        <div
+          style={{
+            display: "flex",
+            gap: "0.75rem",
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          {snapshot && (
+            <div className="built-in-blocking-editor__metrics">
+              <div className="built-in-blocking-editor__metric">
+                <span className="built-in-blocking-editor__metric-value">
+                  {draftBlockedDomains.size.toLocaleString()}
+                </span>
+                <span className="built-in-blocking-editor__metric-label">
+                  Blocked
+                </span>
+              </div>
+              <div className="built-in-blocking-editor__metric">
+                <span className="built-in-blocking-editor__metric-value">
+                  {draftAllowedDomains.size.toLocaleString()}
+                </span>
+                <span className="built-in-blocking-editor__metric-label">
+                  Allowed
+                </span>
+              </div>
+              <div className="built-in-blocking-editor__metric">
+                <span
+                  className={`built-in-blocking-editor__metric-value ${snapshot.metrics.blockingEnabled ? "built-in-blocking-editor__metric-value--active" : "built-in-blocking-editor__metric-value--inactive"}`}
+                >
+                  {snapshot.metrics.blockingEnabled ? "ON" : "OFF"}
+                </span>
+                <span className="built-in-blocking-editor__metric-label">
+                  Status
+                </span>
+              </div>
             </div>
-            <div className="built-in-blocking-editor__metric">
-              <span className="built-in-blocking-editor__metric-value">
-                {draftAllowedDomains.size.toLocaleString()}
-              </span>
-              <span className="built-in-blocking-editor__metric-label">
-                Allowed
-              </span>
-            </div>
-            <div className="built-in-blocking-editor__metric">
-              <span
-                className={`built-in-blocking-editor__metric-value ${snapshot.metrics.blockingEnabled ? "built-in-blocking-editor__metric-value--active" : "built-in-blocking-editor__metric-value--inactive"}`}
-              >
-                {snapshot.metrics.blockingEnabled ? "ON" : "OFF"}
-              </span>
-              <span className="built-in-blocking-editor__metric-label">
-                Status
-              </span>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </header>
 
       {/* Tab navigation */}
@@ -1629,62 +1641,64 @@ export function BuiltInBlockingEditor({
                         icon={activeTab === "blocked" ? faBan : faShieldAlt}
                       />
                       <p>No matching {activeTab} domains found</p>
-                      {searchQuery && (
-                        <p className="built-in-blocking-editor__empty-hint">
-                          Try a different search term
-                        </p>
+                      {snapshot && (
+                        <div className="built-in-blocking-editor__metrics">
+                          <div className="built-in-blocking-editor__metric">
+                            <span className="built-in-blocking-editor__metric-value">
+                              {draftBlockedDomains.size.toLocaleString()}
+                            </span>
+                            <span className="built-in-blocking-editor__metric-label">
+                              Blocked
+                            </span>
+                          </div>
+                          <div className="built-in-blocking-editor__metric">
+                            <span className="built-in-blocking-editor__metric-value">
+                              {draftAllowedDomains.size.toLocaleString()}
+                            </span>
+                            <span className="built-in-blocking-editor__metric-label">
+                              Allowed
+                            </span>
+                          </div>
+                          <div className="built-in-blocking-editor__metric">
+                            <span
+                              className={`built-in-blocking-editor__metric-value ${snapshot.metrics.blockingEnabled ? "built-in-blocking-editor__metric-value--active" : "built-in-blocking-editor__metric-value--inactive"}`}
+                            >
+                              {snapshot.metrics.blockingEnabled ? "ON" : "OFF"}
+                            </span>
+                            <span className="built-in-blocking-editor__metric-label">
+                              Status
+                            </span>
+                          </div>
+                        </div>
                       )}
                     </div>
                   );
                 }
 
+                const baselineDomains =
+                  activeTab === "allowed" ?
+                    baselineAllowedDomains
+                  : baselineBlockedDomains;
+
                 return (
                   <DomainTreeView
                     tree={currentTree}
-                    type={activeTab as "blocked" | "allowed"}
-                    onEdit={(domain) => {
-                      handleStartEdit(domain);
-                      setEditDomainValue(domain);
-                      setEditDomainError(null);
-                    }}
-                    onDelete={(domain) => {
-                      const currentDraft =
-                        activeTab === "allowed" ? draftAllowedDomains : (
-                          draftBlockedDomains
-                        );
-                      const newDraft = new Set(currentDraft);
-                      newDraft.delete(domain);
-                      if (activeTab === "allowed") {
-                        setDraftAllowedDomains(newDraft);
-                      } else {
-                        setDraftBlockedDomains(newDraft);
-                      }
-                    }}
+                    type={activeTab}
+                    baselineDomains={baselineDomains}
                     searchTerm={searchQuery}
+                    onEdit={handleStartEdit}
+                    onDelete={handleDeleteDomain}
                     editingDomain={editingDomain}
                     editDomainValue={editDomainValue}
                     editDomainError={editDomainError}
-                    onChangeEditValue={(value) => {
-                      setEditDomainValue(value);
-                      setEditDomainError(null);
-                    }}
+                    onChangeEditValue={setEditDomainValue}
                     onSaveEdit={handleSaveEdit}
                     onCancelEdit={handleCancelEdit}
                     saving={saving}
-                    pendingRenames={renameChanges
-                      .filter((r) => r.list === activeTab)
-                      .map(({ from, to }) => ({ from, to }))}
-                    baselineDomains={
-                      activeTab === "allowed" ?
-                        baselineAllowedDomains
-                      : baselineBlockedDomains
-                    }
                   />
                 );
               })()
-              // Flat List Mode (existing table)
             : (() => {
-                // Get draft and baseline domains for current tab
                 const draftDomains =
                   activeTab === "allowed" ? draftAllowedDomains : (
                     draftBlockedDomains
@@ -1694,8 +1708,6 @@ export function BuiltInBlockingEditor({
                     baselineAllowedDomains
                   : baselineBlockedDomains;
 
-                // Merge draft + baseline to show pending removals too
-                // A domain in baseline but not in draft = pending removal
                 // A domain in draft but not in baseline = pending add
                 const allDomains = new Set([
                   ...draftDomains,

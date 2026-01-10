@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { clearAuthRedirectReason } from "../config";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
 import { isNodeSessionRequiredButMissing } from "../utils/authSession";
 
 export default function LoginPage() {

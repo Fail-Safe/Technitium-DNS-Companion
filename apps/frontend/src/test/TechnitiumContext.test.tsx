@@ -1,10 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  TechnitiumProvider,
-  useTechnitiumState,
-} from "../context/TechnitiumContext";
+import { TechnitiumProvider } from "../context/TechnitiumContext";
+import { useTechnitiumState } from "../context/useTechnitiumState";
 
 /**
  * TechnitiumContext React Hook Integration Tests

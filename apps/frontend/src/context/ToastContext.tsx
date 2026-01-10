@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import {
-  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -12,8 +11,11 @@ import {
   getAuthRedirectReason,
   getAuthRedirectToastShownReason,
   getAuthUnauthorizedEventName,
+  getNetworkErrorEventName,
+  getNetworkRecoveredEventName,
   markAuthRedirectToastShown,
 } from "../config";
+import { ToastContext } from "./toastContextInstance";
 
 type ToastTone = "info" | "success" | "error";
 
@@ -29,17 +31,18 @@ interface ToastOptions {
   timeout?: number;
 }
 
-interface ToastContextValue {
+export interface ToastContextValue {
   toasts: ToastRecord[];
   pushToast: (options: ToastOptions) => string;
   dismissToast: (id: string) => void;
 }
 
-const ToastContext = createContext<ToastContextValue | undefined>(undefined);
-
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastRecord[]>([]);
   const timersRef = useRef<Map<string, number>>(new Map());
+
+  // Only show "Reconnected" if we previously showed "Connection lost".
+  const hasShownNetworkErrorToastRef = useRef(false);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((previous) => previous.filter((toast) => toast.id !== id));
@@ -127,6 +130,81 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(eventName, onUnauthorized);
   }, [pushToast]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // Keep this conservative: one toast per minute max, even if multiple
+    // concurrent requests fail while the network is down.
+    const throttleMs = 60_000;
+    let lastShownAt = 0;
+
+    const onNetworkError = () => {
+      const now = Date.now();
+      if (now - lastShownAt < throttleMs) {
+        return;
+      }
+      lastShownAt = now;
+
+      // If we're already redirecting due to auth expiry, avoid extra noise.
+      const redirectReason = getAuthRedirectReason();
+      if (
+        redirectReason === "session-expired" ||
+        redirectReason === "node-session-expired"
+      ) {
+        return;
+      }
+
+      pushToast({
+        message: "Connection lost — retrying…",
+        tone: "info",
+        timeout: 4500,
+      });
+
+      hasShownNetworkErrorToastRef.current = true;
+    };
+
+    const eventName = getNetworkErrorEventName();
+    window.addEventListener(eventName, onNetworkError);
+    return () => window.removeEventListener(eventName, onNetworkError);
+  }, [pushToast]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // Keep recovery messages conservative too.
+    const throttleMs = 60_000;
+    let lastShownAt = 0;
+
+    const onNetworkRecovered = () => {
+      const now = Date.now();
+      if (now - lastShownAt < throttleMs) {
+        return;
+      }
+
+      // If we're already redirecting due to auth expiry, avoid extra noise.
+      const redirectReason = getAuthRedirectReason();
+      if (
+        redirectReason === "session-expired" ||
+        redirectReason === "node-session-expired"
+      ) {
+        return;
+      }
+
+      if (!hasShownNetworkErrorToastRef.current) {
+        return;
+      }
+
+      lastShownAt = now;
+      hasShownNetworkErrorToastRef.current = false;
+
+      pushToast({ message: "Reconnected", tone: "success", timeout: 3500 });
+    };
+
+    const eventName = getNetworkRecoveredEventName();
+    window.addEventListener(eventName, onNetworkRecovered);
+    return () => window.removeEventListener(eventName, onNetworkRecovered);
+  }, [pushToast]);
+
   const value = useMemo<ToastContextValue>(
     () => ({ toasts, pushToast, dismissToast }),
     [toasts, pushToast, dismissToast],
@@ -146,12 +224,6 @@ function useToastContext() {
     throw new Error("useToast must be used within a ToastProvider");
   }
   return context;
-}
-
-// eslint-disable-next-line react-refresh/only-export-components -- Hook export is safe for fast refresh.
-export function useToast() {
-  const { pushToast } = useToastContext();
-  return { pushToast };
 }
 
 function ToastViewportContent() {
