@@ -9,6 +9,41 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-01-09
+
+### Added
+
+- Query Logs: custom right-click context menu to copy the value under the cursor (Shift+right-click preserves the native browser context menu).
+- Query Logs: optional SQLite rolling query log store for accurate time-window browsing (e.g., “Last 24h”), including new stored-log endpoints and a storage status endpoint.
+- Query Logs: support `statusFilter=blocked|allowed` filtering.
+- Configuration: DNS Filtering History (snapshots) for both Built-in Blocking and Advanced Blocking (create/list/view/pin/note/restore/delete), including best-effort automatic snapshot creation before Advanced Blocking saves.
+- DHCP: “Preserve Offer Delay Time” option for scope clone and bulk sync.
+- Split Horizon PTR: PTR record management with safe deletions, adoption of existing records, sync workflow, and history/zone snapshots.
+
+### Changed
+
+- Query Logs: live refresh pauses while the custom context menu is open and when an End Date/Time is set; results are ignored while the menu is open to prevent row-jumps under the cursor.
+- Query Logs: date presets are disabled with tooltips when stored logs are unavailable.
+- Query Logs: improved paging stability, including “click page indicator to jump to page”.
+- Authentication: improved session-expiration handling and redirect/toast consistency.
+- Configuration: improved domain entry sort + drag behavior.
+- Frontend: added `useAuth`, `useToast`, and `useTechnitiumState` hooks and stabilized Context instances to avoid Vite HMR Provider/Consumer mismatches.
+
+### Fixed
+
+- PWA: reduced stale shell/cache pitfalls.
+
+### Docs
+
+- Query Logs: documented the optional SQLite rolling query log store and cross-linked it from server-side filtering docs.
+- Docs: formatting/section-header consistency updates.
+
+### Testing
+
+- Advanced Blocking: added unit tests for config serialization/normalization and added backend e2e coverage for save/get round-trip (including numeric-string normalization).
+- Frontend: added tests for `apiFetch` network/unauthorized event behavior.
+- E2E: made Playwright mock backend deterministic.
+
 ## [1.2.5] - 2025-12-28
 
 ### Added
@@ -180,7 +215,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.5...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.5...v1.3.0
 [1.2.5]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.2...v1.2.3
