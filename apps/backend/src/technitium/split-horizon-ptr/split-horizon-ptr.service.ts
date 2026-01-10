@@ -468,9 +468,8 @@ export class SplitHorizonPtrService {
           ).toLowerCase();
           if (!ownerRel) continue;
           const ptr = this.extractPtrTarget(rec);
-          const entry: ExistingPtr =
-            ptr ?
-              {
+          const entry: ExistingPtr = ptr
+            ? {
                 raw: ptr,
                 normalized: this.normalizeHostname(ptr),
                 comments: rec.comments,
@@ -497,16 +496,13 @@ export class SplitHorizonPtrService {
     // 3) Apply record changes.
     for (const planned of preview.plannedRecords) {
       const resolvedTarget =
-        (
-          planned.status === "conflict" &&
-          planned.conflictReason === "multiple-source-hostnames"
-        ) ?
-          sourceHostnameResolutionByIp.get(planned.ip)
-        : undefined;
+        planned.status === "conflict" &&
+        planned.conflictReason === "multiple-source-hostnames"
+          ? sourceHostnameResolutionByIp.get(planned.ip)
+          : undefined;
 
-      const effectivePlanned: SplitHorizonPtrPlannedRecord =
-        resolvedTarget ?
-          {
+      const effectivePlanned: SplitHorizonPtrPlannedRecord = resolvedTarget
+        ? {
             ...planned,
             status: "create-record",
             targetHostname: resolvedTarget,
@@ -543,7 +539,8 @@ export class SplitHorizonPtrService {
         continue;
       }
 
-      const existingForZone = existingByZoneLower.get(zoneLower) ?? new Map();
+      const existingForZone =
+        existingByZoneLower.get(zoneLower) ?? new Map<string, ExistingPtr[]>();
       const existingPtrs = existingForZone.get(ownerLower) ?? [];
 
       if (effectivePlanned.status === "delete-record") {
@@ -587,7 +584,7 @@ export class SplitHorizonPtrService {
           continue;
         }
 
-        const current = managedPtrs[0]!;
+        const current = managedPtrs[0];
         if (!current.raw) {
           actions.push({
             kind: "delete-record",
@@ -671,7 +668,7 @@ export class SplitHorizonPtrService {
           p.normalized.toLowerCase() === normalizedTarget.toLowerCase(),
       );
       if (hasDesired && existingPtrs.length === 1) {
-        const existing = existingPtrs[0]!;
+        const existing = existingPtrs[0];
         const managedForThisSource =
           existing.managed?.sourceZoneName &&
           existing.managed.sourceZoneName.toLowerCase() ===
@@ -806,19 +803,18 @@ export class SplitHorizonPtrService {
 
       if (dryRun) {
         actions.push({
-          kind:
-            shouldCreate ? "create-record"
-            : shouldUpdate ? "update-record"
-            : "noop",
+          kind: shouldCreate
+            ? "create-record"
+            : shouldUpdate
+              ? "update-record"
+              : "noop",
           ok: true,
           ip: planned.ip,
           ptrZoneName: planned.ptrZoneName,
           ptrRecordFqdn: ownerFqdn,
           targetHostname: planned.targetHostname,
           message: `Dry run: would ${
-            shouldCreate ? "create"
-            : shouldUpdate ? "update"
-            : "noop"
+            shouldCreate ? "create" : shouldUpdate ? "update" : "noop"
           }`,
         });
         continue;
@@ -878,7 +874,7 @@ export class SplitHorizonPtrService {
       }
 
       if (shouldUpdate) {
-        const current = existingPtrs[0]!;
+        const current = existingPtrs[0];
 
         if (!current.raw) {
           actions.push({
@@ -905,13 +901,13 @@ export class SplitHorizonPtrService {
               zoneName.toLowerCase();
 
           const nextComments =
-            adoptExistingPtrRecords && !managedForThisSource ?
-              this.buildManagedPtrComment(
-                zoneName,
-                planned.ip,
-                current.comments,
-              )
-            : current.comments;
+            adoptExistingPtrRecords && !managedForThisSource
+              ? this.buildManagedPtrComment(
+                  zoneName,
+                  planned.ip,
+                  current.comments,
+                )
+              : current.comments;
 
           await this.technitiumService.executeAction(nodeId, {
             method: "GET",
@@ -922,12 +918,10 @@ export class SplitHorizonPtrService {
               type: "PTR",
               ptrName: apiCurrent,
               newPtrName: apiTarget,
-              ...((
-                typeof nextComments === "string" &&
-                nextComments.trim().length > 0
-              ) ?
-                { comments: nextComments }
-              : {}),
+              ...(typeof nextComments === "string" &&
+              nextComments.trim().length > 0
+                ? { comments: nextComments }
+                : {}),
             },
           });
 
@@ -1067,7 +1061,7 @@ export class SplitHorizonPtrService {
         plannedZones: [],
         plannedRecords: [],
         warnings: [
-          `Split Horizon app not detected on node \"${nodeId}\" (apps/list did not include \"${SPLIT_HORIZON_APP_NAME}\").`,
+          `Split Horizon app not detected on node "${nodeId}" (apps/list did not include "${SPLIT_HORIZON_APP_NAME}").`,
         ],
       };
     }
@@ -1116,7 +1110,7 @@ export class SplitHorizonPtrService {
 
         if ("error" in reverse) {
           warnings.push(
-            `Skipping IP \"${ip}\" from record \"${record.name}\": ${reverse.error}`,
+            `Skipping IP "${ip}" from record "${record.name}": ${reverse.error}`,
           );
           continue;
         }
@@ -1235,15 +1229,15 @@ export class SplitHorizonPtrService {
           );
           ptrZoneRecordsByZoneLower.set(
             key,
-            Array.isArray(ptrEnvelope.data.records) ?
-              ptrEnvelope.data.records
-            : [],
+            Array.isArray(ptrEnvelope.data.records)
+              ? ptrEnvelope.data.records
+              : [],
           );
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
           warnings.push(
-            `Failed to load existing records for PTR zone \"${ptrZoneName}\" on node \"${nodeId}\": ${message}`,
+            `Failed to load existing records for PTR zone "${ptrZoneName}" on node "${nodeId}": ${message}`,
           );
           ptrZoneRecordsByZoneLower.set(key, []);
         }
@@ -1317,7 +1311,7 @@ export class SplitHorizonPtrService {
           };
         }
 
-        const existing = matchingPtrRecords[0]!;
+        const existing = matchingPtrRecords[0];
         const existingTarget = this.extractPtrTarget(existing);
 
         if (!existingTarget) {
@@ -1475,7 +1469,7 @@ export class SplitHorizonPtrService {
       return undefined;
     }
 
-    const payload = rData as Record<string, unknown>;
+    const payload = rData;
 
     const candidates = [
       payload.ptrDomainName,
@@ -1558,9 +1552,7 @@ export class SplitHorizonPtrService {
       return undefined;
     }
 
-    const raw =
-      (rData as Record<string, unknown>).classPath ??
-      (rData as Record<string, unknown>).ClassPath;
+    const raw = rData.classPath ?? rData.ClassPath;
 
     return typeof raw === "string" ? raw : undefined;
   }
@@ -1579,7 +1571,7 @@ export class SplitHorizonPtrService {
       };
     }
 
-    const payload = rData as Record<string, unknown>;
+    const payload = rData;
 
     // Technitium typically stores the app record JSON in a field named "data".
     const rawConfig =
@@ -1598,8 +1590,9 @@ export class SplitHorizonPtrService {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return {
         addresses: [],
-        warnings:
-          warnings.length ? warnings : ["APP record data was not an object."],
+        warnings: warnings.length
+          ? warnings
+          : ["APP record data was not an object."],
       };
     }
 
@@ -1616,10 +1609,10 @@ export class SplitHorizonPtrService {
       } else if (typeof value === "string") {
         // Some configs may include strings (e.g., SimpleCNAME). Ignore for SimpleAddress.
         warnings.push(
-          `Key \"${key}\" was a string value; expected array of IPs.`,
+          `Key "${key}" was a string value; expected array of IPs.`,
         );
       } else {
-        warnings.push(`Key \"${key}\" had unsupported value type.`);
+        warnings.push(`Key "${key}" had unsupported value type.`);
       }
     }
 

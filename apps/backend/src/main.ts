@@ -49,6 +49,8 @@ async function bootstrap() {
   const httpsEnabled = process.env.HTTPS_ENABLED === "true";
   const sessionAuthEnabled = process.env.AUTH_SESSION_ENABLED === "true";
   const trustProxyEnabled = process.env.TRUST_PROXY === "true";
+  const clusterTokenConfigured =
+    (process.env.TECHNITIUM_CLUSTER_TOKEN ?? "").trim().length > 0;
   const trustProxyHops = Number.parseInt(
     process.env.TRUST_PROXY_HOPS ?? "1",
     10,
@@ -67,6 +69,14 @@ async function bootstrap() {
       "Option B: Terminate TLS in a reverse proxy and set TRUST_PROXY=true so the backend can detect HTTPS via X-Forwarded-Proto.",
     );
     process.exit(1);
+  }
+
+  if (clusterTokenConfigured) {
+    logger.warn(
+      "TECHNITIUM_CLUSTER_TOKEN is deprecated as of v1.3.0 and is planned to be removed in v1.4. " +
+        "Prefer Technitium-backed session auth (AUTH_SESSION_ENABLED=true) for interactive UI usage and TECHNITIUM_BACKGROUND_TOKEN for background jobs. " +
+        "Per-node TECHNITIUM_<NODE>_TOKEN is legacy-only for Technitium DNS < v14.",
+    );
   }
 
   let httpsOptions: { key: Buffer; cert: Buffer; ca?: Buffer } | undefined;
@@ -134,7 +144,7 @@ async function bootstrap() {
       prefix: "/",
       // We serve index.html via the SPA fallback below so we can control headers.
       index: false,
-      setHeaders: (res, filePath) => {
+      setHeaders: (res: Response, filePath: string) => {
         const fileName = basename(filePath);
 
         // Critical: never cache the SPA shell, otherwise browsers can keep loading an
@@ -197,8 +207,9 @@ async function bootstrap() {
     logger.log("CORS enabled for all origins (development mode)");
   }
 
-  const port =
-    httpsEnabled ? process.env.HTTPS_PORT || 3443 : process.env.PORT || 3000;
+  const port = httpsEnabled
+    ? process.env.HTTPS_PORT || 3443
+    : process.env.PORT || 3000;
 
   const portNumber =
     typeof port === "string" ? Number.parseInt(port, 10) : port;

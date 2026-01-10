@@ -1,3 +1,6 @@
+import type { AdvancedBlockingConfig } from "./advanced-blocking.types";
+import type { BlockingSettings } from "./built-in-blocking.types";
+
 export interface TechnitiumNodeConfig {
   id: string;
   name?: string;
@@ -128,6 +131,7 @@ export interface TechnitiumQueryLogFilters {
   clientIpAddress?: string;
   protocol?: string;
   responseType?: string;
+  statusFilter?: "blocked" | "allowed";
   rcode?: string;
   qname?: string;
   qtype?: string;
@@ -287,6 +291,46 @@ export interface DhcpSnapshot {
 
 export type ZoneSnapshotOrigin = "manual" | "automatic";
 
+export type DnsFilteringSnapshotOrigin = "manual" | "automatic";
+export type DnsFilteringSnapshotMethod = "built-in" | "advanced-blocking";
+
+export interface DnsFilteringSnapshotMetadata {
+  id: string;
+  nodeId: string;
+  createdAt: string;
+  origin: DnsFilteringSnapshotOrigin;
+  method: DnsFilteringSnapshotMethod;
+  pinned?: boolean;
+  note?: string;
+  // Summary fields for list display
+  allowedCount?: number;
+  blockedCount?: number;
+  groupCount?: number;
+}
+
+export interface DnsFilteringBuiltInSnapshotData {
+  settings: BlockingSettings;
+  allowedDomains: string[];
+  blockedDomains: string[];
+}
+
+export interface DnsFilteringAdvancedBlockingSnapshotData {
+  config: AdvancedBlockingConfig;
+}
+
+export interface DnsFilteringSnapshot {
+  metadata: DnsFilteringSnapshotMetadata;
+  builtIn?: DnsFilteringBuiltInSnapshotData;
+  advancedBlocking?: DnsFilteringAdvancedBlockingSnapshotData;
+}
+
+export interface DnsFilteringSnapshotRestoreResult {
+  snapshot: DnsFilteringSnapshotMetadata;
+  restoredAllowed: number;
+  restoredBlocked: number;
+  restoredGroups: number;
+}
+
 export interface ZoneSnapshotZoneEntry {
   zoneName: string;
   /** True if zone existed when snapshot was taken; false if it did not exist. */
@@ -384,6 +428,7 @@ export interface TechnitiumCloneDhcpScopeRequest {
   newScopeName?: string;
   overrides?: TechnitiumDhcpScopeOverrides;
   enableOnTarget?: boolean;
+  preserveOfferDelayTime?: boolean;
 }
 
 export interface TechnitiumCloneDhcpScopeResult {
@@ -536,6 +581,7 @@ export interface DhcpBulkSyncRequest {
   strategy: DhcpBulkSyncStrategy;
   scopeNames?: string[]; // Optional: sync only specific scopes
   enableOnTarget?: boolean;
+  preserveOfferDelayTime?: boolean;
 }
 
 export interface DhcpBulkSyncScopeResult {

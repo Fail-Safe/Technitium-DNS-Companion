@@ -59,12 +59,17 @@ export class AuthController {
     const clusterTokenConfigured =
       (process.env.TECHNITIUM_CLUSTER_TOKEN ?? "").trim().length > 0;
 
+    const clusterTokenUsage = {
+      usedForNodeIds: this.technitiumService.getClusterTokenFallbackNodeIds(),
+    };
+
     if (!session) {
       return {
         sessionAuthEnabled,
         authenticated: false,
         configuredNodeIds,
         clusterTokenConfigured,
+        clusterTokenUsage,
         ...(transport ? { transport } : {}),
         backgroundPtrToken,
       };
@@ -77,6 +82,7 @@ export class AuthController {
       nodeIds: Object.keys(session.tokensByNodeId),
       configuredNodeIds,
       clusterTokenConfigured,
+      clusterTokenUsage,
       ...(transport ? { transport } : {}),
       backgroundPtrToken,
     };

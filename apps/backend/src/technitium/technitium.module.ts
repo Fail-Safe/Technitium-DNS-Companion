@@ -6,9 +6,11 @@ import { AdvancedBlockingService } from "./advanced-blocking.service";
 import { BuiltInBlockingController } from "./built-in-blocking.controller";
 import { BuiltInBlockingService } from "./built-in-blocking.service";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
+import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
 import { DomainListController } from "./domain-list-cache.controller";
 import { DomainListCacheService } from "./domain-list-cache.service";
 import { DomainListPersistenceService } from "./domain-list-persistence.service";
+import { QueryLogSqliteService } from "./query-log-sqlite.service";
 import { SplitHorizonPtrStateService } from "./split-horizon-ptr/split-horizon-ptr-state.service";
 import { SplitHorizonPtrController } from "./split-horizon-ptr/split-horizon-ptr.controller";
 import { SplitHorizonPtrService } from "./split-horizon-ptr/split-horizon-ptr.service";
@@ -33,12 +35,14 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
   ],
   providers: [
     TechnitiumService,
+    QueryLogSqliteService,
     AdvancedBlockingService,
     BuiltInBlockingService,
     SplitHorizonPtrService,
     SplitHorizonPtrStateService,
     DomainListCacheService,
     DomainListPersistenceService,
+    DnsFilteringSnapshotService,
     DhcpSnapshotService,
     ZoneSnapshotService,
     {
@@ -73,8 +77,16 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
           .map((value) => value.trim())
           .filter(Boolean);
 
-        // Cluster-wide token (optional fallback for all nodes)
+        // Cluster-wide token (deprecated legacy fallback for all nodes)
         const clusterToken = process.env.TECHNITIUM_CLUSTER_TOKEN;
+
+        if ((clusterToken ?? "").trim().length > 0) {
+          logger.warn(
+            "TECHNITIUM_CLUSTER_TOKEN is deprecated as of v1.3.0 and is planned to be removed in v1.4. " +
+              "Prefer Technitium-backed session auth (AUTH_SESSION_ENABLED=true) for interactive UI usage and TECHNITIUM_BACKGROUND_TOKEN for background jobs. " +
+              "Per-node TECHNITIUM_<NODE>_TOKEN is legacy-only for Technitium DNS < v14.",
+          );
+        }
 
         const configs: TechnitiumNodeConfig[] = [];
 
@@ -82,7 +94,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
           const sanitizedKey = id.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
           const name = process.env[`TECHNITIUM_${sanitizedKey}_NAME`];
           const baseUrl = process.env[`TECHNITIUM_${sanitizedKey}_BASE_URL`];
-          // Check node-specific token first, then fall back to cluster token
+          // Check node-specific token first (legacy), then fall back to cluster token (deprecated)
           const token =
             process.env[`TECHNITIUM_${sanitizedKey}_TOKEN`] || clusterToken;
           const queryLoggerAppName =

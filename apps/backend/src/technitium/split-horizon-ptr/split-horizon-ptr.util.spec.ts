@@ -46,14 +46,15 @@ describe("split-horizon-ptr.util", () => {
     });
 
     it("rejects non-octet-aligned prefix lengths", () => {
-      expect(
-        computeReverseZoneAndRecordName("192.168.1.10", {
-          ipv4ZonePrefixLength: 20,
-        }),
-      ).toEqual({
-        ipVersion: 4,
-        error: expect.stringContaining("Invalid IPv4 PTR zone prefix length"),
+      const result = computeReverseZoneAndRecordName("192.168.1.10", {
+        ipv4ZonePrefixLength: 20,
       });
+
+      expect(result.ipVersion).toBe(4);
+      expect("error" in result).toBe(true);
+      if ("error" in result) {
+        expect(result.error).toContain("Invalid IPv4 PTR zone prefix length");
+      }
     });
   });
 
@@ -83,14 +84,15 @@ describe("split-horizon-ptr.util", () => {
     });
 
     it("rejects non-nibble-aligned prefix lengths", () => {
-      expect(
-        computeReverseZoneAndRecordName("2001:db8::1", {
-          ipv6ZonePrefixLength: 62,
-        }),
-      ).toEqual({
-        ipVersion: 6,
-        error: expect.stringContaining("Invalid IPv6 PTR zone prefix length"),
+      const result = computeReverseZoneAndRecordName("2001:db8::1", {
+        ipv6ZonePrefixLength: 62,
       });
+
+      expect(result.ipVersion).toBe(6);
+      expect("error" in result).toBe(true);
+      if ("error" in result) {
+        expect(result.error).toContain("Invalid IPv6 PTR zone prefix length");
+      }
     });
   });
 
@@ -126,21 +128,27 @@ describe("split-horizon-ptr.util", () => {
     });
 
     it("rejects invalid IPv4 prefix", () => {
-      expect(
-        computeReverseZoneCidr("192.168.1.10", { ipv4ZonePrefixLength: 20 }),
-      ).toEqual({
-        ipVersion: 4,
-        error: expect.stringContaining("Invalid IPv4 PTR zone prefix length"),
+      const result = computeReverseZoneCidr("192.168.1.10", {
+        ipv4ZonePrefixLength: 20,
       });
+
+      expect(result.ipVersion).toBe(4);
+      expect("error" in result).toBe(true);
+      if ("error" in result) {
+        expect(result.error).toContain("Invalid IPv4 PTR zone prefix length");
+      }
     });
 
     it("rejects invalid IPv6 prefix", () => {
-      expect(
-        computeReverseZoneCidr("2001:db8::1", { ipv6ZonePrefixLength: 62 }),
-      ).toEqual({
-        ipVersion: 6,
-        error: expect.stringContaining("Invalid IPv6 PTR zone prefix length"),
+      const result = computeReverseZoneCidr("2001:db8::1", {
+        ipv6ZonePrefixLength: 62,
       });
+
+      expect(result.ipVersion).toBe(6);
+      expect("error" in result).toBe(true);
+      if ("error" in result) {
+        expect(result.error).toContain("Invalid IPv6 PTR zone prefix length");
+      }
     });
   });
 

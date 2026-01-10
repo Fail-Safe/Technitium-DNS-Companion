@@ -66,9 +66,8 @@ export class SplitHorizonPtrStateService implements OnModuleInit {
       const parsed = JSON.parse(
         data,
       ) as Partial<SplitHorizonPtrManagedZonesFile>;
-      const zones =
-        Array.isArray(parsed.managedReverseZones) ?
-          parsed.managedReverseZones
+      const zones = Array.isArray(parsed.managedReverseZones)
+        ? parsed.managedReverseZones
         : [];
       return zones
         .map((z) => (z ?? "").toString().trim())

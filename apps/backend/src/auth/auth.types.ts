@@ -33,6 +33,7 @@ export interface AuthMeResponseDto {
   nodeIds?: string[];
   configuredNodeIds?: string[];
   clusterTokenConfigured?: boolean;
+  clusterTokenUsage?: { usedForNodeIds: string[] };
   transport?: {
     requestSecure: boolean;
     httpsEnabled: boolean;

@@ -5,6 +5,8 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -16,10 +18,17 @@ import { Throttle } from "@nestjs/throttler";
 import type { Response } from "express";
 import { AdvancedBlockingService } from "./advanced-blocking.service";
 import type { AdvancedBlockingUpdateRequest } from "./advanced-blocking.types";
+import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
+import { QueryLogSqliteService } from "./query-log-sqlite.service";
 import { TechnitiumService } from "./technitium.service";
 import type {
   DhcpBulkSyncRequest,
   DhcpSnapshotOrigin,
+  DnsFilteringSnapshot,
+  DnsFilteringSnapshotMetadata,
+  DnsFilteringSnapshotMethod,
+  DnsFilteringSnapshotOrigin,
+  DnsFilteringSnapshotRestoreResult,
   TechnitiumCloneDhcpScopeRequest,
   TechnitiumCreateDhcpScopeRequest,
   TechnitiumQueryLogFilters,
@@ -30,10 +39,35 @@ import type {
 
 @Controller("nodes")
 export class TechnitiumController {
+  private readonly logger = new Logger(TechnitiumController.name);
+
   constructor(
     private readonly technitiumService: TechnitiumService,
+    private readonly queryLogSqliteService: QueryLogSqliteService,
     private readonly advancedBlockingService: AdvancedBlockingService,
+    private readonly dnsFilteringSnapshotService: DnsFilteringSnapshotService,
   ) {}
+
+  @Get("logs/storage")
+  getQueryLogStorageStatus() {
+    return this.queryLogSqliteService.getStatus();
+  }
+
+  @Get("logs/combined/stored")
+  getStoredCombinedQueryLogs(
+    @Query() query: Record<string, string | string[]>,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const filters = this.normalizeQueryLogFilters(query);
+
+    if (filters.disableCache) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
+
+    return this.queryLogSqliteService.getStoredCombinedLogs(filters);
+  }
 
   @Get()
   @UseInterceptors(CacheInterceptor)
@@ -67,6 +101,23 @@ export class TechnitiumController {
     }
 
     return this.technitiumService.getCombinedQueryLogs(filters);
+  }
+
+  @Get(":nodeId/logs/stored")
+  getStoredQueryLogs(
+    @Param("nodeId") nodeId: string,
+    @Query() query: Record<string, string | string[]>,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const filters = this.normalizeQueryLogFilters(query);
+
+    if (filters.disableCache) {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
+
+    return this.queryLogSqliteService.getStoredNodeLogs(nodeId, filters);
   }
 
   @Get("zones/combined")
@@ -301,6 +352,135 @@ export class TechnitiumController {
     );
   }
 
+  // ========================================
+  // DNS Filtering Snapshots (Built-in + Advanced)
+  // ========================================
+
+  @Post(":nodeId/dns-filtering/snapshots")
+  createDnsFilteringSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Body()
+    body: {
+      method?: DnsFilteringSnapshotMethod;
+      origin?: DnsFilteringSnapshotOrigin;
+      note?: string;
+    },
+  ): Promise<DnsFilteringSnapshotMetadata> {
+    const method = body?.method;
+    if (method !== "built-in" && method !== "advanced-blocking") {
+      throw new BadRequestException(
+        "method is required and must be 'built-in' or 'advanced-blocking'",
+      );
+    }
+
+    const origin = body?.origin === "automatic" ? "automatic" : "manual";
+    return this.dnsFilteringSnapshotService.saveSnapshot(
+      nodeId,
+      method,
+      origin,
+      body?.note,
+    );
+  }
+
+  @Get(":nodeId/dns-filtering/snapshots")
+  listDnsFilteringSnapshots(
+    @Param("nodeId") nodeId: string,
+    @Query("method") method?: DnsFilteringSnapshotMethod,
+  ): Promise<DnsFilteringSnapshotMetadata[]> {
+    if (method !== "built-in" && method !== "advanced-blocking") {
+      throw new BadRequestException(
+        "Query parameter 'method' is required and must be 'built-in' or 'advanced-blocking'",
+      );
+    }
+    return this.dnsFilteringSnapshotService.listSnapshots(nodeId, method);
+  }
+
+  @Get(":nodeId/dns-filtering/snapshots/:snapshotId")
+  async getDnsFilteringSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ): Promise<DnsFilteringSnapshot> {
+    const snapshot = await this.dnsFilteringSnapshotService.getSnapshot(
+      nodeId,
+      snapshotId,
+    );
+    if (!snapshot) {
+      throw new NotFoundException("Snapshot not found");
+    }
+    return snapshot;
+  }
+
+  @Delete(":nodeId/dns-filtering/snapshots/:snapshotId")
+  async deleteDnsFilteringSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ): Promise<void> {
+    const deleted = await this.dnsFilteringSnapshotService.deleteSnapshot(
+      nodeId,
+      snapshotId,
+    );
+    if (!deleted) {
+      throw new NotFoundException("Snapshot not found");
+    }
+  }
+
+  @Patch(":nodeId/dns-filtering/snapshots/:snapshotId/note")
+  async updateDnsFilteringSnapshotNote(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+    @Body() body: { note?: string },
+  ): Promise<DnsFilteringSnapshotMetadata> {
+    const updated = await this.dnsFilteringSnapshotService.updateSnapshotNote(
+      nodeId,
+      snapshotId,
+      body?.note,
+    );
+    if (!updated) {
+      throw new NotFoundException("Snapshot not found");
+    }
+    return updated;
+  }
+
+  @Post(":nodeId/dns-filtering/snapshots/:snapshotId/pin")
+  async pinDnsFilteringSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ): Promise<DnsFilteringSnapshotMetadata> {
+    const updated = await this.dnsFilteringSnapshotService.setPinned(
+      nodeId,
+      snapshotId,
+      true,
+    );
+    if (!updated) {
+      throw new NotFoundException("Snapshot not found");
+    }
+    return updated;
+  }
+
+  @Post(":nodeId/dns-filtering/snapshots/:snapshotId/unpin")
+  async unpinDnsFilteringSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ): Promise<DnsFilteringSnapshotMetadata> {
+    const updated = await this.dnsFilteringSnapshotService.setPinned(
+      nodeId,
+      snapshotId,
+      false,
+    );
+    if (!updated) {
+      throw new NotFoundException("Snapshot not found");
+    }
+    return updated;
+  }
+
+  @Post(":nodeId/dns-filtering/snapshots/:snapshotId/restore")
+  restoreDnsFilteringSnapshot(
+    @Param("nodeId") nodeId: string,
+    @Param("snapshotId") snapshotId: string,
+  ): Promise<DnsFilteringSnapshotRestoreResult> {
+    return this.dnsFilteringSnapshotService.restoreSnapshot(nodeId, snapshotId);
+  }
+
   @Get(":nodeId/zones")
   listZones(@Param("nodeId") nodeId: string) {
     return this.technitiumService.listZones(nodeId);
@@ -349,12 +529,32 @@ export class TechnitiumController {
   }
 
   @Post(":nodeId/advanced-blocking")
-  updateAdvancedBlocking(
+  async updateAdvancedBlocking(
     @Param("nodeId") nodeId: string,
     @Body() body: AdvancedBlockingUpdateRequest,
   ) {
     if (!body || !body.config) {
       throw new BadRequestException("Advanced Blocking config is required.");
+    }
+
+    // Best-effort automatic snapshot for rollback before applying changes.
+    // Do not block the save if snapshot creation fails.
+    const requestNote =
+      typeof body.snapshotNote === "string" ? body.snapshotNote.trim() : "";
+    const snapshotNote = requestNote.length > 0 ? requestNote : undefined;
+
+    try {
+      await this.dnsFilteringSnapshotService.saveSnapshot(
+        nodeId,
+        "advanced-blocking",
+        "automatic",
+        snapshotNote ??
+          "Automatic snapshot before Advanced Blocking config save",
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to create automatic DNS filtering snapshot before Advanced Blocking save for node ${nodeId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     return this.advancedBlockingService.setConfig(nodeId, body.config);
@@ -377,6 +577,7 @@ export class TechnitiumController {
     const payload: TechnitiumCloneDhcpScopeRequest = {
       enableOnTarget: body.enableOnTarget,
       overrides: body.overrides,
+      preserveOfferDelayTime: body.preserveOfferDelayTime,
     };
 
     const trimmedTargetNode = body.targetNodeId?.trim();
@@ -580,10 +781,21 @@ export class TechnitiumController {
     assignString("clientIpAddress");
     assignString("protocol");
     assignString("responseType");
+    assignString("statusFilter");
     assignString("rcode");
     assignString("qname");
     assignString("qtype");
     assignString("qclass");
+
+    if (
+      filters.statusFilter !== undefined &&
+      filters.statusFilter !== "blocked" &&
+      filters.statusFilter !== "allowed"
+    ) {
+      throw new BadRequestException(
+        '"statusFilter" must be "blocked" or "allowed".',
+      );
+    }
 
     return filters;
   }

@@ -27,6 +27,7 @@ describe("AuthController /auth/me", () => {
       getConfiguredNodeIds: jest.fn().mockReturnValue(["eq14", "eq12"]),
       getBackgroundPtrTokenValidationSummary:
         getBackgroundPtrTokenValidationSummaryMock,
+      getClusterTokenFallbackNodeIds: jest.fn().mockReturnValue([]),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -73,6 +74,7 @@ describe("AuthController /auth/me", () => {
       authenticated: false,
       configuredNodeIds: ["eq14", "eq12"],
       clusterTokenConfigured: true,
+      clusterTokenUsage: { usedForNodeIds: [] },
       backgroundPtrToken,
     });
 
