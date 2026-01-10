@@ -52,6 +52,7 @@ Detailed documentation for specific features:
 - **[features/query-logs/](./features/query-logs/)** - Query log features
   - Server-side filtering
   - Combined log viewing
+  - SQLite rolling query log store (optional)
 
 #### Split Horizon
 

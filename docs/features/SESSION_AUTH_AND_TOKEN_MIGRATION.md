@@ -1,6 +1,6 @@
 # Session Auth (v1.2+) and Token Migration Guide
 
-This document explains the optional session-based authentication mode and the transition away from using a long-lived cluster admin token for day-to-day UI access.
+This document explains session-based authentication and the transition away from using a long-lived cluster admin token for day-to-day UI access.
 
 ## Why this exists
 
@@ -9,7 +9,7 @@ Historically, Technitium DNS Companion could run entirely using environment-prov
 - The Companion backend effectively has a long-lived, high-privilege credential available at rest.
 - Any user who can reach the Companion UI implicitly gets the power of that token (unless you add external auth).
 
-**Session auth mode** (opt-in for now) changes this:
+**Session auth mode** changes this:
 
 - Users authenticate with their Technitium DNS username/password (TOTP-based 2FA supported).
 - The Companion stores Technitium DNS session tokens server-side and sends only an HttpOnly Companion cookie to the browser.
@@ -17,12 +17,16 @@ Historically, Technitium DNS Companion could run entirely using environment-prov
 
 ## Modes at a glance
 
-### 1) Legacy mode (no login page)
+### 1) Legacy env-token mode (legacy/migration only)
 
 - Do **not** set `AUTH_SESSION_ENABLED=true`.
-- Configure Technitium DNS access via env tokens (cluster token or per-node tokens).
+- Configure Technitium DNS access via env tokens.
+  - `TECHNITIUM_CLUSTER_TOKEN` (deprecated in v1.3, removed in v1.4)
+  - Per-node `TECHNITIUM_<NODE>_TOKEN` (legacy-only for Technitium DNS < v14)
 
 This preserves the pre-v1.2 behavior.
+
+Roadmap note: starting in **v1.4**, the Companion UI requires Technitium login/RBAC (session auth). Legacy env-token mode is intended only for legacy/migration.
 
 ### 2) Session auth mode (login page)
 
@@ -49,6 +53,8 @@ The backend validates this token and disables background PTR work if the token i
 ### `TECHNITIUM_CLUSTER_TOKEN` (legacy / migration source)
 
 In session auth mode, this is treated as a legacy “bootstrap” token to help create a dedicated background user/token. The UI will surface a migration banner when it detects this situation.
+
+Deprecation note: `TECHNITIUM_CLUSTER_TOKEN` is deprecated in v1.3 and planned to be removed in v1.4.
 
 ## Migration: cluster token → background token
 
@@ -213,8 +219,8 @@ server {
 }
 ```
 
-## Planned change (v1.3+)
+## Planned change (future release)
 
 v1.2 introduces session auth as an opt-in via `AUTH_SESSION_ENABLED=true`.
 
-The direction going forward is to make session auth the default (and eventually required) in a follow-up release (v1.3+). If you want to keep running without session auth, you can pin to v1.2, but new features and fixes will focus on v1.3+.
+The direction going forward is to make session auth the default (and eventually required) in a follow-up release. Until then, you can continue to run in legacy env-token mode by leaving `AUTH_SESSION_ENABLED` unset/false.

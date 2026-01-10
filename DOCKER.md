@@ -42,8 +42,11 @@ Runs the single container that serves both the API and built frontend. Use this 
 - Download `.env.example` (or copy it from a clone) and save as `technitium.env`.
 - Minimum variables:
   - `TECHNITIUM_NODES=node1,node2`
-  - Either `TECHNITIUM_CLUSTER_TOKEN` (recommended for clustered v14+) **or** per-node tokens `TECHNITIUM_<NODE>_TOKEN`.
   - `TECHNITIUM_<NODE>_BASE_URL` for each node.
+  - Recommended (and required starting in v1.4): `AUTH_SESSION_ENABLED=true` (Technitium login/RBAC for UI access).
+  - Recommended for background features in session-auth mode: `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege, read-only).
+  - Legacy only (Technitium DNS < v14 / migration): env-token mode using `TECHNITIUM_<NODE>_TOKEN`.
+  - `TECHNITIUM_CLUSTER_TOKEN` is deprecated as of v1.3.0 (legacy / migration source) and will be removed in v1.4.
 - Optional: set `TZ`, `CORS_ORIGINS`, and HTTPS variables.
 
 2. Run the container:
@@ -54,6 +57,27 @@ docker run --rm -p 3000:3000 -p 3443:3443 \
   -v technitium-dns-companion-data:/data \
   ghcr.io/fail-safe/technitium-dns-companion:latest
 ```
+
+Notes on persistence (`/data` volume):
+
+- `-v technitium-dns-companion-data:/data` is recommended. It is used for caches and optional on-disk features.
+- If you enable the optional SQLite rolling query-log store, set `QUERY_LOG_SQLITE_PATH` to a path under `/data` so stored logs survive container restarts.
+- DNS Filtering History snapshots can also be stored under `/data` (see `.env.example` / `DNS_FILTERING_SNAPSHOT_DIR`).
+
+Optional: Enable SQLite rolling query logs storage (accuracy for “Last 24h” presets)
+
+- In `technitium.env`:
+
+```bash
+QUERY_LOG_SQLITE_ENABLED=true
+QUERY_LOG_SQLITE_PATH=/data/query-logs.sqlite
+QUERY_LOG_SQLITE_RETENTION_HOURS=24
+QUERY_LOG_SQLITE_POLL_INTERVAL_MS=10000
+QUERY_LOG_SQLITE_OVERLAP_SECONDS=60
+QUERY_LOG_SQLITE_MAX_ENTRIES_PER_POLL=20000
+```
+
+- If you are using session auth (`AUTH_SESSION_ENABLED=true`), ingestion runs as a background task and requires `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege token that can read query logs). Without it, the DB may exist but will not stay up to date.
 
 - HTTP: http://localhost:3000
 - HTTPS (if enabled): https://localhost:3443

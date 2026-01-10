@@ -23,8 +23,10 @@ Legacy “env-token mode” (configuring the Companion with long-lived admin API
 
 Planned changes:
 
-- **v1.3**: Session auth becomes the standard for interactive UI usage (the `AUTH_SESSION_ENABLED` toggle is planned to be removed). `TECHNITIUM_CLUSTER_TOKEN` is planned to be **deprecated**. Background jobs (e.g., PTR hostname warming, scheduled sync) are expected to require a dedicated `TECHNITIUM_BACKGROUND_TOKEN`.
-- **v1.4**: `TECHNITIUM_CLUSTER_TOKEN` support is planned to be **removed**.
+- **v1.3.x (direction)**: `TECHNITIUM_CLUSTER_TOKEN` is **deprecated**. Background jobs (e.g., PTR hostname warming, scheduled sync) are expected to require a dedicated `TECHNITIUM_BACKGROUND_TOKEN` (instead of using an admin token).
+- **v1.4**:
+  - Interactive UI access requires session auth (Technitium login/RBAC). The `AUTH_SESSION_ENABLED` opt-in toggle will be removed in v1.4.
+  - `TECHNITIUM_CLUSTER_TOKEN` support is planned to be **removed**.
 
 Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)
 
@@ -45,7 +47,7 @@ Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_
 - **Docker, OrbStack, or Podman (or similar)** (recommended for easiest deployment)
 - **OR Node.js 22+** (for running directly without Docker)
 - Access to one or more Technitium DNS servers (v13.6 or v14.0+)
-- For **session auth (preferred as of v1.2.1)**: a Technitium user account to sign in with (run Companion over HTTPS)
+- For **session auth (required for interactive UI in v1.4+)**: a Technitium user account to sign in with (run Companion over HTTPS)
 - For **legacy env-token mode**: admin API token(s) from your Technitium DNS server(s)
 
 ## Quick Start with Docker (or similar) [Recommended]
@@ -86,20 +88,20 @@ Technitium-DNS-Companion supports both **v13.6 (standalone)** and **v14.0+ (clus
 
 #### Technitium DNS v14.0+ with Clustering (Recommended)
 
-When clustering is enabled in Technitium DNS v14.0+, all nodes share the same admin token:
+When clustering is enabled in Technitium DNS v14.0+, the recommended setup is session auth for interactive UI access:
 
 ```bash
-# All nodes use the SAME token (synced by Technitium DNS Primary node)
 TECHNITIUM_NODES=primary,secondary1,secondary2
 
 TECHNITIUM_PRIMARY_BASE_URL=https://primary.home.arpa:53443
-TECHNITIUM_PRIMARY_TOKEN=shared-cluster-token
-
 TECHNITIUM_SECONDARY1_BASE_URL=https://secondary1.home.arpa:53443
-TECHNITIUM_SECONDARY1_TOKEN=shared-cluster-token  # Same token!
-
 TECHNITIUM_SECONDARY2_BASE_URL=https://secondary2.home.arpa:53443
-TECHNITIUM_SECONDARY2_TOKEN=shared-cluster-token  # Same token!
+
+# Interactive UI access (recommended; required starting v1.4)
+AUTH_SESSION_ENABLED=true
+
+# Background jobs (recommended): least-privilege token
+# TECHNITIUM_BACKGROUND_TOKEN=your-low-privilege-token
 ```
 
 **Example config:** See [`configs/.env.example.v14`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/configs/.env.example.v14)
@@ -114,7 +116,7 @@ TECHNITIUM_SECONDARY2_TOKEN=shared-cluster-token  # Same token!
 
 #### Technitium DNS v13.6 (Standalone Nodes)
 
-For v13.6 or nodes without clustering, each node has a unique admin token:
+For v13.6 or nodes without clustering, per-node env tokens are legacy-only (Technitium DNS < v14):
 
 ```bash
 # Each node has its OWN unique token
@@ -141,13 +143,28 @@ TECHNITIUM_NODE3_TOKEN=unique-token-for-node3
 
 **Production**: See [DOCKER.md](./DOCKER.md) for complete Docker deployment configuration.
 
+### Optional storage features
+
+These features write data to disk and are disabled unless explicitly enabled/configured. If you run in Docker, keep a `/data` volume mount so the data persists across container restarts.
+
+- **SQLite rolling query log store (optional)**
+  - Improves accuracy for time-window browsing (e.g., “Last 24h”) by continuously ingesting query logs into a local SQLite DB.
+  - Key env vars: `QUERY_LOG_SQLITE_ENABLED`, `QUERY_LOG_SQLITE_PATH`, `QUERY_LOG_SQLITE_RETENTION_HOURS`.
+  - Session-auth note: the ingester runs as a background task and may require `TECHNITIUM_BACKGROUND_TOKEN`.
+  - Docs: [docs/features/query-logs/SQLITE_ROLLING_QUERY_LOG_STORE.md](docs/features/query-logs/SQLITE_ROLLING_QUERY_LOG_STORE.md)
+
+- **DNS Filtering History snapshots (optional)**
+  - Stores snapshot JSON files so Built-in Blocking / Advanced Blocking changes can be rolled back.
+  - Key env vars: `DNS_FILTERING_SNAPSHOT_DIR`, `DNS_FILTERING_SNAPSHOT_RETENTION`.
+  - See `.env.example` for defaults and persistence notes.
+
 ## Features
 
 ### Core Functionality
 
 - **Multi-Node Management** - Monitor and manage multiple servers from one interface
-- **Query Logs** - View combined query logs from all configured nodes
-- **Advanced Blocking** - Manage domain allow/block lists (requires Advanced Blocking App)
+- **Query Logs** - View combined query logs from all configured nodes (optional SQLite stored logs for accurate time-window browsing; see [docs/features/query-logs/SQLITE_ROLLING_QUERY_LOG_STORE.md](docs/features/query-logs/SQLITE_ROLLING_QUERY_LOG_STORE.md))
+- **Advanced Blocking** - Manage domain allow/block lists (requires Advanced Blocking App), with optional DNS Filtering History (snapshots) for quick rollback
 
 ### Analysis & Comparison
 

@@ -38,12 +38,12 @@ set -e
 # Configuration - EDIT THESE VALUES FOR YOUR SETUP
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-REMOTE_HOST="${REMOTE_HOST:-your-server}"              # Your SSH hostname (e.g., "devserver" or "192.168.1.100")
-REMOTE_USER="${REMOTE_USER:-root}"                     # SSH user (e.g., "root", "ubuntu", "your-username")
-REMOTE_PATH="${REMOTE_PATH:-/opt/technitium-dns-companion}"  # Remote project directory
+REMOTE_HOST="${REMOTE_HOST:-your-server}"                   # Your SSH hostname (e.g., "devserver" or "192.168.1.100")
+REMOTE_USER="${REMOTE_USER:-root}"                          # SSH user (e.g., "root", "ubuntu", "your-username")
+REMOTE_PATH="${REMOTE_PATH:-/opt/technitium-dns-companion}" # Remote project directory
 
 # Your domain/hostname for accessing the app (edit these URLs)
-REMOTE_DOMAIN="your-server.example.com"  # e.g., "devserver.local" or "dev.example.com"
+REMOTE_DOMAIN="your-server.example.com" # e.g., "devserver.local" or "dev.example.com"
 
 # Colors
 RED='\033[0;31m'
@@ -110,6 +110,7 @@ sync_files() {
 	rsync -avz --delete \
 		--exclude 'node_modules' \
 		--exclude '.git' \
+		--exclude '.dev-data' \
 		--exclude 'dist' \
 		--exclude 'build' \
 		--exclude '.env.local' \

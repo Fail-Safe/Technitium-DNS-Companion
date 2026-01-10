@@ -80,8 +80,10 @@ This project is designed to work with multiple Technitium DNS servers in various
 - **Frontend**: React + Vite SPA served by backend or nginx
 - **Backend**: NestJS REST API with HTTPS support
 - **Configuration**: Environment variables for node credentials (see `.env.example`)
-  - For clustered nodes: Use `TECHNITIUM_CLUSTER_TOKEN` (single shared token)
-  - For non-clustered/mixed: Use per-node tokens `TECHNITIUM_<NODE>_TOKEN`
+  - Interactive UI access: Technitium-backed session auth (`AUTH_SESSION_ENABLED=true`)
+  - Background jobs: `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege)
+  - Legacy/migration only: `TECHNITIUM_CLUSTER_TOKEN` (deprecated v1.3, removed v1.4)
+  - Legacy only (Technitium DNS < v14): per-node `TECHNITIUM_<NODE>_TOKEN`
   - Frontend uses `VITE_API_URL` to connect to backend API
 
 ## Project Structure
@@ -266,7 +268,7 @@ npm run preview       # Preview production build
 
 - All Technitium DNS API calls go through `TechnitiumService`
 - Use `unwrapApiResponse()` to extract data from Technitium's response envelope
-- Node credentials via `TECHNITIUM_CLUSTER_TOKEN` (clustered) or `TECHNITIUM_<NODE>_TOKEN` (standalone)
+- Node credentials primarily come from Technitium-backed user sessions (session auth); background work uses `TECHNITIUM_BACKGROUND_TOKEN`
 - Axios errors are normalized to NestJS `HttpException` types
 
 **Frontend Patterns**:

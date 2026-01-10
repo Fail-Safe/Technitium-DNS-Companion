@@ -2,6 +2,8 @@
 
 ## Overview
 
+See also: [SQLITE_ROLLING_QUERY_LOG_STORE.md](./SQLITE_ROLLING_QUERY_LOG_STORE.md) (optional SQLite-backed storage for accurate 24h browsing).
+
 Implemented server-side filtering for query logs to provide accurate "Matching entries" counts across all pages, not just the current page. Previously, filtering was performed only on the current page's entries, making the count misleading.
 
 ## Problem Statement
@@ -15,18 +17,21 @@ Implemented server-side filtering for query logs to provide accurate "Matching e
 ### Backend (NestJS)
 
 #### Modified Files
+
 - `apps/backend/src/technitium/technitium.service.ts`
 - `apps/backend/src/technitium/technitium.types.ts`
 
 #### Key Changes
 
 1. **New Filtering Method**
+
    ```typescript
    private matchesQueryLogFilters(
      entry: TechnitiumCombinedQueryLogEntry,
      filters: TechnitiumQueryLogFilters,
    ): boolean
    ```
+
    - Implements all filter logic: domain, client IP, protocol, response type, RCODE, QTYPE, QCLASS, date ranges
    - Supports substring matching for domain and client IP (case-insensitive)
    - Supports exact matching for structured fields (protocol, response type, etc.)
@@ -52,6 +57,7 @@ Implemented server-side filtering for query logs to provide accurate "Matching e
 ### Frontend (React)
 
 #### Modified Files
+
 - `apps/frontend/src/pages/LogsPage.tsx`
 - `apps/frontend/src/types/technitiumLogs.ts`
 
@@ -104,10 +110,12 @@ Implemented server-side filtering for query logs to provide accurate "Matching e
 ## Filter Types
 
 ### String Filters (Substring Match, Case-Insensitive)
+
 - `qname` - Domain name
 - `clientIpAddress` - Client IP address
 
 ### Exact Match Filters
+
 - `protocol` - DNS protocol (UDP, TCP, DoH, DoT)
 - `responseType` - Response type (e.g., "Authoritative", "Cached")
 - `rcode` - Response code (NOERROR, NXDOMAIN, etc.)
@@ -115,6 +123,7 @@ Implemented server-side filtering for query logs to provide accurate "Matching e
 - `qclass` - Query class (IN, CH, HS, etc.)
 
 ### Date Range Filters
+
 - `start` - Start timestamp (ISO 8601 format)
 - `end` - End timestamp (ISO 8601 format)
 - Entries within range: `start <= entry.timestamp <= end`
@@ -122,17 +131,20 @@ Implemented server-side filtering for query logs to provide accurate "Matching e
 ## Performance Considerations
 
 ### Combined Logs
+
 - Fetches all entries from all nodes simultaneously
 - Client-side filtering happens in memory
 - Should handle 100-1000 entries comfortably
 - For larger datasets, consider implementing backend pagination limits
 
 ### Node Logs
+
 - Fetches up to 500 entries per request from Technitium DNS API
 - Client-side filtering ensures accurate counts
 - May need tuning if nodes have >500 entries in time window
 
 ### Optimization Opportunities
+
 - Could implement server-side filters at Technitium DNS API level (if supported)
 - Could cache filter results temporarily
 - Could implement streaming for very large datasets
@@ -159,23 +171,29 @@ Implemented server-side filtering for query logs to provide accurate "Matching e
 ## API Response Example
 
 ### Before Filtering
+
 ```json
 {
   "pageNumber": 1,
   "totalPages": 2,
   "totalEntries": 100,
-  "entries": [ /* 50 entries */ ]
+  "entries": [
+    /* 50 entries */
+  ]
 }
 ```
 
 ### After Filtering (with filter `qname: "example.com"`)
+
 ```json
 {
   "pageNumber": 1,
   "totalPages": 1,
   "totalEntries": 100,
   "totalMatchingEntries": 5,
-  "entries": [ /* 5 filtered entries */ ]
+  "entries": [
+    /* 5 filtered entries */
+  ]
 }
 ```
 

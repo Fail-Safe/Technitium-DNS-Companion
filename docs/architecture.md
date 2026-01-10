@@ -65,16 +65,25 @@ All settings via environment variables:
 # Required - Node list
 TECHNITIUM_NODES=node1,node2
 
-# Required - Cluster token (for clustered nodes)
-TECHNITIUM_CLUSTER_TOKEN=your-shared-cluster-token
-
 # Required - Base URL per node
 TECHNITIUM_NODE1_BASE_URL=http://192.168.1.10:5380
 TECHNITIUM_NODE2_BASE_URL=http://192.168.1.11:5380
 
-# Alternative - Per-node tokens (for non-clustered nodes)
-# TECHNITIUM_NODE1_TOKEN=token-for-node1
-# TECHNITIUM_NODE2_TOKEN=token-for-node2
+# Preferred (interactive UI): Session auth
+# - Enable session auth so users log in with their Technitium credentials.
+# - In this mode, per-node env tokens are OPTIONAL for interactive UI usage.
+# - Background timers (e.g., PTR warming, SQLite ingester) use TECHNITIUM_BACKGROUND_TOKEN.
+# AUTH_SESSION_ENABLED=true
+# TECHNITIUM_BACKGROUND_TOKEN=your-readonly-token
+
+# Legacy (env-token mode): legacy/migration only
+# - Starting in v1.4, the UI requires Technitium login/RBAC (session auth).
+# - Per-node tokens are legacy-only for Technitium DNS < v14 deployments.
+# TECHNITIUM_NODE1_TOKEN=your-token
+# TECHNITIUM_NODE2_TOKEN=your-token
+
+# Deprecated as of v1.3.0 - Cluster token (removed in v1.4)
+# TECHNITIUM_CLUSTER_TOKEN=your-shared-cluster-token
 
 # Optional
 HTTPS_ENABLED=true

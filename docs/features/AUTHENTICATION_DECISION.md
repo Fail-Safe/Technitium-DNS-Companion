@@ -22,7 +22,7 @@ Technitium DNS provides two ways to obtain tokens:
 
 ## Decision
 
-Technitium DNS Companion supports an optional session-based authentication mode:
+Technitium DNS Companion supports a session-based authentication mode (recommended):
 
 - Use **expiring login session tokens** (`/api/user/login`) by default.
 - Store Technitium tokens **server-side only**, scoped to the Companion session (no tokens in browser storage).
@@ -49,12 +49,14 @@ Non-expiring tokens may be added later as an explicit opt-in (for example, for a
 
 ## Backwards compatibility: env-token (“service”) mode
 
-Existing deployments that rely on environment-provided tokens should continue to work.
+Existing deployments that rely on environment-provided tokens continue to work in v1.3, but this is treated as legacy/migration support.
 
 Planned behavior:
 
-- If the backend is configured with per-node tokens (or a shared cluster token), it can continue operating without interactive login.
-- The new session-based auth flow should be able to coexist with env-token setups, with a clear deprecation plan for shared cluster tokens.
+- If the backend is configured with env tokens, it can call Technitium APIs without interactive login (legacy behavior).
+- `TECHNITIUM_CLUSTER_TOKEN` is deprecated in v1.3 and planned to be removed in v1.4.
+- Per-node `TECHNITIUM_<NODE>_TOKEN` is legacy-only for Technitium DNS < v14.
+- Roadmap: starting in v1.4, the Companion UI requires Technitium login/RBAC (session auth); background tasks should use `TECHNITIUM_BACKGROUND_TOKEN`.
 
 ## Security notes
 
