@@ -40,17 +40,15 @@ describe("Advanced Blocking save/get round-trip (e2e)", () => {
     };
 
     const technitiumService = {
-      listNodes: jest
-        .fn()
-        .mockResolvedValue([
-          {
-            id: "node1",
-            baseUrl: "http://example.invalid",
-            name: "node1",
-            isPrimary: true,
-            cluster: { type: "Standalone", health: "healthy" },
-          },
-        ]),
+      listNodes: jest.fn().mockResolvedValue([
+        {
+          id: "node1",
+          baseUrl: "http://example.invalid",
+          name: "node1",
+          isPrimary: true,
+          cluster: { type: "Standalone", health: "healthy" },
+        },
+      ]),
       executeAction: jest
         .fn()
         .mockImplementation((_nodeId: string, action: unknown) => {

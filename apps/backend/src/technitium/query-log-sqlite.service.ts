@@ -318,8 +318,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           const qnameLc = qname ? qname.toLowerCase() : null;
 
           const clientIpAddress = entry.clientIpAddress ?? null;
-          const clientIpLc =
-            clientIpAddress ? clientIpAddress.toLowerCase() : null;
+          const clientIpLc = clientIpAddress
+            ? clientIpAddress.toLowerCase()
+            : null;
 
           const clientName = entry.clientName ?? null;
           const clientNameLc = clientName ? clientName.toLowerCase() : null;
@@ -455,9 +456,8 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const endTs = filters.end ? Date.parse(filters.end) : now;
 
     return {
-      startTs:
-        Number.isFinite(startTs) ?
-          Math.max(retentionStart, startTs)
+      startTs: Number.isFinite(startTs)
+        ? Math.max(retentionStart, startTs)
         : retentionStart,
       endTs: Number.isFinite(endTs) ? endTs : now,
     };
@@ -648,9 +648,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const totalPages =
-      entriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
-      : 1;
+      entriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
+        : 1;
     const offset = entriesPerPage > 0 ? (pageNumber - 1) * entriesPerPage : 0;
 
     const sortDir = descendingOrder ? "DESC" : "ASC";
@@ -789,9 +789,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const totalPages =
-      entriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
-      : 1;
+      entriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
+        : 1;
     const offset = entriesPerPage > 0 ? (pageNumber - 1) * entriesPerPage : 0;
 
     const sortDir = descendingOrder ? "DESC" : "ASC";
