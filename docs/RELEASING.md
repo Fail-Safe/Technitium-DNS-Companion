@@ -6,6 +6,17 @@ This repo uses **tag-driven releases**.
 - **Release tag format:** `vX.Y.Z` (example: `v1.2.2`)
 - **Automation:** GitHub Actions creates/updates the GitHub Release and publishes Docker images when a release tag is pushed.
 
+## Branch Context (Recommended)
+
+For a patch-friendly workflow (keep `main` stable while developing `v1.(Y+1)` features), see:
+
+- [BRANCHING_STRATEGY.md](./BRANCHING_STRATEGY.md)
+
+In short:
+
+- Patch releases `vX.Y.Z` are typically cut from `release/X.Y` (often created only when an urgent patch is needed).
+- Minor releases `vX.(Y+1).0` are cut from `main` after merging `next`.
+
 ## Quick Sanity Checklist (Do This Every Time)
 
 1. **Bump versions (if needed)**
@@ -27,8 +38,16 @@ This repo uses **tag-driven releases**.
 4. **Push the release tag**
 
    ```bash
+   # Patch release example (recommended): tag from release/X.Y
+   git checkout release/X.Y
+   git pull
    git tag -a vX.Y.Z -m "vX.Y.Z"
    git push origin vX.Y.Z
+
+   # Minor release example: tag from main
+   # git checkout main && git pull
+   # git tag -a vX.(Y+1).0 -m "vX.(Y+1).0"
+   # git push origin vX.(Y+1).0
    ```
 
 5. **Confirm GitHub Actions is green**

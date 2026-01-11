@@ -1,5 +1,17 @@
 # Release Notes
 
+## 1.3.1
+
+- **Query Logs: paginated page size setting**: Rows-per-page is now configurable in “Table settings” (25/50/100/200) and defaults to **25** for new installs.
+- **Query Logs: paging stability**:
+  - Clicking **Prev/Next/jump-to-page** now automatically pauses auto-refresh so the page you’re inspecting doesn’t reshuffle while you read it.
+  - Paging no longer “jumps to the top” (keeps the table visible during reloads).
+- **Query Logs: performance + clarity**:
+  - Stored (SQLite) endpoints use a short-TTL response cache to reduce repeated recomputation during frequent polling.
+  - UI shows subtle “Source” pills (Live Nodes vs Stored SQLite) and can display a DB cache hit-rate indicator when available.
+
+No config changes are required to upgrade. Optional tuning is available via `QUERY_LOG_SQLITE_RESPONSE_CACHE_TTL_MS` and `QUERY_LOG_SQLITE_RESPONSE_CACHE_MAX_ENTRIES`.
+
 ## 1.2 (Draft)
 
 - **Optional session authentication**: The UI can require users to sign in with their Technitium DNS credentials (TOTP/2FA supported). This is opt-in via `AUTH_SESSION_ENABLED=true`.

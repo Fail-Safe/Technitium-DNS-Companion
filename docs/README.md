@@ -19,6 +19,7 @@ Welcome to the documentation for Technitium DNS Companion. This guide will help 
 
 - **[REMOTE_DEVELOPMENT.md](./REMOTE_DEVELOPMENT.md)** - Remote development setup (develop on a server, edit locally)
 - **[RELEASING.md](./RELEASING.md)** - Release process and sanity checklist (tag-driven)
+- **[BRANCHING_STRATEGY.md](./BRANCHING_STRATEGY.md)** - Patch-friendly branching model (`main` + `next` + `release/X.Y`) and hotfix flow
 
 ### Performance
 
