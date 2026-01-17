@@ -146,4 +146,123 @@ docker compose up -d --build
 - Port bind error ("port is already allocated"): pick different host ports (e.g., `-p 1234:3000 -p 1235:3443`) or stop the other container/service using that port.
 - Cannot connect to Technitium DNS nodes: Check URLs and tokens in `.env`.
 
+## Docker Secrets / File-based Secrets
+
+For production deployments, you can use Docker secrets or file-based secrets instead of
+passing sensitive values directly as environment variables. The application supports the
+common `_FILE` suffix pattern.
+
+### Supported Variables
+
+| Environment Variable                  | File Variant                           |
+|---------------------------------------|----------------------------------------|
+| `TECHNITIUM_CLUSTER_TOKEN`            | `TECHNITIUM_CLUSTER_TOKEN_FILE`        |
+| `TECHNITIUM_BACKGROUND_TOKEN`         | `TECHNITIUM_BACKGROUND_TOKEN_FILE`     |
+| `TECHNITIUM_<NODE>_TOKEN`             | `TECHNITIUM_<NODE>_TOKEN_FILE`         |
+
+When the `_FILE` variant is set, the application reads the secret from that file path.
+The `_FILE` variant takes precedence if both are set.
+
+### Docker Swarm Example
+
+1. Create the secrets:
+
+```bash
+echo "your-cluster-token" | docker secret create technitium_cluster_token -
+echo "your-background-token" | docker secret create technitium_background_token -
+```
+
+2. Reference in your stack file:
+
+```yaml
+version: "3.8"
+
+services:
+  technitium-dns-companion:
+    image: ghcr.io/fail-safe/technitium-dns-companion:latest
+    environment:
+      TECHNITIUM_NODES: "node1,node2"
+      TECHNITIUM_NODE1_BASE_URL: "http://dns1.example.com:5380"
+      TECHNITIUM_NODE2_BASE_URL: "http://dns2.example.com:5380"
+      AUTH_SESSION_ENABLED: "true"
+      # Use _FILE variants for secrets
+      TECHNITIUM_CLUSTER_TOKEN_FILE: /run/secrets/technitium_cluster_token
+      TECHNITIUM_BACKGROUND_TOKEN_FILE: /run/secrets/technitium_background_token
+    secrets:
+      - technitium_cluster_token
+      - technitium_background_token
+    ports:
+      - "3000:3000"
+    volumes:
+      - companion-data:/data
+
+secrets:
+  technitium_cluster_token:
+    external: true
+  technitium_background_token:
+    external: true
+
+volumes:
+  companion-data:
+```
+
+### Kubernetes Example
+
+1. Create the secret:
+
+```bash
+kubectl create secret generic technitium-tokens \
+  --from-literal=cluster-token='your-cluster-token' \
+  --from-literal=background-token='your-background-token'
+```
+
+2. Mount in your deployment:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: technitium-dns-companion
+spec:
+  template:
+    spec:
+      containers:
+        - name: companion
+          image: ghcr.io/fail-safe/technitium-dns-companion:latest
+          env:
+            - name: TECHNITIUM_NODES
+              value: "node1,node2"
+            - name: TECHNITIUM_CLUSTER_TOKEN_FILE
+              value: /secrets/cluster-token
+            - name: TECHNITIUM_BACKGROUND_TOKEN_FILE
+              value: /secrets/background-token
+          volumeMounts:
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+      volumes:
+        - name: secrets
+          secret:
+            secretName: technitium-tokens
+```
+
+### Per-Node Tokens
+
+For legacy deployments with per-node tokens:
+
+```bash
+# Create secrets for each node
+echo "node1-token" | docker secret create technitium_node1_token -
+echo "node2-token" | docker secret create technitium_node2_token -
+```
+
+```yaml
+environment:
+  TECHNITIUM_NODE1_TOKEN_FILE: /run/secrets/technitium_node1_token
+  TECHNITIUM_NODE2_TOKEN_FILE: /run/secrets/technitium_node2_token
+secrets:
+  - technitium_node1_token
+  - technitium_node2_token
+```
+
 Need contributor/dev container instructions? See `DEVELOPMENT.md` or `docker-compose.dev.yml`.

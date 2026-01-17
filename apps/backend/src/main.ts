@@ -6,6 +6,10 @@ import { NextFunction, Request, Response } from "express";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import { AppModule } from "./app.module";
+import { resolveEnvFileVariables } from "./utils/env-file";
+
+// Resolve _FILE environment variables early, before any module reads process.env
+resolveEnvFileVariables();
 
 const ONE_YEAR_IN_SECONDS = 60 * 60 * 24 * 365;
 
