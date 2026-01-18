@@ -9,6 +9,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Query Logs: domain tooltip enrichment for blocked entries (“Likely blocked by”), using a best-effort per-node domain-list check with debounce (~300ms) + caching, Top 3 results with Show more/less, mobile-friendly fetch-on-open, de-duplicated matches, improved wrapping for long URLs/regex, and documented XSS mitigations around tooltip HTML rendering.
+
 ## [1.3.1] - 2026-01-10
 
 ### Added
