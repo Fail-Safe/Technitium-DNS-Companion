@@ -6,6 +6,7 @@ import { NextFunction, Request, Response } from "express";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import { AppModule } from "./app.module";
+import { getOrCreateSelfSignedCert } from "./utils/self-signed-cert";
 
 const ONE_YEAR_IN_SECONDS = 60 * 60 * 24 * 365;
 
@@ -47,6 +48,7 @@ function resolveConfigFilePath(inputPath: string): string {
 async function bootstrap() {
   const logger = new Logger("Bootstrap");
   const httpsEnabled = process.env.HTTPS_ENABLED === "true";
+  const httpsSelfSigned = process.env.HTTPS_SELF_SIGNED === "true";
   const sessionAuthEnabled = process.env.AUTH_SESSION_ENABLED === "true";
   const trustProxyEnabled = process.env.TRUST_PROXY === "true";
   const clusterTokenConfigured =
@@ -58,7 +60,12 @@ async function bootstrap() {
   const trustProxyValue =
     Number.isFinite(trustProxyHops) && trustProxyHops > 0 ? trustProxyHops : 1;
 
-  if (sessionAuthEnabled && !httpsEnabled && !trustProxyEnabled) {
+  if (
+    sessionAuthEnabled &&
+    !httpsEnabled &&
+    !httpsSelfSigned &&
+    !trustProxyEnabled
+  ) {
     logger.error(
       "AUTH_SESSION_ENABLED=true requires HTTPS to protect session cookies and login credentials.",
     );
@@ -66,7 +73,10 @@ async function bootstrap() {
       "Option A (recommended): Enable built-in HTTPS by setting HTTPS_ENABLED=true and configuring certificate paths.",
     );
     logger.error(
-      "Option B: Terminate TLS in a reverse proxy and set TRUST_PROXY=true so the backend can detect HTTPS via X-Forwarded-Proto.",
+      "Option B: Set HTTPS_SELF_SIGNED=true to auto-generate a self-signed certificate.",
+    );
+    logger.error(
+      "Option C: Terminate TLS in a reverse proxy and set TRUST_PROXY=true so the backend can detect HTTPS via X-Forwarded-Proto.",
     );
     process.exit(1);
   }
@@ -118,6 +128,24 @@ async function bootstrap() {
       logger.error(
         "Please check that the certificate paths are correct and files are readable",
       );
+      process.exit(1);
+    }
+  } else if (httpsSelfSigned) {
+    // Auto-generate self-signed certificate for development/homelab use
+    const certDir =
+      process.env.HTTPS_SELF_SIGNED_CERT_DIR || "/data/certs/self-signed";
+
+    try {
+      httpsOptions = await getOrCreateSelfSignedCert(certDir);
+      logger.log("Self-signed HTTPS enabled successfully");
+      logger.warn(
+        "Self-signed certificates are not trusted by browsers - you will see security warnings",
+      );
+      logger.warn(
+        "For production use, configure real certificates with HTTPS_ENABLED and HTTPS_CERT_PATH/HTTPS_KEY_PATH",
+      );
+    } catch (error) {
+      logger.error("Failed to generate self-signed certificate:", error);
       process.exit(1);
     }
   }
