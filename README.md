@@ -172,6 +172,11 @@ These features write data to disk and are disabled unless explicitly enabled/con
 - **DHCP Management** - View and clone DHCP scopes across nodes
 - **Auto-Detection** - Automatically detects which apps are installed on each node
 
+### Monitoring & Operations
+
+- **Health Check API** - Built-in health check endpoints for Docker health checks and external monitoring (see [docs/features/HEALTH_CHECK_API.md](docs/features/HEALTH_CHECK_API.md))
+- **Performance Optimizations** - Caching, deduplication, and throttling for efficient operation
+
 ### User Experience
 
 - **Responsive UI** - Mobile-friendly interface built with React and TailwindCSS

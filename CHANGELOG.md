@@ -9,6 +9,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Health Check API: Enhanced health check endpoint with basic (`/api/health`) and detailed (`/api/health?detailed=true`) modes
+  - Basic mode: Fast health check suitable for Docker container health checks
+  - Detailed mode: Comprehensive health information including node connectivity status and cluster information
+  - Public endpoint (no authentication required) for monitoring systems and load balancers
+  - See [docs/features/HEALTH_CHECK_API.md](docs/features/HEALTH_CHECK_API.md) for complete documentation
+
 ## [1.3.1] - 2026-01-10
 
 ### Added
