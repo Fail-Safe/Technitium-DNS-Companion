@@ -53,6 +53,7 @@ async function bootstrap() {
   const httpsEnabled = process.env.HTTPS_ENABLED === "true";
   const sessionAuthEnabled = process.env.AUTH_SESSION_ENABLED === "true";
   const trustProxyEnabled = process.env.TRUST_PROXY === "true";
+  const allowInsecureHttp = process.env.AUTH_ALLOW_INSECURE_HTTP === "true";
   const clusterTokenConfigured =
     (process.env.TECHNITIUM_CLUSTER_TOKEN ?? "").trim().length > 0;
   const trustProxyHops = Number.parseInt(
@@ -63,16 +64,31 @@ async function bootstrap() {
     Number.isFinite(trustProxyHops) && trustProxyHops > 0 ? trustProxyHops : 1;
 
   if (sessionAuthEnabled && !httpsEnabled && !trustProxyEnabled) {
-    logger.error(
-      "AUTH_SESSION_ENABLED=true requires HTTPS to protect session cookies and login credentials.",
-    );
-    logger.error(
-      "Option A (recommended): Enable built-in HTTPS by setting HTTPS_ENABLED=true and configuring certificate paths.",
-    );
-    logger.error(
-      "Option B: Terminate TLS in a reverse proxy and set TRUST_PROXY=true so the backend can detect HTTPS via X-Forwarded-Proto.",
-    );
-    process.exit(1);
+    if (allowInsecureHttp) {
+      logger.warn(
+        "⚠️  AUTH_ALLOW_INSECURE_HTTP=true: Session auth running over HTTP without TLS.",
+      );
+      logger.warn(
+        "⚠️  Credentials and session cookies will be transmitted in plain text.",
+      );
+      logger.warn(
+        "⚠️  Only use this in isolated/trusted networks. NOT recommended for production.",
+      );
+    } else {
+      logger.error(
+        "AUTH_SESSION_ENABLED=true requires HTTPS to protect session cookies and login credentials.",
+      );
+      logger.error(
+        "Enable built-in HTTPS by setting HTTPS_ENABLED=true and configuring certificate paths.",
+      );
+      logger.error(
+        "Or terminate TLS in a reverse proxy and set TRUST_PROXY=true so the backend can detect HTTPS via X-Forwarded-Proto.",
+      );
+      logger.error(
+        "Or set AUTH_ALLOW_INSECURE_HTTP=true to bypass this check entirely (credentials sent in plain text, not recommended).",
+      );
+      process.exit(1);
+    }
   }
 
   if (clusterTokenConfigured) {
