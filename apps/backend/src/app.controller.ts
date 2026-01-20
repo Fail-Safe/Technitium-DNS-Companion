@@ -95,7 +95,9 @@ export class AppController {
         }
       });
     } catch (error) {
-      this.logger.error(`Failed to fetch nodes for health check: ${error}`);
+      this.logger.error(
+        `Failed to fetch nodes for detailed health check: ${error}`,
+      );
     }
 
     const healthyCount = nodeStatuses.filter(
@@ -105,9 +107,20 @@ export class AppController {
       (n) => n.status === "unhealthy",
     ).length;
 
+    // Read version from package.json at runtime for accurate production version
+    let version = "unknown";
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const packageJson = require("../../package.json");
+      version = packageJson.version || "unknown";
+    } catch {
+      // Fallback to unknown if package.json can't be read
+      version = "unknown";
+    }
+
     return {
       ...basicHealth,
-      version: process.env.npm_package_version || "unknown",
+      version,
       environment: process.env.NODE_ENV || "development",
       nodes: {
         configured: nodeStatuses.length,
