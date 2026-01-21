@@ -24,7 +24,7 @@ import {
   SkeletonLogsSummary,
 } from "../components/common/LoadingSkeleton";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
-import { getAuthRedirectReason } from "../config";
+import { apiFetch, getAuthRedirectReason } from "../config";
 import { useTechnitiumState } from "../context/useTechnitiumState";
 import { useToast } from "../context/useToast";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
@@ -32,6 +32,7 @@ import type {
   AdvancedBlockingConfig,
   AdvancedBlockingGroup,
 } from "../types/advancedBlocking";
+import type { DomainCheckResult, DomainListEntry } from "../types/technitium";
 import type {
   TechnitiumCombinedNodeLogSnapshot,
   TechnitiumCombinedQueryLogEntry,
@@ -72,6 +73,9 @@ const REFRESH_OPTIONS = [
 // in-flight guard stuck and stops auto-refresh permanently until a focus/resume
 // event happens. Enforce a hard timeout so the page can self-recover.
 const LOGS_FETCH_TIMEOUT_MS = 25000;
+
+const DOMAIN_BLOCK_SOURCE_HOVER_DELAY_MS = 300;
+const DOMAIN_BLOCK_SOURCE_CACHE_MAX_ENTRIES = 500;
 
 type OptionalColumnKey = "protocol" | "qclass" | "answer" | "responseTime";
 
@@ -502,6 +506,7 @@ const buildTableColumns = (
     entry: TechnitiumCombinedQueryLogEntry,
     shiftKey: boolean,
   ) => void,
+  onDomainHover: (entry: TechnitiumCombinedQueryLogEntry) => void,
   selectedDomains: Set<string>,
   onToggleDomain: (domain: string) => void,
   domainToGroupMap: Map<string, number>,
@@ -775,31 +780,59 @@ const buildTableColumns = (
           return domain;
         }
 
+        /**
+         * SECURITY NOTE (XSS):
+         * This column builds a small HTML snippet for the tooltip and later renders it via
+         * `dangerouslySetInnerHTML` (see the shared tooltip render() below).
+         *
+         * Query logs (domains/answers/etc.) can be influenced by network clients, so treat
+         * these values as untrusted input.
+         *
+         * Mitigation:
+         * - Every dynamic/untrusted value interpolated into the tooltip HTML MUST be escaped
+         *   using `escapeTooltipHtml()`.
+         * - Only static markup (our own <div>/<strong> structure and a few CSS classes) is
+         *   allowed to remain unescaped.
+         *
+         * If you add new fields to this tooltip, do not interpolate raw values.
+         */
+        const escapeTooltipHtml = (value: string): string => {
+          return value
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/\"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+        };
+
+        const isBlocked = isEntryBlocked(entry);
+
         // Build comprehensive tooltip with entry and block/allow information
         const groupDetails = domainGroupDetailsMap.get(domain);
 
-        // Build HTML string for tooltip content
+        // Build HTML string for tooltip content.
+        // IMPORTANT: Any dynamic values must be escaped via `escapeTooltipHtml()`.
         // let tooltipHtml = `<div style="font-family: 'Menlo, Monaco, Consolas, monospace'; line-height: 1.5;">`;
-        let tooltipHtml = `<div><strong>Domain:</strong> ${domain}</div>`;
-        tooltipHtml += `<div><strong>Type:</strong> ${entry.qtype ?? "Unknown"}</div>`;
+        let tooltipHtml = `<div><strong>Domain:</strong> ${escapeTooltipHtml(domain)}</div>`;
+        tooltipHtml += `<div><strong>Type:</strong> ${escapeTooltipHtml(entry.qtype ?? "Unknown")}</div>`;
 
         if (entry.responseType) {
           const iconChar =
             entry.responseType === "Blocked" ? "🚫"
             : entry.responseType === "Allowed" ? "✅"
             : "📄";
-          tooltipHtml += `<div style="margin-top: 8px;"><strong>Status:</strong> ${iconChar} ${entry.responseType}</div>`;
+          tooltipHtml += `<div style="margin-top: 8px;"><strong>Status:</strong> ${iconChar} ${escapeTooltipHtml(entry.responseType)}</div>`;
         }
 
         if (groupDetails) {
-          tooltipHtml += `<div style="margin-top: 8px;"><div><strong>Group:</strong> ${groupDetails.groupName}</div>`;
+          tooltipHtml += `<div style="margin-top: 8px;"><div><strong>Group:</strong> ${escapeTooltipHtml(groupDetails.groupName)}</div>`;
           if (groupDetails.blockedExact) {
             tooltipHtml += `<div class="tooltip-blocked" style="margin-left: 12px;">→ Blocked (Exact Match)</div>`;
           }
           if (groupDetails.blockedRegexMatches.length > 0) {
             tooltipHtml += `<div style="margin-left: 12px;"><div class="tooltip-blocked">→ Blocked by Regex:</div>`;
             groupDetails.blockedRegexMatches.forEach((pattern) => {
-              tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${pattern}</div>`;
+              tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${escapeTooltipHtml(pattern)}</div>`;
             });
             tooltipHtml += `</div>`;
           }
@@ -809,7 +842,7 @@ const buildTableColumns = (
           if (groupDetails.allowedRegexMatches.length > 0) {
             tooltipHtml += `<div style="margin-left: 12px;"><div class="tooltip-allowed">→ Allowed by Regex:</div>`;
             groupDetails.allowedRegexMatches.forEach((pattern) => {
-              tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${pattern}</div>`;
+              tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${escapeTooltipHtml(pattern)}</div>`;
             });
             tooltipHtml += `</div>`;
           }
@@ -886,11 +919,11 @@ const buildTableColumns = (
               }
 
               const indent = "&nbsp;&nbsp;&nbsp;&nbsp;".repeat(level);
-              tooltipHtml += `<div style="margin-left: 12px; font-size: 12px;">${indent}${branch}${answer}</div>`;
+              tooltipHtml += `<div style="margin-left: 12px; font-size: 12px;">${indent}${branch}${escapeTooltipHtml(answer)}</div>`;
             });
           } else {
             // Single answer
-            tooltipHtml += `<div style="margin-left: 12px; font-size: 12px;">${answers[0]}</div>`;
+            tooltipHtml += `<div style="margin-left: 12px; font-size: 12px;">${escapeTooltipHtml(answers[0])}</div>`;
           }
 
           tooltipHtml += `</div>`;
@@ -902,6 +935,8 @@ const buildTableColumns = (
         return (
           <span
             onClick={(e) => onDomainClick(entry, e.shiftKey)}
+            onMouseEnter={() => onDomainHover(entry)}
+            onFocus={() => onDomainHover(entry)}
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
@@ -911,7 +946,10 @@ const buildTableColumns = (
               }
             }}
             data-tooltip-id="domain-tooltip-shared"
-            data-tooltip-html={tooltipHtml}
+            data-tooltip-content={tooltipHtml}
+            data-domain={domain}
+            data-node-id={entry.nodeId}
+            data-is-blocked={isBlocked ? "true" : "false"}
           >
             {domain}
           </span>
@@ -1582,6 +1620,253 @@ export function LogsPage() {
   } = useTechnitiumState();
 
   const { pushToast } = useToast();
+
+  type DomainBlockSourceLookupStatus = "idle" | "loading" | "loaded" | "error";
+
+  type DomainBlockSourceLookupState = {
+    status: DomainBlockSourceLookupStatus;
+    fetchedAt?: number;
+    result?: DomainCheckResult;
+    error?: string;
+  };
+
+  const normalizeDomainForLookup = useCallback((raw: string): string => {
+    return raw.trim().replace(/\.$/, "").toLowerCase();
+  }, []);
+
+  const getDomainBlockSourceCacheKey = useCallback(
+    (nodeId: string, domain: string): string => {
+      return `${nodeId}::${normalizeDomainForLookup(domain)}`;
+    },
+    [normalizeDomainForLookup],
+  );
+
+  const [domainBlockSourceByKey, setDomainBlockSourceByKey] = useState<
+    Record<string, DomainBlockSourceLookupState>
+  >({});
+  const domainBlockSourceRef = useRef(domainBlockSourceByKey);
+
+  useEffect(() => {
+    domainBlockSourceRef.current = domainBlockSourceByKey;
+  }, [domainBlockSourceByKey]);
+
+  const [activeDomainTooltipKey, setActiveDomainTooltipKey] = useState<
+    string | null
+  >(null);
+  const [expandedDomainTooltipKey, setExpandedDomainTooltipKey] = useState<
+    string | null
+  >(null);
+
+  useEffect(() => {
+    setExpandedDomainTooltipKey(null);
+  }, [activeDomainTooltipKey]);
+
+  const domainBlockSourceHoverTimerRef = useRef<number | null>(null);
+  const domainBlockSourceAbortRef = useRef<AbortController | null>(null);
+  const domainTooltipAnchorRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (domainBlockSourceHoverTimerRef.current !== null) {
+        window.clearTimeout(domainBlockSourceHoverTimerRef.current);
+        domainBlockSourceHoverTimerRef.current = null;
+      }
+      domainBlockSourceAbortRef.current?.abort();
+      domainBlockSourceAbortRef.current = null;
+    };
+  }, []);
+
+  const fetchDomainBlockSources = useCallback(
+    async (nodeId: string, domain: string, signal: AbortSignal) => {
+      const cleanDomain = normalizeDomainForLookup(domain);
+
+      const response = await apiFetch(
+        `/domain-lists/${encodeURIComponent(nodeId)}/check?domain=${encodeURIComponent(cleanDomain)}`,
+        { signal },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to check domain lists for ${nodeId} (${response.status})`,
+        );
+      }
+
+      const payload = (await response.json()) as
+        | DomainCheckResult
+        | { error: string };
+
+      if ("error" in payload) {
+        throw new Error(payload.error);
+      }
+
+      return payload;
+    },
+    [normalizeDomainForLookup],
+  );
+
+  const triggerDomainBlockSourceLookupImmediate = useCallback(
+    (nodeId: string, domain: string) => {
+      if (!nodeId || domain.trim().length === 0) {
+        return;
+      }
+
+      const key = getDomainBlockSourceCacheKey(nodeId, domain);
+      setActiveDomainTooltipKey(key);
+
+      const existing = domainBlockSourceRef.current[key];
+      if (existing?.status === "loaded" || existing?.status === "loading") {
+        return;
+      }
+
+      if (domainBlockSourceHoverTimerRef.current !== null) {
+        window.clearTimeout(domainBlockSourceHoverTimerRef.current);
+        domainBlockSourceHoverTimerRef.current = null;
+      }
+
+      domainBlockSourceAbortRef.current?.abort();
+      domainBlockSourceAbortRef.current = null;
+
+      const abortController = new AbortController();
+      domainBlockSourceAbortRef.current = abortController;
+
+      setDomainBlockSourceByKey((prev) => ({
+        ...prev,
+        [key]: { status: "loading" },
+      }));
+
+      fetchDomainBlockSources(nodeId, domain, abortController.signal)
+        .then((result) => {
+          setDomainBlockSourceByKey((prev) => {
+            const now = Date.now();
+            const next: Record<string, DomainBlockSourceLookupState> = {
+              ...prev,
+              [key]: { status: "loaded", result, fetchedAt: now },
+            };
+
+            const keys = Object.keys(next);
+            if (keys.length <= DOMAIN_BLOCK_SOURCE_CACHE_MAX_ENTRIES) {
+              return next;
+            }
+
+            keys
+              .sort(
+                (a, b) => (next[a].fetchedAt ?? 0) - (next[b].fetchedAt ?? 0),
+              )
+              .slice(0, keys.length - DOMAIN_BLOCK_SOURCE_CACHE_MAX_ENTRIES)
+              .forEach((oldKey) => {
+                delete next[oldKey];
+              });
+
+            return next;
+          });
+        })
+        .catch((error: unknown) => {
+          if (abortController.signal.aborted) {
+            return;
+          }
+
+          const message =
+            error instanceof Error ? error.message : String(error);
+          setDomainBlockSourceByKey((prev) => ({
+            ...prev,
+            [key]: { status: "error", error: message, fetchedAt: Date.now() },
+          }));
+        });
+    },
+    [fetchDomainBlockSources, getDomainBlockSourceCacheKey],
+  );
+
+  const scheduleDomainBlockSourceLookup = useCallback(
+    (entry: TechnitiumCombinedQueryLogEntry) => {
+      if (!isEntryBlocked(entry)) {
+        return;
+      }
+
+      const nodeId = entry.nodeId;
+      const domain = entry.qname?.trim() ?? "";
+      if (!nodeId || domain.length === 0) {
+        return;
+      }
+
+      const key = getDomainBlockSourceCacheKey(nodeId, domain);
+      setActiveDomainTooltipKey(key);
+
+      const existing = domainBlockSourceRef.current[key];
+      if (existing?.status === "loaded" || existing?.status === "loading") {
+        return;
+      }
+
+      if (domainBlockSourceHoverTimerRef.current !== null) {
+        window.clearTimeout(domainBlockSourceHoverTimerRef.current);
+        domainBlockSourceHoverTimerRef.current = null;
+      }
+
+      // If we begin a new hover lookup, cancel any in-flight request for the prior anchor.
+      domainBlockSourceAbortRef.current?.abort();
+      domainBlockSourceAbortRef.current = null;
+
+      domainBlockSourceHoverTimerRef.current = window.setTimeout(() => {
+        domainBlockSourceHoverTimerRef.current = null;
+
+        const latest = domainBlockSourceRef.current[key];
+        if (latest?.status === "loaded" || latest?.status === "loading") {
+          return;
+        }
+
+        triggerDomainBlockSourceLookupImmediate(nodeId, domain);
+      }, DOMAIN_BLOCK_SOURCE_HOVER_DELAY_MS);
+    },
+    [getDomainBlockSourceCacheKey, triggerDomainBlockSourceLookupImmediate],
+  );
+
+  const isBlockMatch = useCallback((type: string | undefined): boolean => {
+    return (
+      type === "blocklist" ||
+      type === "regex-blocklist" ||
+      type === "manual-blocked"
+    );
+  }, []);
+
+  const getBlockMatchDedupeKey = useCallback(
+    (match: DomainListEntry): string => {
+      const sortedGroups =
+        match.groups ? [...match.groups].sort().join(",") : "";
+
+      return [
+        match.type ?? "",
+        match.source ?? "",
+        match.groupName ?? "",
+        sortedGroups,
+        match.matchedPattern ?? "",
+        match.matchedDomain ?? "",
+      ].join("||");
+    },
+    [],
+  );
+
+  const formatBlockMatchLabel = useCallback(
+    (match: DomainListEntry): string => {
+      const typeLabel =
+        match.type === "manual-blocked" ? "Manual"
+        : match.type === "regex-blocklist" ? "Regex"
+        : "Blocklist";
+
+      const sourceLabel = match.source === "manual" ? "manual" : match.source;
+
+      const details: string[] = [];
+      if (match.groupName) details.push(`group=${match.groupName}`);
+      if (match.matchedPattern) details.push(`pattern=${match.matchedPattern}`);
+      if (match.matchedDomain) details.push(`match=${match.matchedDomain}`);
+      if (match.groups && match.groups.length > 0) {
+        details.push(`groups=${[...match.groups].sort().join(", ")}`);
+      }
+
+      return details.length > 0 ?
+          `${typeLabel}: ${sourceLabel} (${details.join(", ")})`
+        : `${typeLabel}: ${sourceLabel}`;
+    },
+    [],
+  );
 
   type LogsTableContextMenuItem = { label: string; value: string };
 
@@ -2376,6 +2661,7 @@ export function LogsPage() {
         handleStatusClick,
         handleClientClick,
         handleDomainClick,
+        scheduleDomainBlockSourceLookup,
         selectedDomains,
         toggleDomainSelection,
         domainToGroupMap,
@@ -2385,6 +2671,7 @@ export function LogsPage() {
       handleStatusClick,
       handleClientClick,
       handleDomainClick,
+      scheduleDomainBlockSourceLookup,
       selectedDomains,
       toggleDomainSelection,
       domainToGroupMap,
@@ -4183,6 +4470,175 @@ export function LogsPage() {
         id="domain-tooltip-shared"
         place="top"
         className="domain-tooltip"
+        clickable
+        afterShow={() => {
+          const anchor = domainTooltipAnchorRef.current;
+          if (!anchor) {
+            return;
+          }
+
+          const domain = anchor.getAttribute("data-domain") ?? "";
+          const nodeId = anchor.getAttribute("data-node-id") ?? "";
+          const isBlocked = anchor.getAttribute("data-is-blocked") === "true";
+
+          if (!isBlocked || !domain || !nodeId) {
+            return;
+          }
+
+          triggerDomainBlockSourceLookupImmediate(nodeId, domain);
+        }}
+        afterHide={() => {
+          setExpandedDomainTooltipKey(null);
+        }}
+        render={({
+          activeAnchor,
+          content,
+        }: {
+          activeAnchor: HTMLElement | null;
+          content?: string;
+        }) => {
+          if (!activeAnchor) {
+            return null;
+          }
+
+          const anchor =
+            (activeAnchor.closest(
+              "[data-tooltip-id='domain-tooltip-shared']",
+            ) as HTMLElement | null) ?? activeAnchor;
+
+          domainTooltipAnchorRef.current = anchor;
+
+          const baseHtml =
+            typeof content === "string" ? content : (
+              (anchor.getAttribute("data-tooltip-content") ?? "")
+            );
+
+          const domain = anchor.getAttribute("data-domain") ?? "";
+          const nodeId = anchor.getAttribute("data-node-id") ?? "";
+          const isBlocked = anchor.getAttribute("data-is-blocked") === "true";
+
+          const key =
+            domain && nodeId ?
+              getDomainBlockSourceCacheKey(nodeId, domain)
+            : null;
+
+          const lookup = key ? domainBlockSourceByKey[key] : undefined;
+          const rawMatches =
+            lookup?.result?.foundIn?.filter((match) =>
+              isBlockMatch(match.type),
+            ) ?? [];
+
+          const allMatches =
+            rawMatches.length <= 1 ?
+              rawMatches
+            : Array.from(
+                new Map(
+                  rawMatches.map((match) => [
+                    getBlockMatchDedupeKey(match),
+                    match,
+                  ]),
+                ).values(),
+              );
+          const expanded =
+            key !== null &&
+            expandedDomainTooltipKey === key &&
+            allMatches.length > 3;
+          const matchesToShow = expanded ? allMatches : allMatches.slice(0, 3);
+          const remaining = Math.max(
+            0,
+            allMatches.length - matchesToShow.length,
+          );
+
+          return (
+            <div>
+              {/*
+               * SECURITY NOTE (XSS): `baseHtml` originates from the domain-cell tooltip string.
+               * That string is constructed to escape all dynamic/untrusted values (see
+               * `escapeTooltipHtml()` in the Domain column renderer). Do not pass raw/unescaped
+               * values into that HTML.
+               */}
+              <div dangerouslySetInnerHTML={{ __html: baseHtml }} />
+
+              {isBlocked && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    paddingTop: 8,
+                    borderTop: "1px solid rgba(255, 255, 255, 0.15)",
+                  }}
+                >
+                  <div>
+                    <strong>Likely blocked by:</strong>
+                  </div>
+
+                  {(!lookup || lookup.status === "idle") && (
+                    <div style={{ marginTop: 6, opacity: 0.8 }}>
+                      Hover ~0.3s to check block sources…
+                    </div>
+                  )}
+
+                  {lookup?.status === "loading" && (
+                    <div style={{ marginTop: 6, opacity: 0.8 }}>
+                      Looking up block sources…
+                    </div>
+                  )}
+
+                  {lookup?.status === "error" && (
+                    <div style={{ marginTop: 6, opacity: 0.8 }}>
+                      Unable to determine block source: {lookup.error}
+                    </div>
+                  )}
+
+                  {lookup?.status === "loaded" && (
+                    <>
+                      {allMatches.length === 0 ?
+                        <div style={{ marginTop: 6, opacity: 0.8 }}>
+                          No matching blocklist/rule found (may be blocked by a
+                          different mechanism).
+                        </div>
+                      : <div style={{ marginTop: 6 }}>
+                          {matchesToShow.map((match, index) => (
+                            <div
+                              key={
+                                getBlockMatchDedupeKey(match) ||
+                                `${match.type}-${match.source}-${index}`
+                              }
+                              style={{ marginLeft: 12, fontSize: 12 }}
+                            >
+                              <span className="tooltip-blocked">→</span>{" "}
+                              {formatBlockMatchLabel(match)}
+                            </div>
+                          ))}
+
+                          {allMatches.length > 3 && key && (
+                            <button
+                              type="button"
+                              className="domain-tooltip__show-more"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setExpandedDomainTooltipKey(
+                                  expanded ? null : key,
+                                );
+                              }}
+                              style={{ marginTop: 8 }}
+                            >
+                              {expanded ?
+                                "Show less"
+                              : remaining > 0 ?
+                                `Show ${remaining} more`
+                              : "Show more"}
+                            </button>
+                          )}
+                        </div>
+                      }
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        }}
       />
       {/* Tooltip for response time cells */}
       <Tooltip
