@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   HttpException,
   Inject,
   Injectable,
@@ -10,7 +9,6 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
-import * as crypto from "crypto";
 import * as dns from "dns";
 import * as https from "https";
 import { promisify } from "util";
@@ -403,36 +401,6 @@ export class TechnitiumService {
   }
 
   /**
-   * Returns node ids that would fall back to TECHNITIUM_CLUSTER_TOKEN because
-   * a per-node TECHNITIUM_<NODE>_TOKEN is not configured.
-   *
-   * Notes:
-   * - This is for deprecation UX only (never exposes the token).
-   * - Per-node TECHNITIUM_<NODE>_TOKEN is legacy-only for Technitium DNS < v14.
-   *   We still treat the env var as a node-specific override if it is present.
-   */
-  getClusterTokenFallbackNodeIds(): string[] {
-    const clusterToken = (process.env.TECHNITIUM_CLUSTER_TOKEN ?? "").trim();
-    if (!clusterToken) {
-      return [];
-    }
-
-    const fallback: string[] = [];
-    for (const node of this.nodeConfigs) {
-      const sanitizedKey = node.id.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      const perNodeToken = (
-        process.env[`TECHNITIUM_${sanitizedKey}_TOKEN`] ?? ""
-      ).trim();
-
-      if (!perNodeToken) {
-        fallback.push(node.id);
-      }
-    }
-
-    return fallback.sort((a, b) => a.localeCompare(b));
-  }
-
-  /**
    * Resolve a hostname to IP address with timeout.
    * Used to match cluster nodes when hostnames don't resolve to the configured baseUrl IPs.
    */
@@ -495,9 +463,8 @@ export class TechnitiumService {
     // In session-auth mode we may only have tokens for a subset of nodes.
     if (this.nodeConfigs.length > 0) {
       const session = AuthRequestContext.getSession();
-      const probeNode =
-        this.sessionAuthEnabled ?
-          this.nodeConfigs.find((node) => !!session?.tokensByNodeId?.[node.id])
+      const probeNode = this.sessionAuthEnabled
+        ? this.nodeConfigs.find((node) => !!session?.tokensByNodeId?.[node.id])
         : this.nodeConfigs[0];
 
       if (!probeNode) {
@@ -785,9 +752,9 @@ export class TechnitiumService {
       };
     } catch (error: unknown) {
       const name =
-        error instanceof Error && error.constructor ?
-          error.constructor.name
-        : "Unknown";
+        error instanceof Error && error.constructor
+          ? error.constructor.name
+          : "Unknown";
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
         `Failed to get cluster state for ${nodeId}: ${name} - ${message}`,
@@ -872,13 +839,13 @@ export class TechnitiumService {
         const data = error.response?.data as unknown;
 
         const responseMessage =
-          data && typeof data === "object" && "message" in data ?
-            (data as Record<string, unknown>)["message"]
-          : undefined;
+          data && typeof data === "object" && "message" in data
+            ? (data as Record<string, unknown>)["message"]
+            : undefined;
         const responseError =
-          data && typeof data === "object" && "error" in data ?
-            (data as Record<string, unknown>)["error"]
-          : undefined;
+          data && typeof data === "object" && "error" in data
+            ? (data as Record<string, unknown>)["error"]
+            : undefined;
 
         const parts = [
           typeof status === "number" ? `HTTP ${status}` : undefined,
@@ -1355,9 +1322,9 @@ export class TechnitiumService {
       const message = (() => {
         if (error instanceof HttpException) {
           const response = error.getResponse();
-          return typeof response === "string" ? response : (
-              (error.message ?? "Request failed")
-            );
+          return typeof response === "string"
+            ? response
+            : (error.message ?? "Request failed");
         }
 
         if (error instanceof Error) {
@@ -1376,9 +1343,9 @@ export class TechnitiumService {
     }
 
     const envelopeObj =
-      envelope && typeof envelope === "object" ?
-        (envelope as Partial<TechnitiumApiResponse<SessionInfo>>)
-      : undefined;
+      envelope && typeof envelope === "object"
+        ? (envelope as Partial<TechnitiumApiResponse<SessionInfo>>)
+        : undefined;
 
     if (!envelopeObj || typeof envelopeObj.status !== "string") {
       this.backgroundTokenValidation = {
@@ -1416,13 +1383,12 @@ export class TechnitiumService {
       status?: string;
     };
     const sessionInfo: SessionInfo | undefined =
-      envelopeObj.response !== undefined ? envelopeObj.response
-      : (
-        flattened &&
-        (flattened.info || flattened.username || flattened.displayName)
-      ) ?
-        flattened
-      : undefined;
+      envelopeObj.response !== undefined
+        ? envelopeObj.response
+        : flattened &&
+            (flattened.info || flattened.username || flattened.displayName)
+          ? flattened
+          : undefined;
 
     if (!sessionInfo) {
       this.backgroundTokenValidation = {
@@ -1584,9 +1550,9 @@ export class TechnitiumService {
     };
 
     const envelopeObj =
-      envelope && typeof envelope === "object" ?
-        (envelope as Record<string, unknown>)
-      : undefined;
+      envelope && typeof envelope === "object"
+        ? (envelope as Record<string, unknown>)
+        : undefined;
 
     const status = envelopeObj?.["status"];
     if (!envelopeObj || typeof status !== "string") {
@@ -1619,15 +1585,13 @@ export class TechnitiumService {
       response?: unknown;
     };
     const sessionInfo: SessionInfo | undefined =
-      (
-        flattened &&
-        typeof flattened === "object" &&
-        (flattened.info || flattened.username)
-      ) ?
-        flattened
-      : flattened && typeof flattened.response === "object" ?
-        (flattened.response as SessionInfo)
-      : undefined;
+      flattened &&
+      typeof flattened === "object" &&
+      (flattened.info || flattened.username)
+        ? flattened
+        : flattened && typeof flattened.response === "object"
+          ? (flattened.response as SessionInfo)
+          : undefined;
 
     if (!sessionInfo) {
       return {
@@ -1676,159 +1640,6 @@ export class TechnitiumService {
     return { okForPtr: true, username: sessionInfo.username };
   }
 
-  async migrateClusterTokenToBackgroundToken(): Promise<{
-    username: string;
-    tokenName: string;
-    token: string;
-  }> {
-    const clusterToken = (process.env.TECHNITIUM_CLUSTER_TOKEN ?? "").trim();
-    if (!clusterToken) {
-      throw new BadRequestException(
-        "TECHNITIUM_CLUSTER_TOKEN is not configured; migration cannot run.",
-      );
-    }
-
-    const node = await this.pickPrimaryNodeForAdminToken(clusterToken);
-
-    const baseUsername = "companion-readonly";
-    const displayName = "Technitium DNS Companion";
-    const tokenName = "Technitium-DNS-Companion Background";
-
-    let createdUsername: string | undefined;
-
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const suffix =
-        attempt === 0 ? "" : `-${crypto.randomBytes(3).toString("hex")}`;
-      const username = `${baseUsername}${suffix}`;
-      const password = crypto.randomBytes(18).toString("base64url");
-
-      try {
-        const createUserEnvelope = await this.requestWithExplicitToken<
-          TechnitiumApiResponse<{ displayName?: string; username?: string }>
-        >(
-          node,
-          {
-            method: "GET",
-            url: "/api/admin/users/create",
-            params: { displayName, user: username, pass: password },
-          },
-          clusterToken,
-        );
-
-        this.unwrapApiResponse(
-          createUserEnvelope,
-          node.id,
-          "create migration user",
-        );
-        createdUsername = username;
-        break;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.toLowerCase().includes("access was denied")) {
-          throw new ForbiddenException(
-            "Migration failed: TECHNITIUM_CLUSTER_TOKEN was denied permission to create users/tokens. " +
-              "This usually means the token belongs to a low-privilege (read-only) user. " +
-              "Temporarily provide an admin-capable cluster token to run migration, or manually create a least-privilege Technitium user/token and set TECHNITIUM_BACKGROUND_TOKEN.",
-          );
-        }
-        if (
-          message.toLowerCase().includes("already") &&
-          message.toLowerCase().includes("exist")
-        ) {
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    if (!createdUsername) {
-      throw new ServiceUnavailableException(
-        "Unable to create a dedicated read-only user (username collisions). Try again or delete existing companion users in Technitium.",
-      );
-    }
-
-    // Ensure the user is not placed into any privileged groups.
-    // The default "Everyone" group is expected to be view-only and safe for background lookups.
-    try {
-      const setUserEnvelope = await this.requestWithExplicitToken<
-        TechnitiumApiResponse<{ username?: string }>
-      >(
-        node,
-        {
-          method: "GET",
-          url: "/api/admin/users/set",
-          params: { user: createdUsername, memberOfGroups: "Everyone" },
-        },
-        clusterToken,
-      );
-
-      this.unwrapApiResponse(
-        setUserEnvelope,
-        node.id,
-        "set migration user groups",
-      );
-    } catch (error) {
-      // If we can't enforce group membership (e.g., older TDNS versions or custom auth config),
-      // continue and rely on the least-privilege validation backstop below.
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(
-        `Migration could not set memberOfGroups for user "${createdUsername}": ${message}`,
-      );
-    }
-
-    const createTokenEnvelope = await this.requestWithExplicitToken<
-      TechnitiumApiResponse<{
-        username: string;
-        tokenName: string;
-        token: string;
-      }>
-    >(
-      node,
-      {
-        method: "GET",
-        url: "/api/admin/sessions/createToken",
-        params: { user: createdUsername, tokenName },
-      },
-      clusterToken,
-    );
-
-    const created = this.unwrapApiResponse(
-      createTokenEnvelope,
-      node.id,
-      "create migration API token",
-    );
-
-    const newToken = created.token;
-    if (!newToken) {
-      throw new ServiceUnavailableException(
-        "Technitium did not return a token value during migration.",
-      );
-    }
-
-    const sessionGetEnvelope = await this.requestWithExplicitToken(
-      node,
-      { method: "GET", url: "/api/user/session/get", params: {} },
-      newToken,
-    );
-
-    const policy = this.evaluatePtrTokenPolicy(sessionGetEnvelope);
-    if (!policy.okForPtr) {
-      throw new ServiceUnavailableException(
-        `Created token did not meet least-privilege requirements: ${policy.reason ?? "unknown reason"}`,
-      );
-    }
-
-    this.logger.log(
-      `Migration created background token user "${createdUsername}" on node "${node.id}" (tokenName: "${tokenName}").`,
-    );
-
-    return {
-      username: createdUsername,
-      tokenName: created.tokenName ?? tokenName,
-      token: newToken,
-    };
-  }
-
   private stopPeriodicPtrLookups(): void {
     if (!this.ptrLookupTimer) {
       return;
@@ -1868,9 +1679,9 @@ export class TechnitiumService {
         }
       } else {
         const paramsObject =
-          params && typeof params === "object" ?
-            (params as Record<string, unknown>)
-          : {};
+          params && typeof params === "object"
+            ? (params as Record<string, unknown>)
+            : {};
 
         if (!("token" in paramsObject)) {
           axiosConfig.params = { ...paramsObject, token };
@@ -1920,9 +1731,8 @@ export class TechnitiumService {
         timeout: 5000, // 5 second timeout for PTR lookups
       };
 
-      const envelope =
-        this.sessionAuthEnabled ?
-          await this.requestWithExplicitToken<TechnitiumApiResponse<any>>(
+      const envelope = this.sessionAuthEnabled
+        ? await this.requestWithExplicitToken<TechnitiumApiResponse<any>>(
             node,
             requestConfig,
             this.backgroundToken ?? "",
@@ -2252,18 +2062,18 @@ export class TechnitiumService {
       totalMatchingEntries > 0;
 
     const totalPages =
-      effectiveEntriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
-      : 1;
+      effectiveEntriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
+        : 1;
 
     const startIndex =
-      effectiveEntriesPerPage > 0 ?
-        (pageNumber - 1) * effectiveEntriesPerPage
-      : 0;
+      effectiveEntriesPerPage > 0
+        ? (pageNumber - 1) * effectiveEntriesPerPage
+        : 0;
     const endIndex =
-      effectiveEntriesPerPage > 0 ?
-        startIndex + effectiveEntriesPerPage
-      : totalMatchingEntries;
+      effectiveEntriesPerPage > 0
+        ? startIndex + effectiveEntriesPerPage
+        : totalMatchingEntries;
     const paginatedEntries = filteredEntries.slice(startIndex, endIndex);
 
     return {
@@ -2736,17 +2546,17 @@ export class TechnitiumService {
       anyNodeHitLimit && hasFiltersActive && totalMatchingEntries > 0;
 
     const totalPages =
-      effectiveEntriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
-      : 1;
+      effectiveEntriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / effectiveEntriesPerPage))
+        : 1;
     const startIndex =
-      effectiveEntriesPerPage > 0 ?
-        (pageNumber - 1) * effectiveEntriesPerPage
-      : 0;
+      effectiveEntriesPerPage > 0
+        ? (pageNumber - 1) * effectiveEntriesPerPage
+        : 0;
     const endIndex =
-      effectiveEntriesPerPage > 0 ?
-        startIndex + effectiveEntriesPerPage
-      : filteredEntries.length;
+      effectiveEntriesPerPage > 0
+        ? startIndex + effectiveEntriesPerPage
+        : filteredEntries.length;
     const paginatedEntries = filteredEntries.slice(startIndex, endIndex);
 
     const nodes: TechnitiumCombinedNodeLogSnapshot[] = snapshots.map(
@@ -2790,13 +2600,13 @@ export class TechnitiumService {
 
     // BENCHMARK: Log detailed metrics
     const hitRate =
-      this.queryLogCacheStats.hits + this.queryLogCacheStats.misses > 0 ?
-        (
-          (this.queryLogCacheStats.hits /
-            (this.queryLogCacheStats.hits + this.queryLogCacheStats.misses)) *
-          100
-        ).toFixed(1)
-      : "0.0";
+      this.queryLogCacheStats.hits + this.queryLogCacheStats.misses > 0
+        ? (
+            (this.queryLogCacheStats.hits /
+              (this.queryLogCacheStats.hits + this.queryLogCacheStats.misses)) *
+            100
+          ).toFixed(1)
+        : "0.0";
 
     this.logger.log(
       `[BENCHMARK] getCombinedQueryLogs: ` +
@@ -2843,9 +2653,8 @@ export class TechnitiumService {
     >(node, { method: "GET", url: "/api/zones/list" });
 
     const payload = this.unwrapApiResponse(envelope, node.id, "zone list");
-    const zones =
-      Array.isArray(payload.zones) ?
-        payload.zones.map((zone) => this.sanitizeZoneSummary(zone))
+    const zones = Array.isArray(payload.zones)
+      ? payload.zones.map((zone) => this.sanitizeZoneSummary(zone))
       : [];
 
     const pageNumber =
@@ -3011,9 +2820,8 @@ export class TechnitiumService {
         const totalZones =
           snapshot.data?.totalZones ??
           (snapshot.data ? snapshot.data.zones.length : undefined);
-        const modifiableZones =
-          snapshot.data ?
-            snapshot.data.zones.filter((zone) => zone.internal !== true).length
+        const modifiableZones = snapshot.data
+          ? snapshot.data.zones.filter((zone) => zone.internal !== true).length
           : undefined;
 
         return {
@@ -3054,12 +2862,12 @@ export class TechnitiumService {
       `zone records for ${zoneName || "(root)"}`,
     );
 
-    const records =
-      Array.isArray(payload.records) ? payload.records : ([] as unknown[]);
+    const records = Array.isArray(payload.records)
+      ? payload.records
+      : ([] as unknown[]);
 
-    const zone =
-      payload.zone ?
-        this.sanitizeZoneSummary(payload.zone)
+    const zone = payload.zone
+      ? this.sanitizeZoneSummary(payload.zone)
       : { name: zoneName };
 
     return {
@@ -3082,9 +2890,8 @@ export class TechnitiumService {
 
       if (clusterEnabled) {
         const primarySummary = summaries.find((summary) => summary.isPrimary);
-        const primaryNode =
-          primarySummary ?
-            this.nodeConfigs.find((node) => node.id === primarySummary.id)
+        const primaryNode = primarySummary
+          ? this.nodeConfigs.find((node) => node.id === primarySummary.id)
           : undefined;
 
         if (primaryNode) {
@@ -3171,9 +2978,9 @@ export class TechnitiumService {
     const sourceNode = this.findNode(sourceNodeId);
     const requestedTargetId = request.targetNodeId?.trim();
     const targetNode = this.findNode(
-      requestedTargetId && requestedTargetId.length > 0 ?
-        requestedTargetId
-      : sourceNode.id,
+      requestedTargetId && requestedTargetId.length > 0
+        ? requestedTargetId
+        : sourceNode.id,
     );
     const isLocalClone =
       targetNode.id.toLowerCase() === sourceNode.id.toLowerCase();
@@ -3325,8 +3132,9 @@ export class TechnitiumService {
       request.enableOnTarget ??
       (sourceSummary?.enabled !== undefined ? sourceSummary.enabled : false);
 
-    const enableDisableUrl =
-      desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+    const enableDisableUrl = desiredEnabled
+      ? "/api/dhcp/scopes/enable"
+      : "/api/dhcp/scopes/disable";
 
     const toggleEnvelope = await this.request<
       TechnitiumApiResponse<Record<string, unknown>>
@@ -3430,8 +3238,9 @@ export class TechnitiumService {
     );
 
     const desiredEnabled = request.enabled ?? false;
-    const enableDisableUrl =
-      desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+    const enableDisableUrl = desiredEnabled
+      ? "/api/dhcp/scopes/enable"
+      : "/api/dhcp/scopes/disable";
 
     const toggleEnvelope = await this.request<
       TechnitiumApiResponse<Record<string, unknown>>
@@ -3677,8 +3486,9 @@ export class TechnitiumService {
 
     if (wantsEnabledChange) {
       const desiredEnabled = request.enabled as boolean;
-      const enableDisableUrl =
-        desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+      const enableDisableUrl = desiredEnabled
+        ? "/api/dhcp/scopes/enable"
+        : "/api/dhcp/scopes/disable";
 
       const toggleEnvelope = await this.request<
         TechnitiumApiResponse<Record<string, unknown>>
@@ -3953,8 +3763,9 @@ export class TechnitiumService {
       );
 
       const desiredEnabled = entry.enabled ?? false;
-      const enableDisableUrl =
-        desiredEnabled ? "/api/dhcp/scopes/enable" : "/api/dhcp/scopes/disable";
+      const enableDisableUrl = desiredEnabled
+        ? "/api/dhcp/scopes/enable"
+        : "/api/dhcp/scopes/disable";
 
       const toggleEnvelope = await this.request<
         TechnitiumApiResponse<Record<string, unknown>>
@@ -4004,13 +3815,13 @@ export class TechnitiumService {
 
     // Filter to specific scopes if requested
     const scopesToSync =
-      scopeNames && scopeNames.length > 0 ?
-        sourceScopes.filter((scope) =>
-          scopeNames.some(
-            (name) => name.toLowerCase() === scope.name?.toLowerCase(),
-          ),
-        )
-      : sourceScopes;
+      scopeNames && scopeNames.length > 0
+        ? sourceScopes.filter((scope) =>
+            scopeNames.some(
+              (name) => name.toLowerCase() === scope.name?.toLowerCase(),
+            ),
+          )
+        : sourceScopes;
 
     if (scopesToSync.length === 0) {
       throw new BadRequestException("No scopes found to sync on source node.");
@@ -4154,18 +3965,17 @@ export class TechnitiumService {
           sourceScopeDetails.get(scopeName.toLowerCase()) ||
           (sourceScope as unknown as import("./technitium.types").TechnitiumDhcpScope);
 
-        const scopeDiff =
-          targetScopeDetails ?
-            this.compareDhcpScopes(sourceScopeDetail, targetScopeDetails, {
+        const scopeDiff = targetScopeDetails
+          ? this.compareDhcpScopes(sourceScopeDetail, targetScopeDetails, {
               ignoreOfferDelayTime: shouldPreserveOfferDelayTime,
             })
-          : existingTargetScope ?
-            this.compareDhcpScopes(
-              sourceScopeDetail,
-              existingTargetScope as unknown as import("./technitium.types").TechnitiumDhcpScope,
-              { ignoreOfferDelayTime: shouldPreserveOfferDelayTime },
-            )
-          : undefined;
+          : existingTargetScope
+            ? this.compareDhcpScopes(
+                sourceScopeDetail,
+                existingTargetScope as unknown as import("./technitium.types").TechnitiumDhcpScope,
+                { ignoreOfferDelayTime: shouldPreserveOfferDelayTime },
+              )
+            : undefined;
 
         // Apply strategy
         if (strategy === "skip-existing" && existsOnTarget) {
@@ -4223,9 +4033,9 @@ export class TechnitiumService {
             enableOnTarget: enableOnTarget ?? sourceScope.enabled,
             preserveOfferDelayTime: shouldPreserveOfferDelayTime,
             overrides:
-              Object.keys(cloneOverrides).length > 0 ?
-                cloneOverrides
-              : undefined,
+              Object.keys(cloneOverrides).length > 0
+                ? cloneOverrides
+                : undefined,
           });
 
           scopeResults.push({ scopeName, status: "synced" });
@@ -4241,9 +4051,7 @@ export class TechnitiumService {
       }
 
       const nodeStatus: import("./technitium.types").DhcpBulkSyncNodeResult["status"] =
-        failedCount === 0 ? "success"
-        : syncedCount > 0 ? "partial"
-        : "failed";
+        failedCount === 0 ? "success" : syncedCount > 0 ? "partial" : "failed";
 
       nodeResults.push({
         targetNodeId,
@@ -4333,8 +4141,9 @@ export class TechnitiumService {
       pool: `${scope.startingAddress}-${scope.endingAddress}-${scope.subnetMask}`,
       leaseTime: `${scope.leaseTimeDays ?? 0}-${scope.leaseTimeHours ?? 0}-${scope.leaseTimeMinutes ?? 0}`,
       enabled: (scope as { enabled?: boolean }).enabled ?? false,
-      offerDelayTime:
-        options?.ignoreOfferDelayTime ? undefined : scope.offerDelayTime,
+      offerDelayTime: options?.ignoreOfferDelayTime
+        ? undefined
+        : scope.offerDelayTime,
       pingCheckEnabled: scope.pingCheckEnabled,
       pingCheckTimeout: scope.pingCheckTimeout,
       pingCheckRetries: scope.pingCheckRetries,
@@ -4805,7 +4614,7 @@ export class TechnitiumService {
           effectiveToken = this.backgroundToken;
           if (!effectiveToken) {
             throw new UnauthorizedException(
-              `Authentication required for background access to Technitium node "${node.id}". Background timers do not use TECHNITIUM_CLUSTER_TOKEN; set TECHNITIUM_BACKGROUND_TOKEN (recommended).`,
+              `Authentication required for background access to Technitium node "${node.id}". Set TECHNITIUM_BACKGROUND_TOKEN to enable background tasks.`,
             );
           }
         } else {
@@ -4819,7 +4628,7 @@ export class TechnitiumService {
         }
       } else {
         // Legacy mode: accept either a request-scoped session token (if any)
-        // or a configured node/cluster token.
+        // or a configured per-node token.
         effectiveToken = sessionToken ?? node.token;
       }
 
@@ -4830,9 +4639,9 @@ export class TechnitiumService {
         }
       } else {
         const paramsObject =
-          params && typeof params === "object" ?
-            (params as Record<string, unknown>)
-          : {};
+          params && typeof params === "object"
+            ? (params as Record<string, unknown>)
+            : {};
 
         if (!("token" in paramsObject)) {
           axiosConfig.params = { ...paramsObject, token: effectiveToken ?? "" };
@@ -4917,9 +4726,9 @@ export class TechnitiumService {
       obj.error,
       obj.errorMessage,
       obj.status,
-      obj.response && typeof obj.response === "object" ?
-        (obj.response as Record<string, unknown>).errorMessage
-      : undefined,
+      obj.response && typeof obj.response === "object"
+        ? (obj.response as Record<string, unknown>).errorMessage
+        : undefined,
     ];
 
     return candidates
@@ -5129,21 +4938,21 @@ export class TechnitiumService {
 
     assign(
       "allowOnlyReservedLeases",
-      hasOwn("allowOnlyReservedLeases") ?
-        scope.allowOnlyReservedLeases
-      : undefined,
+      hasOwn("allowOnlyReservedLeases")
+        ? scope.allowOnlyReservedLeases
+        : undefined,
     );
     assign(
       "blockLocallyAdministeredMacAddresses",
-      hasOwn("blockLocallyAdministeredMacAddresses") ?
-        scope.blockLocallyAdministeredMacAddresses
-      : undefined,
+      hasOwn("blockLocallyAdministeredMacAddresses")
+        ? scope.blockLocallyAdministeredMacAddresses
+        : undefined,
     );
     assign(
       "ignoreClientIdentifierOption",
-      hasOwn("ignoreClientIdentifierOption") ?
-        scope.ignoreClientIdentifierOption
-      : undefined,
+      hasOwn("ignoreClientIdentifierOption")
+        ? scope.ignoreClientIdentifierOption
+        : undefined,
     );
 
     return form;
@@ -5422,11 +5231,11 @@ export class TechnitiumService {
     const deleteZonesThatDidNotExist =
       options?.deleteZonesThatDidNotExist ?? true;
 
-    const selectedZoneNames =
-      Array.isArray(options?.zoneNames) ? options?.zoneNames : undefined;
-    const selectedSet =
-      selectedZoneNames ?
-        new Set(
+    const selectedZoneNames = Array.isArray(options?.zoneNames)
+      ? options?.zoneNames
+      : undefined;
+    const selectedSet = selectedZoneNames
+      ? new Set(
           selectedZoneNames
             .map((z) => this.normalizeZoneName(z))
             .filter((z) => z.length > 0),
@@ -5443,9 +5252,8 @@ export class TechnitiumService {
     let deleted = 0;
     let skipped = 0;
 
-    const entries =
-      selectedSet ?
-        (snapshot.zones ?? []).filter((entry) =>
+    const entries = selectedSet
+      ? (snapshot.zones ?? []).filter((entry) =>
           selectedSet.has(this.normalizeZoneName(entry.zoneName)),
         )
       : (snapshot.zones ?? []);
@@ -5631,9 +5439,9 @@ export class TechnitiumService {
       if (axiosError.response) {
         const { status, data, statusText } = axiosError.response;
         const message =
-          typeof data === "string" ? data : (
-            ((data as Record<string, unknown>)?.message ?? statusText)
-          );
+          typeof data === "string"
+            ? data
+            : ((data as Record<string, unknown>)?.message ?? statusText);
 
         return new HttpException(
           {

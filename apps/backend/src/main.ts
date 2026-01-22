@@ -55,8 +55,6 @@ async function bootstrap() {
   const sessionAuthEnabled = true;
   const trustProxyEnabled = process.env.TRUST_PROXY === "true";
   const httpsSelfSignedRequested = process.env.HTTPS_SELF_SIGNED === "true";
-  const clusterTokenConfigured =
-    (process.env.TECHNITIUM_CLUSTER_TOKEN ?? "").trim().length > 0;
   const trustProxyHops = Number.parseInt(
     process.env.TRUST_PROXY_HOPS ?? "1",
     10,
@@ -81,14 +79,6 @@ async function bootstrap() {
       "Option B: Terminate TLS in a reverse proxy and set TRUST_PROXY=true so the backend can detect HTTPS via X-Forwarded-Proto.",
     );
     process.exit(1);
-  }
-
-  if (clusterTokenConfigured) {
-    logger.warn(
-      "TECHNITIUM_CLUSTER_TOKEN is deprecated as of v1.3.0 and is planned to be removed in v1.4. " +
-        "Prefer Technitium-backed session auth for interactive UI usage and TECHNITIUM_BACKGROUND_TOKEN for background jobs. " +
-        "Per-node TECHNITIUM_<NODE>_TOKEN is legacy-only for Technitium DNS < v14.",
-    );
   }
 
   let httpsOptions: { key: Buffer; cert: Buffer; ca?: Buffer } | undefined;
@@ -242,8 +232,9 @@ async function bootstrap() {
     logger.log("CORS enabled for all origins (development mode)");
   }
 
-  const port =
-    httpsActive ? process.env.HTTPS_PORT || 3443 : process.env.PORT || 3000;
+  const port = httpsActive
+    ? process.env.HTTPS_PORT || 3443
+    : process.env.PORT || 3000;
 
   const portNumber =
     typeof port === "string" ? Number.parseInt(port, 10) : port;

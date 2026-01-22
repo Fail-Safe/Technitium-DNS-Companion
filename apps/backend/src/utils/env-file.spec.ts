@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
 import { tmpdir } from "os";
+import { join } from "path";
 import { getEnvOrFile, resolveEnvFileVariables } from "./env-file";
 
 describe("env-file utilities", () => {
@@ -20,8 +20,6 @@ describe("env-file utilities", () => {
     // Clean up env vars before each test
     delete process.env.TEST_VAR;
     delete process.env.TEST_VAR_FILE;
-    delete process.env.TECHNITIUM_CLUSTER_TOKEN;
-    delete process.env.TECHNITIUM_CLUSTER_TOKEN_FILE;
     delete process.env.TECHNITIUM_BACKGROUND_TOKEN;
     delete process.env.TECHNITIUM_BACKGROUND_TOKEN_FILE;
     delete process.env.TECHNITIUM_NODES;
@@ -85,16 +83,6 @@ describe("env-file utilities", () => {
   });
 
   describe("resolveEnvFileVariables", () => {
-    it("should resolve TECHNITIUM_CLUSTER_TOKEN from file", () => {
-      const filePath = join(testDir, "cluster-token.txt");
-      writeFileSync(filePath, "my-cluster-token");
-      process.env.TECHNITIUM_CLUSTER_TOKEN_FILE = filePath;
-
-      resolveEnvFileVariables();
-
-      expect(process.env.TECHNITIUM_CLUSTER_TOKEN).toBe("my-cluster-token");
-    });
-
     it("should resolve TECHNITIUM_BACKGROUND_TOKEN from file", () => {
       const filePath = join(testDir, "background-token.txt");
       writeFileSync(filePath, "my-background-token");
@@ -121,12 +109,12 @@ describe("env-file utilities", () => {
     it("should not overwrite existing env values", () => {
       const filePath = join(testDir, "should-not-use.txt");
       writeFileSync(filePath, "file-value");
-      process.env.TECHNITIUM_CLUSTER_TOKEN = "existing-value";
-      process.env.TECHNITIUM_CLUSTER_TOKEN_FILE = filePath;
+      process.env.TECHNITIUM_BACKGROUND_TOKEN = "existing-value";
+      process.env.TECHNITIUM_BACKGROUND_TOKEN_FILE = filePath;
 
       resolveEnvFileVariables();
 
-      expect(process.env.TECHNITIUM_CLUSTER_TOKEN).toBe("existing-value");
+      expect(process.env.TECHNITIUM_BACKGROUND_TOKEN).toBe("existing-value");
     });
   });
 });

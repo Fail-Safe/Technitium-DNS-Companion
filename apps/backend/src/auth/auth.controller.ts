@@ -11,11 +11,7 @@ import type { Request, Response } from "express";
 import { TechnitiumService } from "../technitium/technitium.service";
 import { AuthRequestContext } from "./auth-request-context";
 import { AuthService } from "./auth.service";
-import type {
-  AuthLoginRequestDto,
-  AuthMeResponseDto,
-  AuthMigrateBackgroundTokenResponseDto,
-} from "./auth.types";
+import type { AuthLoginRequestDto, AuthMeResponseDto } from "./auth.types";
 import { Public } from "./public.decorator";
 
 @Controller("auth")
@@ -36,13 +32,14 @@ export class AuthController {
 
     const forwardedProtoHeader = req?.headers?.["x-forwarded-proto"];
     const forwardedProto =
-      typeof forwardedProtoHeader === "string" ? forwardedProtoHeader
-      : Array.isArray(forwardedProtoHeader) ? forwardedProtoHeader[0]
-      : undefined;
+      typeof forwardedProtoHeader === "string"
+        ? forwardedProtoHeader
+        : Array.isArray(forwardedProtoHeader)
+          ? forwardedProtoHeader[0]
+          : undefined;
 
-    const transport =
-      req ?
-        {
+    const transport = req
+      ? {
           requestSecure: req.secure === true,
           httpsEnabled,
           trustProxyEnabled,
@@ -55,20 +52,11 @@ export class AuthController {
 
     const configuredNodeIds = this.technitiumService.getConfiguredNodeIds();
 
-    const clusterTokenConfigured =
-      (process.env.TECHNITIUM_CLUSTER_TOKEN ?? "").trim().length > 0;
-
-    const clusterTokenUsage = {
-      usedForNodeIds: this.technitiumService.getClusterTokenFallbackNodeIds(),
-    };
-
     if (!session) {
       return {
         sessionAuthEnabled,
         authenticated: false,
         configuredNodeIds,
-        clusterTokenConfigured,
-        clusterTokenUsage,
         ...(transport ? { transport } : {}),
         backgroundPtrToken,
       };
@@ -80,17 +68,9 @@ export class AuthController {
       user: session.user,
       nodeIds: Object.keys(session.tokensByNodeId),
       configuredNodeIds,
-      clusterTokenConfigured,
-      clusterTokenUsage,
       ...(transport ? { transport } : {}),
       backgroundPtrToken,
     };
-  }
-
-  @Post("background-token/migrate")
-  async migrateBackgroundToken(): Promise<AuthMigrateBackgroundTokenResponseDto> {
-    // AuthGuard ensures a session is present.
-    return this.technitiumService.migrateClusterTokenToBackgroundToken();
   }
 
   @Public()

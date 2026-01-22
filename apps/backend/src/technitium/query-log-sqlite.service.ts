@@ -1,9 +1,9 @@
 import {
-  Inject,
-  Injectable,
-  Logger,
-  OnModuleDestroy,
-  OnModuleInit,
+    Inject,
+    Injectable,
+    Logger,
+    OnModuleDestroy,
+    OnModuleInit,
 } from "@nestjs/common";
 import { createHash } from "crypto";
 import { mkdirSync } from "fs";
@@ -12,12 +12,12 @@ import { dirname } from "path";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
 import { TechnitiumService } from "./technitium.service";
 import type {
-  TechnitiumCombinedQueryLogEntry,
-  TechnitiumCombinedQueryLogPage,
-  TechnitiumNodeConfig,
-  TechnitiumQueryLogEntry,
-  TechnitiumQueryLogFilters,
-  TechnitiumQueryLogPage,
+    TechnitiumCombinedQueryLogEntry,
+    TechnitiumCombinedQueryLogPage,
+    TechnitiumNodeConfig,
+    TechnitiumQueryLogEntry,
+    TechnitiumQueryLogFilters,
+    TechnitiumQueryLogPage,
 } from "./technitium.types";
 
 export interface QueryLogSqliteStatus {
@@ -368,8 +368,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           const qnameLc = qname ? qname.toLowerCase() : null;
 
           const clientIpAddress = entry.clientIpAddress ?? null;
-          const clientIpLc =
-            clientIpAddress ? clientIpAddress.toLowerCase() : null;
+          const clientIpLc = clientIpAddress
+            ? clientIpAddress.toLowerCase()
+            : null;
 
           const clientName = entry.clientName ?? null;
           const clientNameLc = clientName ? clientName.toLowerCase() : null;
@@ -500,7 +501,10 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     nodeId?: string,
   ): string {
     // Exclude disableCache from the cache key; it controls whether we use the cache at all.
-    const { disableCache: _disableCache, ...rest } = filters ?? {};
+    const rest: Record<string, unknown> & { disableCache?: unknown } = {
+      ...(filters ?? {}),
+    };
+    delete rest.disableCache;
 
     // Stable stringify by sorting keys.
     const normalized: Record<string, unknown> = {};
@@ -567,9 +571,8 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const endTs = filters.end ? Date.parse(filters.end) : now;
 
     return {
-      startTs:
-        Number.isFinite(startTs) ?
-          Math.max(retentionStart, startTs)
+      startTs: Number.isFinite(startTs)
+        ? Math.max(retentionStart, startTs)
         : retentionStart,
       endTs: Number.isFinite(endTs) ? endTs : now,
     };
@@ -708,9 +711,8 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const db = this.db;
 
     const disableCache = !!filters.disableCache;
-    const cacheKey =
-      !disableCache ?
-        this.buildResponseCacheKey("combined", filters)
+    const cacheKey = !disableCache
+      ? this.buildResponseCacheKey("combined", filters)
       : undefined;
 
     if (cacheKey) {
@@ -776,9 +778,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const totalPages =
-      entriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
-      : 1;
+      entriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
+        : 1;
     const offset = entriesPerPage > 0 ? (pageNumber - 1) * entriesPerPage : 0;
 
     const sortDir = descendingOrder ? "DESC" : "ASC";
@@ -841,11 +843,11 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       const nodeTotalEntries = nodeTotalEntriesRow?.count ?? 0;
 
       const nodeTotalPages =
-        entriesPerPage > 0 ?
-          nodeTotalEntries > 0 ?
-            Math.ceil(nodeTotalEntries / entriesPerPage)
-          : 0
-        : 0;
+        entriesPerPage > 0
+          ? nodeTotalEntries > 0
+            ? Math.ceil(nodeTotalEntries / entriesPerPage)
+            : 0
+          : 0;
 
       return {
         nodeId: node.id,
@@ -889,9 +891,8 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const disableCache = !!filters.disableCache;
-    const cacheKey =
-      !disableCache ?
-        this.buildResponseCacheKey("node", filters, nodeId)
+    const cacheKey = !disableCache
+      ? this.buildResponseCacheKey("node", filters, nodeId)
       : undefined;
 
     if (cacheKey) {
@@ -958,9 +959,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const totalPages =
-      entriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
-      : 1;
+      entriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
+        : 1;
     const offset = entriesPerPage > 0 ? (pageNumber - 1) * entriesPerPage : 0;
 
     const sortDir = descendingOrder ? "DESC" : "ASC";
