@@ -1,9 +1,9 @@
 import {
-    Inject,
-    Injectable,
-    Logger,
-    OnModuleDestroy,
-    OnModuleInit,
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
 } from "@nestjs/common";
 import { createHash } from "crypto";
 import { mkdirSync } from "fs";
@@ -12,12 +12,12 @@ import { dirname } from "path";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
 import { TechnitiumService } from "./technitium.service";
 import type {
-    TechnitiumCombinedQueryLogEntry,
-    TechnitiumCombinedQueryLogPage,
-    TechnitiumNodeConfig,
-    TechnitiumQueryLogEntry,
-    TechnitiumQueryLogFilters,
-    TechnitiumQueryLogPage,
+  TechnitiumCombinedQueryLogEntry,
+  TechnitiumCombinedQueryLogPage,
+  TechnitiumNodeConfig,
+  TechnitiumQueryLogEntry,
+  TechnitiumQueryLogFilters,
+  TechnitiumQueryLogPage,
 } from "./technitium.types";
 
 export interface QueryLogSqliteStatus {
