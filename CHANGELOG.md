@@ -11,6 +11,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Health Check API: Enhanced health check endpoint with basic (`/api/health`) and detailed (`/api/health?detailed=true`) modes
+  - Basic mode: Fast health check suitable for Docker container health checks
+  - Detailed mode: Comprehensive health information including node connectivity status and cluster information
+  - Public endpoint (no authentication required) for monitoring systems and load balancers
+  - See [docs/features/HEALTH_CHECK_API.md](docs/features/HEALTH_CHECK_API.md) for complete documentation
 - Query Logs: domain tooltip enrichment for blocked entries (“Likely blocked by”), using a best-effort per-node domain-list check with debounce (~300ms) + caching, Top 3 results with Show more/less, mobile-friendly fetch-on-open, de-duplicated matches, improved wrapping for long URLs/regex, and documented XSS mitigations around tooltip HTML rendering.
 
 ## [1.3.1] - 2026-01-10
