@@ -2,6 +2,7 @@
 # Multi-stage build for Technitium DNS Companion (Monorepo)
 
 ARG BUILDPLATFORM=linux/amd64
+ARG NPM_VERSION=11.8.0
 
 
 # Stage 0: Shared manifest context (reduces repeated COPY invalidations)
@@ -14,6 +15,7 @@ COPY apps/frontend/package.json ./apps/frontend/
 # Stage 1: Build frontend
 FROM --platform=$BUILDPLATFORM node:22-alpine3.21 AS frontend-builder
 ARG BUILDPLATFORM
+ARG NPM_VERSION
 
 WORKDIR /app
 
@@ -23,7 +25,9 @@ COPY --from=manifest-context /app/ ./
 # Install ALL dependencies to get platform-specific optional deps (Rollup binaries)
 # --ignore-scripts skips native module compilation (not needed for frontend build)
 # Explicitly install the matching Rollup native build to work around npm optional deps bug
-RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts \
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --no-fund --no-audit -g npm@${NPM_VERSION} && \
+    npm ci --ignore-scripts \
     && case "$BUILDPLATFORM" in \
         linux/amd64*) npm install --no-save @rollup/rollup-linux-x64-musl @esbuild/linux-x64 ;; \
         linux/arm64*) npm install --no-save @rollup/rollup-linux-arm64-musl @esbuild/linux-arm64 ;; \
@@ -38,6 +42,7 @@ RUN npm run build --workspace=apps/frontend
 
 # Stage 2: Build backend
 FROM --platform=$BUILDPLATFORM node:22-alpine3.21 AS backend-builder
+ARG NPM_VERSION
 
 WORKDIR /app
 
@@ -46,7 +51,9 @@ COPY --from=manifest-context /app/ ./
 
 # Install ALL dependencies (NestJS needs full dependency tree)
 # --ignore-scripts skips native module compilation
-RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --no-fund --no-audit -g npm@${NPM_VERSION} && \
+    npm ci --ignore-scripts
 
 # Copy backend source
 COPY apps/backend/ ./apps/backend/
