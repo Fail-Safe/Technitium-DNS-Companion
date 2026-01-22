@@ -1,10 +1,10 @@
-# Session Auth (v1.2+) and Token Migration Guide
+# Session Auth (v1.4+) and Background Token Guide
 
 This document explains session-based authentication and the transition away from using a long-lived cluster admin token for day-to-day UI access.
 
 ## Why this exists
 
-Historically, Technitium DNS Companion could run entirely using environment-provided Technitium DNS tokens (e.g. a shared cluster token). That works, but it means:
+Historically, Technitium DNS Companion could run entirely using environment-provided Technitium DNS tokens. That works, but it means:
 
 - The Companion backend effectively has a long-lived, high-privilege credential available at rest.
 - Any user who can reach the Companion UI implicitly gets the power of that token (unless you add external auth).
@@ -20,7 +20,6 @@ Historically, Technitium DNS Companion could run entirely using environment-prov
 ### 1) Legacy env-token mode (legacy/migration only)
 
 - Configure Technitium DNS access via env tokens.
-  - `TECHNITIUM_CLUSTER_TOKEN` (deprecated in v1.3, removed in v1.4)
   - Per-node `TECHNITIUM_<NODE>_TOKEN` (legacy-only for Technitium DNS < v14)
 
 This preserves the pre-v1.2 behavior.
@@ -48,34 +47,23 @@ Used only for backend background work (example: background PTR lookups). It shou
 
 The backend validates this token and disables background PTR work if the token is unsafe.
 
-### `TECHNITIUM_CLUSTER_TOKEN` (legacy / migration source)
+## Set up `TECHNITIUM_BACKGROUND_TOKEN` (manual)
 
-In session auth mode, this is treated as a legacy “bootstrap” token to help create a dedicated background user/token. The UI will surface a migration banner when it detects this situation.
+In v1.4+, `TECHNITIUM_CLUSTER_TOKEN` is removed and there is no guided “migration banner” flow.
 
-Deprecation note: `TECHNITIUM_CLUSTER_TOKEN` is deprecated in v1.3 and planned to be removed in v1.4.
+If you want background features (example: background PTR hostname resolution), create and set a dedicated least-privilege token:
 
-## Migration: cluster token → background token
+1. In the Technitium DNS admin UI:
+   - Go to `Administration` → `Sessions` → `Create Token`.
+   - Create a dedicated low-privilege user if you don't already have one.
+   - Generate a token for that user with read-only permissions appropriate for background tasks.
 
-This is the recommended transition plan when you want to enable session auth but currently rely on `TECHNITIUM_CLUSTER_TOKEN`.
+2. Set the token in your env file:
+   - `TECHNITIUM_BACKGROUND_TOKEN=...`
 
-1. Start from a working configuration with a legacy cluster token:
-   - `TECHNITIUM_CLUSTER_TOKEN` is set
-
-2. Log in via the Companion UI.
-
-3. Use the migration banner action:
-   - The backend creates a dedicated read-only user (name may be suffixed if it already exists).
-   - The backend generates a one-time token for that user.
-   - The UI displays the token once.
-
-4. Set `TECHNITIUM_BACKGROUND_TOKEN` in your `technitium.env` file using the generated token.
-
-5. Remove the legacy cluster token:
-   - Comment out or remove `TECHNITIUM_CLUSTER_TOKEN`.
-
-6. Apply the `technitium.env` change by recreating the container (Compose reads `technitium.env` at container create time):
-   - Docker Compose (manual): `docker compose up -d --force-recreate`
-   - Docker run (manual): stop/remove the old container, then run again with the updated env file:
+3. Apply the env change by recreating the container (Compose reads the env file at container create time):
+   - Docker Compose: `docker compose up -d --force-recreate`
+   - Docker run: stop/remove the old container, then run again with the updated env file.
 
 One-liners:
 
@@ -109,7 +97,6 @@ docker run -d \
 7. Validate:
    - The login page appears.
    - You can log in (including 2FA).
-   - The migration banner is gone.
    - Background token is validated as safe.
 
 A quick sanity check endpoint:

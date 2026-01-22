@@ -17,7 +17,7 @@ No config changes are required to upgrade. Optional tuning is available via `QUE
 - **Session authentication**: Users sign in with their Technitium DNS credentials (TOTP/2FA supported). (v1.4+: required for interactive UI).
 - **Planned v1.3+ direction**: Session auth was expected to become the default (and eventually required) in a follow-up release.
 - **Safer background token model**: Background PTR lookups run using `TECHNITIUM_BACKGROUND_TOKEN` (validated for least privilege).
-- **Guided migration from cluster token**: When session auth is enabled and `TECHNITIUM_CLUSTER_TOKEN` is still configured, the UI provides a guided migration flow to create a dedicated read-only user/token.
+- **Guided migration from cluster token**: This existed in earlier versions, but `TECHNITIUM_CLUSTER_TOKEN` and the guided migration flow are removed in v1.4.
 - **Remote dev ergonomics**: `./scripts/remote-dev.sh recreate` force-recreates the dev container so `.env` changes take effect.
 - **Details**: [Optional session auth + token migration guide](./release-notes-v1.2-session-auth-migration.md)
 

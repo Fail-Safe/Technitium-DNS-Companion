@@ -26,7 +26,7 @@ curl http://localhost:3000/api/health
 
 **Request:**
 ```bash
-curl http://localhost:3000/api/health?detailed=true
+curl -b cookies.txt http://localhost:3000/api/health/detailed
 ```
 
 **Response:**
@@ -79,7 +79,7 @@ curl http://localhost:3000/api/health?detailed=true
 
 **Request:**
 ```bash
-curl http://localhost:3000/api/health?detailed=true
+curl -b cookies.txt http://localhost:3000/api/health/detailed
 ```
 
 **Response:**
@@ -162,7 +162,7 @@ services:
 #!/bin/bash
 # check-health.sh - Simple health check script
 
-RESPONSE=$(curl -s http://localhost:3000/api/health?detailed=true)
+RESPONSE=$(curl -b cookies.txt -s http://localhost:3000/api/health/detailed)
 UNHEALTHY=$(echo "$RESPONSE" | jq -r '.nodes.unhealthy // 0')
 
 if [ "$UNHEALTHY" -gt 0 ]; then
@@ -185,25 +185,27 @@ import sys
 
 def check_health():
     try:
-        response = requests.get('http://localhost:3000/api/health?detailed=true', timeout=10)
+    # `/api/health/detailed` requires an authenticated Companion session.
+    # For scripting, authenticate first and reuse the session cookie.
+    response = requests.get('http://localhost:3000/api/health/detailed', timeout=10)
         response.raise_for_status()
-        
+
         data = response.json()
         nodes = data.get('nodes', {})
-        
+
         unhealthy = nodes.get('unhealthy', 0)
         healthy = nodes.get('healthy', 0)
-        
+
         if unhealthy > 0:
             print(f"⚠️  {unhealthy} unhealthy nodes:")
             for node in nodes.get('details', []):
                 if node.get('status') == 'unhealthy':
                     print(f"  - {node['name']}: {node.get('error', 'Unknown error')}")
             return 1
-        
+
         print(f"✅ All {healthy} nodes healthy (uptime: {data.get('uptime')}s)")
         return 0
-        
+
     except Exception as e:
         print(f"❌ Health check failed: {str(e)}")
         return 2
@@ -227,7 +229,7 @@ groups:
         annotations:
           summary: "Technitium DNS Companion is down"
           description: "The Technitium DNS Companion service has been unreachable for 2 minutes"
-      
+
       - alert: TechnitiumNodeUnhealthy
         expr: technitium_unhealthy_nodes > 0
         for: 5m
@@ -244,7 +246,7 @@ groups:
 
 **Settings:**
 - **Friendly Name:** Technitium DNS Companion
-- **URL:** `http://your-server:3000/api/health?detailed=true`
+- **URL:** `http://your-server:3000/api/health/detailed`
 - **Heartbeat Interval:** 60 seconds
 - **Retries:** 3
 - **Expected Status Code:** 200

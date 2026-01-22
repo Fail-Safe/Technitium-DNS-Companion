@@ -81,9 +81,6 @@ TECHNITIUM_NODE2_BASE_URL=http://192.168.1.11:5380
 # TECHNITIUM_NODE1_TOKEN=your-token
 # TECHNITIUM_NODE2_TOKEN=your-token
 
-# Deprecated as of v1.3.0 - Cluster token (removed in v1.4)
-# TECHNITIUM_CLUSTER_TOKEN=your-shared-cluster-token
-
 # Optional
 HTTPS_ENABLED=true
 HTTPS_PORT=3443

@@ -11,22 +11,21 @@ One primary goal of this project is to provide a more mobile-friendly interface 
 
 This project is **not affiliated with Technitium** but is built to complement Technitium DNS server deployments and not to replace functionality.
 
-## Authentication (as of v1.2.1)
+## Authentication (v1.4+)
 
-As of **v1.2.1**, the preferred authentication mechanism is **Technitium DNS-backed session authentication**:
+As of **v1.4**, interactive UI access uses **Technitium DNS-backed session authentication**:
 
 - Users sign in with their **Technitium DNS username/password** (and 2FA if enabled).
 - The Companion stores Technitium session tokens **server-side** and the browser receives only an **HttpOnly session cookie**.
 - This keeps interactive permissions aligned with the Technitium account the user actually logged in with.
 
-Legacy “env-token mode” (configuring the Companion with long-lived admin API tokens) is still supported (for a limited time), but is no longer the recommended default, nor long-term approach for deployments.
+Legacy “env-token mode” (configuring the Companion with long-lived API tokens) is intended for legacy/migration use only.
 
-Planned changes:
+Security posture (v1.4+):
 
-- **v1.3.x (direction)**: `TECHNITIUM_CLUSTER_TOKEN` is **deprecated**. Background jobs (e.g., PTR hostname warming, scheduled sync) are expected to require a dedicated `TECHNITIUM_BACKGROUND_TOKEN` (instead of using an admin token).
-- **v1.4**:
-  - Interactive UI access requires session auth (Technitium login/RBAC).
-  - `TECHNITIUM_CLUSTER_TOKEN` support is planned to be **removed**.
+- Interactive UI access requires session auth (Technitium login/RBAC).
+- `TECHNITIUM_CLUSTER_TOKEN` support is removed.
+- Background jobs use `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege) since background tasks do not have a user session.
 
 Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)
 

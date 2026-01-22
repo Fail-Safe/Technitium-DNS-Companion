@@ -37,17 +37,17 @@ curl http://localhost:3000/api/health
 
 ### Detailed Health Check
 
-**Endpoint:** `GET /api/health?detailed=true`
+**Endpoint:** `GET /api/health/detailed`
 
 **Description:** Provides comprehensive health information including node connectivity status and cluster information. Useful for monitoring dashboards and troubleshooting.
 
-**Authentication:** Public (no authentication required)
+**Authentication:** Requires session authentication (must be logged in)
 
 **Response Time:** Depends on node count and network latency
 
 **Example Request:**
 ```bash
-curl http://localhost:3000/api/health?detailed=true
+curl -b cookies.txt http://localhost:3000/api/health/detailed
 ```
 
 **Example Response:**
@@ -162,15 +162,14 @@ services:
 
 ### Prometheus/Grafana
 
-You can use the detailed health check endpoint with Prometheus blackbox exporter or create a custom exporter:
+For authenticated monitoring, you can use the basic endpoint with Prometheus blackbox exporter.
+If you need the detailed endpoint, prefer an agent running on the same host/network that can maintain a login session.
 
 ```yaml
 # prometheus.yml
 scrape_configs:
   - job_name: 'technitium-companion'
     metrics_path: '/api/health'
-    params:
-      detailed: ['true']
     static_configs:
       - targets: ['localhost:3000']
 ```
@@ -183,9 +182,8 @@ Add a new HTTP monitor:
 - **Heartbeat Interval:** 60 seconds
 - **Expected Status Code:** 200
 
-For detailed monitoring, use:
-- **URL:** `http://your-server:3000/api/health?detailed=true`
-- **Keyword:** `"status":"ok"`
+For detailed monitoring, use an authenticated monitor that can store cookies and request:
+- **URL:** `http://your-server:3000/api/health/detailed`
 
 ### Nagios/Icinga
 
@@ -195,7 +193,7 @@ Example check command:
 #!/bin/bash
 # check_technitium_companion.sh
 
-RESPONSE=$(curl -s -w "%{http_code}" http://localhost:3000/api/health?detailed=true)
+RESPONSE=$(curl -s -w "%{http_code}" http://localhost:3000/api/health/detailed)
 HTTP_CODE="${RESPONSE: -3}"
 BODY="${RESPONSE%???}"
 
@@ -225,29 +223,31 @@ import sys
 
 def check_health():
     try:
-        response = requests.get('http://localhost:3000/api/health?detailed=true', timeout=10)
+    # Detailed health requires an authenticated Companion session.
+    # For scripting, pass the session cookie jar (see curl examples below).
+    response = requests.get('http://localhost:3000/api/health/detailed', timeout=10)
         response.raise_for_status()
-        
+
         data = response.json()
-        
+
         if data.get('status') != 'ok':
             print(f"ERROR: Status is {data.get('status')}")
             return 1
-        
+
         nodes = data.get('nodes', {})
         unhealthy = nodes.get('unhealthy', 0)
-        
+
         if unhealthy > 0:
             print(f"WARNING: {unhealthy} unhealthy nodes")
             for node in nodes.get('details', []):
                 if node.get('status') == 'unhealthy':
                     print(f"  - {node['name']}: {node.get('error', 'Unknown error')}")
             return 1
-        
+
         healthy = nodes.get('healthy', 0)
         print(f"OK: All {healthy} nodes healthy")
         return 0
-        
+
     except Exception as e:
         print(f"ERROR: {str(e)}")
         return 2
@@ -265,13 +265,13 @@ curl -f http://localhost:3000/api/health || echo "Service is down"
 
 ### Get detailed status
 ```bash
-curl -s http://localhost:3000/api/health?detailed=true | jq .
+curl -b cookies.txt -s http://localhost:3000/api/health/detailed | jq .
 ```
 
 ### Check node health from script
 ```bash
 #!/bin/bash
-HEALTH=$(curl -s http://localhost:3000/api/health?detailed=true)
+HEALTH=$(curl -b cookies.txt -s http://localhost:3000/api/health/detailed)
 UNHEALTHY=$(echo "$HEALTH" | jq -r '.nodes.unhealthy')
 
 if [ "$UNHEALTHY" -gt 0 ]; then
@@ -288,7 +288,7 @@ fi
   - Number of configured nodes
   - Network latency to each node
   - Node responsiveness
-  
+
 For frequent health checks (e.g., Docker container health), use the basic endpoint without the `detailed` parameter.
 
 For monitoring dashboards and troubleshooting, use the detailed endpoint but with appropriate intervals (e.g., 30-60 seconds).
@@ -297,10 +297,14 @@ For monitoring dashboards and troubleshooting, use the detailed endpoint but wit
 
 ### Health check returns 401 Unauthorized
 
-The health check endpoint is marked as `@Public()` and should not require authentication. If you're getting 401 errors:
+`GET /api/health` is public (`@Public()`) and should not require authentication. If you're getting 401 errors:
 1. Verify you're accessing `/api/health` (not `/health`)
 2. Check if you have custom authentication middleware interfering
 3. Review backend logs for authentication issues
+
+`GET /api/health/detailed` requires an authenticated Companion session. If you're getting 401 on the detailed endpoint:
+1. Log in via the UI first (session cookie required)
+2. For curl/scripts, pass your cookie jar (e.g., `curl -b cookies.txt ...`)
 
 ### Detailed health shows all nodes as unhealthy
 
@@ -319,22 +323,18 @@ Possible causes:
 
 ## Security Considerations
 
-The health check endpoint is intentionally public (no authentication required) to support:
+The basic health check endpoint is intentionally public (no authentication required) to support:
 - Docker container health checks
 - Load balancer health probes
 - Monitoring systems
 
 **Security implications:**
 - Basic health check reveals minimal information (service is running)
-- Detailed health check reveals:
-  - Node names and URLs (but not credentials)
-  - Cluster topology
-  - Response times
+- Detailed health check reveals additional information (node URLs, cluster topology, response times) and therefore requires authentication.
 
 **Recommendations:**
 - Use basic health check for public-facing load balancers
-- Restrict detailed health check to trusted networks if concerned about information disclosure
-- Consider using a reverse proxy to limit access to `/api/health?detailed=true`
+- Use detailed health only from authenticated monitoring/troubleshooting contexts
 
 ## Future Enhancements
 

@@ -2,6 +2,9 @@
 
 This release introduces an **optional session-auth mode** for Technitium DNS Companion. It lets you require users to sign in with their Technitium DNS credentials (including TOTP-based 2FA) instead of relying on a long-lived admin token for interactive UI access.
 
+Note: This document is **historical** and describes the v1.2-era token migration story.
+In v1.4+, `TECHNITIUM_CLUSTER_TOKEN` and the guided migration banner/endpoint are removed.
+
 ## Why this matters
 
 - Reduces the risk of a long-lived high-privilege token sitting in the Companion environment.
@@ -37,7 +40,12 @@ If you strongly prefer the legacy no-login behavior, you can stay pinned to v1.2
 
 ## Migration: `TECHNITIUM_CLUSTER_TOKEN` → `TECHNITIUM_BACKGROUND_TOKEN`
 
-If you currently use `TECHNITIUM_CLUSTER_TOKEN` and you enable session auth, the UI will show a migration banner.
+This section is **historical (v1.2–v1.3)**.
+
+In those versions, if you used `TECHNITIUM_CLUSTER_TOKEN` and enabled session auth, the UI showed a migration banner.
+
+In v1.4+, there is no guided migration flow. Set up `TECHNITIUM_BACKGROUND_TOKEN` manually:
+- Guide: [features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)
 
 That migration:
 
@@ -58,7 +66,7 @@ docker rm -f technitium-dns-companion 2>/dev/null || true; docker run -d --name 
 ## Quick validation
 
 ```bash
-curl -s https://your-host:5174/api/auth/me
+curl -s https://your-host:3443/api/auth/me
 ```
 
 Look for:
@@ -69,4 +77,4 @@ Look for:
 
 ## More details
 
-- Full guide: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)
+- Full guide: [features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)
