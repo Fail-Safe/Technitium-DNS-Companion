@@ -45,16 +45,6 @@ function RequireAuth() {
     return <PageLoader />;
   }
 
-  // In non-session mode (AUTH_SESSION_ENABLED=false), the app should be usable
-  // without a login page.
-  if (status?.sessionAuthEnabled === false) {
-    return (
-      <TechnitiumProvider>
-        <Outlet />
-      </TechnitiumProvider>
-    );
-  }
-
   // If any API request observed a 401, we store a redirect reason in
   // sessionStorage. Redirecting here prevents protected pages (like DNS Logs)
   // from getting stuck spamming 401s when the auth status hasn't refreshed yet.

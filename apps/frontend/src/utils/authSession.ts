@@ -10,9 +10,6 @@ export function isNodeSessionRequiredButMissing(
 ): boolean {
   if (!status?.authenticated) return false;
 
-  // In non-session mode, we do not require per-node session tokens.
-  if (status.sessionAuthEnabled === false) return false;
-
   const configuredNodeCount = status.configuredNodeIds?.length ?? 0;
   const sessionNodeCount = status.nodeIds?.length ?? 0;
 
