@@ -31,9 +31,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
       />
       <BackgroundTokenSecurityBanner
         backgroundPtrToken={status?.backgroundPtrToken}
-        clusterTokenConfigured={status?.clusterTokenConfigured}
-        clusterTokenUsage={status?.clusterTokenUsage}
-        authenticated={status?.authenticated ?? false}
       />
       <main className={mainClassName}>{children}</main>
     </div>

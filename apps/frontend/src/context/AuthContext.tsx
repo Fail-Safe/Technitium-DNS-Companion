@@ -3,9 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BackgroundPtrTokenValidationSummary } from "../components/common/BackgroundTokenSecurityBanner";
 import type { AuthTransportInfo } from "../components/common/TransportSecurityBanner";
 import {
-  apiFetch,
-  getAuthUnauthorizedEventName,
-  triggerAuthRedirect,
+    apiFetch,
+    getAuthUnauthorizedEventName,
+    triggerAuthRedirect,
 } from "../config";
 import { AuthContext } from "./authContextInstance";
 
@@ -15,8 +15,6 @@ export type AuthStatus = {
   user?: string;
   nodeIds?: string[];
   configuredNodeIds?: string[];
-  clusterTokenConfigured?: boolean;
-  clusterTokenUsage?: { usedForNodeIds: string[] };
   transport?: AuthTransportInfo;
   backgroundPtrToken?: BackgroundPtrTokenValidationSummary;
 };
