@@ -6,7 +6,6 @@ import type { TechnitiumNodeSummary } from "./technitium/technitium.types";
 
 describe("AppController", () => {
   let appController: AppController;
-  let appService: AppService;
   let technitiumService: TechnitiumService;
 
   beforeEach(async () => {
@@ -27,7 +26,6 @@ describe("AppController", () => {
     }).compile();
 
     appController = app.get<AppController>(AppController);
-    appService = app.get<AppService>(AppService);
     technitiumService = app.get<TechnitiumService>(TechnitiumService);
   });
 
@@ -38,8 +36,8 @@ describe("AppController", () => {
   });
 
   describe("health check", () => {
-    it("should return basic health status by default", async () => {
-      const result = await appController.getHealth();
+    it("should return basic health status", () => {
+      const result = appController.getHealth();
 
       expect(result).toHaveProperty("status", "ok");
       expect(result).toHaveProperty("timestamp");
@@ -47,16 +45,7 @@ describe("AppController", () => {
       expect(result).not.toHaveProperty("nodes");
     });
 
-    it("should return basic health status when detailed=false", async () => {
-      const result = await appController.getHealth("false");
-
-      expect(result).toHaveProperty("status", "ok");
-      expect(result).toHaveProperty("timestamp");
-      expect(result).toHaveProperty("uptime");
-      expect(result).not.toHaveProperty("nodes");
-    });
-
-    it("should return detailed health status when detailed=true", async () => {
+    it("should return detailed health status", async () => {
       const mockNodes: TechnitiumNodeSummary[] = [
         {
           id: "node1",
@@ -76,7 +65,7 @@ describe("AppController", () => {
         data: { status: "ok" },
       });
 
-      const result = await appController.getHealth("true");
+      const result = await appController.getHealthDetailed();
 
       expect(result).toHaveProperty("status", "ok");
       expect(result).toHaveProperty("timestamp");
@@ -85,18 +74,16 @@ describe("AppController", () => {
       expect(result).toHaveProperty("environment");
       expect(result).toHaveProperty("nodes");
 
-      if ("nodes" in result) {
-        expect(result.nodes.configured).toBe(1);
-        expect(result.nodes.healthy).toBe(1);
-        expect(result.nodes.unhealthy).toBe(0);
-        expect(result.nodes.details).toHaveLength(1);
-        expect(result.nodes.details[0]).toMatchObject({
-          id: "node1",
-          name: "DNS Primary",
-          baseUrl: "http://localhost:5380",
-          status: "healthy",
-        });
-      }
+      expect(result.nodes.configured).toBe(1);
+      expect(result.nodes.healthy).toBe(1);
+      expect(result.nodes.unhealthy).toBe(0);
+      expect(result.nodes.details).toHaveLength(1);
+      expect(result.nodes.details[0]).toMatchObject({
+        id: "node1",
+        name: "DNS Primary",
+        baseUrl: "http://localhost:5380",
+        status: "healthy",
+      });
     });
 
     it("should mark nodes as unhealthy when status check fails", async () => {
@@ -117,31 +104,27 @@ describe("AppController", () => {
         .spyOn(technitiumService, "getNodeStatus")
         .mockRejectedValue(new Error("Connection timeout"));
 
-      const result = await appController.getHealth("true");
+      const result = await appController.getHealthDetailed();
 
-      if ("nodes" in result) {
-        expect(result.nodes.configured).toBe(1);
-        expect(result.nodes.healthy).toBe(0);
-        expect(result.nodes.unhealthy).toBe(1);
-        expect(result.nodes.details[0]).toMatchObject({
-          id: "node1",
-          status: "unhealthy",
-          error: "Connection timeout",
-        });
-      }
+      expect(result.nodes.configured).toBe(1);
+      expect(result.nodes.healthy).toBe(0);
+      expect(result.nodes.unhealthy).toBe(1);
+      expect(result.nodes.details[0]).toMatchObject({
+        id: "node1",
+        status: "unhealthy",
+        error: "Connection timeout",
+      });
     });
 
     it("should handle empty node list gracefully", async () => {
       jest.spyOn(technitiumService, "listNodes").mockResolvedValue([]);
 
-      const result = await appController.getHealth("true");
+      const result = await appController.getHealthDetailed();
 
-      if ("nodes" in result) {
-        expect(result.nodes.configured).toBe(0);
-        expect(result.nodes.healthy).toBe(0);
-        expect(result.nodes.unhealthy).toBe(0);
-        expect(result.nodes.details).toHaveLength(0);
-      }
+      expect(result.nodes.configured).toBe(0);
+      expect(result.nodes.healthy).toBe(0);
+      expect(result.nodes.unhealthy).toBe(0);
+      expect(result.nodes.details).toHaveLength(0);
     });
 
     it("should handle error fetching nodes gracefully", async () => {
@@ -149,13 +132,11 @@ describe("AppController", () => {
         .spyOn(technitiumService, "listNodes")
         .mockRejectedValue(new Error("Failed to fetch nodes"));
 
-      const result = await appController.getHealth("true");
+      const result = await appController.getHealthDetailed();
 
       // Should still return health data, just with empty nodes
       expect(result).toHaveProperty("status", "ok");
-      if ("nodes" in result) {
-        expect(result.nodes.configured).toBe(0);
-      }
+      expect(result.nodes.configured).toBe(0);
     });
   });
 });

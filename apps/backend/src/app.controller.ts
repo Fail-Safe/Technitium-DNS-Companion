@@ -1,12 +1,12 @@
-import { Controller, Get, Logger, Query } from "@nestjs/common";
-import { AppService } from "./app.service";
-import { Public } from "./auth/public.decorator";
-import { TechnitiumService } from "./technitium/technitium.service";
+import { Controller, Get, Logger } from "@nestjs/common";
 import type {
   HealthCheckBasic,
   HealthCheckDetailed,
   NodeHealthStatus,
 } from "./app.service";
+import { AppService } from "./app.service";
+import { Public } from "./auth/public.decorator";
+import { TechnitiumService } from "./technitium/technitium.service";
 
 @Controller()
 export class AppController {
@@ -24,15 +24,13 @@ export class AppController {
 
   @Get("health")
   @Public()
-  async getHealth(
-    @Query("detailed") detailed?: string,
-  ): Promise<HealthCheckBasic | HealthCheckDetailed> {
-    // Basic health check (fast, for Docker health checks)
-    if (detailed !== "true") {
-      return this.appService.getBasicHealth();
-    }
+  getHealth(): HealthCheckBasic {
+    return this.appService.getBasicHealth();
+  }
 
-    // Detailed health check with node connectivity status
+  @Get("health/detailed")
+  async getHealthDetailed(): Promise<HealthCheckDetailed> {
+    // Detailed health check with node connectivity status (requires auth)
     const basicHealth = this.appService.getBasicHealth();
     const nodeStatuses: NodeHealthStatus[] = [];
 
@@ -111,8 +109,16 @@ export class AppController {
     let version = "unknown";
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const packageJson = require("../../package.json");
-      version = packageJson.version || "unknown";
+      const packageJson: unknown = require("../../package.json");
+      if (packageJson && typeof packageJson === "object") {
+        const maybeVersion = (packageJson as { version?: unknown }).version;
+        if (
+          typeof maybeVersion === "string" &&
+          maybeVersion.trim().length > 0
+        ) {
+          version = maybeVersion;
+        }
+      }
     } catch {
       // Fallback to unknown if package.json can't be read
       version = "unknown";
