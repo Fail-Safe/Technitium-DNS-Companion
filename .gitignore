@@ -34,6 +34,8 @@ pnpm-debug.log*
 # Build output
 /dist
 /build
+**/dist/
+**/build/
 coverage
 
 # Browser Profiling Data
