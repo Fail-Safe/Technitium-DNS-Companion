@@ -129,7 +129,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Optional session-based authentication behind `AUTH_SESSION_ENABLED=true`, using HttpOnly cookies and server-side session storage.
+- Optional session-based authentication (now required in v1.4+) using HttpOnly cookies and server-side session storage.
 - Dedicated `TECHNITIUM_BACKGROUND_TOKEN` support so background PTR/hostname work can run safely in session-auth mode.
 - Guided migration from `TECHNITIUM_CLUSTER_TOKEN` → `TECHNITIUM_BACKGROUND_TOKEN`, including token creation + validation.
 - Backend Jest tests and frontend Vitest/RTL tests covering the new auth + migration flows.
@@ -152,7 +152,7 @@ All notable changes to this project will be documented in this file.
 
 - Token capability validation for `TECHNITIUM_BACKGROUND_TOKEN` (must be least-privilege); unsafe/unverifiable tokens disable background PTR warming and surface warnings.
 - Implemented a session-token-first approach using Technitium `/api/user/login` expiring tokens (no long-lived admin API tokens by default), while preserving backwards-compatible env-token “service mode”.
-- When `AUTH_SESSION_ENABLED=true`, the backend requires HTTPS and supports TLS-terminating reverse proxies via `TRUST_PROXY=true`.
+- When using session auth, the backend requires HTTPS and supports TLS-terminating reverse proxies via `TRUST_PROXY=true`.
 
 ## [1.1.6] - 2025-12-13
 

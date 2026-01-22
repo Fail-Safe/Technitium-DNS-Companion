@@ -5,6 +5,7 @@ This guide explains how to run the hot-reload development environment on your RE
 ## Overview
 
 **Workflow:**
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Your Mac (Local)                              │
@@ -50,6 +51,7 @@ This guide explains how to run the hot-reload development environment on your RE
 ```
 
 This will:
+
 - Sync your project files to REMOTE-SERVER
 - Build and start the Docker container on REMOTE-SERVER
 - Show you the access URLs
@@ -65,10 +67,12 @@ This watches your local files and auto-syncs changes to REMOTE-SERVER.
 ### 3. Edit Files Locally
 
 Open VS Code and edit files in:
+
 - `apps/backend/src/` - Backend changes
 - `apps/frontend/src/` - Frontend changes
 
 Changes will:
+
 1. Be detected by `fswatch` on your Mac
 2. Sync to REMOTE-SERVER via `rsync`
 3. Trigger hot-reload in the Docker container
@@ -116,7 +120,7 @@ Changes will:
 ### When to use restart vs recreate vs rebuild
 
 - `restart`: restarts the container processes. Use this for most code changes (especially backend changes). It does **not** reload `.env`.
-- `recreate`: recreates the container so `env_file: .env` (and interpolated env vars) are re-read. Use this after changing `.env` values like `AUTH_SESSION_ENABLED`, proxy targets, ports, tokens, etc.
+- `recreate`: recreates the container so `env_file: .env` (and interpolated env vars) are re-read. Use this after changing `.env` values like proxy targets, ports, tokens, etc.
 - `rebuild`: rebuilds the image and resets volumes. Use this after dependency changes (e.g. package installs) or when the container image itself must change.
 
 ## Typical Workflow
@@ -124,6 +128,7 @@ Changes will:
 ### Daily Development Session
 
 **Terminal 1:**
+
 ```bash
 # Start remote environment
 ./scripts/remote-dev.sh start
@@ -134,17 +139,20 @@ Changes will:
 ```
 
 **Terminal 2 (optional):**
+
 ```bash
 # View logs
 ./scripts/remote-dev.sh logs
 ```
 
 **VS Code:**
+
 - Edit files as normal
 - Changes auto-sync and hot-reload
 - View in browser at http://remote-server.example.com:5173
 
 **End of session:**
+
 ```bash
 # Stop watching (Ctrl+C in watch terminal)
 # Stop remote environment
@@ -161,11 +169,13 @@ Access services directly via REMOTE-SERVER's hostname:
 - Backend: http://remote-server.example.com:3000/api
 
 **Pros:**
+
 - No SSH tunnel needed
 - Multiple people can access
 - Real network conditions
 
 **Cons:**
+
 - Requires network access to REMOTE-SERVER
 - Firewall rules must allow ports
 
@@ -179,11 +189,13 @@ Access services via `localhost` through SSH tunnel:
 ```
 
 **Pros:**
+
 - Works from anywhere with SSH access
 - No firewall rule changes needed
 - More secure
 
 **Cons:**
+
 - Single user only
 - Requires keeping SSH connection open
 
@@ -192,6 +204,7 @@ Access services via `localhost` through SSH tunnel:
 ### What Gets Synced
 
 ✅ **Synced:**
+
 - `apps/backend/src/` - Backend source
 - `apps/frontend/src/` - Frontend source
 - `apps/backend/test/` - Backend tests
@@ -199,6 +212,7 @@ Access services via `localhost` through SSH tunnel:
 - Environment files (.env.example)
 
 ❌ **Not Synced (Excluded):**
+
 - `node_modules/` - Installed on remote
 - `dist/`, `build/` - Built on remote
 - `.git/` - Not needed in container
@@ -209,6 +223,7 @@ Access services via `localhost` through SSH tunnel:
 ### Sync Triggers
 
 The `watch` command syncs when changes are detected in:
+
 - `apps/backend/src/**/*`
 - `apps/frontend/src/**/*`
 - `apps/backend/tsconfig.json`
@@ -220,11 +235,11 @@ The `watch` command syncs when changes are detected in:
 
 ### Sync Speed
 
-| Change Type | Sync Time | Hot-Reload Time | Total |
-|-------------|-----------|-----------------|-------|
-| Single file edit | ~0.5s | ~1-3s | ~1.5-3.5s |
-| Multiple files | ~1-2s | ~1-3s | ~2-5s |
-| Config change | ~0.5s | ~3-5s | ~3.5-5.5s |
+| Change Type      | Sync Time | Hot-Reload Time | Total     |
+| ---------------- | --------- | --------------- | --------- |
+| Single file edit | ~0.5s     | ~1-3s           | ~1.5-3.5s |
+| Multiple files   | ~1-2s     | ~1-3s           | ~2-5s     |
+| Config change    | ~0.5s     | ~3-5s           | ~3.5-5.5s |
 
 ### Network Requirements
 
@@ -239,6 +254,7 @@ The `watch` command syncs when changes are detected in:
 **Problem:** Files change but don't sync
 
 **Solutions:**
+
 ```bash
 # Check if fswatch is installed
 which fswatch
@@ -259,6 +275,7 @@ ps aux | grep fswatch
 **Problem:** Files sync but container doesn't reload
 
 **Solutions:**
+
 ```bash
 # Check container logs
 ./scripts/remote-dev.sh logs
@@ -280,6 +297,7 @@ ls -la apps/backend/src/
 **Problem:** Can't connect to REMOTE-SERVER
 
 **Solutions:**
+
 ```bash
 # Test SSH connection
 ssh remote-server echo "Connected!"
@@ -299,6 +317,7 @@ Host remote-server
 **Problem:** Sync takes too long
 
 **Solutions:**
+
 ```bash
 # Check what's being synced
 rsync -avz --dry-run --exclude 'node_modules' \
@@ -314,6 +333,7 @@ rsync -avz --dry-run --exclude 'node_modules' \
 **Problem:** Ports 5173, 3000, etc. already in use on REMOTE-SERVER
 
 **Solutions:**
+
 ```bash
 # Check what's using the ports
 ssh remote-server "lsof -i :5173"
@@ -329,15 +349,15 @@ ssh remote-server "cd /opt/technitium-dns-companion && docker compose down"
 
 ## Comparison: Remote vs Local Development
 
-| Aspect | Local Dev | Remote Dev on REMOTE-SERVER |
-|--------|-----------|-------------------|
-| **Setup** | Simple | Requires SSH + rsync |
-| **Performance** | Native | ~0.5-1s sync delay |
-| **Network Access** | localhost only | Real REMOTE-SERVER access |
-| **Technitium DNS Access** | VPN/SSH tunnel needed | Direct access (same network) |
-| **Multi-device** | One machine | Edit anywhere, runs on REMOTE-SERVER |
-| **Resource Usage** | Local RAM/CPU | REMOTE-SERVER resources |
-| **Environment** | Mac ARM64 | Linux x86_64 (production-like) |
+| Aspect                    | Local Dev             | Remote Dev on REMOTE-SERVER          |
+| ------------------------- | --------------------- | ------------------------------------ |
+| **Setup**                 | Simple                | Requires SSH + rsync                 |
+| **Performance**           | Native                | ~0.5-1s sync delay                   |
+| **Network Access**        | localhost only        | Real REMOTE-SERVER access            |
+| **Technitium DNS Access** | VPN/SSH tunnel needed | Direct access (same network)         |
+| **Multi-device**          | One machine           | Edit anywhere, runs on REMOTE-SERVER |
+| **Resource Usage**        | Local RAM/CPU         | REMOTE-SERVER resources              |
+| **Environment**           | Mac ARM64             | Linux x86_64 (production-like)       |
 
 ## Best Practices
 
@@ -427,6 +447,7 @@ exit
 ```
 
 **Key Differences:**
+
 - Docker runs on REMOTE-SERVER (more production-like)
 - Hot-reload works automatically (no manual restarts)
 - Both frontend and backend run together

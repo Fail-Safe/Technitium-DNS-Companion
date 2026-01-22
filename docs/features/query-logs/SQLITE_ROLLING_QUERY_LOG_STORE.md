@@ -62,20 +62,12 @@ The stored endpoints accept the same query filter shape used elsewhere in the Lo
 
 ## Authentication / tokens (important)
 
-### If session-auth is enabled (`AUTH_SESSION_ENABLED=true`)
+### Session auth (v1.4+: always enabled for interactive UI)
 
 Background timers do **not** have an interactive user session token. The SQLite ingester therefore runs using **background auth mode**, which requires a configured background token:
 
 - Set `TECHNITIUM_BACKGROUND_TOKEN` to a **least-privilege** Technitium token that can read query logs.
 - Without `TECHNITIUM_BACKGROUND_TOKEN`, the SQLite DB can still open (status may show `ready: true`), but ingestion will fail with auth errors and the store will not stay up to date.
-
-### If session-auth is disabled (legacy env-token mode)
-
-The ingester will use your configured env tokens.
-
-- Per-node `TECHNITIUM_<NODE>_TOKEN` is legacy-only for Technitium DNS < v14.
-
-Note: `TECHNITIUM_CLUSTER_TOKEN` is deprecated as of v1.3.0 and planned to be removed in v1.4, but will continue to work in legacy env-token mode until removal.
 
 ## Configuration (env vars)
 

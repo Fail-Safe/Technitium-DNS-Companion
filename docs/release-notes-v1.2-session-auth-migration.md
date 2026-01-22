@@ -14,13 +14,11 @@ Nothing changes unless you opt in.
 
 ### Legacy mode (default)
 
-If you do **not** set `AUTH_SESSION_ENABLED=true`, the app behaves as it always has.
+If you do not enable session auth, the app behaves as it always has.
 
 ### Session auth mode (opt-in)
 
-Set:
-
-- `AUTH_SESSION_ENABLED=true`
+Enable session auth.
 
 When enabled:
 
@@ -30,6 +28,8 @@ When enabled:
 ## Roadmap / deprecation note
 
 Session auth is **opt-in** in v1.2.
+
+As of v1.4, session auth is required for interactive UI access.
 
 The intention is to make session auth the default (and eventually required) in a follow-up release (v1.3+), so the Companion UI no longer relies on long-lived env tokens for interactive access.
 

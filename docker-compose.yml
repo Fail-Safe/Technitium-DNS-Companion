@@ -38,8 +38,6 @@ services:
       # - Option A: enable Companion HTTPS above and mount certs below
       # - Option B: terminate TLS in a reverse proxy and set TRUST_PROXY=true
       #
-      # Session auth toggle (recommended):
-      # AUTH_SESSION_ENABLED: "true"
       # v1.4+: the interactive UI requires session auth (Technitium DNS login/RBAC).
       # TRUST_PROXY: "true"
       # TRUST_PROXY_HOPS: "1"

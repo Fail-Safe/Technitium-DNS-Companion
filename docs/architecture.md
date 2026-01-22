@@ -69,11 +69,10 @@ TECHNITIUM_NODES=node1,node2
 TECHNITIUM_NODE1_BASE_URL=http://192.168.1.10:5380
 TECHNITIUM_NODE2_BASE_URL=http://192.168.1.11:5380
 
-# Preferred (interactive UI): Session auth
-# - Enable session auth so users log in with their Technitium credentials.
-# - In this mode, per-node env tokens are OPTIONAL for interactive UI usage.
+# Preferred (interactive UI): Session auth (v1.4+: required)
+# - Users log in with their Technitium credentials.
+# - Per-node env tokens are OPTIONAL for interactive UI usage.
 # - Background timers (e.g., PTR warming, SQLite ingester) use TECHNITIUM_BACKGROUND_TOKEN.
-# AUTH_SESSION_ENABLED=true
 # TECHNITIUM_BACKGROUND_TOKEN=your-readonly-token
 
 # Legacy (env-token mode): legacy/migration only
