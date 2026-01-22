@@ -302,13 +302,15 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
           ]),
         );
 
-      const cloneSpy = jest.spyOn(svc, "cloneDhcpScope").mockResolvedValue({
-        sourceNodeId: "src",
-        targetNodeId: "tgt",
-        sourceScopeName: "Parents",
-        targetScopeName: "Parents",
-        enabledOnTarget: false,
-      });
+      const cloneSpy = jest
+        .spyOn(svc, "cloneDhcpScope")
+        .mockResolvedValue({
+          sourceNodeId: "src",
+          targetNodeId: "tgt",
+          sourceScopeName: "Parents",
+          targetScopeName: "Parents",
+          enabledOnTarget: false,
+        });
 
       const result = await svc.bulkSyncDhcpScopes({
         sourceNodeId: "src",
@@ -376,13 +378,15 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
           ]),
         );
 
-      const cloneSpy = jest.spyOn(svc, "cloneDhcpScope").mockResolvedValue({
-        sourceNodeId: "src",
-        targetNodeId: "tgt",
-        sourceScopeName: "Default",
-        targetScopeName: "Default",
-        enabledOnTarget: false,
-      });
+      const cloneSpy = jest
+        .spyOn(svc, "cloneDhcpScope")
+        .mockResolvedValue({
+          sourceNodeId: "src",
+          targetNodeId: "tgt",
+          sourceScopeName: "Default",
+          targetScopeName: "Default",
+          enabledOnTarget: false,
+        });
 
       const result = await svc.bulkSyncDhcpScopes({
         sourceNodeId: "src",
@@ -594,16 +598,13 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
 });
 
 describe("TechnitiumService request (session auth)", () => {
-  const originalAuthSessionEnabled = process.env.AUTH_SESSION_ENABLED;
   let service: TechnitiumService;
 
   beforeEach(() => {
-    process.env.AUTH_SESSION_ENABLED = "true";
     service = new TechnitiumService([], new DhcpSnapshotService());
   });
 
   afterEach(() => {
-    process.env.AUTH_SESSION_ENABLED = originalAuthSessionEnabled;
     jest.restoreAllMocks();
     service.onModuleDestroy();
   });

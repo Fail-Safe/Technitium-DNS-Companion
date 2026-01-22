@@ -19,23 +19,21 @@ Historically, Technitium DNS Companion could run entirely using environment-prov
 
 ### 1) Legacy env-token mode (legacy/migration only)
 
-- Do **not** set `AUTH_SESSION_ENABLED=true`.
 - Configure Technitium DNS access via env tokens.
   - `TECHNITIUM_CLUSTER_TOKEN` (deprecated in v1.3, removed in v1.4)
   - Per-node `TECHNITIUM_<NODE>_TOKEN` (legacy-only for Technitium DNS < v14)
 
 This preserves the pre-v1.2 behavior.
 
-Roadmap note: starting in **v1.4**, the Companion UI requires Technitium login/RBAC (session auth). Legacy env-token mode is intended only for legacy/migration.
+Important: starting in **v1.4**, the Companion UI requires Technitium login/RBAC (session auth). Legacy env-token mode is intended only for legacy/migration tasks and older deployments.
 
 ### 2) Session auth mode (login page)
 
-- Set `AUTH_SESSION_ENABLED=true`.
 - Run the Companion UI/API over HTTPS (recommended/expected).
 - Users log into the Companion using their Technitium DNS credentials.
 - The backend uses per-user Technitium DNS session tokens for interactive operations.
 
-Note: When `AUTH_SESSION_ENABLED=true`, the backend will refuse to start unless it can reliably detect HTTPS.
+Note: Session auth requires the backend to reliably detect HTTPS.
 
 Choose one:
 
@@ -60,27 +58,22 @@ Deprecation note: `TECHNITIUM_CLUSTER_TOKEN` is deprecated in v1.3 and planned t
 
 This is the recommended transition plan when you want to enable session auth but currently rely on `TECHNITIUM_CLUSTER_TOKEN`.
 
-1. Start from a working legacy configuration (no session auth):
+1. Start from a working configuration with a legacy cluster token:
    - `TECHNITIUM_CLUSTER_TOKEN` is set
-   - `AUTH_SESSION_ENABLED` is unset/false
 
-2. Enable session auth:
-   - Set `AUTH_SESSION_ENABLED=true`
-   - Keep `TECHNITIUM_CLUSTER_TOKEN` temporarily
+2. Log in via the Companion UI.
 
-3. Log in via the Companion UI.
-
-4. Use the migration banner action:
+3. Use the migration banner action:
    - The backend creates a dedicated read-only user (name may be suffixed if it already exists).
    - The backend generates a one-time token for that user.
    - The UI displays the token once.
 
-5. Set `TECHNITIUM_BACKGROUND_TOKEN` in your `technitium.env` file using the generated token.
+4. Set `TECHNITIUM_BACKGROUND_TOKEN` in your `technitium.env` file using the generated token.
 
-6. Remove the legacy cluster token:
+5. Remove the legacy cluster token:
    - Comment out or remove `TECHNITIUM_CLUSTER_TOKEN`.
 
-7. Apply the `technitium.env` change by recreating the container (Compose reads `technitium.env` at container create time):
+6. Apply the `technitium.env` change by recreating the container (Compose reads `technitium.env` at container create time):
    - Docker Compose (manual): `docker compose up -d --force-recreate`
    - Docker run (manual): stop/remove the old container, then run again with the updated env file:
 
@@ -113,7 +106,7 @@ docker run -d \
 #  -v "$(pwd)/certs:/app/certs:ro"
 ```
 
-8. Validate:
+7. Validate:
    - The login page appears.
    - You can log in (including 2FA).
    - The migration banner is gone.
@@ -134,13 +127,12 @@ Look for:
 ## Operational notes
 
 - Keep `TECHNITIUM_BACKGROUND_TOKEN` private (it is still a credential).
-- If you want to go back to legacy mode (for now), unset `AUTH_SESSION_ENABLED` and reconfigure env tokens.
+- Legacy env-token mode is intentionally less strict and is intended only for legacy/migration use cases.
 
 ## Recommended deployment model (practical guidance)
 
 If you want **Technitium to remain the single source of truth for auth + permissions**, the recommended setup is:
 
-- Enable **session auth**: `AUTH_SESSION_ENABLED=true`
 - Run Companion over **HTTPS** (direct HTTPS or TLS-terminating reverse proxy + `TRUST_PROXY=true`)
 - Use Technitium users/permissions to control what a person can do
 - Configure a dedicated, **least-privileged** `TECHNITIUM_BACKGROUND_TOKEN` only for background-only work (currently: PTR hostname resolution)
@@ -180,7 +172,6 @@ Permission names below are based on the permission sections returned by Techniti
 
 If you terminate TLS in a reverse proxy (Caddy/Nginx/Traefik) and run the Companion backend on plain HTTP behind it, set:
 
-- `AUTH_SESSION_ENABLED=true`
 - `TRUST_PROXY=true`
 
 This allows the backend to treat requests as HTTPS when the proxy sends `X-Forwarded-Proto: https`.
@@ -221,6 +212,6 @@ server {
 
 ## Planned change (future release)
 
-v1.2 introduces session auth as an opt-in via `AUTH_SESSION_ENABLED=true`.
+v1.2 introduced session auth as an opt-in.
 
-The direction going forward is to make session auth the default (and eventually required) in a follow-up release. Until then, you can continue to run in legacy env-token mode by leaving `AUTH_SESSION_ENABLED` unset/false.
+As of v1.4, session auth is required for interactive UI access.

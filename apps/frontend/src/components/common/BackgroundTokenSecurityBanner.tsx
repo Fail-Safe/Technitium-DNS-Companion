@@ -90,11 +90,10 @@ export function BackgroundTokenSecurityBanner({
                   {clusterTokenIsBeingUsedAsFallback ?
                     <>
                       This token is currently being used as a fallback for:{" "}
-                      <strong>{clusterFallbackNodeIds.join(", ")}</strong>.
-                      Enable <strong>AUTH_SESSION_ENABLED=true</strong> and set
+                      <strong>{clusterFallbackNodeIds.join(", ")}</strong>. Set
                       a least-privilege{" "}
-                      <strong>TECHNITIUM_BACKGROUND_TOKEN</strong> to adopt
-                      Technitium login/RBAC, then remove{" "}
+                      <strong>TECHNITIUM_BACKGROUND_TOKEN</strong> so background
+                      PTR lookups can run without an admin token, then remove{" "}
                       <strong>TECHNITIUM_CLUSTER_TOKEN</strong>.
                     </>
                   : <>

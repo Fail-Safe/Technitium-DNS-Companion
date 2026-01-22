@@ -1,4 +1,3 @@
-import { ForbiddenException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { TechnitiumService } from "../technitium/technitium.service";
 import { AuthController } from "./auth.controller";
@@ -34,22 +33,7 @@ describe("AuthController background-token migration", () => {
     };
   }
 
-  it("rejects migration when session auth is disabled", async () => {
-    process.env.AUTH_SESSION_ENABLED = "false";
-
-    const migrateMock = jest.fn();
-    const { controller } = await createController(migrateMock);
-
-    await expect(controller.migrateBackgroundToken()).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
-
-    expect(migrateMock).not.toHaveBeenCalled();
-  });
-
-  it("delegates migration when session auth is enabled", async () => {
-    process.env.AUTH_SESSION_ENABLED = "true";
-
+  it("delegates migration", async () => {
     const migrateMock = jest
       .fn()
       .mockResolvedValue({ username: "u", tokenName: "t", token: "tok" });

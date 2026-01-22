@@ -39,10 +39,6 @@ export default function LoginPage() {
     return <Navigate to={nextPath} replace />;
   }
 
-  if (!loading && status?.sessionAuthEnabled === false) {
-    return <Navigate to={nextPath} replace />;
-  }
-
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);

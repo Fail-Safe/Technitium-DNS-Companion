@@ -25,7 +25,7 @@ Planned changes:
 
 - **v1.3.x (direction)**: `TECHNITIUM_CLUSTER_TOKEN` is **deprecated**. Background jobs (e.g., PTR hostname warming, scheduled sync) are expected to require a dedicated `TECHNITIUM_BACKGROUND_TOKEN` (instead of using an admin token).
 - **v1.4**:
-  - Interactive UI access requires session auth (Technitium login/RBAC). The `AUTH_SESSION_ENABLED` opt-in toggle will be removed in v1.4.
+  - Interactive UI access requires session auth (Technitium login/RBAC).
   - `TECHNITIUM_CLUSTER_TOKEN` support is planned to be **removed**.
 
 Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)
@@ -96,9 +96,6 @@ TECHNITIUM_NODES=primary,secondary1,secondary2
 TECHNITIUM_PRIMARY_BASE_URL=https://primary.home.arpa:53443
 TECHNITIUM_SECONDARY1_BASE_URL=https://secondary1.home.arpa:53443
 TECHNITIUM_SECONDARY2_BASE_URL=https://secondary2.home.arpa:53443
-
-# Interactive UI access (recommended; required starting v1.4)
-AUTH_SESSION_ENABLED=true
 
 # Background jobs (recommended): least-privilege token
 # TECHNITIUM_BACKGROUND_TOKEN=your-low-privilege-token

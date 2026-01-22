@@ -43,7 +43,7 @@ Runs the single container that serves both the API and built frontend. Use this 
 - Minimum variables:
   - `TECHNITIUM_NODES=node1,node2`
   - `TECHNITIUM_<NODE>_BASE_URL` for each node.
-  - Recommended (and required starting in v1.4): `AUTH_SESSION_ENABLED=true` (Technitium login/RBAC for UI access).
+  - Required for interactive UI access (v1.4+): Technitium login/RBAC (session auth).
   - Recommended for background features in session-auth mode: `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege, read-only).
   - Legacy only (Technitium DNS < v14 / migration): env-token mode using `TECHNITIUM_<NODE>_TOKEN`.
   - `TECHNITIUM_CLUSTER_TOKEN` is deprecated as of v1.3.0 (legacy / migration source) and will be removed in v1.4.
@@ -77,7 +77,7 @@ QUERY_LOG_SQLITE_OVERLAP_SECONDS=60
 QUERY_LOG_SQLITE_MAX_ENTRIES_PER_POLL=20000
 ```
 
-- If you are using session auth (`AUTH_SESSION_ENABLED=true`), ingestion runs as a background task and requires `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege token that can read query logs). Without it, the DB may exist but will not stay up to date.
+- With session auth (v1.4+: always enabled for interactive UI), ingestion runs as a background task and requires `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege token that can read query logs). Without it, the DB may exist but will not stay up to date.
 
 - HTTP: http://localhost:3000
 - HTTPS (if enabled): https://localhost:3443
