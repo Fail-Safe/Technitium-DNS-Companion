@@ -9,7 +9,6 @@ describe("AuthController /auth/me", () => {
   beforeEach(() => {
     jest.resetAllMocks();
     delete process.env.TECHNITIUM_CLUSTER_TOKEN;
-    process.env.AUTH_SESSION_ENABLED = "false";
   });
 
   async function createController(getBackgroundSummaryImpl?: jest.Mock) {
@@ -17,11 +16,13 @@ describe("AuthController /auth/me", () => {
 
     const getBackgroundPtrTokenValidationSummaryMock =
       getBackgroundSummaryImpl ??
-      jest.fn().mockReturnValue({
-        configured: false,
-        sessionAuthEnabled: true,
-        validated: false,
-      });
+      jest
+        .fn()
+        .mockReturnValue({
+          configured: false,
+          sessionAuthEnabled: true,
+          validated: false,
+        });
 
     const technitiumServiceMock: Partial<TechnitiumService> = {
       getConfiguredNodeIds: jest.fn().mockReturnValue(["eq14", "eq12"]),
@@ -70,7 +71,7 @@ describe("AuthController /auth/me", () => {
     const res = withContext(undefined, () => controller.me());
 
     expect(res).toEqual({
-      sessionAuthEnabled: false,
+      sessionAuthEnabled: true,
       authenticated: false,
       configuredNodeIds: ["eq14", "eq12"],
       clusterTokenConfigured: true,
@@ -95,7 +96,7 @@ describe("AuthController /auth/me", () => {
     const res = withContext(session, () => controller.me());
 
     expect(res.authenticated).toBe(true);
-    expect(res.sessionAuthEnabled).toBe(false);
+    expect(res.sessionAuthEnabled).toBe(true);
     expect(res.user).toBe("alice");
     expect(res.nodeIds?.sort()).toEqual(["eq12", "eq14"]);
     expect(res.configuredNodeIds?.sort()).toEqual(["eq12", "eq14"]);

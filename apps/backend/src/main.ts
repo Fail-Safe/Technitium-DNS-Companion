@@ -6,6 +6,7 @@ import { NextFunction, Request, Response } from "express";
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { basename, dirname, join, resolve } from "path";
 import { AppModule } from "./app.module";
+import { getOrCreateSelfSignedCert } from "./utils/self-signed-cert";
 
 const ONE_YEAR_IN_SECONDS = 60 * 60 * 24 * 365;
 
@@ -47,8 +48,9 @@ function resolveConfigFilePath(inputPath: string): string {
 async function bootstrap() {
   const logger = new Logger("Bootstrap");
   const httpsEnabled = process.env.HTTPS_ENABLED === "true";
-  const sessionAuthEnabled = process.env.AUTH_SESSION_ENABLED === "true";
+  const sessionAuthEnabled = true;
   const trustProxyEnabled = process.env.TRUST_PROXY === "true";
+  const httpsSelfSignedRequested = process.env.HTTPS_SELF_SIGNED === "true";
   const clusterTokenConfigured =
     (process.env.TECHNITIUM_CLUSTER_TOKEN ?? "").trim().length > 0;
   const trustProxyHops = Number.parseInt(
@@ -58,9 +60,15 @@ async function bootstrap() {
   const trustProxyValue =
     Number.isFinite(trustProxyHops) && trustProxyHops > 0 ? trustProxyHops : 1;
 
-  if (sessionAuthEnabled && !httpsEnabled && !trustProxyEnabled) {
+  const httpsSelfSignedAuto =
+    sessionAuthEnabled && !httpsEnabled && !trustProxyEnabled;
+  const httpsSelfSignedEnabled =
+    httpsSelfSignedRequested || httpsSelfSignedAuto;
+  const httpsActive = httpsEnabled || httpsSelfSignedEnabled;
+
+  if (sessionAuthEnabled && !httpsActive && !trustProxyEnabled) {
     logger.error(
-      "AUTH_SESSION_ENABLED=true requires HTTPS to protect session cookies and login credentials.",
+      "Session authentication requires HTTPS to protect session cookies and login credentials.",
     );
     logger.error(
       "Option A (recommended): Enable built-in HTTPS by setting HTTPS_ENABLED=true and configuring certificate paths.",
@@ -74,7 +82,7 @@ async function bootstrap() {
   if (clusterTokenConfigured) {
     logger.warn(
       "TECHNITIUM_CLUSTER_TOKEN is deprecated as of v1.3.0 and is planned to be removed in v1.4. " +
-        "Prefer Technitium-backed session auth (AUTH_SESSION_ENABLED=true) for interactive UI usage and TECHNITIUM_BACKGROUND_TOKEN for background jobs. " +
+        "Prefer Technitium-backed session auth for interactive UI usage and TECHNITIUM_BACKGROUND_TOKEN for background jobs. " +
         "Per-node TECHNITIUM_<NODE>_TOKEN is legacy-only for Technitium DNS < v14.",
     );
   }
@@ -117,6 +125,29 @@ async function bootstrap() {
       logger.error("Failed to load HTTPS certificates:", error);
       logger.error(
         "Please check that the certificate paths are correct and files are readable",
+      );
+      process.exit(1);
+    }
+  } else if (httpsSelfSignedEnabled) {
+    const certDir =
+      process.env.HTTPS_SELF_SIGNED_CERT_DIR || "/data/certs/self-signed";
+
+    if (httpsSelfSignedAuto && !httpsSelfSignedRequested) {
+      logger.warn(
+        "Session auth is enabled and no HTTPS/proxy detected; auto-enabling self-signed HTTPS.",
+      );
+      logger.warn(
+        "To use a reverse proxy for TLS termination instead, set TRUST_PROXY=true and ensure X-Forwarded-Proto is set to https.",
+      );
+    }
+
+    try {
+      httpsOptions = getOrCreateSelfSignedCert(certDir);
+      logger.log(`Self-signed HTTPS certificates ready (dir: ${certDir})`);
+    } catch (error) {
+      logger.error(
+        "Failed to generate/load self-signed HTTPS certificates:",
+        error,
       );
       process.exit(1);
     }
@@ -207,13 +238,12 @@ async function bootstrap() {
     logger.log("CORS enabled for all origins (development mode)");
   }
 
-  const port = httpsEnabled
-    ? process.env.HTTPS_PORT || 3443
-    : process.env.PORT || 3000;
+  const port =
+    httpsActive ? process.env.HTTPS_PORT || 3443 : process.env.PORT || 3000;
 
   const portNumber =
     typeof port === "string" ? Number.parseInt(port, 10) : port;
-  if (!httpsEnabled && portNumber === 3443) {
+  if (!httpsActive && portNumber === 3443) {
     logger.warn(
       "HTTPS is disabled but the backend is listening on port 3443 (commonly used for HTTPS).",
     );
@@ -224,11 +254,11 @@ async function bootstrap() {
 
   await app.listen(port);
 
-  const protocol = httpsEnabled ? "https" : "http";
+  const protocol = httpsActive ? "https" : "http";
   logger.log(`Application is running on: ${protocol}://localhost:${port}`);
   logger.log(`API available at: ${protocol}://localhost:${port}/api`);
 
-  if (httpsEnabled) {
+  if (httpsActive) {
     logger.log("🔒 HTTPS is ENABLED");
   } else {
     logger.log("🔓 HTTPS is DISABLED (using HTTP)");

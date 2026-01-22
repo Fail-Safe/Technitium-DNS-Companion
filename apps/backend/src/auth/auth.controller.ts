@@ -30,20 +30,19 @@ export class AuthController {
   me(@Req() req?: Request): AuthMeResponseDto {
     const session = AuthRequestContext.getSession();
 
-    const sessionAuthEnabled = process.env.AUTH_SESSION_ENABLED === "true";
+    const sessionAuthEnabled = true;
     const httpsEnabled = process.env.HTTPS_ENABLED === "true";
     const trustProxyEnabled = process.env.TRUST_PROXY === "true";
 
     const forwardedProtoHeader = req?.headers?.["x-forwarded-proto"];
     const forwardedProto =
-      typeof forwardedProtoHeader === "string"
-        ? forwardedProtoHeader
-        : Array.isArray(forwardedProtoHeader)
-          ? forwardedProtoHeader[0]
-          : undefined;
+      typeof forwardedProtoHeader === "string" ? forwardedProtoHeader
+      : Array.isArray(forwardedProtoHeader) ? forwardedProtoHeader[0]
+      : undefined;
 
-    const transport = req
-      ? {
+    const transport =
+      req ?
+        {
           requestSecure: req.secure === true,
           httpsEnabled,
           trustProxyEnabled,
@@ -90,13 +89,7 @@ export class AuthController {
 
   @Post("background-token/migrate")
   async migrateBackgroundToken(): Promise<AuthMigrateBackgroundTokenResponseDto> {
-    if (process.env.AUTH_SESSION_ENABLED !== "true") {
-      throw new ForbiddenException(
-        "Migration is only available when AUTH_SESSION_ENABLED=true",
-      );
-    }
-
-    // AuthGuard ensures a session is present when AUTH_SESSION_ENABLED=true.
+    // AuthGuard ensures a session is present.
     return this.technitiumService.migrateClusterTokenToBackgroundToken();
   }
 
@@ -107,7 +100,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    if (process.env.AUTH_SESSION_ENABLED === "true" && !req.secure) {
+    if (!req.secure) {
       throw new ForbiddenException(
         "Session authentication requires HTTPS (direct HTTPS or a TLS-terminating reverse proxy with TRUST_PROXY=true).",
       );

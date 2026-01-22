@@ -59,9 +59,6 @@ describe("TechnitiumService migration", () => {
 
     // In Jest, NODE_ENV is usually "test"; ensure background timers are disabled.
     process.env.NODE_ENV = "test";
-
-    // Make sure session-auth flag doesn't accidentally change behavior.
-    process.env.AUTH_SESSION_ENABLED = "true";
   });
 
   afterEach(() => {
