@@ -3893,12 +3893,14 @@ button.secondary:disabled,
 .logs-page__context-menu-overlay {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  /* Must be above .domain-tooltip (z-index: 99999) */
+  z-index: 100000;
 }
 
 .logs-page__context-menu {
   position: fixed;
   min-width: 10rem;
+  z-index: 100001;
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
   border-radius: 0.75rem;

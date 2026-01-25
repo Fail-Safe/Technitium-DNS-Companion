@@ -1,27 +1,27 @@
 import {
-  faBan,
-  faCheck,
-  faFile,
-  faRotate,
-  faSquare,
-  faSquareCheck,
-  faTowerBroadcast,
+    faBan,
+    faCheck,
+    faFile,
+    faRotate,
+    faSquare,
+    faSquareCheck,
+    faTowerBroadcast,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { ReactNode } from "react";
 import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
 } from "react";
 import { Tooltip } from "react-tooltip";
 import "react-tooltip/dist/react-tooltip.css";
 import {
-  SkeletonLogEntries,
-  SkeletonLogsStats,
-  SkeletonLogsSummary,
+    SkeletonLogEntries,
+    SkeletonLogsStats,
+    SkeletonLogsSummary,
 } from "../components/common/LoadingSkeleton";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
 import { apiFetch, getAuthRedirectReason } from "../config";
@@ -29,16 +29,16 @@ import { useTechnitiumState } from "../context/useTechnitiumState";
 import { useToast } from "../context/useToast";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type {
-  AdvancedBlockingConfig,
-  AdvancedBlockingGroup,
+    AdvancedBlockingConfig,
+    AdvancedBlockingGroup,
 } from "../types/advancedBlocking";
 import type { DomainCheckResult, DomainListEntry } from "../types/technitium";
 import type {
-  TechnitiumCombinedNodeLogSnapshot,
-  TechnitiumCombinedQueryLogEntry,
-  TechnitiumCombinedQueryLogPage,
-  TechnitiumNodeQueryLogEnvelope,
-  TechnitiumQueryLogStorageStatus,
+    TechnitiumCombinedNodeLogSnapshot,
+    TechnitiumCombinedQueryLogEntry,
+    TechnitiumCombinedQueryLogPage,
+    TechnitiumNodeQueryLogEnvelope,
+    TechnitiumQueryLogStorageStatus,
 } from "../types/technitiumLogs";
 
 type ViewMode = "combined" | "node";
@@ -1868,7 +1868,9 @@ export function LogsPage() {
     [],
   );
 
-  type LogsTableContextMenuItem = { label: string; value: string };
+  type LogsTableContextMenuItem =
+    | { label: string; action: "copy"; value: string }
+    | { label: string; action: "open"; href: string };
 
   type LogsTableContextMenuState = {
     x: number;
@@ -1956,6 +1958,100 @@ export function LogsPage() {
         return null;
       }
 
+      const isValidHttpUrl = (value: string): boolean => {
+        if (!value) {
+          return false;
+        }
+
+        try {
+          const parsed = new URL(value);
+          return parsed.protocol === "http:" || parsed.protocol === "https:";
+        } catch {
+          return false;
+        }
+      };
+
+      // If the user right-clicked inside the domain tooltip, provide tooltip-specific copy options.
+      const tooltipRoot =
+        (target.closest("#domain-tooltip-shared") as HTMLElement | null) ??
+        ((target.closest(".domain-tooltip") as HTMLElement | null)?.closest(
+          "#domain-tooltip-shared",
+        ) as HTMLElement | null);
+
+      if (tooltipRoot) {
+        const anchor = domainTooltipAnchorRef.current;
+        const anchorDomain = anchor?.getAttribute("data-domain")?.trim() ?? "";
+        const anchorNodeId = anchor?.getAttribute("data-node-id")?.trim() ?? "";
+
+        const matchTarget = target.closest(
+          "[data-logs-tooltip-block-source]",
+        ) as HTMLElement | null;
+
+        // If the user right-clicked a specific "Likely blocked by" match, offer granular options.
+        if (matchTarget) {
+          const label =
+            matchTarget.getAttribute("data-block-match-label") ?? "";
+          const source =
+            matchTarget.getAttribute("data-block-match-source") ?? "";
+          const pattern =
+            matchTarget.getAttribute("data-block-match-pattern") ?? "";
+
+          const items: LogsTableContextMenuItem[] = [];
+
+          if (anchorDomain) {
+            items.push({
+              label: "Copy Domain",
+              action: "copy",
+              value: anchorDomain,
+            });
+          }
+
+          if (label) {
+            items.push({ label: "Copy Match", action: "copy", value: label });
+          }
+
+          if (source) {
+            items.push({ label: "Copy Source", action: "copy", value: source });
+            if (isValidHttpUrl(source)) {
+              items.push({
+                label: "Open Source URL",
+                action: "open",
+                href: source,
+              });
+            }
+          }
+
+          if (pattern) {
+            items.push({
+              label: "Copy Pattern",
+              action: "copy",
+              value: pattern,
+            });
+          }
+
+          return items.length > 0 ? items : null;
+        }
+
+        // Otherwise, offer general tooltip copy options.
+        const items: LogsTableContextMenuItem[] = [];
+        if (anchorDomain) {
+          items.push({
+            label: "Copy Domain",
+            action: "copy",
+            value: anchorDomain,
+          });
+        }
+        if (anchorNodeId) {
+          items.push({
+            label: "Copy Node",
+            action: "copy",
+            value: anchorNodeId,
+          });
+        }
+
+        return items.length > 0 ? items : null;
+      }
+
       const cell = target.closest("td");
       if (!cell || !cell.closest("tbody")) {
         return null;
@@ -1977,17 +2073,17 @@ export function LogsPage() {
 
         if (ip.length > 0 && hostname.length > 0) {
           return [
-            { label: "Copy IP", value: ip },
-            { label: "Copy Hostname", value: hostname },
+            { label: "Copy IP", action: "copy", value: ip },
+            { label: "Copy Hostname", action: "copy", value: hostname },
           ];
         }
 
         if (ip.length > 0) {
-          return [{ label: "Copy IP", value: ip }];
+          return [{ label: "Copy IP", action: "copy", value: ip }];
         }
 
         if (hostname.length > 0) {
-          return [{ label: "Copy Hostname", value: hostname }];
+          return [{ label: "Copy Hostname", action: "copy", value: hostname }];
         }
 
         return null;
@@ -2006,7 +2102,7 @@ export function LogsPage() {
         }
 
         return value.length > 0 && value !== "—" ?
-            [{ label: "Copy", value }]
+            [{ label: "Copy", action: "copy", value }]
           : null;
       }
 
@@ -2017,7 +2113,7 @@ export function LogsPage() {
       }
 
       return value.length > 0 && value !== "—" ?
-          [{ label: "Copy", value }]
+          [{ label: "Copy", action: "copy", value }]
         : null;
     },
     [],
@@ -2049,14 +2145,25 @@ export function LogsPage() {
     ],
   );
 
-  const handleCopyFromContextMenu = useCallback(
-    async (value: string) => {
-      if (!value) {
+  const handleContextMenuAction = useCallback(
+    async (item: LogsTableContextMenuItem) => {
+      if (item.action === "copy") {
+        if (!item.value) {
+          return;
+        }
+        await copyTextToClipboard(item.value);
+        closeLogsTableContextMenu();
         return;
       }
 
-      await copyTextToClipboard(value);
-      closeLogsTableContextMenu();
+      if (item.action === "open") {
+        if (!item.href) {
+          return;
+        }
+
+        window.open(item.href, "_blank", "noopener,noreferrer");
+        closeLogsTableContextMenu();
+      }
     },
     [closeLogsTableContextMenu, copyTextToClipboard],
   );
@@ -4495,7 +4602,7 @@ export function LogsPage() {
           content,
         }: {
           activeAnchor: HTMLElement | null;
-          content?: string;
+          content: string | null;
         }) => {
           if (!activeAnchor) {
             return null;
@@ -4550,7 +4657,7 @@ export function LogsPage() {
           );
 
           return (
-            <div>
+            <div onContextMenu={handleLogsTableContextMenu}>
               {/*
                * SECURITY NOTE (XSS): `baseHtml` originates from the domain-cell tooltip string.
                * That string is constructed to escape all dynamic/untrusted values (see
@@ -4605,8 +4712,19 @@ export function LogsPage() {
                               }
                               style={{ marginLeft: 12, fontSize: 12 }}
                             >
-                              <span className="tooltip-blocked">→</span>{" "}
-                              {formatBlockMatchLabel(match)}
+                              <span
+                                data-logs-tooltip-block-source="true"
+                                data-block-match-label={formatBlockMatchLabel(
+                                  match,
+                                )}
+                                data-block-match-source={match.source ?? ""}
+                                data-block-match-pattern={
+                                  match.matchedPattern ?? ""
+                                }
+                              >
+                                <span className="tooltip-blocked">→</span>{" "}
+                                {formatBlockMatchLabel(match)}
+                              </span>
                             </div>
                           ))}
 
@@ -5885,10 +6003,10 @@ export function LogsPage() {
                   >
                     {logsTableContextMenu.items.map((item) => (
                       <button
-                        key={`${item.label}-${item.value}`}
+                        key={`${item.label}-${item.action === "copy" ? item.value : item.href}`}
                         type="button"
                         className="logs-page__context-menu-item"
-                        onClick={() => handleCopyFromContextMenu(item.value)}
+                        onClick={() => handleContextMenuAction(item)}
                       >
                         {item.label}
                       </button>
