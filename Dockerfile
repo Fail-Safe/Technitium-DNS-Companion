@@ -27,12 +27,7 @@ COPY --from=manifest-context /app/ ./
 # Explicitly install the matching Rollup native build to work around npm optional deps bug
 RUN --mount=type=cache,target=/root/.npm \
     npm install --no-fund --no-audit -g npm@${NPM_VERSION} && \
-    npm ci --ignore-scripts --no-fund --no-audit \
-    && case "$BUILDPLATFORM" in \
-        linux/amd64*) npm install --no-save --no-fund --no-audit @rollup/rollup-linux-x64-musl @esbuild/linux-x64 ;; \
-        linux/arm64*) npm install --no-save --no-fund --no-audit @rollup/rollup-linux-arm64-musl @esbuild/linux-arm64 ;; \
-        *) echo "Skipping Rollup native binary install for BUILDPLATFORM=$BUILDPLATFORM" ;; \
-      esac
+    npm ci --ignore-scripts --no-fund --no-audit
 
 # Copy frontend source
 COPY apps/frontend/ ./apps/frontend/
@@ -61,9 +56,10 @@ COPY apps/backend/ ./apps/backend/
 # Build backend
 RUN npm run build --workspace=apps/backend
 
-# Prune dev dependencies after build so the final image can copy only production deps.
-# With npm workspaces, dependencies are typically hoisted to /app/node_modules (not apps/backend/node_modules).
-RUN npm prune --omit=dev
+# For backend-only production deps (after workspace install)
+RUN if [ -d apps/backend/node_modules ]; then \
+    npm prune --omit=dev --workspace=apps/backend; \
+    fi
 
 # Stage 3: Production image
 FROM node:22-alpine3.21
@@ -84,7 +80,8 @@ LABEL \
 WORKDIR /app
 
 # Pull in latest Alpine security fixes for base packages
-RUN apk upgrade --no-cache
+RUN apk upgrade --no-cache && \
+    apk add --no-cache tzdata ca-certificates
 
 # Copy manifests from shared context
 COPY --from=manifest-context /app/ ./
@@ -110,7 +107,7 @@ EXPOSE 3000 3443
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+    CMD timeout 5s node -e "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 # Run the application
 CMD ["node", "apps/backend/dist/main"]
