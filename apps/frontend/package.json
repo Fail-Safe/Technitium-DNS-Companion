@@ -57,5 +57,9 @@
     "vite": "^7.1.7",
     "vite-plugin-pwa": "^1.1.0",
     "vitest": "^3.2.4"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-musl": "^4.57.0",
+    "@esbuild/linux-x64": "^0.27.2"
   }
 }
