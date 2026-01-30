@@ -1051,14 +1051,17 @@ html {
 }
 
 .logs-page__card-swipe-btn--block {
+  background-color: inherit;
   /* Red background for block action - inherits from parent gradient */
 }
 
 .logs-page__card-swipe-btn--allow {
+  background-color: inherit;
   /* Green background for allow action - inherits from parent gradient */
 }
 
 .logs-page__card-swipe-btn--select {
+  background-color: inherit;
   /* Blue background for select - inherits from parent gradient */
 }
 
@@ -3906,6 +3909,14 @@ button.secondary:disabled,
   border-radius: 0.75rem;
   box-shadow: 0 12px 28px rgba(30, 42, 64, 0.12);
   padding: 0.25rem;
+}
+
+.logs-page__context-menu-separator {
+  height: 1px;
+  background: var(--color-border);
+  margin: 0.35rem 0.5rem;
+  border-radius: 9999px;
+  opacity: 0.9;
 }
 
 .logs-page__context-menu-item {
