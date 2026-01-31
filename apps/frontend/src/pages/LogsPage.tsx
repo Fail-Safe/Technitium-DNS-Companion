@@ -135,18 +135,6 @@ const DEDUPLICATE_DOMAINS_STORAGE_KEY = "technitiumLogs.deduplicateDomains";
 const FILTER_TIP_DISMISSED_KEY = "technitiumLogs.filterTipDismissed";
 const SELECTION_TIP_DISMISSED_KEY = "technitiumLogs.selectionTipDismissed";
 const MOBILE_LAYOUT_MODE_KEY = "technitiumLogs.mobileLayoutMode";
-const LOGS_DEBUG_RESUME_STORAGE_KEY = "technitiumLogs.debugResume";
-
-const isLogsResumeDebugEnabled = () => {
-  if (typeof window === "undefined") return false;
-  try {
-    return (
-      window.localStorage.getItem(LOGS_DEBUG_RESUME_STORAGE_KEY) === "true"
-    );
-  } catch {
-    return false;
-  }
-};
 
 const BLOCKED_RESPONSE_KEYWORDS = ["block", "filter", "deny"];
 const EMPTY_RESPONSE_FILTER_VALUE = "__EMPTY__";
@@ -1573,6 +1561,11 @@ const loadDeduplicateDomains = (): boolean => {
 
 interface BlockDialogState {
   entry: TechnitiumCombinedQueryLogEntry;
+  /**
+   * When both Built-in Blocking and Advanced Blocking are enabled on the node,
+   * the user must choose which system this action should update.
+   */
+  selectedBlockingSystem?: "advanced" | "built-in";
 }
 
 // Memoized table row component to prevent unnecessary re-renders
@@ -1657,8 +1650,18 @@ export function LogsPage() {
     loadStoredCombinedLogs,
     loadStoredNodeLogs,
     advancedBlocking,
+    loadingAdvancedBlocking,
+    advancedBlockingError,
     reloadAdvancedBlocking,
     saveAdvancedBlockingConfig,
+    // Built-in blocking + blocking status
+    blockingStatus,
+    loadingBlockingStatus,
+    reloadBlockingStatus,
+    addAllowedDomain,
+    addBlockedDomain,
+    deleteAllowedDomain,
+    deleteBlockedDomain,
   } = useTechnitiumState();
 
   const { pushToast } = useToast();
@@ -2507,6 +2510,18 @@ export function LogsPage() {
     logsRefreshSecondsRef.current = refreshSeconds;
   }, [refreshSeconds]);
 
+  // Keep an always-current snapshot of refreshSeconds that can safely be read inside
+  // event handlers without risking stale-closure values.
+  //
+  // Why this exists:
+  // React state updates are async, and event handlers can capture stale values.
+  // In our case, "Pause" -> immediately open modal -> "Cancel" could restore a stale
+  // pre-pause refreshSeconds and unintentionally resume tailing. Using a ref avoids that.
+  const refreshSecondsRef = useRef<number>(refreshSeconds);
+  useEffect(() => {
+    refreshSecondsRef.current = refreshSeconds;
+  }, [refreshSeconds]);
+
   useEffect(() => {
     setLogsRefreshSecondsRef.current = setRefreshSeconds;
     setLogsIsAutoRefreshRef.current = setIsAutoRefresh;
@@ -2563,10 +2578,38 @@ export function LogsPage() {
   const [tailBuffer, setTailBuffer] = useState<
     TechnitiumCombinedQueryLogEntry[]
   >([]);
+  // Tail mode pause semantics (single source of truth):
+  // - refreshSeconds <= 0 means "paused" and must stop all fetching
+  // - refreshSeconds > 0 means "live" and should poll on an interval
+  //
+  // NOTE: tailPaused previously represented a second pause flag ("stop merging"),
+  // but that created conflicting states with the modal + pause button. We keep it
+  // only for backward-compat reads in a few places, but it is no longer used to
+  // drive pause/resume behavior. It should eventually be deleted.
   const [tailPaused, setTailPaused] = useState<boolean>(false);
   const [tailNewestTimestamp, setTailNewestTimestamp] = useState<string | null>(
     null,
   );
+
+  // When opening an allow/block modal in tail mode, we may temporarily force a pause.
+  // Track prior pause state so cancel/dismiss restores exactly what the user had.
+  //
+  // IMPORTANT: Use refs (not state/closures) to avoid capturing stale values right after
+  // a pause/resume click (a common cause of "Cancel unpauses" on first open after reload).
+  const tailPauseBeforeModalRef = useRef<{
+    tailPaused: boolean;
+    refreshSeconds: number;
+  } | null>(null);
+
+  // Initialize the snapshot to the current pause state so even if, for some reason,
+  // the first Status click happens before we set it, Cancel won't "restore live".
+  useEffect(() => {
+    tailPauseBeforeModalRef.current = {
+      tailPaused,
+      refreshSeconds: refreshSecondsRef.current,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [newEntryTimestamps, setNewEntryTimestamps] = useState<Set<string>>(
     new Set(),
   );
@@ -2598,7 +2641,6 @@ export function LogsPage() {
   // Prevent overlapping log loads (auto-refresh can otherwise stack requests if a call takes longer than refresh interval)
   const logsFetchInFlightRef = useRef<boolean>(false);
   const logsFetchAbortRef = useRef<AbortController | null>(null);
-  const logsResumeDebugToastAtRef = useRef<number>(0);
 
   const [blockDialog, setBlockDialog] = useState<
     BlockDialogState | undefined
@@ -2700,6 +2742,107 @@ export function LogsPage() {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }, []);
 
+  /**
+   * Tail-mode UX: after confirming an allow/block change while paused, reflect the new
+   * administrative state in-place (so the user sees the change immediately) without
+   * forcing a full refresh that can re-sort/re-dedupe and "jump" the table.
+   *
+   * NOTE: We intentionally keep this logic lightweight and UI-focused: it updates the
+   * currently-visible tail buffer entries only. A future live refresh will still
+   * reconcile with actual DNS server behavior, but we avoid a disruptive immediate reload.
+   */
+  const applyTailModeAdminActionPatch = useCallback(
+    (params: {
+      nodeId: string;
+      domain: string;
+      action: "block" | "allow";
+      blockingMethod: "advanced" | "built-in";
+    }) => {
+      const cleanDomain = params.domain.trim();
+      if (!cleanDomain) {
+        return;
+      }
+
+      // Only relevant for tail mode; in paginated mode we keep the existing refresh behavior.
+      if (displayMode !== "tail") {
+        return;
+      }
+
+      setTailBuffer((prev) => {
+        if (prev.length === 0) {
+          return prev;
+        }
+
+        let changed = false;
+
+        const next = prev.map((entry) => {
+          if (entry.nodeId !== params.nodeId) {
+            return entry;
+          }
+          if ((entry.qname ?? "").trim() !== cleanDomain) {
+            return entry;
+          }
+
+          // Patch the entry's textual response so our existing isEntryBlocked() heuristics
+          // reflect the new state without re-fetching.
+          //
+          // We only do this when the action would logically flip the blocked-ness.
+          // - "block": mark as blocked
+          // - "allow": ensure it's not marked as blocked
+          //
+          // The keywords are already defined by BLOCKED_RESPONSE_KEYWORDS; a well-known
+          // value like "blocked" should be enough to classify as blocked.
+          const currentResponse = entry.responseType ?? "";
+
+          if (params.action === "block") {
+            // If it's already classified as blocked, no need to mutate.
+            if (isEntryBlocked(entry)) {
+              return entry;
+            }
+
+            changed = true;
+            return {
+              ...entry,
+              // Ensure some "blocked" keyword for the classifier.
+              responseType:
+                currentResponse && currentResponse.trim().length > 0
+                  ? currentResponse
+                  : "blocked",
+            };
+          }
+
+          // action === "allow"
+          // If it's currently classified as blocked, remove blocked markers so it stops
+          // looking blocked in the UI.
+          if (!isEntryBlocked(entry)) {
+            return entry;
+          }
+
+          changed = true;
+
+          // Remove obvious blocked keywords; keep whatever else is there.
+          // If the response is now empty, set to a benign placeholder.
+          const lowered = currentResponse.toLowerCase();
+          const hasBlockedKeyword = BLOCKED_RESPONSE_KEYWORDS.some((kw) =>
+            lowered.includes(kw),
+          );
+
+          return {
+            ...entry,
+            responseType: hasBlockedKeyword
+              ? "recursive"
+              : currentResponse && currentResponse.trim().length > 0
+                ? currentResponse
+                : "recursive",
+          };
+        });
+
+        return changed ? next : prev;
+      });
+    },
+    [displayMode, setTailBuffer],
+  );
+
   const pullToRefresh = usePullToRefresh({
     onRefresh: handlePullToRefresh,
     threshold: 80,
@@ -2800,12 +2943,74 @@ export function LogsPage() {
     setBulkAction(null);
   }, []);
 
-  // Lazy load Advanced Blocking data - only when needed
+  // Lazy load Advanced Blocking data - only when needed.
+  // IMPORTANT: Don't depend on `advancedBlocking` being updated immediately after `reloadAdvancedBlocking()`.
+  // React state updates are async; a caller should re-read from state on the next render.
   const ensureAdvancedBlockingLoaded = useCallback(async () => {
-    if (!advancedBlocking) {
-      await reloadAdvancedBlocking();
+    // If a load is already in-flight, don't start another. The state will update on the next render.
+    if (loadingAdvancedBlocking) {
+      return;
     }
-  }, [advancedBlocking, reloadAdvancedBlocking]);
+
+    // If we already have a payload (even if some nodes have errors), don't refetch here.
+    if (advancedBlocking) {
+      return;
+    }
+
+    await reloadAdvancedBlocking();
+  }, [advancedBlocking, loadingAdvancedBlocking, reloadAdvancedBlocking]);
+
+  // Ensure blocking status is loaded before routing (advanced vs built-in).
+  // The Status click handler must not choose a blocking mode while status is missing.
+  const ensureBlockingStatusLoaded = useCallback(async () => {
+    if (loadingBlockingStatus) {
+      return;
+    }
+    if (!blockingStatus) {
+      await reloadBlockingStatus();
+    }
+  }, [blockingStatus, loadingBlockingStatus, reloadBlockingStatus]);
+
+  type BlockingUiMethod = "advanced" | "built-in";
+
+  const getUiBlockingMethodForNode = useCallback(
+    (nodeId: string): BlockingUiMethod => {
+      const nodeStatus = blockingStatus?.nodes?.find(
+        (n) => n.nodeId === nodeId,
+      );
+
+      // If both are enabled, we prompt the user to choose per-action in the modal.
+      // This function only answers "which modal do we have enough data to show?"
+      // In conflicts, default to Advanced Blocking UI so we can always render a usable modal.
+      if (nodeStatus?.builtInEnabled && nodeStatus?.advancedBlockingEnabled) {
+        return "advanced";
+      }
+
+      // Prefer Advanced Blocking only when it's installed AND enabled.
+      // `advancedBlockingEnabled` can sometimes appear true even when the app isn't installed;
+      // guarding on `advancedBlockingInstalled` avoids incorrectly routing to built-in UI.
+      if (
+        nodeStatus?.advancedBlockingInstalled === true &&
+        nodeStatus?.advancedBlockingEnabled === true
+      ) {
+        return "advanced";
+      }
+
+      // Otherwise, if built-in blocking is enabled, use built-in
+      if (nodeStatus?.builtInEnabled === true) {
+        return "built-in";
+      }
+
+      // Fallback: if AB is installed (even if enabled state is unknown), prefer AB UI
+      if (nodeStatus?.advancedBlockingInstalled === true) {
+        return "advanced";
+      }
+
+      // Last resort: built-in
+      return "built-in";
+    },
+    [blockingStatus],
+  );
 
   const initiateBulkAction = useCallback(
     async (action: "block" | "allow") => {
@@ -2836,85 +3041,144 @@ export function LogsPage() {
 
   const handleStatusClick = useCallback(
     async (entry: TechnitiumCombinedQueryLogEntry, forceToggle = false) => {
-      // Ensure advanced blocking data is loaded before opening dialog
-      await ensureAdvancedBlockingLoaded();
+      // Ensure we have blocking status before routing.
+      // NOTE: Status fetch updates React state asynchronously; after awaiting, re-check that status exists.
+      await ensureBlockingStatusLoaded();
 
-      const domain = entry.qname ?? "";
-      const snapshot = advancedBlocking?.nodes?.find(
-        (nodeConfig) => nodeConfig.nodeId === entry.nodeId,
+      const nodeStatusAfterEnsure = blockingStatus?.nodes?.find(
+        (n) => n.nodeId === entry.nodeId,
       );
-      const groups = snapshot?.config?.groups ?? [];
-      const defaultRegex = domain ? buildDefaultRegexPattern(domain) : "";
-      const blockSummary = collectActionOverrides(groups, domain, "block");
-      const allowSummary = collectActionOverrides(groups, domain, "allow");
-      const blockRegexPatterns = blockSummary.regexMatches;
-      const allowRegexPatterns = allowSummary.regexMatches;
-      const hasBlockedExact = blockSummary.hasExact;
-      const hasAllowedExact = allowSummary.hasExact;
 
-      const blockedDominant = blockRegexPatterns.length > 0 || hasBlockedExact;
-      const allowDominant = allowRegexPatterns.length > 0 || hasAllowedExact;
+      // If status is still not available (first click / slow network), don't mis-route to built-in.
+      // Default to Advanced UI in this case so we can render a consistent modal, then the user can
+      // proceed once data is available. (If Advanced is actually unavailable, the modal will surface
+      // that cleanly rather than silently doing the wrong thing.)
+      const uiMethod: BlockingUiMethod = nodeStatusAfterEnsure
+        ? getUiBlockingMethodForNode(entry.nodeId)
+        : "advanced";
 
-      // Default action should be the OPPOSITE of current state
-      // If currently blocked → offer to allow; if currently allowed → offer to block
-      let initialAction: "block" | "allow" = blockedDominant
-        ? "allow" // Currently blocked, so offer to allow
-        : allowDominant
-          ? "block" // Currently allowed, so offer to block
-          : entry.responseType && isEntryBlocked(entry)
-            ? "allow" // Blocked by list, so offer to allow
-            : "block"; // Not blocked, so offer to block
+      if (uiMethod === "advanced") {
+        // Advanced Blocking modal behavior
 
-      // If called from swipe (forceToggle=true), invert the action again
-      if (forceToggle) {
-        initialAction = initialAction === "block" ? "allow" : "block";
+        await ensureAdvancedBlockingLoaded();
+
+        // Open the modal immediately (spinner UX) and let the modal content reflect
+        // Advanced Blocking loading state instead of forcing the user to retry.
+        const domain = entry.qname ?? "";
+        const snapshot = advancedBlocking?.nodes?.find(
+          (nodeConfig) => nodeConfig.nodeId === entry.nodeId,
+        );
+        const groups = snapshot?.config?.groups ?? [];
+
+        // If this node's snapshot couldn't be fetched, don't pretend there are no groups.
+        // Spinner UX: allow the modal to open and show loading/error states in-body.
+        // Only hard-fail early if we already have a payload and it explicitly errored for this node.
+        if (advancedBlocking && !snapshot?.config && snapshot?.error) {
+          setBlockError(
+            `Failed to load Advanced Blocking config for node "${entry.nodeId}": ${snapshot.error}`,
+          );
+        }
+
+        const defaultRegex = domain ? buildDefaultRegexPattern(domain) : "";
+        const blockSummary = collectActionOverrides(groups, domain, "block");
+        const allowSummary = collectActionOverrides(groups, domain, "allow");
+        const blockRegexPatterns = blockSummary.regexMatches;
+        const allowRegexPatterns = allowSummary.regexMatches;
+        const hasBlockedExact = blockSummary.hasExact;
+        const hasAllowedExact = allowSummary.hasExact;
+
+        const blockedDominant =
+          blockRegexPatterns.length > 0 || hasBlockedExact;
+        const allowDominant = allowRegexPatterns.length > 0 || hasAllowedExact;
+
+        // Default action should be the OPPOSITE of current state
+        // If currently blocked → offer to allow; if currently allowed → offer to block
+        let initialAction: "block" | "allow" = blockedDominant
+          ? "allow" // Currently blocked, so offer to allow
+          : allowDominant
+            ? "block" // Currently allowed, so offer to block
+            : entry.responseType && isEntryBlocked(entry)
+              ? "allow" // Blocked by list, so offer to allow
+              : "block"; // Not blocked, so offer to block
+
+        // If called from swipe (forceToggle=true), invert the action again
+        if (forceToggle) {
+          initialAction = initialAction === "block" ? "allow" : "block";
+        }
+
+        const sourceMatches =
+          initialAction === "block" ? blockRegexPatterns : allowRegexPatterns;
+        const initialMode: "exact" | "regex" =
+          initialAction === "block"
+            ? hasBlockedExact
+              ? "exact"
+              : sourceMatches.length > 0
+                ? "regex"
+                : "exact"
+            : hasAllowedExact
+              ? "exact"
+              : sourceMatches.length > 0
+                ? "regex"
+                : "exact";
+        const initialRegex =
+          sourceMatches.length > 0 ? sourceMatches[0] : defaultRegex;
+
+        const initialSelection =
+          initialAction === "block"
+            ? blockSummary.selected
+            : allowSummary.selected;
+        setBlockSelectedGroups(new Set(initialSelection));
+        setBlockingAction(initialAction);
+        setBlockMode(initialMode);
+        setBlockRegexValue(initialRegex);
+        setBlockError(undefined);
+        setIsBlocking(false);
+        setBlockDialog({ entry, selectedBlockingSystem: undefined });
+      } else {
+        // Built-in Blocking: no groups/regex; apply exact allow/block directly.
+        const domain = entry.qname?.trim();
+        if (!domain) {
+          setBlockError("This log entry does not include a domain name.");
+          return;
+        }
+
+        // Determine current blocked-ness from the log heuristics; offer opposite action
+        let initialAction: "block" | "allow" =
+          entry.responseType && isEntryBlocked(entry) ? "allow" : "block";
+
+        if (forceToggle) {
+          initialAction = initialAction === "block" ? "allow" : "block";
+        }
+
+        setBlockingAction(initialAction);
+        setBlockSelectedGroups(new Set<string>());
+        setBlockMode("exact");
+        setBlockRegexValue("");
+        setBlockError(undefined);
+        setIsBlocking(false);
+        setBlockDialog({ entry, selectedBlockingSystem: undefined });
       }
 
-      const sourceMatches =
-        initialAction === "block" ? blockRegexPatterns : allowRegexPatterns;
-      const initialMode: "exact" | "regex" =
-        initialAction === "block"
-          ? hasBlockedExact
-            ? "exact"
-            : sourceMatches.length > 0
-              ? "regex"
-              : "exact"
-          : hasAllowedExact
-            ? "exact"
-            : sourceMatches.length > 0
-              ? "regex"
-              : "exact";
-      const initialRegex =
-        sourceMatches.length > 0 ? sourceMatches[0] : defaultRegex;
-
-      const initialSelection =
-        initialAction === "block"
-          ? blockSummary.selected
-          : allowSummary.selected;
-      setBlockSelectedGroups(new Set(initialSelection));
-      setBlockingAction(initialAction);
-      setBlockMode(initialMode);
-      setBlockRegexValue(initialRegex);
-      setBlockError(undefined);
-      setIsBlocking(false);
-      setBlockDialog({ entry });
-
-      // Pause auto-refresh when opening the modal (similar to mobile swipe behavior)
+      // Tail mode: opening the modal should NOT mutate pause semantics.
+      // If the user is live, they remain live; if they are paused, they remain paused.
+      //
+      // We still stop the interval/fetching by relying exclusively on refreshSeconds,
+      // and we do not toggle tailPaused (which is now deprecated for pause semantics).
       if (displayMode === "tail") {
-        setTailPaused(true);
-        setRefreshSeconds(0);
+        tailPauseBeforeModalRef.current = {
+          tailPaused,
+          refreshSeconds: refreshSecondsRef.current,
+        };
       }
     },
     [
       advancedBlocking,
-      setBlockDialog,
-      setBlockError,
-      setBlockSelectedGroups,
-      setIsBlocking,
       ensureAdvancedBlockingLoaded,
+      ensureBlockingStatusLoaded,
+      getUiBlockingMethodForNode,
       displayMode,
-      setTailPaused,
-      setRefreshSeconds,
+      tailPaused,
+      blockingStatus?.nodes,
     ],
   );
 
@@ -3322,6 +3586,45 @@ export function LogsPage() {
   const isBlockedEntry = blockDialog
     ? isEntryBlocked(blockDialog.entry)
     : false;
+
+  const blockDialogBlockingMethod: "advanced" | "built-in" | undefined =
+    useMemo(() => {
+      if (!blockDialog) {
+        return undefined;
+      }
+
+      // If blocking status isn't available yet, default to Advanced Blocking UI behavior.
+      // This prevents a built-in-only modal from flashing incorrectly while status is loading.
+      if (!blockingStatus || loadingBlockingStatus) {
+        return "advanced";
+      }
+
+      const nodeStatus = blockingStatus.nodes.find(
+        (n) => n.nodeId === blockDialog.entry.nodeId,
+      );
+
+      // If both are enabled, prompt the user to choose per-action.
+      // Use the user's explicit choice if present; otherwise show Advanced UI by default.
+      //
+      // IMPORTANT: Treat this as a conflict ONLY when Advanced Blocking is installed+enabled.
+      // This avoids incorrectly prompting (or misrouting to built-in UI) if the status payload
+      // reports `advancedBlockingEnabled` true while the app isn't installed.
+      if (
+        nodeStatus?.builtInEnabled === true &&
+        nodeStatus?.advancedBlockingInstalled === true &&
+        nodeStatus?.advancedBlockingEnabled === true
+      ) {
+        return blockDialog.selectedBlockingSystem ?? "advanced";
+      }
+
+      return getUiBlockingMethodForNode(blockDialog.entry.nodeId);
+    }, [
+      blockDialog,
+      blockingStatus,
+      loadingBlockingStatus,
+      getUiBlockingMethodForNode,
+    ]);
+
   const blockCoverage = useMemo<CoverageEntry[]>(() => {
     if (!blockDialog || !blockDialog.entry.qname) {
       return [];
@@ -3482,25 +3785,49 @@ export function LogsPage() {
     ],
   );
 
-  const closeBlockDialog = useCallback(() => {
-    setBlockDialog(undefined);
-    setBlockSelectedGroups(new Set<string>());
-    setBlockError(undefined);
-    setIsBlocking(false);
-    setBlockMode("exact");
-    setBlockRegexValue("");
-    setBulkAction(null);
+  const closeBlockDialog = useCallback(
+    (reason?: "cancel" | "confirm" | "dismiss") => {
+      setBlockDialog(undefined);
+      setBlockSelectedGroups(new Set<string>());
+      setBlockError(undefined);
+      setIsBlocking(false);
+      setBlockMode("exact");
+      setBlockRegexValue("");
+      setBulkAction(null);
 
-    // Resume auto-refresh when closing the modal (similar to mobile swipe behavior)
-    if (displayMode === "tail" && tailPaused) {
-      setTailPaused(false);
-    }
-  }, [displayMode, tailPaused, setTailPaused]);
+      if (displayMode === "tail") {
+        const prior = tailPauseBeforeModalRef.current;
+        tailPauseBeforeModalRef.current = null;
+
+        // In tail mode, the modal must NOT change pause state at all.
+        // We restore the prior refreshSeconds, and we do NOT touch tailPaused here.
+        //
+        // This prevents "first cancel unpauses" and also prevents getting stuck in a state
+        // where resume no longer triggers fetching.
+        if (reason === "cancel" || reason === "dismiss") {
+          if (prior) {
+            setRefreshSeconds(prior.refreshSeconds);
+          }
+          return;
+        }
+
+        // For confirm: keep whatever pause state the user had before opening the modal.
+        // (The confirm handlers decide whether to trigger a refresh tick or patch in-place.)
+        if (prior) {
+          setRefreshSeconds(prior.refreshSeconds);
+        }
+      }
+    },
+    [displayMode, setRefreshSeconds],
+  );
 
   const handleConfirmBlock = useCallback(async () => {
     if (!blockDialog) {
       return;
     }
+
+    // Ensure status exists so we can apply via the correct blocking method
+    await ensureBlockingStatusLoaded();
 
     const domain = blockDialog.entry.qname?.trim();
     const isCurrentlyBlocked = isEntryBlocked(blockDialog.entry);
@@ -3510,6 +3837,77 @@ export function LogsPage() {
       return;
     }
 
+    // If both systems are enabled, require an explicit per-action choice.
+    // Only consider it a true conflict when Advanced Blocking is installed+enabled.
+    const nodeStatus = blockingStatus?.nodes?.find(
+      (n) => n.nodeId === blockDialog.entry.nodeId,
+    );
+    const hasConflict = Boolean(
+      nodeStatus?.builtInEnabled === true &&
+      nodeStatus?.advancedBlockingInstalled === true &&
+      nodeStatus?.advancedBlockingEnabled === true,
+    );
+    if (hasConflict && !blockDialog.selectedBlockingSystem) {
+      setBlockError(
+        "Choose which blocking system to update (Built-in Blocking or Advanced Blocking).",
+      );
+      return;
+    }
+
+    const uiMethod =
+      hasConflict && blockDialog.selectedBlockingSystem
+        ? blockDialog.selectedBlockingSystem
+        : getUiBlockingMethodForNode(blockDialog.entry.nodeId);
+
+    // Built-in Blocking path: apply exact allow/block immediately (no groups/regex)
+    if (uiMethod === "built-in") {
+      try {
+        setIsBlocking(true);
+
+        if (blockingAction === "block") {
+          // Ensure domain is in blocked list; also remove it from allowed list best-effort
+          await addBlockedDomain(blockDialog.entry.nodeId, domain);
+          try {
+            await deleteAllowedDomain(blockDialog.entry.nodeId, domain);
+          } catch {
+            // best-effort; ignore
+          }
+        } else {
+          // Ensure domain is in allowed list; also remove it from blocked list best-effort
+          await addAllowedDomain(blockDialog.entry.nodeId, domain);
+          try {
+            await deleteBlockedDomain(blockDialog.entry.nodeId, domain);
+          } catch {
+            // best-effort; ignore
+          }
+        }
+
+        // Tail mode UX: if paused, patch visible entries in-place rather than forcing
+        // a refresh that can reshuffle the table and lose the user's position.
+        if (displayMode === "tail" && tailPaused) {
+          applyTailModeAdminActionPatch({
+            nodeId: blockDialog.entry.nodeId,
+            domain,
+            action: blockingAction,
+            blockingMethod: "built-in",
+          });
+        } else {
+          setRefreshTick((prev) => prev + 1);
+        }
+
+        closeBlockDialog("confirm");
+      } catch (error) {
+        setBlockError(
+          error instanceof Error
+            ? error.message
+            : "Failed to apply built-in blocking change.",
+        );
+        setIsBlocking(false);
+      }
+      return;
+    }
+
+    // Advanced Blocking path (existing behavior)
     if (blockingAction === "block") {
       if (!isCurrentlyBlocked && blockSelectedGroups.size === 0) {
         setBlockError("Select at least one group to apply the block.");
@@ -3726,8 +4124,21 @@ export function LogsPage() {
     try {
       setIsBlocking(true);
       await saveAdvancedBlockingConfig(blockDialog.entry.nodeId, updatedConfig);
-      setRefreshTick((prev) => prev + 1);
-      closeBlockDialog();
+
+      // Tail mode UX: if paused, patch visible entries in-place rather than forcing
+      // a refresh that can reshuffle the table and lose the user's position.
+      if (displayMode === "tail" && tailPaused) {
+        applyTailModeAdminActionPatch({
+          nodeId: blockDialog.entry.nodeId,
+          domain,
+          action: blockingAction,
+          blockingMethod: "advanced",
+        });
+      } else {
+        setRefreshTick((prev) => prev + 1);
+      }
+
+      closeBlockDialog("confirm");
     } catch (error) {
       setBlockError(
         error instanceof Error ? error.message : "Failed to apply block.",
@@ -3747,6 +4158,16 @@ export function LogsPage() {
     setBlockError,
     setIsBlocking,
     allowCoverage,
+    ensureBlockingStatusLoaded,
+    getUiBlockingMethodForNode,
+    addAllowedDomain,
+    addBlockedDomain,
+    deleteAllowedDomain,
+    deleteBlockedDomain,
+    blockingStatus,
+    applyTailModeAdminActionPatch,
+    displayMode,
+    tailPaused,
   ]);
 
   const handleConfirmBulkAction = useCallback(async () => {
@@ -3827,9 +4248,40 @@ export function LogsPage() {
         await saveAdvancedBlockingConfig(snapshot.nodeId, updatedConfig);
       }
 
-      setRefreshTick((prev) => prev + 1);
+      // Tail mode UX: if paused, patch visible entries in-place rather than forcing
+      // a refresh that can reshuffle the table and lose the user's position.
+      if (displayMode === "tail" && tailPaused) {
+        // Apply the patch for all selected domains on the current node context (bulk action
+        // updates Advanced Blocking config across nodes; UI patch here is best-effort for
+        // what the user currently sees in the tail buffer).
+        //
+        // NOTE: applyTailModeAdminActionPatch is nodeId-specific. In bulk mode we don't
+        // have a single nodeId, so we patch for every nodeId present in the current tail buffer.
+        const nodeIdsInTail = Array.from(
+          new Set(
+            tailBuffer
+              .map((entry) => entry.nodeId)
+              .filter((nodeId): nodeId is string => Boolean(nodeId)),
+          ),
+        );
+        const action: "block" | "allow" = bulkAction;
+
+        for (const nodeId of nodeIdsInTail) {
+          for (const domain of selectedDomains) {
+            applyTailModeAdminActionPatch({
+              nodeId,
+              domain,
+              action,
+              blockingMethod: "advanced",
+            });
+          }
+        }
+      } else {
+        setRefreshTick((prev) => prev + 1);
+      }
+
       clearSelection();
-      closeBlockDialog();
+      closeBlockDialog("confirm");
     } catch (error) {
       setBlockError(
         error instanceof Error
@@ -3847,6 +4299,10 @@ export function LogsPage() {
     setRefreshTick,
     clearSelection,
     closeBlockDialog,
+    displayMode,
+    tailPaused,
+    tailBuffer,
+    applyTailModeAdminActionPatch,
   ]);
 
   useEffect(() => {
@@ -3861,12 +4317,20 @@ export function LogsPage() {
   }, [mode, nodeMap, nodes, selectedNodeId]);
 
   useEffect(() => {
+    // Tail-mode pause should stop network fetching entirely.
+    // Single source of truth: refreshSeconds <= 0 is paused.
     if (refreshSeconds <= 0) {
       setIsAutoRefresh(false);
       return;
     }
 
     const triggerRefresh = () => {
+      // Belt-and-suspenders: even if an interval callback fires late,
+      // never trigger a refresh while paused.
+      if (refreshSeconds <= 0) {
+        return;
+      }
+
       if (!document.hidden) {
         // Skip auto-refresh ticks while a load is already in-flight.
         // This avoids request pile-ups and keeps the UI responsive.
@@ -3884,40 +4348,15 @@ export function LogsPage() {
 
     const handleVisibilityChange = () => {
       if (!document.hidden && refreshSeconds > 0) {
-        if (isLogsResumeDebugEnabled()) {
-          console.info("[LogsPage] visibility resume", {
-            at: new Date().toISOString(),
-            refreshSeconds,
-            inFlight: logsFetchInFlightRef.current,
-          });
-        }
         // Some browsers throttle/suspend network requests in background tabs.
         // If a log fetch was in-flight when the tab was backgrounded, the promise
         // may never resolve/reject, leaving logsFetchInFlightRef stuck and
         // preventing subsequent refresh ticks (which also stalls hostname
         // enrichment coming from the combined logs endpoint).
         if (logsFetchInFlightRef.current) {
-          if (isLogsResumeDebugEnabled()) {
-            console.warn(
-              "[LogsPage] Aborting in-flight log fetch on visibility resume (likely background-throttled).",
-              {
-                at: new Date().toISOString(),
-                visibilityState: document.visibilityState,
-                refreshSeconds,
-              },
-            );
-
-            const now = Date.now();
-            if (now - logsResumeDebugToastAtRef.current > 30000) {
-              logsResumeDebugToastAtRef.current = now;
-              pushToast({
-                tone: "info",
-                timeout: 7000,
-                message:
-                  "Logs debug: aborted a stuck in-flight fetch on resume (check console).",
-              });
-            }
-          }
+          // Some browsers can leave in-flight requests unresolved when backgrounded.
+          // If we detect that situation on resume, abort and clear the in-flight marker
+          // so tailing can continue.
           logsFetchAbortRef.current?.abort();
           logsFetchAbortRef.current = null;
           logsFetchInFlightRef.current = false;
@@ -3928,35 +4367,8 @@ export function LogsPage() {
 
     const handleWindowFocus = () => {
       if (!document.hidden && refreshSeconds > 0) {
-        if (isLogsResumeDebugEnabled()) {
-          console.info("[LogsPage] window focus", {
-            at: new Date().toISOString(),
-            refreshSeconds,
-            inFlight: logsFetchInFlightRef.current,
-          });
-        }
         if (logsFetchInFlightRef.current) {
-          if (isLogsResumeDebugEnabled()) {
-            console.warn(
-              "[LogsPage] Aborting in-flight log fetch on window focus (likely background-throttled).",
-              {
-                at: new Date().toISOString(),
-                visibilityState: document.visibilityState,
-                refreshSeconds,
-              },
-            );
-
-            const now = Date.now();
-            if (now - logsResumeDebugToastAtRef.current > 30000) {
-              logsResumeDebugToastAtRef.current = now;
-              pushToast({
-                tone: "info",
-                timeout: 7000,
-                message:
-                  "Logs debug: aborted a stuck in-flight fetch on focus (check console).",
-              });
-            }
-          }
+          // Same stuck in-flight protection as visibility resume.
           logsFetchAbortRef.current?.abort();
           logsFetchAbortRef.current = null;
           logsFetchInFlightRef.current = false;
@@ -6325,7 +6737,7 @@ export function LogsPage() {
             aria-modal="true"
             onClick={(event) => {
               if (event.target === event.currentTarget) {
-                closeBlockDialog();
+                closeBlockDialog("dismiss");
               }
             }}
           >
@@ -6339,7 +6751,7 @@ export function LogsPage() {
                 <button
                   type="button"
                   className="logs-page__modal-close"
-                  onClick={closeBlockDialog}
+                  onClick={() => closeBlockDialog("dismiss")}
                 >
                   Close
                 </button>
@@ -6389,44 +6801,199 @@ export function LogsPage() {
                 ) : (
                   <>
                     <p>
-                      {isBlockedEntry
-                        ? "Adjust Advanced Blocking groups for"
-                        : "Add"}{" "}
-                      <strong>{blockDomainValue || "Unknown domain"}</strong>{" "}
-                      {isBlockedEntry ? "on" : "to Advanced Blocking on"} node{" "}
-                      <strong>{blockNodeLabel}</strong>.
+                      {(() => {
+                        const nodeStatus = blockingStatus?.nodes?.find(
+                          (n) => n.nodeId === blockDialog?.entry.nodeId,
+                        );
+                        const hasConflict = Boolean(
+                          nodeStatus?.builtInEnabled === true &&
+                          nodeStatus?.advancedBlockingInstalled === true &&
+                          nodeStatus?.advancedBlockingEnabled === true,
+                        );
+
+                        if (hasConflict) {
+                          return (
+                            <>
+                              Choose which blocking system to update for{" "}
+                              <strong>
+                                {blockDomainValue || "Unknown domain"}
+                              </strong>{" "}
+                              on node <strong>{blockNodeLabel}</strong>.
+                            </>
+                          );
+                        }
+
+                        return (
+                          <>
+                            {blockDialogBlockingMethod === "built-in"
+                              ? `${blockingAction === "allow" ? "Allow" : "Block"}`
+                              : isBlockedEntry
+                                ? "Adjust Advanced Blocking groups for"
+                                : "Add"}{" "}
+                            <strong>
+                              {blockDomainValue || "Unknown domain"}
+                            </strong>{" "}
+                            {blockDialogBlockingMethod === "built-in" ? (
+                              <>
+                                in Built-in Blocking on node{" "}
+                                <strong>{blockNodeLabel}</strong>.
+                              </>
+                            ) : (
+                              <>
+                                {isBlockedEntry
+                                  ? "on"
+                                  : "to Advanced Blocking on"}{" "}
+                                node <strong>{blockNodeLabel}</strong>.
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
                     </p>
-                    {isBlockedEntry && blockCoverage.length > 0 ? (
-                      <section className="logs-page__modal-summary">
-                        <h3 className="logs-page__modal-summary-title">
-                          Current coverage
-                        </h3>
-                        <ul className="logs-page__modal-summary-list">
-                          {blockCoverage.map((entry) => (
-                            <li key={`${entry.name}-${entry.description}`}>
-                              <span className="logs-page__modal-summary-group">
-                                {entry.name}
+
+                    {(() => {
+                      const nodeStatus = blockingStatus?.nodes?.find(
+                        (n) => n.nodeId === blockDialog?.entry.nodeId,
+                      );
+                      const hasConflict = Boolean(
+                        nodeStatus?.builtInEnabled === true &&
+                        nodeStatus?.advancedBlockingInstalled === true &&
+                        nodeStatus?.advancedBlockingEnabled === true,
+                      );
+
+                      if (hasConflict) {
+                        return (
+                          <div className="logs-page__modal-notice">
+                            <strong>Both blocking systems are enabled</strong>
+                            <p>
+                              Technitium DNS strongly recommends not running
+                              Built-in Blocking and Advanced Blocking at the
+                              same time. For this action, choose which system
+                              you want to update. (The DNS Filtering page should
+                              guide you to disable one.)
+                            </p>
+                            <div className="logs-page__modal-action-toggle">
+                              <span className="logs-page__modal-action-label">
+                                Blocking system
                               </span>
-                              <span className="logs-page__modal-summary-detail">
-                                {entry.description}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    ) : null}
-                    {isBlockedEntry && blockCoverage.length === 0 ? (
-                      <div className="logs-page__modal-notice">
-                        <strong>Blocked via downloaded list</strong>
-                        <p>
-                          Technitium DNS marked this query as blocked, but none
-                          of your manual overrides include the domain. It is
-                          likely coming from an external block list feed or an
-                          upstream integration. Select a group and save to add
-                          an explicit override.
-                        </p>
-                      </div>
-                    ) : null}
+                              <div className="logs-page__modal-action-buttons">
+                                <button
+                                  type="button"
+                                  className={
+                                    blockDialog?.selectedBlockingSystem ===
+                                    "built-in"
+                                      ? "toggle-button active"
+                                      : "toggle-button"
+                                  }
+                                  onClick={() => {
+                                    setBlockDialog((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            selectedBlockingSystem: "built-in",
+                                          }
+                                        : prev,
+                                    );
+                                    // Built-in mode is exact-only.
+                                    setBlockMode("exact");
+                                    setBlockRegexValue("");
+                                    setBlockSelectedGroups(new Set<string>());
+                                    setBlockError(undefined);
+                                  }}
+                                  disabled={isBlocking}
+                                  aria-pressed={
+                                    blockDialog?.selectedBlockingSystem ===
+                                    "built-in"
+                                  }
+                                >
+                                  Built-in Blocking (exact)
+                                </button>
+                                <button
+                                  type="button"
+                                  className={
+                                    blockDialog?.selectedBlockingSystem ===
+                                    "advanced"
+                                      ? "toggle-button active"
+                                      : "toggle-button"
+                                  }
+                                  onClick={() => {
+                                    setBlockDialog((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            selectedBlockingSystem: "advanced",
+                                          }
+                                        : prev,
+                                    );
+                                    setBlockError(undefined);
+                                  }}
+                                  disabled={isBlocking}
+                                  aria-pressed={
+                                    blockDialog?.selectedBlockingSystem ===
+                                    "advanced"
+                                  }
+                                >
+                                  Advanced Blocking (groups)
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      if (blockDialogBlockingMethod !== "built-in") {
+                        return (
+                          <>
+                            {isBlockedEntry && blockCoverage.length > 0 ? (
+                              <section className="logs-page__modal-summary">
+                                <h3 className="logs-page__modal-summary-title">
+                                  Current coverage
+                                </h3>
+                                <ul className="logs-page__modal-summary-list">
+                                  {blockCoverage.map((entry) => (
+                                    <li
+                                      key={`${entry.name}-${entry.description}`}
+                                    >
+                                      <span className="logs-page__modal-summary-group">
+                                        {entry.name}
+                                      </span>
+                                      <span className="logs-page__modal-summary-detail">
+                                        {entry.description}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </section>
+                            ) : null}
+                            {isBlockedEntry && blockCoverage.length === 0 ? (
+                              <div className="logs-page__modal-notice">
+                                <strong>Blocked via downloaded list</strong>
+                                <p>
+                                  Technitium DNS marked this query as blocked,
+                                  but none of your manual overrides include the
+                                  domain. It is likely coming from an external
+                                  block list feed or an upstream integration.
+                                  Select a group and save to add an explicit
+                                  override.
+                                </p>
+                              </div>
+                            ) : null}
+                          </>
+                        );
+                      }
+
+                      return (
+                        <div className="logs-page__modal-notice">
+                          <strong>Built-in Blocking</strong>
+                          <p>
+                            Built-in Blocking supports exact domain allow/block
+                            entries only (no groups and no regex). Saving will
+                            apply the change immediately.
+                          </p>
+                        </div>
+                      );
+                    })()}
+
                     {blockDomainValue ? (
                       <>
                         <div className="logs-page__modal-action-toggle">
@@ -6462,190 +7029,262 @@ export function LogsPage() {
                             </button>
                           </div>
                         </div>
-                        <fieldset className="logs-page__modal-mode">
-                          <legend>
-                            {blockingAction === "allow"
-                              ? "Allow method"
-                              : "Block method"}
-                          </legend>
-                          <label className="logs-page__modal-mode-option">
-                            <input
-                              type="radio"
-                              name="block-mode"
-                              value="exact"
-                              checked={blockMode === "exact"}
-                              onChange={() => setBlockMode("exact")}
-                            />
-                            <div>
-                              <span className="logs-page__modal-mode-title">
-                                Exact domain
-                              </span>
-                              <span className="logs-page__modal-mode-detail">
-                                {blockDomainValue}
-                              </span>
-                            </div>
-                          </label>
-                          <label className="logs-page__modal-mode-option">
-                            <input
-                              type="radio"
-                              name="block-mode"
-                              value="regex"
-                              checked={blockMode === "regex"}
-                              onChange={() => {
-                                setBlockMode("regex");
-                                if (blockRegexValue.trim().length === 0) {
-                                  setBlockRegexValue(
-                                    buildDefaultRegexPattern(blockDomainValue),
-                                  );
-                                }
-                              }}
-                            />
-                            <div>
-                              <span className="logs-page__modal-mode-title">
-                                Regex pattern
-                              </span>
-                              <span className="logs-page__modal-mode-description">
-                                Prefills a regex pattern to match this domain
-                                and its subdomains.
-                              </span>
+
+                        {blockDialogBlockingMethod !== "built-in" ? (
+                          <fieldset className="logs-page__modal-mode">
+                            <legend>
+                              {blockingAction === "allow"
+                                ? "Allow method"
+                                : "Block method"}
+                            </legend>
+                            <label className="logs-page__modal-mode-option">
                               <input
-                                type="text"
-                                className="logs-page__modal-mode-input"
-                                value={blockRegexValue}
-                                onChange={(event) =>
-                                  setBlockRegexValue(event.target.value)
-                                }
-                                disabled={blockMode !== "regex"}
+                                type="radio"
+                                name="block-mode"
+                                value="exact"
+                                checked={blockMode === "exact"}
+                                onChange={() => setBlockMode("exact")}
                               />
-                            </div>
-                          </label>
-                        </fieldset>
+                              <div>
+                                <span className="logs-page__modal-mode-title">
+                                  Exact domain
+                                </span>
+                                <span className="logs-page__modal-mode-detail">
+                                  {blockDomainValue}
+                                </span>
+                              </div>
+                            </label>
+                            <label className="logs-page__modal-mode-option">
+                              <input
+                                type="radio"
+                                name="block-mode"
+                                value="regex"
+                                checked={blockMode === "regex"}
+                                onChange={() => {
+                                  setBlockMode("regex");
+                                  if (blockRegexValue.trim().length === 0) {
+                                    setBlockRegexValue(
+                                      buildDefaultRegexPattern(
+                                        blockDomainValue,
+                                      ),
+                                    );
+                                  }
+                                }}
+                              />
+                              <div>
+                                <span className="logs-page__modal-mode-title">
+                                  Regex pattern
+                                </span>
+                                <span className="logs-page__modal-mode-description">
+                                  Prefills a regex pattern to match this domain
+                                  and its subdomains.
+                                </span>
+                                <input
+                                  type="text"
+                                  className="logs-page__modal-mode-input"
+                                  value={blockRegexValue}
+                                  onChange={(event) =>
+                                    setBlockRegexValue(event.target.value)
+                                  }
+                                  disabled={blockMode !== "regex"}
+                                />
+                              </div>
+                            </label>
+                          </fieldset>
+                        ) : null}
                       </>
                     ) : null}
                   </>
                 )}
-                {availableGroupsForSelection.length === 0 ? (
-                  <p className="logs-page__modal-empty">
-                    No Advanced Blocking groups are available
-                    {bulkAction ? "" : " for this node"}.
-                  </p>
-                ) : (
-                  <fieldset className="logs-page__modal-groups">
-                    <legend>
-                      Select groups
-                      {bulkAction ? " (will apply to all nodes)" : ""}
-                    </legend>
-                    <div className="logs-page__modal-group-actions">
-                      <button
-                        type="button"
-                        onClick={handleSelectAllGroups}
-                        className="logs-page__modal-link"
-                      >
-                        All
-                      </button>
-                      <span aria-hidden="true">·</span>
-                      <button
-                        type="button"
-                        onClick={handleSelectNoGroups}
-                        className="logs-page__modal-link"
-                      >
-                        None
-                      </button>
-                    </div>
-                    {availableGroupsForSelection.map((group) => {
-                      const isSelected = blockSelectedGroups.has(group.name);
-                      const overrides = blockDomainValue
-                        ? extractGroupOverrides(group, blockDomainValue)
-                        : undefined;
-                      const trimmedRegex = blockRegexValue.trim();
-                      const pendingRegex =
-                        trimmedRegex || defaultRegexSuggestion;
-                      const hasBlockOverride = Boolean(
-                        overrides?.blockedExact ||
-                        (overrides && overrides.blockedRegexMatches.length > 0),
-                      );
-                      const hasAllowOverride = Boolean(
-                        overrides?.allowedExact ||
-                        (overrides && overrides.allowedRegexMatches.length > 0),
-                      );
-                      const firstBlockRegex = overrides?.blockedRegexMatches[0];
-                      const firstAllowRegex = overrides?.allowedRegexMatches[0];
 
-                      let detailMessage: string;
+                {blockDialogBlockingMethod !== "built-in" ? (
+                  <>
+                    {(() => {
+                      // Spinner UX: when Advanced Blocking is selected (or assumed) but the overview
+                      // hasn't landed in state yet, show an in-modal loading state.
+                      if (!bulkAction && !advancedBlocking) {
+                        return (
+                          <div className="logs-page__modal-notice">
+                            <strong>Loading Advanced Blocking…</strong>
+                            <p>
+                              Fetching groups for this node. This should only
+                              take a moment.
+                            </p>
+                            <div
+                              className="logs-page__modal-loading"
+                              aria-busy="true"
+                              aria-label="Loading Advanced Blocking"
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                                marginTop: 10,
+                              }}
+                            >
+                              <div
+                                className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"
+                                aria-hidden="true"
+                              ></div>
+                              <span className="logs-page__modal-empty">
+                                Loading…
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }
 
-                      if (blockingAction === "block") {
-                        if (hasBlockOverride) {
-                          detailMessage = overrides?.blockedExact
-                            ? "Currently blocked via exact match"
-                            : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
-                        } else if (hasAllowOverride) {
-                          detailMessage = overrides?.allowedExact
-                            ? "Currently allowed via exact override"
-                            : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
-                        } else {
-                          detailMessage = isBlockedEntry
-                            ? "No local override; blocked via list"
-                            : "No local override yet";
-                        }
+                      // If Advanced Blocking load failed, surface the error in the modal body.
+                      if (
+                        !bulkAction &&
+                        !advancedBlocking &&
+                        advancedBlockingError
+                      ) {
+                        return (
+                          <div className="logs-page__modal-notice">
+                            <strong>Failed to load Advanced Blocking</strong>
+                            <p>{advancedBlockingError}</p>
+                          </div>
+                        );
+                      }
 
-                        if (!isSelected && hasBlockOverride) {
-                          detailMessage = `${detailMessage} — will remove on save`;
-                        } else if (isSelected && !hasBlockOverride) {
-                          detailMessage =
-                            blockMode === "regex"
-                              ? pendingRegex
-                                ? `Will add regex ${pendingRegex}`
-                                : "Will add regex pattern"
-                              : "Will add exact match";
-                        }
-                      } else {
-                        if (hasAllowOverride) {
-                          detailMessage = overrides?.allowedExact
-                            ? "Currently allowed via exact override"
-                            : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
-                        } else if (hasBlockOverride) {
-                          detailMessage = overrides?.blockedExact
-                            ? "Currently blocked via exact match"
-                            : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
-                        } else {
-                          detailMessage = "No local override yet";
-                        }
-
-                        if (!isSelected && hasAllowOverride) {
-                          detailMessage = `${detailMessage} — will remove on save`;
-                        } else if (isSelected && !hasAllowOverride) {
-                          detailMessage =
-                            blockMode === "regex"
-                              ? pendingRegex
-                                ? `Will add allow regex ${pendingRegex}`
-                                : "Will add regex allow override"
-                              : "Will add exact allow override";
-                        }
+                      if (availableGroupsForSelection.length === 0) {
+                        return (
+                          <p className="logs-page__modal-empty">
+                            No Advanced Blocking groups are available
+                            {bulkAction ? "" : " for this node"}.
+                          </p>
+                        );
                       }
 
                       return (
-                        <label
-                          key={group.name}
-                          className="logs-page__modal-group"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => handleToggleBlockGroup(group.name)}
-                          />
-                          <div className="logs-page__modal-group-label">
-                            <span className="logs-page__modal-group-name">
-                              {group.name}
-                            </span>
-                            <span className="logs-page__modal-group-detail">
-                              {detailMessage}
-                            </span>
+                        <fieldset className="logs-page__modal-groups">
+                          <legend>
+                            Select groups
+                            {bulkAction ? " (will apply to all nodes)" : ""}
+                          </legend>
+                          <div className="logs-page__modal-group-actions">
+                            <button
+                              type="button"
+                              onClick={handleSelectAllGroups}
+                              className="logs-page__modal-link"
+                            >
+                              All
+                            </button>
+                            <span aria-hidden="true">·</span>
+                            <button
+                              type="button"
+                              onClick={handleSelectNoGroups}
+                              className="logs-page__modal-link"
+                            >
+                              None
+                            </button>
                           </div>
-                        </label>
+                          {availableGroupsForSelection.map((group) => {
+                            const isSelected = blockSelectedGroups.has(
+                              group.name,
+                            );
+                            const overrides = blockDomainValue
+                              ? extractGroupOverrides(group, blockDomainValue)
+                              : undefined;
+                            const trimmedRegex = blockRegexValue.trim();
+                            const pendingRegex =
+                              trimmedRegex || defaultRegexSuggestion;
+                            const hasBlockOverride = Boolean(
+                              overrides?.blockedExact ||
+                              (overrides &&
+                                overrides.blockedRegexMatches.length > 0),
+                            );
+                            const hasAllowOverride = Boolean(
+                              overrides?.allowedExact ||
+                              (overrides &&
+                                overrides.allowedRegexMatches.length > 0),
+                            );
+                            const firstBlockRegex =
+                              overrides?.blockedRegexMatches[0];
+                            const firstAllowRegex =
+                              overrides?.allowedRegexMatches[0];
+
+                            let detailMessage: string;
+
+                            if (blockingAction === "block") {
+                              if (hasBlockOverride) {
+                                detailMessage = overrides?.blockedExact
+                                  ? "Currently blocked via exact match"
+                                  : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
+                              } else if (hasAllowOverride) {
+                                detailMessage = overrides?.allowedExact
+                                  ? "Currently allowed via exact override"
+                                  : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
+                              } else {
+                                detailMessage = isBlockedEntry
+                                  ? "No local override; blocked via list"
+                                  : "No local override yet";
+                              }
+
+                              if (!isSelected && hasBlockOverride) {
+                                detailMessage = `${detailMessage} — will remove on save`;
+                              } else if (isSelected && !hasBlockOverride) {
+                                detailMessage =
+                                  blockMode === "regex"
+                                    ? pendingRegex
+                                      ? `Will add regex ${pendingRegex}`
+                                      : "Will add regex pattern"
+                                    : "Will add exact match";
+                              }
+                            } else {
+                              if (hasAllowOverride) {
+                                detailMessage = overrides?.allowedExact
+                                  ? "Currently allowed via exact override"
+                                  : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
+                              } else if (hasBlockOverride) {
+                                detailMessage = overrides?.blockedExact
+                                  ? "Currently blocked via exact match"
+                                  : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
+                              } else {
+                                detailMessage = "No local override yet";
+                              }
+
+                              if (!isSelected && hasAllowOverride) {
+                                detailMessage = `${detailMessage} — will remove on save`;
+                              } else if (isSelected && !hasAllowOverride) {
+                                detailMessage =
+                                  blockMode === "regex"
+                                    ? pendingRegex
+                                      ? `Will add allow regex ${pendingRegex}`
+                                      : "Will add regex allow override"
+                                    : "Will add exact allow override";
+                              }
+                            }
+
+                            return (
+                              <label
+                                key={group.name}
+                                className="logs-page__modal-group"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() =>
+                                    handleToggleBlockGroup(group.name)
+                                  }
+                                />
+                                <div className="logs-page__modal-group-label">
+                                  <span className="logs-page__modal-group-name">
+                                    {group.name}
+                                  </span>
+                                  <span className="logs-page__modal-group-detail">
+                                    {detailMessage}
+                                  </span>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </fieldset>
                       );
-                    })}
-                  </fieldset>
-                )}
+                    })()}
+                  </>
+                ) : null}
+
                 {blockError ? (
                   <div className="logs-page__modal-error">{blockError}</div>
                 ) : null}
@@ -6654,7 +7293,7 @@ export function LogsPage() {
                 <button
                   type="button"
                   className="secondary"
-                  onClick={closeBlockDialog}
+                  onClick={() => closeBlockDialog("cancel")}
                   disabled={isBlocking}
                 >
                   Cancel
@@ -6667,7 +7306,13 @@ export function LogsPage() {
                   }
                   disabled={
                     isBlocking ||
-                    (bulkAction ? false : blockAvailableGroups.length === 0)
+                    (bulkAction
+                      ? false
+                      : blockDialogBlockingMethod === "built-in"
+                        ? false
+                        : !advancedBlocking ||
+                          loadingAdvancedBlocking ||
+                          blockAvailableGroups.length === 0)
                   }
                 >
                   {bulkAction
@@ -6684,6 +7329,7 @@ export function LogsPage() {
         {/* Floating Live Toggle - Only show in tail mode */}
         {displayMode === "tail" && (
           <FloatingLiveToggle
+            // Tail mode "live" is derived solely from refreshSeconds (single source of truth).
             isLive={refreshSeconds > 0}
             refreshSeconds={refreshSeconds}
             pausedTitle={
@@ -6703,9 +7349,16 @@ export function LogsPage() {
                 event.currentTarget.blur();
               }
 
-              if (refreshSeconds > 0) {
+              // Tail mode pause semantics (single source of truth):
+              // - Pause: refreshSeconds = 0 (must stop ALL fetching)
+              // - Resume: refreshSeconds = default (restart polling) + immediate refresh tick
+              const currentlyLive = refreshSeconds > 0;
+
+              if (currentlyLive) {
                 setRefreshSeconds(0);
               } else {
+                setIsAutoRefresh(true);
+                setRefreshTick((prev) => prev + 1);
                 setRefreshSeconds(TAIL_MODE_DEFAULT_REFRESH);
               }
 
