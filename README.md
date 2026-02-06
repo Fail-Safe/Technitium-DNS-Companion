@@ -1,6 +1,6 @@
 # Technitium DNS Companion
 
-A multi-node companion tool for aiding in day-to-day management of Technitium DNS servers. Currently offers additional functionality for:
+A multi-node companion tool for aiding in day-to-day management of [Technitium DNS servers](https://technitium.com/dns/). Currently offers additional functionality for:
 
 - DNS Query Logs (DNS Logs)
 - Advanced Blocking App upkeep (DNS Filtering)
@@ -9,7 +9,7 @@ A multi-node companion tool for aiding in day-to-day management of Technitium DN
 
 One primary goal of this project is to provide a more mobile-friendly interface for managing day-to-day DNS functions, enabling administrators to perform common tasks (like domain blocking/unblocking) from smartphones and tablets with ease.
 
-This project is **not affiliated with Technitium** but is built to complement Technitium DNS server deployments and not to replace functionality.
+This project is **not affiliated with Technitium** but is built to complement [Technitium DNS server](https://technitium.com/dns/) deployments and not to replace functionality.
 
 ## Authentication (v1.4+)
 
