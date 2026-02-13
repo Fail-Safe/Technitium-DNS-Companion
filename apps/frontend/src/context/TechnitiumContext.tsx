@@ -2,62 +2,62 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, triggerAuthRedirect } from "../config";
 import type {
-  AdvancedBlockingConfig,
-  AdvancedBlockingOverview,
-  AdvancedBlockingSnapshot,
+    AdvancedBlockingConfig,
+    AdvancedBlockingOverview,
+    AdvancedBlockingSnapshot,
 } from "../types/advancedBlocking";
 import type {
-  BlockingMethod,
-  BlockingSettings,
-  BlockingStatusOverview,
-  BlockingZoneListResponse,
-  BlockingZoneOperationResult,
-  BuiltInBlockingOverview,
+    BlockingMethod,
+    BlockingSettings,
+    BlockingStatusOverview,
+    BlockingZoneListResponse,
+    BlockingZoneOperationResult,
+    BuiltInBlockingOverview,
 } from "../types/builtInBlocking";
 import type {
-  DhcpBulkSyncRequest,
-  DhcpBulkSyncResult,
-  DhcpSnapshot,
-  DhcpSnapshotMetadata,
-  DhcpSnapshotOrigin,
-  DhcpSnapshotRestoreOptions,
-  DhcpSnapshotRestoreResult,
-  TechnitiumCloneDhcpScopeRequest,
-  TechnitiumCloneDhcpScopeResult,
-  TechnitiumCreateDhcpScopeEnvelope,
-  TechnitiumCreateDhcpScopeRequest,
-  TechnitiumDhcpScope,
-  TechnitiumDhcpScopeEnvelope,
-  TechnitiumDhcpScopeListEnvelope,
-  TechnitiumRenameDhcpScopeRequest,
-  TechnitiumRenameDhcpScopeResult,
-  TechnitiumUpdateDhcpScopeEnvelope,
-  TechnitiumUpdateDhcpScopeRequest,
+    ConfigSnapshot,
+    ConfigSnapshotMetadata,
+    ConfigSnapshotMethod,
+    ConfigSnapshotOrigin,
+    ConfigSnapshotRestoreResult,
+} from "../types/configSnapshots";
+import type {
+    DhcpBulkSyncRequest,
+    DhcpBulkSyncResult,
+    DhcpSnapshot,
+    DhcpSnapshotMetadata,
+    DhcpSnapshotOrigin,
+    DhcpSnapshotRestoreOptions,
+    DhcpSnapshotRestoreResult,
+    TechnitiumCloneDhcpScopeRequest,
+    TechnitiumCloneDhcpScopeResult,
+    TechnitiumCreateDhcpScopeEnvelope,
+    TechnitiumCreateDhcpScopeRequest,
+    TechnitiumDhcpScope,
+    TechnitiumDhcpScopeEnvelope,
+    TechnitiumDhcpScopeListEnvelope,
+    TechnitiumRenameDhcpScopeRequest,
+    TechnitiumRenameDhcpScopeResult,
+    TechnitiumUpdateDhcpScopeEnvelope,
+    TechnitiumUpdateDhcpScopeRequest,
 } from "../types/dhcp";
 import type {
-  DnsFilteringSnapshot,
-  DnsFilteringSnapshotMetadata,
-  DnsFilteringSnapshotMethod,
-  DnsFilteringSnapshotOrigin,
-  DnsFilteringSnapshotRestoreResult,
-} from "../types/dnsFilteringSnapshots";
-import type {
-  TechnitiumCombinedQueryLogPage,
-  TechnitiumNodeQueryLogEnvelope,
-  TechnitiumQueryLogFilters,
-  TechnitiumQueryLogStorageStatus,
+    TechnitiumCombinedQueryLogPage,
+    TechnitiumNodeQueryLogEnvelope,
+    TechnitiumQueryLogFilters,
+    TechnitiumQueryLogStorageStatus,
 } from "../types/technitiumLogs";
 import type {
-  TechnitiumCombinedZoneOverview,
-  TechnitiumCombinedZoneRecordsOverview,
-  TechnitiumZoneListEnvelope,
+    TechnitiumCombinedZoneOverview,
+    TechnitiumCombinedZoneRecordsOverview,
+    TechnitiumZoneListEnvelope,
 } from "../types/zones";
 import type {
-  ZoneSnapshot,
-  ZoneSnapshotCreateRequest,
-  ZoneSnapshotMetadata,
-  ZoneSnapshotRestoreOptions,
-  ZoneSnapshotRestoreResult,
+    ZoneSnapshot,
+    ZoneSnapshotCreateRequest,
+    ZoneSnapshotMetadata,
+    ZoneSnapshotRestoreOptions,
+    ZoneSnapshotRestoreResult,
 } from "../types/zoneSnapshots";
 import type { AuthStatus } from "./AuthContext";
 import { TechnitiumContext } from "./technitiumContextInstance";
@@ -270,40 +270,37 @@ export interface TechnitiumState {
     note?: string,
   ) => Promise<DhcpSnapshotMetadata>;
 
-  listDnsFilteringSnapshots: (
+  listConfigSnapshots: (
     nodeId: string,
-    method: DnsFilteringSnapshotMethod,
-  ) => Promise<DnsFilteringSnapshotMetadata[]>;
-  createDnsFilteringSnapshot: (
+    method: ConfigSnapshotMethod,
+  ) => Promise<ConfigSnapshotMetadata[]>;
+  createConfigSnapshot: (
     nodeId: string,
     request: {
-      method: DnsFilteringSnapshotMethod;
-      origin?: DnsFilteringSnapshotOrigin;
+      method: ConfigSnapshotMethod;
+      origin?: ConfigSnapshotOrigin;
       note?: string;
     },
-  ) => Promise<DnsFilteringSnapshotMetadata>;
-  getDnsFilteringSnapshot: (
+  ) => Promise<ConfigSnapshotMetadata>;
+  getConfigSnapshot: (
     nodeId: string,
     snapshotId: string,
-  ) => Promise<DnsFilteringSnapshot>;
-  deleteDnsFilteringSnapshot: (
-    nodeId: string,
-    snapshotId: string,
-  ) => Promise<void>;
-  updateDnsFilteringSnapshotNote: (
+  ) => Promise<ConfigSnapshot>;
+  deleteConfigSnapshot: (nodeId: string, snapshotId: string) => Promise<void>;
+  updateConfigSnapshotNote: (
     nodeId: string,
     snapshotId: string,
     note?: string,
-  ) => Promise<DnsFilteringSnapshotMetadata>;
-  setDnsFilteringSnapshotPinned: (
+  ) => Promise<ConfigSnapshotMetadata>;
+  setConfigSnapshotPinned: (
     nodeId: string,
     snapshotId: string,
     pinned: boolean,
-  ) => Promise<DnsFilteringSnapshotMetadata>;
-  restoreDnsFilteringSnapshot: (
+  ) => Promise<ConfigSnapshotMetadata>;
+  restoreConfigSnapshot: (
     nodeId: string,
     snapshotId: string,
-  ) => Promise<DnsFilteringSnapshotRestoreResult>;
+  ) => Promise<ConfigSnapshotRestoreResult>;
 
   listZoneSnapshots: (nodeId: string) => Promise<ZoneSnapshotMetadata[]>;
   createZoneSnapshot: (
@@ -1861,8 +1858,8 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const listDnsFilteringSnapshots = useCallback(
-    async (nodeId: string, method: DnsFilteringSnapshotMethod) => {
+  const listConfigSnapshots = useCallback(
+    async (nodeId: string, method: ConfigSnapshotMethod) => {
       const response = await apiFetch(
         `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots?method=${encodeURIComponent(method)}`,
       );
@@ -1873,17 +1870,17 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      return (await response.json()) as DnsFilteringSnapshotMetadata[];
+      return (await response.json()) as ConfigSnapshotMetadata[];
     },
     [],
   );
 
-  const createDnsFilteringSnapshot = useCallback(
+  const createConfigSnapshot = useCallback(
     async (
       nodeId: string,
       request: {
-        method: DnsFilteringSnapshotMethod;
-        origin?: DnsFilteringSnapshotOrigin;
+        method: ConfigSnapshotMethod;
+        origin?: ConfigSnapshotOrigin;
         note?: string;
       },
     ) => {
@@ -1903,12 +1900,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      return (await response.json()) as DnsFilteringSnapshotMetadata;
+      return (await response.json()) as ConfigSnapshotMetadata;
     },
     [],
   );
 
-  const getDnsFilteringSnapshot = useCallback(
+  const getConfigSnapshot = useCallback(
     async (nodeId: string, snapshotId: string) => {
       const response = await apiFetch(
         `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots/${encodeURIComponent(snapshotId)}`,
@@ -1920,12 +1917,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      return (await response.json()) as DnsFilteringSnapshot;
+      return (await response.json()) as ConfigSnapshot;
     },
     [],
   );
 
-  const deleteDnsFilteringSnapshot = useCallback(
+  const deleteConfigSnapshot = useCallback(
     async (nodeId: string, snapshotId: string) => {
       const response = await apiFetch(
         `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots/${encodeURIComponent(snapshotId)}`,
@@ -1942,7 +1939,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const updateDnsFilteringSnapshotNote = useCallback(
+  const updateConfigSnapshotNote = useCallback(
     async (nodeId: string, snapshotId: string, note?: string) => {
       const response = await apiFetch(
         `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots/${encodeURIComponent(snapshotId)}/note`,
@@ -1960,12 +1957,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      return (await response.json()) as DnsFilteringSnapshotMetadata;
+      return (await response.json()) as ConfigSnapshotMetadata;
     },
     [],
   );
 
-  const setDnsFilteringSnapshotPinned = useCallback(
+  const setConfigSnapshotPinned = useCallback(
     async (nodeId: string, snapshotId: string, pinned: boolean) => {
       const action = pinned ? "pin" : "unpin";
       const response = await apiFetch(
@@ -1979,12 +1976,12 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      return (await response.json()) as DnsFilteringSnapshotMetadata;
+      return (await response.json()) as ConfigSnapshotMetadata;
     },
     [],
   );
 
-  const restoreDnsFilteringSnapshot = useCallback(
+  const restoreConfigSnapshot = useCallback(
     async (nodeId: string, snapshotId: string) => {
       const response = await apiFetch(
         `/nodes/${encodeURIComponent(nodeId)}/dns-filtering/snapshots/${encodeURIComponent(snapshotId)}/restore`,
@@ -1998,7 +1995,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         );
       }
 
-      return (await response.json()) as DnsFilteringSnapshotRestoreResult;
+      return (await response.json()) as ConfigSnapshotRestoreResult;
     },
     [],
   );
@@ -2215,6 +2212,30 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       setLoadingBlockingStatus(false);
     }
   }, []);
+
+  // Ensure blocking capability state is initialized globally so header/route
+  // gating does not depend on visiting the DNS Filtering page first.
+  useEffect(() => {
+    if (nodes.length === 0) {
+      return;
+    }
+
+    if (isSessionAuthUnauthenticated()) {
+      return;
+    }
+
+    if (blockingStatus || loadingBlockingStatus) {
+      return;
+    }
+
+    void reloadBlockingStatus();
+  }, [
+    nodes.length,
+    isSessionAuthUnauthenticated,
+    blockingStatus,
+    loadingBlockingStatus,
+    reloadBlockingStatus,
+  ]);
 
   const listAllowedDomains = useCallback(
     async (
@@ -2463,13 +2484,13 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       getDhcpSnapshot,
       deleteDhcpSnapshot,
       updateDhcpSnapshotNote,
-      listDnsFilteringSnapshots,
-      createDnsFilteringSnapshot,
-      restoreDnsFilteringSnapshot,
-      setDnsFilteringSnapshotPinned,
-      getDnsFilteringSnapshot,
-      deleteDnsFilteringSnapshot,
-      updateDnsFilteringSnapshotNote,
+      listConfigSnapshots,
+      createConfigSnapshot,
+      restoreConfigSnapshot,
+      setConfigSnapshotPinned,
+      getConfigSnapshot,
+      deleteConfigSnapshot,
+      updateConfigSnapshotNote,
       listZoneSnapshots,
       createZoneSnapshot,
       getZoneSnapshot,
@@ -2530,13 +2551,13 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       getDhcpSnapshot,
       deleteDhcpSnapshot,
       updateDhcpSnapshotNote,
-      listDnsFilteringSnapshots,
-      createDnsFilteringSnapshot,
-      restoreDnsFilteringSnapshot,
-      setDnsFilteringSnapshotPinned,
-      getDnsFilteringSnapshot,
-      deleteDnsFilteringSnapshot,
-      updateDnsFilteringSnapshotNote,
+      listConfigSnapshots,
+      createConfigSnapshot,
+      restoreConfigSnapshot,
+      setConfigSnapshotPinned,
+      getConfigSnapshot,
+      deleteConfigSnapshot,
+      updateConfigSnapshotNote,
       listZoneSnapshots,
       createZoneSnapshot,
       getZoneSnapshot,
