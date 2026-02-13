@@ -1,24 +1,24 @@
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import {
-  faBan,
-  faCheck,
-  faChevronUp,
-  faCircle,
-  faClockRotateLeft,
-  faCode,
-  faExclamationTriangle,
-  faGripVertical,
-  faInfoCircle,
-  faList,
-  faMinus,
-  faPencil,
-  faPlus,
-  faSearch,
-  faSquareCheck,
-  faSquareMinus,
-  faTrash,
-  faUsers,
-  faXmark,
+    faBan,
+    faCheck,
+    faChevronUp,
+    faCircle,
+    faClockRotateLeft,
+    faCode,
+    faExclamationTriangle,
+    faGripVertical,
+    faInfoCircle,
+    faList,
+    faMinus,
+    faPencil,
+    faPlus,
+    faSearch,
+    faSquareCheck,
+    faSquareMinus,
+    faTrash,
+    faUsers,
+    faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -43,8 +43,8 @@ import { useClusterNodes } from "../hooks/usePrimaryNode";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type { AdvancedBlockingConfig } from "../types/advancedBlocking";
 import {
-  compareStringArrays,
-  compareUrlArrays,
+    compareStringArrays,
+    compareUrlArrays,
 } from "../utils/arrayComparison";
 import "./ConfigurationPage.css";
 
@@ -1110,6 +1110,93 @@ export function ConfigurationPage() {
     [selectedNodeConfig, testStagedConfig, activeDomainType, activeTab],
   );
 
+  const getDomainListForType = useCallback(
+    (config: AdvancedBlockingConfig, targetGroupName: string): string[] => {
+      const group = config.groups.find((g) => g.name === targetGroupName);
+      if (!group) return [];
+
+      switch (activeDomainType) {
+        case "blocked":
+          return group.blocked || [];
+        case "allowed":
+          return group.allowed || [];
+        case "blockedRegex":
+          return group.blockedRegex || [];
+        case "allowedRegex":
+          return group.allowedRegex || [];
+        default:
+          return [];
+      }
+    },
+    [activeDomainType],
+  );
+
+  const getDomainBadgeEntries = useCallback(
+    (
+      domain: string,
+    ): Array<{
+      groupName: string;
+      status: "committed" | "pending-add" | "pending-remove";
+    }> => {
+      if (
+        activeTab !== "domain-management" ||
+        !selectedNodeConfig?.groups ||
+        !testStagedConfig?.groups
+      ) {
+        return getGroupsForDomain(domain).map((groupName) => ({
+          groupName,
+          status: "committed",
+        }));
+      }
+
+      const orderedGroupNames = new Set<string>();
+      testStagedConfig.groups.forEach((group) =>
+        orderedGroupNames.add(group.name),
+      );
+      selectedNodeConfig.groups.forEach((group) =>
+        orderedGroupNames.add(group.name),
+      );
+
+      const entries: Array<{
+        groupName: string;
+        status: "committed" | "pending-add" | "pending-remove";
+      }> = [];
+
+      Array.from(orderedGroupNames).forEach((groupName) => {
+        const baselineDomains = getDomainListForType(
+          selectedNodeConfig,
+          groupName,
+        );
+        const stagedDomains = getDomainListForType(testStagedConfig, groupName);
+        const inBaseline = baselineDomains.includes(domain);
+        const inStaged = stagedDomains.includes(domain);
+
+        if (inStaged && !inBaseline) {
+          entries.push({ groupName, status: "pending-add" });
+          return;
+        }
+
+        if (!inStaged && inBaseline) {
+          entries.push({ groupName, status: "pending-remove" });
+          return;
+        }
+
+        if (inStaged && inBaseline) {
+          entries.push({ groupName, status: "committed" });
+        }
+      });
+
+      return entries;
+    },
+    [
+      activeTab,
+      selectedNodeConfig,
+      testStagedConfig,
+      getGroupsForDomain,
+      getDomainListForType,
+    ],
+  );
+
   // Helper to toggle group expansion
   const toggleGroupExpansion = useCallback((groupName: string) => {
     setExpandedGroups((prev) => {
@@ -1739,8 +1826,8 @@ export function ConfigurationPage() {
                           : <table className="domain-table">
                               <tbody>
                                 {filteredDomains.map((domain) => {
-                                  const domainGroups =
-                                    getGroupsForDomain(domain);
+                                  const domainBadgeEntries =
+                                    getDomainBadgeEntries(domain);
 
                                   return (
                                     <tr
@@ -1769,14 +1856,43 @@ export function ConfigurationPage() {
                                           whiteSpace: "nowrap",
                                         }}
                                       >
-                                        {domainGroups.map((g) => (
-                                          <span
-                                            key={g}
-                                            className="domain-table__badge"
-                                          >
-                                            {g}
-                                          </span>
-                                        ))}
+                                        {domainBadgeEntries.map((entry) => {
+                                          const badgeStateTooltip =
+                                            entry.status === "pending-add" ?
+                                              `${entry.groupName}: Pending add (not yet saved)`
+                                            : (
+                                              entry.status === "pending-remove"
+                                            ) ?
+                                              `${entry.groupName}: Pending removal (not yet saved)`
+                                            : `${entry.groupName}: Saved (committed)`;
+
+                                          return (
+                                            <span
+                                              key={entry.groupName}
+                                              className={`domain-table__badge ${entry.status === "pending-add" ? "domain-table__badge--pending-add" : ""} ${entry.status === "pending-remove" ? "domain-table__badge--pending-remove" : ""}`}
+                                              title={badgeStateTooltip}
+                                              aria-label={badgeStateTooltip}
+                                            >
+                                              {(entry.status ===
+                                                "pending-add" ||
+                                                entry.status ===
+                                                  "pending-remove") && (
+                                                <FontAwesomeIcon
+                                                  icon={
+                                                    (
+                                                      entry.status ===
+                                                      "pending-add"
+                                                    ) ?
+                                                      faPlus
+                                                    : faMinus
+                                                  }
+                                                  className="domain-table__badge-icon"
+                                                />
+                                              )}
+                                              {entry.groupName}
+                                            </span>
+                                          );
+                                        })}
                                       </td>
                                       <td className="domain-table__cell domain-table__cell--right">
                                         <button
