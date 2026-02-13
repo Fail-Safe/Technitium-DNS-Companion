@@ -108,9 +108,9 @@ COPY --from=backend-builder --chown=node:node /app/apps/backend/dist ./apps/back
 # Copy built frontend from builder (Nest serves from apps/frontend/dist)
 COPY --from=frontend-builder --chown=node:node /app/apps/frontend/dist ./apps/frontend/dist
 
-# Create runtime directories (session/cert paths) and grant write access to non-root user
-RUN mkdir -p /app/config /data/certs/self-signed && \
-    chown -R node:node /app/config /data
+# Create runtime directories (session/cert/tmp paths) and grant write access to non-root user
+RUN mkdir -p /app/config /app/tmp /data/certs/self-signed && \
+    chown -R node:node /app/config /app/tmp /data
 
 ENV NODE_ENV=production
 
@@ -126,7 +126,7 @@ EXPOSE 3000 3443
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD node -e "const http=require('http');const https=require('https');const useHttps=(process.env.HTTPS_ENABLED==='true'||process.env.HTTPS_PORT);const port=Number(useHttps?(process.env.HTTPS_PORT||3443):(process.env.PORT||3000));const mod=useHttps?https:http;const req=mod.get({hostname:'127.0.0.1',port,path:'/api/health',rejectUnauthorized:false},(r)=>process.exit(r.statusCode===200?0:1));req.on('error',()=>process.exit(1));req.setTimeout(5000,()=>{req.destroy();process.exit(1);});"
+    CMD node -e "const http=require('http');const https=require('https');const checks=[()=>new Promise((resolve)=>{const req=https.get({hostname:'127.0.0.1',port:Number(process.env.HTTPS_PORT||3443),path:'/api/health',rejectUnauthorized:false},(r)=>resolve(r.statusCode===200));req.on('error',()=>resolve(false));req.setTimeout(5000,()=>{req.destroy();resolve(false);});}),()=>new Promise((resolve)=>{const req=http.get({hostname:'127.0.0.1',port:Number(process.env.PORT||3000),path:'/api/health'},(r)=>resolve(r.statusCode===200));req.on('error',()=>resolve(false));req.setTimeout(5000,()=>{req.destroy();resolve(false);});})];(async()=>{for(const check of checks){if(await check()){process.exit(0);}}process.exit(1);})();"
 
 # Run under init for proper signal forwarding
 ENTRYPOINT ["dumb-init", "--"]
