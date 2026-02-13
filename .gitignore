@@ -66,3 +66,4 @@ docker-compose.prod.test.yml
 docker-entrypoint-dev.sh
 Dockerfile.dev
 technitium.env
+test*.json
