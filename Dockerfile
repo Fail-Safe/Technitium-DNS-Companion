@@ -27,7 +27,12 @@ COPY --from=manifest-context /app/ ./
 # Explicitly install the matching Rollup native build to work around npm optional deps bug
 RUN --mount=type=cache,target=/root/.npm \
     npm install --no-fund --no-audit -g npm@${NPM_VERSION} && \
-    npm ci --ignore-scripts --no-fund --no-audit
+    npm ci --ignore-scripts --no-fund --no-audit \
+    && case "$BUILDPLATFORM" in \
+    linux/amd64*) npm install --no-save --no-fund --no-audit @rollup/rollup-linux-x64-musl @esbuild/linux-x64 ;; \
+    linux/arm64*) npm install --no-save --no-fund --no-audit @rollup/rollup-linux-arm64-musl @esbuild/linux-arm64 ;; \
+    *) echo "Skipping Rollup native binary install for BUILDPLATFORM=$BUILDPLATFORM" ;; \
+    esac
 
 # Copy frontend source
 COPY apps/frontend/ ./apps/frontend/
@@ -56,10 +61,19 @@ COPY apps/backend/ ./apps/backend/
 # Build backend
 RUN npm run build --workspace=apps/backend
 
-# For backend-only production deps (after workspace install)
-RUN if [ -d apps/backend/node_modules ]; then \
-    npm prune --omit=dev --workspace=apps/backend; \
-    fi
+# Stage 2b: Install backend production dependencies only
+FROM --platform=$BUILDPLATFORM node:22-alpine3.21 AS backend-runtime-deps
+ARG NPM_VERSION
+
+WORKDIR /app
+
+# Copy manifests from shared context
+COPY --from=manifest-context /app/ ./
+
+# Install production dependencies only for backend workspace
+RUN --mount=type=cache,target=/root/.npm \
+    npm install --no-fund --no-audit -g npm@${NPM_VERSION} && \
+    npm ci --omit=dev --no-fund --no-audit --workspace=apps/backend
 
 # Stage 3: Production image
 FROM node:22-alpine3.21
@@ -79,27 +93,32 @@ LABEL \
 
 WORKDIR /app
 
-# Pull in latest Alpine security fixes for base packages
-RUN apk upgrade --no-cache && \
-    apk add --no-cache tzdata ca-certificates
+# Add init for proper signal handling and zombie reaping
+RUN apk add --no-cache dumb-init
 
 # Copy manifests from shared context
-COPY --from=manifest-context /app/ ./
+COPY --from=manifest-context --chown=node:node /app/ ./
 
-# Copy production dependencies from builder (npm workspaces hoist to /app/node_modules)
-COPY --from=backend-builder /app/node_modules ./node_modules
+# Copy production dependencies from runtime-deps stage
+COPY --from=backend-runtime-deps --chown=node:node /app/node_modules ./node_modules
 
 # Copy built backend from builder
-COPY --from=backend-builder /app/apps/backend/dist ./apps/backend/dist
+COPY --from=backend-builder --chown=node:node /app/apps/backend/dist ./apps/backend/dist
 
 # Copy built frontend from builder (Nest serves from apps/frontend/dist)
-COPY --from=frontend-builder /app/apps/frontend/dist ./apps/frontend/dist
+COPY --from=frontend-builder --chown=node:node /app/apps/frontend/dist ./apps/frontend/dist
 
-# Create directory for environment file
-RUN mkdir -p /app/config
+# Create runtime directories (session/cert paths) and grant write access to non-root user
+RUN mkdir -p /app/config /data/certs/self-signed && \
+    chown -R node:node /app/config /data
+
+ENV NODE_ENV=production
 
 # Ensure backend-local node_modules are on the module resolution path
 ENV NODE_PATH=/app/apps/backend/node_modules:/app/node_modules
+
+# Run as non-root user
+USER node
 
 # Expose ports
 # Default HTTP: 3000, Default HTTPS: 3443
@@ -107,7 +126,10 @@ EXPOSE 3000 3443
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD timeout 5s node -e "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+    CMD node -e "const http=require('http');const https=require('https');const useHttps=(process.env.HTTPS_ENABLED==='true'||process.env.HTTPS_PORT);const port=Number(useHttps?(process.env.HTTPS_PORT||3443):(process.env.PORT||3000));const mod=useHttps?https:http;const req=mod.get({hostname:'127.0.0.1',port,path:'/api/health',rejectUnauthorized:false},(r)=>process.exit(r.statusCode===200?0:1));req.on('error',()=>process.exit(1));req.setTimeout(5000,()=>{req.destroy();process.exit(1);});"
+
+# Run under init for proper signal forwarding
+ENTRYPOINT ["dumb-init", "--"]
 
 # Run the application
 CMD ["node", "apps/backend/dist/main"]
