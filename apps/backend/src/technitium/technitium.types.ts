@@ -291,8 +291,14 @@ export interface DhcpSnapshot {
 
 export type ZoneSnapshotOrigin = "manual" | "automatic";
 
-export type DnsFilteringSnapshotOrigin = "manual" | "automatic";
-export type DnsFilteringSnapshotMethod = "built-in" | "advanced-blocking";
+export type DnsFilteringSnapshotOrigin =
+  | "manual"
+  | "automatic"
+  | "rule-optimization";
+export type DnsFilteringSnapshotMethod =
+  | "built-in"
+  | "advanced-blocking"
+  | "rule-optimizer";
 
 export interface DnsFilteringSnapshotMetadata {
   id: string;

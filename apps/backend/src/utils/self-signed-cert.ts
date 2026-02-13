@@ -34,9 +34,9 @@ function unique(values: string[]): string[] {
  * - <dir>/server.key
  * - <dir>/server.crt
  */
-export function getOrCreateSelfSignedCert(
+export async function getOrCreateSelfSignedCert(
   certDir: string,
-): SelfSignedCertResult {
+): Promise<SelfSignedCertResult> {
   const keyPath = join(certDir, "server.key");
   const certPath = join(certDir, "server.crt");
 
@@ -77,22 +77,43 @@ export function getOrCreateSelfSignedCert(
   );
 
   const attrs = [{ name: "commonName", value: "Technitium DNS Companion" }];
-  const pems = selfsigned.generate(attrs, {
-    algorithm: "sha256",
-    days: safeValidDays,
-    keySize: 2048,
-    extensions: [{ name: "subjectAltName", altNames }],
-  });
+  const pems = await Promise.resolve(
+    selfsigned.generate(attrs, {
+      algorithm: "sha256",
+      days: safeValidDays,
+      keySize: 2048,
+      extensions: [{ name: "subjectAltName", altNames }],
+    }),
+  );
 
-  writeFileSync(keyPath, pems.private, { mode: 0o600 });
-  writeFileSync(certPath, pems.cert, { mode: 0o644 });
+  const generated = pems as unknown as {
+    private?: unknown;
+    privateKey?: unknown;
+    cert?: unknown;
+  };
+
+  const privateKey =
+    typeof generated.private === "string" ? generated.private
+    : typeof generated.privateKey === "string" ? generated.privateKey
+    : undefined;
+  const certificate =
+    typeof generated.cert === "string" ? generated.cert : undefined;
+
+  if (!privateKey || !certificate) {
+    throw new Error(
+      "selfsigned.generate() did not return expected key/cert strings",
+    );
+  }
+
+  writeFileSync(keyPath, privateKey, { mode: 0o600 });
+  writeFileSync(certPath, certificate, { mode: 0o644 });
 
   logger.log(`Wrote self-signed key: ${keyPath}`);
   logger.log(`Wrote self-signed cert: ${certPath}`);
   logger.log(`SAN DNS: ${dnsSans.join(", ")}`);
   logger.log(`SAN IP: ${ipSans.join(", ")}`);
 
-  return { key: Buffer.from(pems.private), cert: Buffer.from(pems.cert) };
+  return { key: Buffer.from(privateKey), cert: Buffer.from(certificate) };
 }
 
 function isIpLike(value: string): boolean {

@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import type {
   AdvancedBlockingCombinedOverview,
   AdvancedBlockingConfig,
@@ -13,6 +19,8 @@ import type {
   AdvancedBlockingUrlEntry,
   AdvancedBlockingUrlOverride,
 } from "./advanced-blocking.types";
+import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
+import { QueryLogSqliteService } from "./query-log-sqlite.service";
 import { TechnitiumService } from "./technitium.service";
 import type { TechnitiumNodeSummary } from "./technitium.types";
 
@@ -21,13 +29,105 @@ interface TechnitiumAppConfigEnvelope {
   response?: { config?: string | null };
 }
 
+type RuleOptimizationSuggestionKind =
+  | "SAFE_TO_ZONE_DOMAIN_ENTRY"
+  | "LIKELY_TO_ZONE_DOMAIN_ENTRY_EXPANDS_SCOPE"
+  | "MANUAL_REVIEW_ZONE_CANDIDATE"
+  | "PERF_WARNING";
+
+type RuleOptimizationSuggestionTargetList = "allowedRegex" | "blockedRegex";
+
+interface RuleOptimizationSuggestion {
+  id: string;
+  nodeId: string;
+  groupName: string;
+  targetList: RuleOptimizationSuggestionTargetList;
+  kind: RuleOptimizationSuggestionKind;
+  title: string;
+  summary: string;
+  regexPattern: string;
+  proposedDomainEntry?: string;
+  /**
+   * When true, applying this suggestion is expected to expand scope and match additional
+   * domains compared to the regex (e.g. replacing apex-only regex with a zone rule).
+   */
+  scopeExpansionRisk: boolean;
+  /**
+   * Human-readable explanation shown in the UI.
+   */
+  details: string[];
+  /**
+   * Optional perf heuristics (higher = worse).
+   */
+  perfScore?: number;
+  /**
+   * Example of a "safe" rewrite explanation.
+   */
+  confidence: "safe" | "likely" | "warning";
+}
+
+interface ValidateSuggestionRequest {
+  suggestionId?: string;
+  regexPattern?: string;
+  proposedDomainEntry?: string;
+  targetList?: RuleOptimizationSuggestionTargetList;
+}
+
+interface ValidateSuggestionResult {
+  enabled: boolean;
+  windowHours: number;
+  limit: number;
+  distinctDomainsAnalyzed: number;
+  proposedDomainEntry: string;
+  additionalMatchedDomainsCount: number;
+  additionalMatchedDomainsExamples: Array<{ domain: string; count: number }>;
+  note: string;
+}
+
+interface ApplySuggestionRequest {
+  suggestionId?: string;
+  regexPattern?: string;
+  proposedDomainEntry: string;
+  targetList: RuleOptimizationSuggestionTargetList;
+  /**
+   * When true, the backend will take a DNS filtering snapshot prior to applying changes.
+   * Defaults to true.
+   */
+  takeSnapshot?: boolean;
+  /**
+   * Optional snapshot note.
+   */
+  snapshotNote?: string;
+}
+
+interface ApplySuggestionResult {
+  snapshotTaken?: {
+    id: string;
+    createdAt: string;
+    method: "rule-optimizer";
+    note?: string;
+  };
+  updated: AdvancedBlockingSnapshot;
+  applied: {
+    groupName: string;
+    targetList: RuleOptimizationSuggestionTargetList;
+    removedRegexPattern: string;
+    addedDomainEntry: string;
+  };
+}
+
 @Injectable()
 export class AdvancedBlockingService {
   private static readonly APP_NAME_CANDIDATES = ["Advanced Blocking"] as const;
   private readonly logger = new Logger(AdvancedBlockingService.name);
   private readonly appNameByNode = new Map<string, string>();
 
-  constructor(private readonly technitiumService: TechnitiumService) {}
+  constructor(
+    private readonly technitiumService: TechnitiumService,
+    @Inject(forwardRef(() => DnsFilteringSnapshotService))
+    private readonly dnsFilteringSnapshotService: DnsFilteringSnapshotService,
+    private readonly queryLogSqliteService: QueryLogSqliteService,
+  ) {}
 
   async getOverview(): Promise<AdvancedBlockingOverview> {
     const summaries = await this.technitiumService.listNodes();
@@ -196,6 +296,737 @@ export class AdvancedBlockingService {
     return [remembered, ...candidates.filter((name) => name !== remembered)];
   }
 
+  /**
+   * Return group-level regex optimization suggestions (allowedRegex/blockedRegex only).
+   *
+   * This is intentionally conservative:
+   * - SAFE suggestions only cover zone-equivalent regex patterns that we can confidently map.
+   * - LIKELY suggestions may change semantics (notably: apex-only regex → zone rule expands scope).
+   * - PERF_WARNING suggestions are advisory only.
+   */
+  async getGroupRuleOptimizationSuggestions(
+    nodeId: string,
+    groupName: string,
+  ): Promise<{
+    fetchedAt: string;
+    nodeId: string;
+    groupName: string;
+    suggestions: RuleOptimizationSuggestion[];
+  }> {
+    const snapshot = await this.getSnapshot(nodeId);
+    const config = snapshot.config;
+
+    if (!config) {
+      throw new Error(
+        snapshot.error ||
+          `Advanced Blocking is not available on node "${nodeId}".`,
+      );
+    }
+
+    const group = (config.groups ?? []).find(
+      (g) => (g.name ?? "").toLowerCase() === groupName.toLowerCase(),
+    );
+
+    if (!group) {
+      throw new NotFoundException(
+        `Advanced Blocking group "${groupName}" was not found on node "${nodeId}".`,
+      );
+    }
+
+    const suggestions: RuleOptimizationSuggestion[] = [];
+
+    const allowedRegex = (group.allowedRegex ?? []).filter(Boolean);
+    const blockedRegex = (group.blockedRegex ?? []).filter(Boolean);
+
+    for (const pattern of allowedRegex) {
+      suggestions.push(
+        ...this.suggestForPattern(
+          nodeId,
+          group.name ?? groupName,
+          "allowedRegex",
+          pattern,
+        ),
+      );
+    }
+
+    for (const pattern of blockedRegex) {
+      suggestions.push(
+        ...this.suggestForPattern(
+          nodeId,
+          group.name ?? groupName,
+          "blockedRegex",
+          pattern,
+        ),
+      );
+    }
+
+    return {
+      fetchedAt: new Date().toISOString(),
+      nodeId,
+      groupName: group.name ?? groupName,
+      suggestions,
+    };
+  }
+
+  /**
+   * Validate a suggestion against recent query logs.
+   *
+   * MVP validation:
+   * - Uses SQLite (if enabled) to fetch distinct recent domains (aggregated across nodes).
+   * - Reports "expansion impact" of converting to a zone/domain entry:
+   *   how many additional recent domains would match the proposed domain entry.
+   *
+   * Note: This does NOT execute .NET regex. It is meant to quantify scope expansion risk.
+   */
+  async validateGroupRuleOptimizationSuggestion(
+    nodeId: string,
+    groupName: string,
+    input: { windowHours?: number; limit?: number; payload?: unknown },
+  ): Promise<ValidateSuggestionResult> {
+    const payload = (input.payload ?? {}) as ValidateSuggestionRequest;
+
+    const proposedDomainEntryRaw =
+      typeof payload.proposedDomainEntry === "string" ?
+        payload.proposedDomainEntry
+      : undefined;
+
+    if (!proposedDomainEntryRaw || !proposedDomainEntryRaw.trim()) {
+      throw new Error("Validation requires proposedDomainEntry.");
+    }
+
+    const proposedDomainEntry = this.normalizeDomain(proposedDomainEntryRaw);
+
+    // Ensure group exists (and that this endpoint is group-scoped).
+    const snapshot = await this.getSnapshot(nodeId);
+    const config = snapshot.config;
+    if (!config) {
+      throw new Error(
+        snapshot.error ||
+          `Advanced Blocking is not available on node "${nodeId}".`,
+      );
+    }
+
+    const group = (config.groups ?? []).find(
+      (g) => (g.name ?? "").toLowerCase() === groupName.toLowerCase(),
+    );
+    if (!group) {
+      throw new NotFoundException(
+        `Advanced Blocking group "${groupName}" was not found on node "${nodeId}".`,
+      );
+    }
+
+    const windowHours =
+      (
+        typeof input.windowHours === "number" &&
+        Number.isFinite(input.windowHours)
+      ) ?
+        Math.max(1, Math.trunc(input.windowHours))
+      : 24;
+
+    const limit =
+      typeof input.limit === "number" && Number.isFinite(input.limit) ?
+        Math.min(100_000, Math.max(100, Math.trunc(input.limit)))
+      : 10_000;
+
+    // Pull distinct domains from sqlite (aggregated across all nodes).
+    // If sqlite is disabled, QueryLogSqliteService will throw; we convert to a user-friendly result.
+    let domains: Array<{ qnameLc: string; count: number }> = [];
+    try {
+      domains = this.queryLogSqliteService.getStoredDistinctDomainsCombined({
+        windowHours,
+        limit,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        enabled: false,
+        windowHours,
+        limit,
+        distinctDomainsAnalyzed: 0,
+        proposedDomainEntry,
+        additionalMatchedDomainsCount: 0,
+        additionalMatchedDomainsExamples: [],
+        note:
+          `Validation is unavailable because stored query logs are not enabled/ready. ` +
+          `Details: ${message}`,
+      };
+    }
+
+    const proposedIsZoneEntry = proposedDomainEntry;
+    const additional: Array<{ domain: string; count: number }> = [];
+
+    for (const row of domains) {
+      const q = row.qnameLc;
+      if (!q) continue;
+
+      // "Additional domains" means subdomains (excluding the apex itself).
+      if (q === proposedIsZoneEntry) continue;
+
+      if (this.isSubdomainOf(q, proposedIsZoneEntry)) {
+        additional.push({ domain: q, count: row.count ?? 0 });
+      }
+    }
+
+    // Sort examples by count desc, then lexicographically.
+    additional.sort((a, b) => {
+      if ((b.count ?? 0) !== (a.count ?? 0))
+        return (b.count ?? 0) - (a.count ?? 0);
+      return a.domain.localeCompare(b.domain);
+    });
+
+    const examples = additional.slice(0, 50);
+
+    return {
+      enabled: true,
+      windowHours,
+      limit,
+      distinctDomainsAnalyzed: domains.length,
+      proposedDomainEntry,
+      additionalMatchedDomainsCount: additional.length,
+      additionalMatchedDomainsExamples: examples,
+      note:
+        "Validation reports scope expansion impact of converting to a zone/domain entry " +
+        "(how many additional recent subdomains would match). It does not execute .NET regex.",
+    };
+  }
+
+  /**
+   * Apply an optimization:
+   * - optionally take a DNS filtering snapshot (advanced-blocking),
+   * - remove the specified regex pattern from allowedRegex/blockedRegex,
+   * - add the proposed domain entry to allowed/blocked (zone semantics),
+   * - save config via Technitium and return updated snapshot.
+   */
+  async applyGroupRuleOptimization(
+    nodeId: string,
+    groupName: string,
+    body?: unknown,
+  ): Promise<ApplySuggestionResult> {
+    const payload = (body ?? {}) as ApplySuggestionRequest;
+
+    const proposedDomainEntryRaw = payload.proposedDomainEntry;
+    if (
+      typeof proposedDomainEntryRaw !== "string" ||
+      !proposedDomainEntryRaw.trim()
+    ) {
+      throw new Error("Apply requires proposedDomainEntry.");
+    }
+
+    const targetList = payload.targetList;
+    if (targetList !== "allowedRegex" && targetList !== "blockedRegex") {
+      throw new Error(
+        'Apply requires targetList of "allowedRegex" or "blockedRegex".',
+      );
+    }
+
+    const regexPatternRaw = payload.regexPattern;
+    if (typeof regexPatternRaw !== "string" || !regexPatternRaw.trim()) {
+      throw new Error("Apply requires regexPattern.");
+    }
+
+    const proposedDomainEntry = this.normalizeDomain(proposedDomainEntryRaw);
+    const regexPattern = regexPatternRaw;
+
+    const takeSnapshot =
+      typeof payload.takeSnapshot === "boolean" ? payload.takeSnapshot : true;
+
+    let snapshotTaken:
+      | {
+          id: string;
+          createdAt: string;
+          method: "rule-optimizer";
+          note?: string;
+        }
+      | undefined;
+
+    if (takeSnapshot) {
+      const note =
+        (
+          typeof payload.snapshotNote === "string" &&
+          payload.snapshotNote.trim()
+        ) ?
+          payload.snapshotNote.trim()
+        : `Rule optimization apply: ${targetList} "${regexPattern}" -> domain "${proposedDomainEntry}"`;
+
+      const metadata = await this.dnsFilteringSnapshotService.saveSnapshot(
+        nodeId,
+        "rule-optimizer",
+        "rule-optimization",
+        note,
+      );
+
+      snapshotTaken = {
+        id: metadata.id,
+        createdAt: metadata.createdAt,
+        method: "rule-optimizer",
+        note: metadata.note,
+      };
+    }
+
+    const snapshot = await this.getSnapshot(nodeId);
+    const config = snapshot.config;
+
+    if (!config) {
+      throw new Error(
+        snapshot.error ||
+          `Advanced Blocking is not available on node "${nodeId}".`,
+      );
+    }
+
+    const groups = [...(config.groups ?? [])];
+    const idx = groups.findIndex(
+      (g) => (g.name ?? "").toLowerCase() === groupName.toLowerCase(),
+    );
+
+    if (idx < 0) {
+      throw new NotFoundException(
+        `Advanced Blocking group "${groupName}" was not found on node "${nodeId}".`,
+      );
+    }
+
+    const group = { ...groups[idx] };
+
+    const allowed = new Set(
+      (group.allowed ?? []).map((d) => this.normalizeDomain(d)),
+    );
+    const blocked = new Set(
+      (group.blocked ?? []).map((d) => this.normalizeDomain(d)),
+    );
+
+    const allowedRegex = [...(group.allowedRegex ?? [])];
+    const blockedRegex = [...(group.blockedRegex ?? [])];
+
+    const removeFrom =
+      targetList === "allowedRegex" ? allowedRegex : blockedRegex;
+    const removedIndex = removeFrom.findIndex((p) => p === regexPattern);
+
+    if (removedIndex < 0) {
+      throw new NotFoundException(
+        `Regex pattern was not found in ${targetList} for group "${group.name ?? groupName}".`,
+      );
+    }
+
+    removeFrom.splice(removedIndex, 1);
+
+    if (targetList === "allowedRegex") {
+      // Convert to allow zone rule.
+      allowed.add(proposedDomainEntry);
+      group.allowed = [...allowed].sort((a, b) => a.localeCompare(b));
+      group.allowedRegex = allowedRegex;
+    } else {
+      // Convert to block zone rule.
+      blocked.add(proposedDomainEntry);
+      group.blocked = [...blocked].sort((a, b) => a.localeCompare(b));
+      group.blockedRegex = blockedRegex;
+    }
+
+    groups[idx] = group;
+
+    const nextConfig: AdvancedBlockingConfig = { ...config, groups };
+
+    const updated = await this.setConfig(nodeId, nextConfig);
+
+    return {
+      snapshotTaken,
+      updated,
+      applied: {
+        groupName: group.name ?? groupName,
+        targetList,
+        removedRegexPattern: regexPattern,
+        addedDomainEntry: proposedDomainEntry,
+      },
+    };
+  }
+
+  private suggestForPattern(
+    nodeId: string,
+    groupName: string,
+    targetList: RuleOptimizationSuggestionTargetList,
+    regexPattern: string,
+  ): RuleOptimizationSuggestion[] {
+    const pattern = String(regexPattern);
+
+    const out: RuleOptimizationSuggestion[] = [];
+
+    const perf = this.scoreRegexPerf(pattern);
+
+    const zone = this.extractZoneDomainFromRegex(pattern);
+
+    if (zone) {
+      out.push({
+        id: this.buildSuggestionId(
+          groupName,
+          targetList,
+          pattern,
+          "SAFE_TO_ZONE_DOMAIN_ENTRY",
+        ),
+        nodeId,
+        groupName,
+        targetList,
+        kind: "SAFE_TO_ZONE_DOMAIN_ENTRY",
+        title: "Replace regex with zone domain entry",
+        summary:
+          `This regex appears to match the zone "${zone}" (apex + subdomains). ` +
+          `Replacing it with "${zone}" should be faster and simpler.`,
+        regexPattern: pattern,
+        proposedDomainEntry: zone,
+        scopeExpansionRisk: false,
+        details: [
+          "Advanced Blocking non-regex domains are evaluated via zone (suffix) lookup, which is typically faster than evaluating regex.",
+          "This suggestion is categorized SAFE because the regex matches a common zone pattern we can confidently interpret.",
+        ],
+        perfScore: perf,
+        confidence: "safe",
+      });
+    } else {
+      const apex = this.extractExactApexDomainFromRegex(pattern);
+      if (apex) {
+        out.push({
+          id: this.buildSuggestionId(
+            groupName,
+            targetList,
+            pattern,
+            "LIKELY_TO_ZONE_DOMAIN_ENTRY_EXPANDS_SCOPE",
+          ),
+          nodeId,
+          groupName,
+          targetList,
+          kind: "LIKELY_TO_ZONE_DOMAIN_ENTRY_EXPANDS_SCOPE",
+          title:
+            "Replace apex-only regex with zone domain entry (expands scope)",
+          summary:
+            `This regex appears to match only the apex "${apex}". ` +
+            `Replacing it with "${apex}" would also match subdomains (zone semantics).`,
+          regexPattern: pattern,
+          proposedDomainEntry: apex,
+          scopeExpansionRisk: true,
+          details: [
+            "Advanced Blocking non-regex domains use zone matching (suffix-walk).",
+            `Adding "${apex}" will match "${apex}" and any subdomains like "a.${apex}".`,
+            "Use Validate to see how many additional recent domains would be affected.",
+          ],
+          perfScore: perf,
+          confidence: "likely",
+        });
+      } else {
+        const alternation =
+          this.extractSimpleAlternationHostPatternFromRegex(pattern);
+        if (alternation) {
+          const hostsPreview = alternation.hosts.slice(0, 6).join(", ");
+          const hostCount = alternation.hosts.length;
+
+          out.push({
+            id: this.buildSuggestionId(
+              groupName,
+              targetList,
+              pattern,
+              "MANUAL_REVIEW_ZONE_CANDIDATE",
+            ),
+            nodeId,
+            groupName,
+            targetList,
+            kind: "MANUAL_REVIEW_ZONE_CANDIDATE",
+            title: "Manual review: host alternation may be collapsible",
+            summary:
+              `This regex matches ${hostCount} explicit host` +
+              `${hostCount === 1 ? "" : "s"} under "${alternation.apex}" ` +
+              `(${hostsPreview}${hostCount > 6 ? ", ..." : ""}). ` +
+              `A zone entry "${alternation.apex}" may simplify rules, but will expand scope to additional subdomains.`,
+            regexPattern: pattern,
+            proposedDomainEntry: alternation.apex,
+            scopeExpansionRisk: true,
+            details: [
+              "This is a manual-review candidate, not an auto-apply recommendation.",
+              `Current regex appears limited to explicit hosts: ${alternation.hosts.join(", ")}.`,
+              `Replacing with "${alternation.apex}" will also match other subdomains not currently matched.`,
+              "Use Validate to estimate additional impacted subdomains from recent query logs before any manual change.",
+            ],
+            perfScore: perf,
+            confidence: "likely",
+          });
+        } else {
+          const regexAlternation =
+            this.extractSingleLabelRegexAlternationPattern(pattern);
+          if (regexAlternation) {
+            const branchCount = regexAlternation.branches.length;
+            const branchPreview = regexAlternation.branches
+              .slice(0, 4)
+              .join(" | ");
+
+            out.push({
+              id: this.buildSuggestionId(
+                groupName,
+                targetList,
+                pattern,
+                "MANUAL_REVIEW_ZONE_CANDIDATE",
+              ),
+              nodeId,
+              groupName,
+              targetList,
+              kind: "MANUAL_REVIEW_ZONE_CANDIDATE",
+              title:
+                "Manual review: regex alternation may be replaceable by zone",
+              summary:
+                `This regex contains ${branchCount} label alternation branch` +
+                `${branchCount === 1 ? "" : "es"} before "${regexAlternation.apex}" ` +
+                `(${branchPreview}${branchCount > 4 ? " | ..." : ""}). ` +
+                `A zone entry "${regexAlternation.apex}" may simplify rule maintenance, but will broaden match scope.`,
+              regexPattern: pattern,
+              proposedDomainEntry: regexAlternation.apex,
+              scopeExpansionRisk: true,
+              details: [
+                "This is a manual-review candidate, not an auto-apply recommendation.",
+                `Regex branches detected: ${regexAlternation.branches.join(" | ")}.`,
+                `Replacing with "${regexAlternation.apex}" would match additional subdomains not currently constrained by this regex.`,
+                "Use Validate to estimate expansion impact from recent query logs before making a manual change.",
+              ],
+              perfScore: perf,
+              confidence: "likely",
+            });
+          }
+        }
+      }
+    }
+
+    // Perf warning (advisory) — always emit for high-ish scores.
+    if (perf >= 6) {
+      out.push({
+        id: this.buildSuggestionId(
+          groupName,
+          targetList,
+          pattern,
+          "PERF_WARNING",
+        ),
+        nodeId,
+        groupName,
+        targetList,
+        kind: "PERF_WARNING",
+        title: "Regex may be more expensive than necessary",
+        summary:
+          "This pattern may increase per-query overhead (unanchored matches, wildcards, or complex constructs).",
+        regexPattern: pattern,
+        proposedDomainEntry: undefined,
+        scopeExpansionRisk: false,
+        details: [
+          "Regex rules are evaluated by scanning patterns and calling IsMatch for each one until a match is found.",
+          "Consider replacing with a domain entry when the intent is to match a specific zone/domain.",
+        ],
+        perfScore: perf,
+        confidence: "warning",
+      });
+    }
+
+    return out;
+  }
+
+  private buildSuggestionId(
+    groupName: string,
+    targetList: RuleOptimizationSuggestionTargetList,
+    pattern: string,
+    kind: RuleOptimizationSuggestionKind,
+  ): string {
+    const src = `${groupName}|${targetList}|${kind}|${pattern}`;
+    // Stable, non-cryptographic hash is fine for IDs here.
+    let hash = 0;
+    for (let i = 0; i < src.length; i += 1) {
+      hash = (hash * 31 + src.charCodeAt(i)) >>> 0;
+    }
+    return `abopt-${hash.toString(16)}`;
+  }
+
+  private normalizeDomain(domain: string): string {
+    return domain.trim().replace(/\.$/, "").toLowerCase();
+  }
+
+  private isSubdomainOf(qnameLc: string, zoneLc: string): boolean {
+    if (!qnameLc || !zoneLc) return false;
+    if (qnameLc === zoneLc) return true;
+    return qnameLc.endsWith(`.${zoneLc}`);
+  }
+
+  /**
+   * Very conservative "safe zone regex" extractor.
+   *
+   * Supports patterns like:
+   * - ^([a-z0-9-]+\.)*example\.com$
+   * - ^([a-z0-9-]+\.)+example\.com$  (subdomains only; still maps to zone)
+   * - ^(.*\.)?example\.com$          (commonly used; treated as safe only if anchored)
+   * - (\.|^)example\.com$            (common boundary-prefix form in blocklists)
+   *
+   * Returns the zone domain (lowercased) if recognized; otherwise null.
+   */
+  private extractZoneDomainFromRegex(pattern: string): string | null {
+    const p = pattern.trim();
+
+    // Must be anchored at end to avoid broad partial matches.
+    if (!p.endsWith("$")) return null;
+
+    // Common forms:
+    // 1) ^([a-z0-9-]+\.)*example\.com$
+    // 2) ^(.*\.)?example\.com$
+    // 3) ^([\\w-]+\\.)*example\\.com$ (users sometimes use \w)
+    // We don't want to hardcode example.com; we want to capture the domain tail.
+    // Capture a literal domain tail of the form label(\.label)+ with escaped dots.
+    const tail = p.match(/([a-z0-9-]+(?:\\\.[a-z0-9-]+)+)\$$/i);
+    if (!tail) return null;
+
+    const escapedDomain = tail[1];
+    const domain = escapedDomain.replace(/\\\./g, ".").toLowerCase();
+
+    // Verify domain "shape" quickly (avoid suggesting nonsense).
+    if (!this.looksLikeDomain(domain)) return null;
+
+    // Ensure the prefix is one of our allowed "subdomain wildcard" forms.
+    const prefix = p.slice(0, p.length - (escapedDomain.length + 1)); // remove "<domain>$"
+    const normalizedPrefix = prefix;
+
+    const allowedPrefixes = [
+      "^([a-z0-9-]+\\.)*",
+      "^([a-z0-9-]+\\.)+",
+      "^(.*\\.)?",
+      "^(.*\\.)*",
+      "^(\\w+\\.)*",
+      "^(\\w+\\.)+",
+      "^([\\w-]+\\.)*",
+      "^([\\w-]+\\.)+",
+      "(\\.|^)",
+      "(?:\\.|^)",
+      "(^|\\.)",
+      "(?:^|\\.)",
+    ];
+
+    if (!allowedPrefixes.includes(normalizedPrefix)) {
+      return null;
+    }
+
+    return domain;
+  }
+
+  /**
+   * Extract apex-only exact match patterns like:
+   * - ^example\.com$
+   */
+  private extractExactApexDomainFromRegex(pattern: string): string | null {
+    const p = pattern.trim();
+    const m = p.match(/^\^([a-z0-9-]+(?:\\\.[a-z0-9-]+)+)\$$/i);
+    if (!m) return null;
+
+    const domain = m[1].replace(/\\\./g, ".").toLowerCase();
+    if (!this.looksLikeDomain(domain)) return null;
+    return domain;
+  }
+
+  /**
+   * Extract patterns like:
+   * - ^(booking|cdn|growthbook|www)\.moego\.pet$
+   * - ^(?:a|b|c)\.example\.com$
+   *
+   * Returns the apex and explicit host labels when the regex is simple enough
+   * for manual-review guidance.
+   */
+  private extractSimpleAlternationHostPatternFromRegex(
+    pattern: string,
+  ): { apex: string; hosts: string[] } | null {
+    const p = pattern.trim();
+    const m = p.match(
+      /^\^(?:\((?:\?:)?([a-z0-9-]+(?:\|[a-z0-9-]+)+)\)|(?:\?:)?([a-z0-9-]+(?:\|[a-z0-9-]+)+))\\\.([a-z0-9-]+(?:\\\.[a-z0-9-]+)+)\$$/i,
+    );
+    if (!m) return null;
+
+    const alternationRaw = (m[1] || m[2] || "").toLowerCase();
+    const hosts = alternationRaw
+      .split("|")
+      .map((h) => h.trim())
+      .filter(Boolean);
+
+    if (hosts.length < 2) return null;
+    if (!hosts.every((h) => /^[a-z0-9-]+$/.test(h))) return null;
+    if (hosts.some((h) => h.startsWith("-") || h.endsWith("-"))) return null;
+
+    const apex = m[3].replace(/\\\./g, ".").toLowerCase();
+    if (!this.looksLikeDomain(apex)) return null;
+
+    return { apex, hosts: [...new Set(hosts)] };
+  }
+
+  /**
+   * Extract patterns like:
+   * - (?:[a-f0-9]{32}|text-generation)\.perchance\.org$
+   * - ^(?:[a-z0-9-]{1,16}|api|cdn)\.example\.com$
+   *
+   * These are treated as manual-review candidates because converting to a zone
+   * entry would likely expand scope beyond the constrained label alternation.
+   */
+  private extractSingleLabelRegexAlternationPattern(
+    pattern: string,
+  ): { apex: string; branches: string[] } | null {
+    const p = pattern.trim();
+
+    const m = p.match(
+      /^\^?\(\?:([^()]+)\)\\\.([a-z0-9-]+(?:\\\.[a-z0-9-]+)+)\$$/i,
+    );
+    if (!m) return null;
+
+    const alternationRaw = m[1] ?? "";
+    const branches = alternationRaw
+      .split("|")
+      .map((b) => b.trim())
+      .filter(Boolean);
+
+    if (branches.length < 2) return null;
+
+    const apex = m[2].replace(/\\\./g, ".").toLowerCase();
+    if (!this.looksLikeDomain(apex)) return null;
+
+    return { apex, branches: [...new Set(branches)] };
+  }
+
+  private looksLikeDomain(domain: string): boolean {
+    // Conservative check: labels separated by dots, labels contain a-z0-9-,
+    // don't start/end with hyphen, and total length sanity.
+    if (domain.length < 1 || domain.length > 253) return false;
+    const labels = domain.split(".");
+    if (labels.length < 2) return false;
+
+    for (const label of labels) {
+      if (label.length < 1 || label.length > 63) return false;
+      if (!/^[a-z0-9-]+$/.test(label)) return false;
+      if (label.startsWith("-") || label.endsWith("-")) return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Rough perf heuristic used for warnings and sorting.
+   * Higher score means "more likely to be expensive".
+   */
+  private scoreRegexPerf(pattern: string): number {
+    let score = 0;
+    const p = pattern;
+
+    // Unanchored patterns tend to be more expensive and ambiguous.
+    if (!p.startsWith("^")) score += 2;
+    if (!p.endsWith("$")) score += 2;
+
+    // Wildcards and broad matches.
+    if (p.includes(".*")) score += 3;
+    if (p.includes(".+")) score += 2;
+
+    // Alternations can be costly.
+    const alternations = (p.match(/\|/g) ?? []).length;
+    score += Math.min(3, alternations);
+
+    // Nested quantifiers (very rough detection).
+    if (/\+\)\+|\*\)\+|\+\)\*|\*\)\*/.test(p)) score += 4;
+
+    // Length as a proxy.
+    if (p.length > 50) score += 1;
+    if (p.length > 150) score += 1;
+
+    return score;
+  }
+
   private parseConfig(rawConfig: string): AdvancedBlockingConfig {
     let parsed: unknown;
     try {
@@ -211,26 +1042,27 @@ export class AdvancedBlockingService {
     }
 
     const payload = parsed as Record<string, unknown>;
-    const groups = Array.isArray(payload.groups)
-      ? payload.groups
+    const groups =
+      Array.isArray(payload.groups) ?
+        payload.groups
           .map((group) => this.normalizeGroup(group))
           .filter((group): group is AdvancedBlockingGroup => Boolean(group))
       : [];
 
     return {
       enableBlocking:
-        typeof payload.enableBlocking === "boolean"
-          ? payload.enableBlocking
-          : undefined,
+        typeof payload.enableBlocking === "boolean" ?
+          payload.enableBlocking
+        : undefined,
       blockingAnswerTtl: this.normalizeInteger(payload.blockingAnswerTtl),
       blockListUrlUpdateIntervalHours:
-        typeof payload.blockListUrlUpdateIntervalHours === "number"
-          ? payload.blockListUrlUpdateIntervalHours
-          : undefined,
+        typeof payload.blockListUrlUpdateIntervalHours === "number" ?
+          payload.blockListUrlUpdateIntervalHours
+        : undefined,
       blockListUrlUpdateIntervalMinutes:
-        typeof payload.blockListUrlUpdateIntervalMinutes === "number"
-          ? payload.blockListUrlUpdateIntervalMinutes
-          : undefined,
+        typeof payload.blockListUrlUpdateIntervalMinutes === "number" ?
+          payload.blockListUrlUpdateIntervalMinutes
+        : undefined,
       localEndPointGroupMap: this.normalizeMapping(
         payload.localEndPointGroupMap,
       ),
@@ -275,17 +1107,17 @@ export class AdvancedBlockingService {
     return {
       name,
       enableBlocking:
-        typeof data.enableBlocking === "boolean"
-          ? data.enableBlocking
-          : undefined,
+        typeof data.enableBlocking === "boolean" ?
+          data.enableBlocking
+        : undefined,
       allowTxtBlockingReport:
-        typeof data.allowTxtBlockingReport === "boolean"
-          ? data.allowTxtBlockingReport
-          : undefined,
+        typeof data.allowTxtBlockingReport === "boolean" ?
+          data.allowTxtBlockingReport
+        : undefined,
       blockAsNxDomain:
-        typeof data.blockAsNxDomain === "boolean"
-          ? data.blockAsNxDomain
-          : undefined,
+        typeof data.blockAsNxDomain === "boolean" ?
+          data.blockAsNxDomain
+        : undefined,
       blockingAddresses: this.normalizeStringArray(data.blockingAddresses),
       allowed: this.normalizeStringArray(data.allowed),
       blocked: this.normalizeStringArray(data.blocked),
@@ -411,10 +1243,12 @@ export class AdvancedBlockingService {
         .length,
       networkMappingCount: Object.keys(config.networkGroupMap).length,
       scheduledNodeCount:
-        typeof config.blockListUrlUpdateIntervalHours === "number" ||
-        typeof config.blockListUrlUpdateIntervalMinutes === "number"
-          ? 1
-          : 0,
+        (
+          typeof config.blockListUrlUpdateIntervalHours === "number" ||
+          typeof config.blockListUrlUpdateIntervalMinutes === "number"
+        ) ?
+          1
+        : 0,
     };
   }
 
