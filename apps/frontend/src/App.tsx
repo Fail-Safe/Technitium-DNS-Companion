@@ -1,11 +1,11 @@
 import { lazy, Suspense } from "react";
 import {
-  BrowserRouter,
-  Navigate,
-  Outlet,
-  Route,
-  Routes,
-  useLocation,
+    BrowserRouter,
+    Navigate,
+    Outlet,
+    Route,
+    Routes,
+    useLocation,
 } from "react-router-dom";
 import "./App.css";
 import { AppLayout } from "./components/layout/AppLayout";
@@ -16,6 +16,7 @@ import { AuthProvider } from "./context/AuthContext";
 import { TechnitiumProvider } from "./context/TechnitiumContext";
 import { ToastProvider } from "./context/ToastContext";
 import { useAuth } from "./context/useAuth";
+import { useTechnitiumState } from "./context/useTechnitiumState";
 import { isNodeSessionRequiredButMissing } from "./utils/authSession";
 
 // Lazy load ALL pages for optimal code splitting
@@ -26,6 +27,9 @@ const DhcpPage = lazy(() => import("./pages/DhcpPage"));
 const ZonesPage = lazy(() => import("./pages/ZonesPage"));
 const DnsLookupPage = lazy(() => import("./pages/DnsLookupPage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
+const AdvancedBlockingRuleOptimizerPage = lazy(
+  () => import("./pages/AdvancedBlockingRuleOptimizerPage"),
+);
 
 // Loading fallback component
 const PageLoader = () => (
@@ -74,41 +78,71 @@ function RequireAuth() {
   }
 
   return (
-    <TechnitiumProvider>
+    <RequireOptimizerRouteGate>
       <Outlet />
-    </TechnitiumProvider>
+    </RequireOptimizerRouteGate>
   );
+}
+
+function RequireOptimizerRouteGate({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const location = useLocation();
+  const { blockingStatus } = useTechnitiumState();
+
+  const optimizerEnabled = Boolean(
+    blockingStatus?.nodes?.some(
+      (n) => n.advancedBlockingInstalled && n.advancedBlockingEnabled,
+    ),
+  );
+
+  if (
+    location.pathname.startsWith("/advanced-blocking/rule-optimizer") &&
+    !optimizerEnabled
+  ) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
 }
 
 export default function App() {
   return (
     <AuthProvider>
       <ToastProvider>
-        <BrowserRouter
-          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-        >
-          <OfflineBanner />
-          <AppLayout>
-            <Suspense fallback={<PageLoader />}>
-              <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route element={<RequireAuth />}>
-                  <Route path="/" element={<OverviewPage />} />
-                  <Route
-                    path="/configuration"
-                    element={<ConfigurationPage />}
-                  />
-                  <Route path="/dhcp" element={<DhcpPage />} />
-                  <Route path="/logs" element={<LogsPage />} />
-                  <Route path="/zones" element={<ZonesPage />} />
-                  <Route path="/dns-lookup" element={<DnsLookupPage />} />
-                </Route>
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Routes>
-            </Suspense>
-          </AppLayout>
-          <InstallPrompt />
-        </BrowserRouter>
+        <TechnitiumProvider>
+          <BrowserRouter
+            future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+          >
+            <OfflineBanner />
+            <AppLayout>
+              <Suspense fallback={<PageLoader />}>
+                <Routes>
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route element={<RequireAuth />}>
+                    <Route path="/" element={<OverviewPage />} />
+                    <Route
+                      path="/configuration"
+                      element={<ConfigurationPage />}
+                    />
+                    <Route path="/dhcp" element={<DhcpPage />} />
+                    <Route path="/logs" element={<LogsPage />} />
+                    <Route path="/zones" element={<ZonesPage />} />
+                    <Route path="/dns-lookup" element={<DnsLookupPage />} />
+                    <Route
+                      path="/advanced-blocking/rule-optimizer"
+                      element={<AdvancedBlockingRuleOptimizerPage />}
+                    />
+                  </Route>
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </Suspense>
+            </AppLayout>
+            <InstallPrompt />
+          </BrowserRouter>
+        </TechnitiumProvider>
       </ToastProvider>
     </AuthProvider>
   );
