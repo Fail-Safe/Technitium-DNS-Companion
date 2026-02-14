@@ -6,7 +6,7 @@ import {
   OnModuleInit,
 } from "@nestjs/common";
 import { createHash } from "crypto";
-import { mkdirSync } from "fs";
+import { accessSync, constants, existsSync, mkdirSync } from "fs";
 import { DatabaseSync } from "node:sqlite";
 import { dirname } from "path";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
@@ -47,10 +47,7 @@ type StoredLogRowWithClient = {
   data: string;
 };
 
-type DistinctDomainRow = {
-  qnameLc: string;
-  count: number;
-};
+type DistinctDomainRow = { qnameLc: string; count: number };
 
 @Injectable()
 export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
@@ -183,6 +180,17 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
 
     mkdirSync(dirname(dbPath), { recursive: true });
 
+    const writeabilityProblem = this.getWriteabilityProblem(dbPath);
+    if (writeabilityProblem) {
+      this.logger.error(
+        `SQLite query log storage is enabled but the DB path is not writable: ${writeabilityProblem}`,
+      );
+      this.logger.error(
+        "Fix file ownership/permissions for QUERY_LOG_SQLITE_PATH (including -wal/-shm files), or point QUERY_LOG_SQLITE_PATH to a writable mounted directory.",
+      );
+      return;
+    }
+
     this.db = new DatabaseSync(dbPath);
 
     // Concurrency-friendly settings: WAL allows concurrent readers while writing.
@@ -207,6 +215,31 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     this.retentionTimer = setInterval(() => {
       this.safeApplyRetention();
     }, retentionIntervalMs);
+  }
+
+  private getWriteabilityProblem(dbPath: string): string | null {
+    const dbDir = dirname(dbPath);
+
+    try {
+      accessSync(dbDir, constants.W_OK);
+    } catch {
+      return `directory is not writable (${dbDir})`;
+    }
+
+    const sqliteFiles = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
+    for (const filePath of sqliteFiles) {
+      if (!existsSync(filePath)) {
+        continue;
+      }
+
+      try {
+        accessSync(filePath, constants.W_OK);
+      } catch {
+        return `file is not writable (${filePath})`;
+      }
+    }
+
+    return null;
   }
 
   onModuleDestroy(): void {
@@ -383,9 +416,8 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           const qnameLc = qname ? qname.toLowerCase() : null;
 
           const clientIpAddress = entry.clientIpAddress ?? null;
-          const clientIpLc = clientIpAddress
-            ? clientIpAddress.toLowerCase()
-            : null;
+          const clientIpLc =
+            clientIpAddress ? clientIpAddress.toLowerCase() : null;
 
           const clientName = entry.clientName ?? null;
           const clientNameLc = clientName ? clientName.toLowerCase() : null;
@@ -586,8 +618,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const endTs = filters.end ? Date.parse(filters.end) : now;
 
     return {
-      startTs: Number.isFinite(startTs)
-        ? Math.max(retentionStart, startTs)
+      startTs:
+        Number.isFinite(startTs) ?
+          Math.max(retentionStart, startTs)
         : retentionStart,
       endTs: Number.isFinite(endTs) ? endTs : now,
     };
@@ -729,24 +762,23 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
   getStoredDistinctDomainsCombined(options: {
     windowHours?: number;
     limit?: number;
-  }): Array<{
-    qnameLc: string;
-    count: number;
-  }> {
+  }): Array<{ qnameLc: string; count: number }> {
     if (!this.db) {
       throw new Error("SQLite query log storage is not enabled.");
     }
 
     const windowHours =
-      typeof options.windowHours === "number" &&
-      Number.isFinite(options.windowHours)
-        ? Math.max(1, Math.trunc(options.windowHours))
-        : 24;
+      (
+        typeof options.windowHours === "number" &&
+        Number.isFinite(options.windowHours)
+      ) ?
+        Math.max(1, Math.trunc(options.windowHours))
+      : 24;
 
     const limit =
-      typeof options.limit === "number" && Number.isFinite(options.limit)
-        ? Math.min(100_000, Math.max(1, Math.trunc(options.limit)))
-        : 10_000;
+      typeof options.limit === "number" && Number.isFinite(options.limit) ?
+        Math.min(100_000, Math.max(1, Math.trunc(options.limit)))
+      : 10_000;
 
     const now = Date.now();
     const startTs = now - windowHours * 60 * 60 * 1000;
@@ -779,8 +811,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const db = this.db;
 
     const disableCache = !!filters.disableCache;
-    const cacheKey = !disableCache
-      ? this.buildResponseCacheKey("combined", filters)
+    const cacheKey =
+      !disableCache ?
+        this.buildResponseCacheKey("combined", filters)
       : undefined;
 
     if (cacheKey) {
@@ -846,9 +879,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const totalPages =
-      entriesPerPage > 0
-        ? Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
-        : 1;
+      entriesPerPage > 0 ?
+        Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
+      : 1;
     const offset = entriesPerPage > 0 ? (pageNumber - 1) * entriesPerPage : 0;
 
     const sortDir = descendingOrder ? "DESC" : "ASC";
@@ -911,11 +944,11 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       const nodeTotalEntries = nodeTotalEntriesRow?.count ?? 0;
 
       const nodeTotalPages =
-        entriesPerPage > 0
-          ? nodeTotalEntries > 0
-            ? Math.ceil(nodeTotalEntries / entriesPerPage)
-            : 0
-          : 0;
+        entriesPerPage > 0 ?
+          nodeTotalEntries > 0 ?
+            Math.ceil(nodeTotalEntries / entriesPerPage)
+          : 0
+        : 0;
 
       return {
         nodeId: node.id,
@@ -959,8 +992,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const disableCache = !!filters.disableCache;
-    const cacheKey = !disableCache
-      ? this.buildResponseCacheKey("node", filters, nodeId)
+    const cacheKey =
+      !disableCache ?
+        this.buildResponseCacheKey("node", filters, nodeId)
       : undefined;
 
     if (cacheKey) {
@@ -1027,9 +1061,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const totalPages =
-      entriesPerPage > 0
-        ? Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
-        : 1;
+      entriesPerPage > 0 ?
+        Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
+      : 1;
     const offset = entriesPerPage > 0 ? (pageNumber - 1) * entriesPerPage : 0;
 
     const sortDir = descendingOrder ? "DESC" : "ASC";
