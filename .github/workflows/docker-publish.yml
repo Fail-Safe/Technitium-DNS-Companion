@@ -2,6 +2,8 @@ name: Build and Push Docker Image
 
 on:
   push:
+    branches:
+      - "main"
     tags:
       - "v*"
   workflow_dispatch: # Allow manual trigger
@@ -40,7 +42,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
-        if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.push_image)
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.push_image)
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -58,6 +60,8 @@ jobs:
           tags: |
             # Always tag release images as latest
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            # Keep a moving tag for current main branch image
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
             # Provide a non-pushed tag for manual builds (helps avoid empty-tag edge cases)
             type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' }}
             # Manual runs: include a unique sha tag (safe for optional pushing)
@@ -70,7 +74,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.push_image) }}
+          push: ${{ startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.push_image) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
