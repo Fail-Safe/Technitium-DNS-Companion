@@ -1,0 +1,85 @@
+name: Verify Docker Tag Consistency
+
+on:
+  workflow_run:
+    workflows:
+      - Build and Push Docker Image
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/fail-safe/technitium-dns-companion
+
+jobs:
+  verify-tags:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Derive version tags
+        id: version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "major_minor=${version%.*}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify digest alignment for required tags
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags=(main latest "${{ steps.version.outputs.major_minor }}" "${{ steps.version.outputs.version }}")
+          baseline_digest=""
+
+          resolve_digest() {
+            local tag="$1"
+            local attempt=1
+            local max_attempts=12
+            local digest=""
+
+            while [[ "$attempt" -le "$max_attempts" ]]; do
+              digest="$(docker buildx imagetools inspect "$IMAGE:$tag" 2>/dev/null | awk '/^Digest:/ {print $2; exit}' || true)"
+              if [[ -n "$digest" ]]; then
+                echo "$digest"
+                return 0
+              fi
+
+              echo "Tag '$tag' not resolvable yet (attempt $attempt/$max_attempts); retrying in 10s..."
+              sleep 10
+              attempt=$((attempt + 1))
+            done
+
+            return 1
+          }
+
+          for tag in "${tags[@]}"; do
+            digest="$(resolve_digest "$tag" || true)"
+
+            if [[ -z "$digest" ]]; then
+              echo "❌ Unable to resolve digest for tag '$tag' from $IMAGE"
+              exit 1
+            fi
+
+            echo "Tag '$tag' -> $digest"
+
+            if [[ -z "$baseline_digest" ]]; then
+              baseline_digest="$digest"
+              continue
+            fi
+
+            if [[ "$digest" != "$baseline_digest" ]]; then
+              echo "❌ Tag digest mismatch detected"
+              echo "Expected: $baseline_digest"
+              echo "Actual  : $digest (tag: $tag)"
+              exit 1
+            fi
+          done
+
+          echo "✅ All required tags are aligned at $baseline_digest"
