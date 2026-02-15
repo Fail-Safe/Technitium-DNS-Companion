@@ -38,8 +38,29 @@ jobs:
           tags=(main latest "${{ steps.version.outputs.major_minor }}" "${{ steps.version.outputs.version }}")
           baseline_digest=""
 
+          resolve_digest() {
+            local tag="$1"
+            local attempt=1
+            local max_attempts=12
+            local digest=""
+
+            while [[ "$attempt" -le "$max_attempts" ]]; do
+              digest="$(docker buildx imagetools inspect "$IMAGE:$tag" 2>/dev/null | awk '/^Digest:/ {print $2; exit}' || true)"
+              if [[ -n "$digest" ]]; then
+                echo "$digest"
+                return 0
+              fi
+
+              echo "Tag '$tag' not resolvable yet (attempt $attempt/$max_attempts); retrying in 10s..."
+              sleep 10
+              attempt=$((attempt + 1))
+            done
+
+            return 1
+          }
+
           for tag in "${tags[@]}"; do
-            digest="$(docker buildx imagetools inspect "$IMAGE:$tag" 2>/dev/null | awk '/^Digest:/ {print $2; exit}')"
+            digest="$(resolve_digest "$tag" || true)"
 
             if [[ -z "$digest" ]]; then
               echo "❌ Unable to resolve digest for tag '$tag' from $IMAGE"
