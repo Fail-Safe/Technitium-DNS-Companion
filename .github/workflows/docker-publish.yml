@@ -40,7 +40,9 @@ jobs:
 
       - name: Derive major.minor version tag
         id: package-version-minor
-        run: echo "major_minor=$(node -p \"const [major,minor]=require('./package.json').version.split('.'); major + '.' + minor\")" >> $GITHUB_OUTPUT
+        run: |
+          version="${{ steps.package-version.outputs.version }}"
+          echo "major_minor=${version%.*}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
