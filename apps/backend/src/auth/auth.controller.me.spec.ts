@@ -8,8 +8,6 @@ import type { AuthSession } from "./auth.types";
 describe("AuthController /auth/me", () => {
   beforeEach(() => {
     jest.resetAllMocks();
-    delete process.env.TECHNITIUM_CLUSTER_TOKEN;
-    process.env.AUTH_SESSION_ENABLED = "false";
   });
 
   async function createController(getBackgroundSummaryImpl?: jest.Mock) {
@@ -27,7 +25,6 @@ describe("AuthController /auth/me", () => {
       getConfiguredNodeIds: jest.fn().mockReturnValue(["eq14", "eq12"]),
       getBackgroundPtrTokenValidationSummary:
         getBackgroundPtrTokenValidationSummaryMock,
-      getClusterTokenFallbackNodeIds: jest.fn().mockReturnValue([]),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -49,9 +46,7 @@ describe("AuthController /auth/me", () => {
     return AuthRequestContext.run({ session }, fn);
   }
 
-  it("returns unauthenticated response, still including clusterTokenConfigured and backgroundPtrToken", async () => {
-    process.env.TECHNITIUM_CLUSTER_TOKEN = "cluster-token";
-
+  it("returns unauthenticated response including backgroundPtrToken", async () => {
     const backgroundPtrToken = {
       configured: true,
       sessionAuthEnabled: true,
@@ -70,18 +65,16 @@ describe("AuthController /auth/me", () => {
     const res = withContext(undefined, () => controller.me());
 
     expect(res).toEqual({
-      sessionAuthEnabled: false,
+      sessionAuthEnabled: true,
       authenticated: false,
       configuredNodeIds: ["eq14", "eq12"],
-      clusterTokenConfigured: true,
-      clusterTokenUsage: { usedForNodeIds: [] },
       backgroundPtrToken,
     });
 
     expect(getBackgroundPtrTokenValidationSummaryMock).toHaveBeenCalledTimes(1);
   });
 
-  it("returns authenticated response with user and nodeIds, and clusterTokenConfigured=false", async () => {
+  it("returns authenticated response with user and nodeIds", async () => {
     const { controller } = await createController();
 
     const session: AuthSession = {
@@ -95,30 +88,10 @@ describe("AuthController /auth/me", () => {
     const res = withContext(session, () => controller.me());
 
     expect(res.authenticated).toBe(true);
-    expect(res.sessionAuthEnabled).toBe(false);
+    expect(res.sessionAuthEnabled).toBe(true);
     expect(res.user).toBe("alice");
     expect(res.nodeIds?.sort()).toEqual(["eq12", "eq14"]);
     expect(res.configuredNodeIds?.sort()).toEqual(["eq12", "eq14"]);
-    expect(res.clusterTokenConfigured).toBe(false);
     expect(res.backgroundPtrToken).toBeDefined();
-  });
-
-  it("reports clusterTokenConfigured=true when TECHNITIUM_CLUSTER_TOKEN is set", async () => {
-    process.env.TECHNITIUM_CLUSTER_TOKEN = "cluster-token";
-
-    const { controller } = await createController();
-
-    const session: AuthSession = {
-      id: "s1",
-      createdAt: new Date().toISOString(),
-      lastSeenAt: Date.now(),
-      user: "alice",
-      tokensByNodeId: { eq14: "t1" },
-    };
-
-    const res = withContext(session, () => controller.me());
-
-    expect(res.clusterTokenConfigured).toBe(true);
-    expect(res.configuredNodeIds?.sort()).toEqual(["eq12", "eq14"]);
   });
 });

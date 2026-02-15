@@ -1,24 +1,24 @@
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import {
-  faBan,
-  faCheck,
-  faChevronUp,
-  faCircle,
-  faClockRotateLeft,
-  faCode,
-  faExclamationTriangle,
-  faGripVertical,
-  faInfoCircle,
-  faList,
-  faMinus,
-  faPencil,
-  faPlus,
-  faSearch,
-  faSquareCheck,
-  faSquareMinus,
-  faTrash,
-  faUsers,
-  faXmark,
+    faBan,
+    faCheck,
+    faChevronUp,
+    faCircle,
+    faClockRotateLeft,
+    faCode,
+    faExclamationTriangle,
+    faGripVertical,
+    faInfoCircle,
+    faList,
+    faMinus,
+    faPencil,
+    faPlus,
+    faSearch,
+    faSquareCheck,
+    faSquareMinus,
+    faTrash,
+    faUsers,
+    faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -30,9 +30,9 @@ import { AdvancedBlockingSetupGuide } from "../components/configuration/Advanced
 import { BlockingConflictBanner } from "../components/configuration/BlockingConflictBanner.tsx";
 import { BlockingMethodSelector } from "../components/configuration/BlockingMethodSelector.tsx";
 import { BuiltInBlockingEditor } from "../components/configuration/BuiltInBlockingEditor.tsx";
+import { ConfigSnapshotDrawer } from "../components/configuration/ConfigSnapshotDrawer";
 import { ConfigurationSkeleton } from "../components/configuration/ConfigurationSkeleton.tsx";
 import { ConfigurationSyncView } from "../components/configuration/ConfigurationSyncView.tsx";
-import { DnsFilteringSnapshotDrawer } from "../components/configuration/DnsFilteringSnapshotDrawer";
 import { ListSourceEditor } from "../components/configuration/ListSourceEditor.tsx";
 import { NodeSelector } from "../components/configuration/NodeSelector.tsx";
 import { apiFetch } from "../config";
@@ -43,8 +43,8 @@ import { useClusterNodes } from "../hooks/usePrimaryNode";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type { AdvancedBlockingConfig } from "../types/advancedBlocking";
 import {
-  compareStringArrays,
-  compareUrlArrays,
+    compareStringArrays,
+    compareUrlArrays,
 } from "../utils/arrayComparison";
 import "./ConfigurationPage.css";
 
@@ -84,13 +84,13 @@ export function ConfigurationPage() {
     selectedBlockingMethod,
     reloadBlockingStatus,
     setSelectedBlockingMethod,
-    listDnsFilteringSnapshots,
-    createDnsFilteringSnapshot,
-    restoreDnsFilteringSnapshot,
-    setDnsFilteringSnapshotPinned,
-    getDnsFilteringSnapshot,
-    deleteDnsFilteringSnapshot,
-    updateDnsFilteringSnapshotNote,
+    listConfigSnapshots,
+    createConfigSnapshot,
+    restoreConfigSnapshot,
+    setConfigSnapshotPinned,
+    getConfigSnapshot,
+    deleteConfigSnapshot,
+    updateConfigSnapshotNote,
   } = useTechnitiumState();
 
   // Cluster information
@@ -137,58 +137,55 @@ export function ConfigurationPage() {
     blocked: number;
   } | null>(null);
 
-  const [dnsFilteringSnapshotsOpen, setDnsFilteringSnapshotsOpen] =
-    useState(false);
+  const [configSnapshotsOpen, setConfigSnapshotsOpen] = useState(false);
 
   const builtInSnapshotNodeId = selectedNodeId || nodes[0]?.id || "";
-  const dnsFilteringSnapshotNodeId =
+  const configSnapshotNodeId =
     selectedBlockingMethod === "built-in" ?
       builtInSnapshotNodeId
     : selectedNodeId;
 
   const selectedNodeName = useMemo(() => {
-    if (!dnsFilteringSnapshotNodeId) return undefined;
-    const node = nodes.find((n) => n.id === dnsFilteringSnapshotNodeId);
+    if (!configSnapshotNodeId) return undefined;
+    const node = nodes.find((n) => n.id === configSnapshotNodeId);
     return node?.name;
-  }, [nodes, dnsFilteringSnapshotNodeId]);
+  }, [nodes, configSnapshotNodeId]);
 
   const isSelectedNodeAdvancedBlockingCapable = useMemo(() => {
     const node = nodes.find((n) => n.id === selectedNodeId);
     return Boolean(node?.hasAdvancedBlocking);
   }, [nodes, selectedNodeId]);
 
-  const dnsFilteringSnapshotMethod =
+  const configSnapshotMethod =
     selectedBlockingMethod === "built-in" ?
       ("built-in" as const)
     : ("advanced-blocking" as const);
 
-  const canOpenDnsFilteringSnapshots =
-    dnsFilteringSnapshotMethod === "built-in" ?
-      Boolean(dnsFilteringSnapshotNodeId)
-    : Boolean(
-        dnsFilteringSnapshotNodeId && isSelectedNodeAdvancedBlockingCapable,
-      );
+  const canOpenConfigSnapshots =
+    configSnapshotMethod === "built-in" ?
+      Boolean(configSnapshotNodeId)
+    : Boolean(configSnapshotNodeId && isSelectedNodeAdvancedBlockingCapable);
 
-  const dnsFilteringSnapshotsPullTitle =
-    !dnsFilteringSnapshotNodeId ? "Select a node"
+  const configSnapshotsPullTitle =
+    !configSnapshotNodeId ? "Select a node"
     : (
-      dnsFilteringSnapshotMethod === "advanced-blocking" &&
+      configSnapshotMethod === "advanced-blocking" &&
       !isSelectedNodeAdvancedBlockingCapable
     ) ?
       "Advanced Blocking app not installed on this node"
     : "";
 
-  const handleOpenDnsFilteringSnapshots = useCallback(() => {
-    if (canOpenDnsFilteringSnapshots) {
-      setDnsFilteringSnapshotsOpen(true);
+  const handleOpenConfigSnapshots = useCallback(() => {
+    if (canOpenConfigSnapshots) {
+      setConfigSnapshotsOpen(true);
       return;
     }
 
     const message =
-      dnsFilteringSnapshotsPullTitle ||
+      configSnapshotsPullTitle ||
       "Select a node to view DNS filtering history.";
     pushToast({ message, tone: "info", timeout: 5000 });
-  }, [canOpenDnsFilteringSnapshots, dnsFilteringSnapshotsPullTitle, pushToast]);
+  }, [canOpenConfigSnapshots, configSnapshotsPullTitle, pushToast]);
 
   const handleBuiltInCountsChange = useCallback(
     (counts: { allowed: number; blocked: number }) => {
@@ -1110,6 +1107,93 @@ export function ConfigurationPage() {
     [selectedNodeConfig, testStagedConfig, activeDomainType, activeTab],
   );
 
+  const getDomainListForType = useCallback(
+    (config: AdvancedBlockingConfig, targetGroupName: string): string[] => {
+      const group = config.groups.find((g) => g.name === targetGroupName);
+      if (!group) return [];
+
+      switch (activeDomainType) {
+        case "blocked":
+          return group.blocked || [];
+        case "allowed":
+          return group.allowed || [];
+        case "blockedRegex":
+          return group.blockedRegex || [];
+        case "allowedRegex":
+          return group.allowedRegex || [];
+        default:
+          return [];
+      }
+    },
+    [activeDomainType],
+  );
+
+  const getDomainBadgeEntries = useCallback(
+    (
+      domain: string,
+    ): Array<{
+      groupName: string;
+      status: "committed" | "pending-add" | "pending-remove";
+    }> => {
+      if (
+        activeTab !== "domain-management" ||
+        !selectedNodeConfig?.groups ||
+        !testStagedConfig?.groups
+      ) {
+        return getGroupsForDomain(domain).map((groupName) => ({
+          groupName,
+          status: "committed",
+        }));
+      }
+
+      const orderedGroupNames = new Set<string>();
+      testStagedConfig.groups.forEach((group) =>
+        orderedGroupNames.add(group.name),
+      );
+      selectedNodeConfig.groups.forEach((group) =>
+        orderedGroupNames.add(group.name),
+      );
+
+      const entries: Array<{
+        groupName: string;
+        status: "committed" | "pending-add" | "pending-remove";
+      }> = [];
+
+      Array.from(orderedGroupNames).forEach((groupName) => {
+        const baselineDomains = getDomainListForType(
+          selectedNodeConfig,
+          groupName,
+        );
+        const stagedDomains = getDomainListForType(testStagedConfig, groupName);
+        const inBaseline = baselineDomains.includes(domain);
+        const inStaged = stagedDomains.includes(domain);
+
+        if (inStaged && !inBaseline) {
+          entries.push({ groupName, status: "pending-add" });
+          return;
+        }
+
+        if (!inStaged && inBaseline) {
+          entries.push({ groupName, status: "pending-remove" });
+          return;
+        }
+
+        if (inStaged && inBaseline) {
+          entries.push({ groupName, status: "committed" });
+        }
+      });
+
+      return entries;
+    },
+    [
+      activeTab,
+      selectedNodeConfig,
+      testStagedConfig,
+      getGroupsForDomain,
+      getDomainListForType,
+    ],
+  );
+
   // Helper to toggle group expansion
   const toggleGroupExpansion = useCallback((groupName: string) => {
     setExpandedGroups((prev) => {
@@ -1340,9 +1424,9 @@ export function ConfigurationPage() {
         type="button"
         className="drawer-pull"
         aria-label="Open DNS filtering history"
-        aria-disabled={!canOpenDnsFilteringSnapshots}
-        onClick={handleOpenDnsFilteringSnapshots}
-        title={dnsFilteringSnapshotsPullTitle}
+        aria-disabled={!canOpenConfigSnapshots}
+        onClick={handleOpenConfigSnapshots}
+        title={configSnapshotsPullTitle}
       >
         <FontAwesomeIcon
           icon={faClockRotateLeft}
@@ -1739,8 +1823,8 @@ export function ConfigurationPage() {
                           : <table className="domain-table">
                               <tbody>
                                 {filteredDomains.map((domain) => {
-                                  const domainGroups =
-                                    getGroupsForDomain(domain);
+                                  const domainBadgeEntries =
+                                    getDomainBadgeEntries(domain);
 
                                   return (
                                     <tr
@@ -1769,14 +1853,43 @@ export function ConfigurationPage() {
                                           whiteSpace: "nowrap",
                                         }}
                                       >
-                                        {domainGroups.map((g) => (
-                                          <span
-                                            key={g}
-                                            className="domain-table__badge"
-                                          >
-                                            {g}
-                                          </span>
-                                        ))}
+                                        {domainBadgeEntries.map((entry) => {
+                                          const badgeStateTooltip =
+                                            entry.status === "pending-add" ?
+                                              `${entry.groupName}: Pending add (not yet saved)`
+                                            : (
+                                              entry.status === "pending-remove"
+                                            ) ?
+                                              `${entry.groupName}: Pending removal (not yet saved)`
+                                            : `${entry.groupName}: Saved (committed)`;
+
+                                          return (
+                                            <span
+                                              key={entry.groupName}
+                                              className={`domain-table__badge ${entry.status === "pending-add" ? "domain-table__badge--pending-add" : ""} ${entry.status === "pending-remove" ? "domain-table__badge--pending-remove" : ""}`}
+                                              title={badgeStateTooltip}
+                                              aria-label={badgeStateTooltip}
+                                            >
+                                              {(entry.status ===
+                                                "pending-add" ||
+                                                entry.status ===
+                                                  "pending-remove") && (
+                                                <FontAwesomeIcon
+                                                  icon={
+                                                    (
+                                                      entry.status ===
+                                                      "pending-add"
+                                                    ) ?
+                                                      faPlus
+                                                    : faMinus
+                                                  }
+                                                  className="domain-table__badge-icon"
+                                                />
+                                              )}
+                                              {entry.groupName}
+                                            </span>
+                                          );
+                                        })}
                                       </td>
                                       <td className="domain-table__cell domain-table__cell--right">
                                         <button
@@ -2480,21 +2593,21 @@ export function ConfigurationPage() {
         }
       </section>
 
-      <DnsFilteringSnapshotDrawer
-        isOpen={dnsFilteringSnapshotsOpen}
-        nodeId={dnsFilteringSnapshotNodeId}
+      <ConfigSnapshotDrawer
+        isOpen={configSnapshotsOpen}
+        nodeId={configSnapshotNodeId}
         nodeName={selectedNodeName}
-        method={dnsFilteringSnapshotMethod}
-        onClose={() => setDnsFilteringSnapshotsOpen(false)}
-        listSnapshots={listDnsFilteringSnapshots}
-        createSnapshot={createDnsFilteringSnapshot}
-        restoreSnapshot={restoreDnsFilteringSnapshot}
-        setSnapshotPinned={setDnsFilteringSnapshotPinned}
-        getSnapshotDetail={getDnsFilteringSnapshot}
-        deleteSnapshot={deleteDnsFilteringSnapshot}
-        updateSnapshotNote={updateDnsFilteringSnapshotNote}
+        method={configSnapshotMethod}
+        onClose={() => setConfigSnapshotsOpen(false)}
+        listSnapshots={listConfigSnapshots}
+        createSnapshot={createConfigSnapshot}
+        restoreSnapshot={restoreConfigSnapshot}
+        setSnapshotPinned={setConfigSnapshotPinned}
+        getSnapshotDetail={getConfigSnapshot}
+        deleteSnapshot={deleteConfigSnapshot}
+        updateSnapshotNote={updateConfigSnapshotNote}
         onRestoreSuccess={async () => {
-          if (dnsFilteringSnapshotMethod === "built-in") {
+          if (configSnapshotMethod === "built-in") {
             await reloadBuiltInBlocking();
           } else {
             await reloadAdvancedBlocking();

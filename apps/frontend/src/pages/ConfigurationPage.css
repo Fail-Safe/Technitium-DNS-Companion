@@ -230,7 +230,11 @@
 }
 
 .domain-table__badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  cursor: help;
+  user-select: none;
   padding: 0.2rem 0.5rem;
   margin-left: 4px;
   font-size: 0.7rem;
@@ -238,6 +242,22 @@
   border-radius: 3px;
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
+}
+
+.domain-table__badge--pending-add {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-dark);
+  border: 1px solid var(--color-warning);
+}
+
+.domain-table__badge--pending-remove {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border: 1px solid var(--color-danger);
+}
+
+.domain-table__badge-icon {
+  font-size: 0.6rem;
 }
 
 .domain-table__domain-pill {

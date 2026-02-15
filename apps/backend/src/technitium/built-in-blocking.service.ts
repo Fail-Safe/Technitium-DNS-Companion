@@ -119,31 +119,45 @@ export class BuiltInBlockingService {
         const builtInEnabled = settings.enableBlocking ?? false;
 
         // Check if Advanced Blocking is installed
-        const advancedBlockingInstalled = summary.hasAdvancedBlocking ?? false;
+        // NOTE: /api/apps/list may be unavailable due to permissions/token scope, even when the app is installed.
+        // So we treat the apps/list result as a hint and also probe /api/apps/config/get defensively.
+        let advancedBlockingInstalled = summary.hasAdvancedBlocking ?? false;
 
-        // If Advanced Blocking is installed, check if it's enabled
+        // Probe Advanced Blocking config to confirm install/enabled status.
+        // This makes status detection robust even when apps/list doesn't include the app.
         let advancedBlockingEnabled = false;
-        if (advancedBlockingInstalled) {
-          try {
-            const abOverview = await this.technitiumService.executeAction<{
-              status: string;
-              response?: { config?: string | null };
-            }>(summary.id, {
-              method: "GET",
-              url: "/api/apps/config/get",
-              params: { name: "Advanced Blocking" },
-            });
+        try {
+          const abOverview = await this.technitiumService.executeAction<{
+            status: string;
+            response?: { config?: string | null };
+          }>(summary.id, {
+            method: "GET",
+            url: "/api/apps/config/get",
+            params: { name: "Advanced Blocking" },
+          });
 
-            if (abOverview.status === "ok" && abOverview.response?.config) {
+          if (abOverview.status === "ok") {
+            // If we can reach the config endpoint at all, the app is almost certainly installed.
+            advancedBlockingInstalled = true;
+
+            if (abOverview.response?.config) {
               const config = JSON.parse(abOverview.response.config) as {
                 enableBlocking?: boolean;
               };
               advancedBlockingEnabled = Boolean(config.enableBlocking);
             }
-          } catch {
-            // Advanced Blocking config not accessible, assume not enabled
+          }
+        } catch {
+          // If probing fails:
+          // - keep advancedBlockingInstalled as-is (apps/list hint)
+          // - assume not enabled (safe default)
+          if (advancedBlockingInstalled) {
             this.logger.warn(
-              `Could not get Advanced Blocking config for node "${summary.id}"`,
+              `Could not get Advanced Blocking config for node "${summary.id}" (apps/list indicated installed)`,
+            );
+          } else {
+            this.logger.debug(
+              `Advanced Blocking config probe failed for node "${summary.id}" (apps/list did not indicate installed)`,
             );
           }
         }

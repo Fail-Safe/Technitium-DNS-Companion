@@ -24,11 +24,6 @@ export class AuthGuard implements CanActivate {
       return true;
     }
 
-    const enabled = process.env.AUTH_SESSION_ENABLED === "true";
-    if (!enabled) {
-      return true;
-    }
-
     const req = context.switchToHttp().getRequest<Request>();
     if (!req.secure) {
       throw new ForbiddenException(

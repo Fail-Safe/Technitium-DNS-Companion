@@ -32,8 +32,6 @@ export interface AuthMeResponseDto {
   user?: string;
   nodeIds?: string[];
   configuredNodeIds?: string[];
-  clusterTokenConfigured?: boolean;
-  clusterTokenUsage?: { usedForNodeIds: string[] };
   transport?: {
     requestSecure: boolean;
     httpsEnabled: boolean;
@@ -49,10 +47,4 @@ export interface AuthMeResponseDto {
     reason?: string;
     tooPrivilegedSections?: string[];
   };
-}
-
-export interface AuthMigrateBackgroundTokenResponseDto {
-  username: string;
-  tokenName: string;
-  token: string;
 }

@@ -9,6 +9,47 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- No unreleased changes yet.
+
+## [1.4.0] - 2026-02-14
+
+### Added
+
+- Health Check API enhancements and documentation:
+  - Basic endpoint for container/liveness checks (`/api/health`)
+  - Detailed endpoint for authenticated diagnostics (`/api/health/detailed`)
+- Rule Optimizer UX hardening for safer incremental cleanup:
+  - In-app apply confirmation flow (no browser confirm)
+  - Redundant-regex cleanup mode with explicit messaging
+  - Consistent pre/post-apply verification language and badges
+- Query Logs blocked-domain insight improvements with tooltip enrichment and safer rendering guidance.
+
+### Changed
+
+- Authentication model finalized for v1.4:
+  - Session-auth is now the interactive UI path
+  - Legacy no-login interactive mode removed
+- Frontend architecture and UX consistency improvements:
+  - Unified snapshot drawer scaffolding and naming
+  - App shell/theme context wiring cleanup
+- Docker and build pipeline refinements for more reliable local and CI workflows.
+
+### Removed
+
+- `TECHNITIUM_CLUSTER_TOKEN` support removed.
+- Cluster-token migration UI/API flow removed in favor of background-token model.
+
+### Security
+
+- Session-auth path enforces secure deployment expectations (HTTPS/self-signed support in backend runtime path).
+- Background token model remains least-privilege focused; cluster-token path is fully retired.
+
+### Docs
+
+- Updated auth/session migration, health check API, and release notes documentation for the v1.4 model.
+
 ## [1.3.1] - 2026-01-10
 
 ### Added
@@ -125,7 +166,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Optional session-based authentication behind `AUTH_SESSION_ENABLED=true`, using HttpOnly cookies and server-side session storage.
+- Optional session-based authentication (now required in v1.4+) using HttpOnly cookies and server-side session storage.
 - Dedicated `TECHNITIUM_BACKGROUND_TOKEN` support so background PTR/hostname work can run safely in session-auth mode.
 - Guided migration from `TECHNITIUM_CLUSTER_TOKEN` → `TECHNITIUM_BACKGROUND_TOKEN`, including token creation + validation.
 - Backend Jest tests and frontend Vitest/RTL tests covering the new auth + migration flows.
@@ -148,7 +189,7 @@ All notable changes to this project will be documented in this file.
 
 - Token capability validation for `TECHNITIUM_BACKGROUND_TOKEN` (must be least-privilege); unsafe/unverifiable tokens disable background PTR warming and surface warnings.
 - Implemented a session-token-first approach using Technitium `/api/user/login` expiring tokens (no long-lived admin API tokens by default), while preserving backwards-compatible env-token “service mode”.
-- When `AUTH_SESSION_ENABLED=true`, the backend requires HTTPS and supports TLS-terminating reverse proxies via `TRUST_PROXY=true`.
+- When using session auth, the backend requires HTTPS and supports TLS-terminating reverse proxies via `TRUST_PROXY=true`.
 
 ## [1.1.6] - 2025-12-13
 
@@ -234,7 +275,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.5...v1.3.0
 [1.2.5]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.4...v1.2.5

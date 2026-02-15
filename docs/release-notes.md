@@ -1,5 +1,41 @@
 # Release Notes
 
+## 1.4.0
+
+- **Authentication model finalized**:
+  - Interactive UI now runs with session-based auth as the supported path.
+  - Legacy no-login interactive mode has been removed.
+  - `TECHNITIUM_CLUSTER_TOKEN` and migration UX/API are removed; use `TECHNITIUM_BACKGROUND_TOKEN` for background work.
+
+- **Health checks improved for production operations**:
+  - `GET /api/health` is optimized for Docker/liveness checks.
+  - `GET /api/health/detailed` provides authenticated diagnostics for deeper monitoring.
+
+- **Rule Optimizer UX safety and clarity pass**:
+  - Preview/apply flow now uses explicit in-app confirmation.
+  - Redundancy-aware actions identify already-covered domains and offer **Remove redundant regex** semantics.
+  - Post-apply verification messaging and badges are clearer for rollback confidence.
+
+- **Frontend consistency + snapshot UX cleanup**:
+  - Snapshot drawer patterns were unified to reduce UI drift across configuration surfaces.
+  - App shell/theme/context wiring was cleaned up for more predictable behavior.
+
+- **Query Logs blocked-domain insight improvements**:
+  - Improved “Likely blocked by” tooltip behavior, including caching/debounce and clearer UX.
+
+### Upgrade notes
+
+- If you still rely on `TECHNITIUM_CLUSTER_TOKEN`, migrate to `TECHNITIUM_BACKGROUND_TOKEN` before or during this upgrade.
+- Verify your deployment is configured for session-auth expectations (HTTPS/TLS path as documented).
+- For Docker health checks, point probes to `/api/health`.
+
+### Tonight release sanity pass
+
+1. Confirm `CHANGELOG.md` includes `## [1.4.0] - 2026-02-14` on the tagged commit.
+2. Confirm environment docs/examples no longer imply `TECHNITIUM_CLUSTER_TOKEN` usage.
+3. Run backend build/tests and frontend build smoke checks.
+4. Tag from the intended release commit and push `v1.4.0`.
+
 ## 1.3.1
 
 - **Query Logs: paginated page size setting**: Rows-per-page is now configurable in “Table settings” (25/50/100/200) and defaults to **25** for new installs.
@@ -14,10 +50,10 @@ No config changes are required to upgrade. Optional tuning is available via `QUE
 
 ## 1.2 (Draft)
 
-- **Optional session authentication**: The UI can require users to sign in with their Technitium DNS credentials (TOTP/2FA supported). This is opt-in via `AUTH_SESSION_ENABLED=true`.
-- **Planned v1.3+ direction**: Session auth is expected to become the default (and eventually required) in a follow-up release.
+- **Session authentication**: Users sign in with their Technitium DNS credentials (TOTP/2FA supported). (v1.4+: required for interactive UI).
+- **Planned v1.3+ direction**: Session auth was expected to become the default (and eventually required) in a follow-up release.
 - **Safer background token model**: Background PTR lookups run using `TECHNITIUM_BACKGROUND_TOKEN` (validated for least privilege).
-- **Guided migration from cluster token**: When session auth is enabled and `TECHNITIUM_CLUSTER_TOKEN` is still configured, the UI provides a guided migration flow to create a dedicated read-only user/token.
+- **Guided migration from cluster token**: This existed in earlier versions, but `TECHNITIUM_CLUSTER_TOKEN` and the guided migration flow are removed in v1.4.
 - **Remote dev ergonomics**: `./scripts/remote-dev.sh recreate` force-recreates the dev container so `.env` changes take effect.
 - **Details**: [Optional session auth + token migration guide](./release-notes-v1.2-session-auth-migration.md)
 

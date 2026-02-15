@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import crypto from "crypto";
 import { promises as fs } from "fs";
 import os from "os";
@@ -26,6 +32,7 @@ export class DnsFilteringSnapshotService {
 
   constructor(
     private readonly builtInBlockingService: BuiltInBlockingService,
+    @Inject(forwardRef(() => AdvancedBlockingService))
     private readonly advancedBlockingService: AdvancedBlockingService,
   ) {
     const envDir = process.env.DNS_FILTERING_SNAPSHOT_DIR;

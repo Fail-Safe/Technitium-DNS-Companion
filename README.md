@@ -1,6 +1,6 @@
 # Technitium DNS Companion
 
-A multi-node companion tool for aiding in day-to-day management of Technitium DNS servers. Currently offers additional functionality for:
+A multi-node companion tool for aiding in day-to-day management of [Technitium DNS servers](https://technitium.com/dns/). Currently offers additional functionality for:
 
 - DNS Query Logs (DNS Logs)
 - Advanced Blocking App upkeep (DNS Filtering)
@@ -9,24 +9,23 @@ A multi-node companion tool for aiding in day-to-day management of Technitium DN
 
 One primary goal of this project is to provide a more mobile-friendly interface for managing day-to-day DNS functions, enabling administrators to perform common tasks (like domain blocking/unblocking) from smartphones and tablets with ease.
 
-This project is **not affiliated with Technitium** but is built to complement Technitium DNS server deployments and not to replace functionality.
+This project is **not affiliated with Technitium** but is built to complement [Technitium DNS server](https://technitium.com/dns/) deployments and not to replace functionality.
 
-## Authentication (as of v1.2.1)
+## Authentication (v1.4+)
 
-As of **v1.2.1**, the preferred authentication mechanism is **Technitium DNS-backed session authentication**:
+As of **v1.4**, interactive UI access uses **Technitium DNS-backed session authentication**:
 
 - Users sign in with their **Technitium DNS username/password** (and 2FA if enabled).
 - The Companion stores Technitium session tokens **server-side** and the browser receives only an **HttpOnly session cookie**.
 - This keeps interactive permissions aligned with the Technitium account the user actually logged in with.
 
-Legacy “env-token mode” (configuring the Companion with long-lived admin API tokens) is still supported (for a limited time), but is no longer the recommended default, nor long-term approach for deployments.
+Legacy “env-token mode” (configuring the Companion with long-lived API tokens) is intended for legacy/migration use only.
 
-Planned changes:
+Security posture (v1.4+):
 
-- **v1.3.x (direction)**: `TECHNITIUM_CLUSTER_TOKEN` is **deprecated**. Background jobs (e.g., PTR hostname warming, scheduled sync) are expected to require a dedicated `TECHNITIUM_BACKGROUND_TOKEN` (instead of using an admin token).
-- **v1.4**:
-  - Interactive UI access requires session auth (Technitium login/RBAC). The `AUTH_SESSION_ENABLED` opt-in toggle will be removed in v1.4.
-  - `TECHNITIUM_CLUSTER_TOKEN` support is planned to be **removed**.
+- Interactive UI access requires session auth (Technitium login/RBAC).
+- `TECHNITIUM_CLUSTER_TOKEN` support is removed.
+- Background jobs use `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege) since background tasks do not have a user session.
 
 Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)
 
@@ -96,9 +95,6 @@ TECHNITIUM_NODES=primary,secondary1,secondary2
 TECHNITIUM_PRIMARY_BASE_URL=https://primary.home.arpa:53443
 TECHNITIUM_SECONDARY1_BASE_URL=https://secondary1.home.arpa:53443
 TECHNITIUM_SECONDARY2_BASE_URL=https://secondary2.home.arpa:53443
-
-# Interactive UI access (recommended; required starting v1.4)
-AUTH_SESSION_ENABLED=true
 
 # Background jobs (recommended): least-privilege token
 # TECHNITIUM_BACKGROUND_TOKEN=your-low-privilege-token
@@ -171,6 +167,11 @@ These features write data to disk and are disabled unless explicitly enabled/con
 - **Zone Comparison** - Compare DNS zones across nodes and identify differences
 - **DHCP Management** - View and clone DHCP scopes across nodes
 - **Auto-Detection** - Automatically detects which apps are installed on each node
+
+### Monitoring & Operations
+
+- **Health Check API** - Built-in health check endpoints for Docker health checks and external monitoring (see [docs/features/HEALTH_CHECK_API.md](docs/features/HEALTH_CHECK_API.md))
+- **Performance Optimizations** - Caching, deduplication, and throttling for efficient operation
 
 ### User Experience
 

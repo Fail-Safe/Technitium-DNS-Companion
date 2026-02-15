@@ -43,10 +43,9 @@ Runs the single container that serves both the API and built frontend. Use this 
 - Minimum variables:
   - `TECHNITIUM_NODES=node1,node2`
   - `TECHNITIUM_<NODE>_BASE_URL` for each node.
-  - Recommended (and required starting in v1.4): `AUTH_SESSION_ENABLED=true` (Technitium login/RBAC for UI access).
+  - Required for interactive UI access (v1.4+): Technitium login/RBAC (session auth).
   - Recommended for background features in session-auth mode: `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege, read-only).
   - Legacy only (Technitium DNS < v14 / migration): env-token mode using `TECHNITIUM_<NODE>_TOKEN`.
-  - `TECHNITIUM_CLUSTER_TOKEN` is deprecated as of v1.3.0 (legacy / migration source) and will be removed in v1.4.
 - Optional: set `TZ`, `CORS_ORIGINS`, and HTTPS variables.
 
 2. Run the container:
@@ -77,7 +76,7 @@ QUERY_LOG_SQLITE_OVERLAP_SECONDS=60
 QUERY_LOG_SQLITE_MAX_ENTRIES_PER_POLL=20000
 ```
 
-- If you are using session auth (`AUTH_SESSION_ENABLED=true`), ingestion runs as a background task and requires `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege token that can read query logs). Without it, the DB may exist but will not stay up to date.
+- With session auth (v1.4+: always enabled for interactive UI), ingestion runs as a background task and requires `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege token that can read query logs). Without it, the DB may exist but will not stay up to date.
 
 - HTTP: http://localhost:3000
 - HTTPS (if enabled): https://localhost:3443
@@ -156,7 +155,6 @@ common `_FILE` suffix pattern.
 
 | Environment Variable                  | File Variant                           |
 |---------------------------------------|----------------------------------------|
-| `TECHNITIUM_CLUSTER_TOKEN`            | `TECHNITIUM_CLUSTER_TOKEN_FILE`        |
 | `TECHNITIUM_BACKGROUND_TOKEN`         | `TECHNITIUM_BACKGROUND_TOKEN_FILE`     |
 | `TECHNITIUM_<NODE>_TOKEN`             | `TECHNITIUM_<NODE>_TOKEN_FILE`         |
 
@@ -168,7 +166,6 @@ The `_FILE` variant takes precedence if both are set.
 1. Create the secrets:
 
 ```bash
-echo "your-cluster-token" | docker secret create technitium_cluster_token -
 echo "your-background-token" | docker secret create technitium_background_token -
 ```
 
@@ -184,12 +181,9 @@ services:
       TECHNITIUM_NODES: "node1,node2"
       TECHNITIUM_NODE1_BASE_URL: "http://dns1.example.com:5380"
       TECHNITIUM_NODE2_BASE_URL: "http://dns2.example.com:5380"
-      AUTH_SESSION_ENABLED: "true"
       # Use _FILE variants for secrets
-      TECHNITIUM_CLUSTER_TOKEN_FILE: /run/secrets/technitium_cluster_token
       TECHNITIUM_BACKGROUND_TOKEN_FILE: /run/secrets/technitium_background_token
     secrets:
-      - technitium_cluster_token
       - technitium_background_token
     ports:
       - "3000:3000"
@@ -197,8 +191,6 @@ services:
       - companion-data:/data
 
 secrets:
-  technitium_cluster_token:
-    external: true
   technitium_background_token:
     external: true
 
@@ -212,7 +204,6 @@ volumes:
 
 ```bash
 kubectl create secret generic technitium-tokens \
-  --from-literal=cluster-token='your-cluster-token' \
   --from-literal=background-token='your-background-token'
 ```
 
@@ -232,8 +223,6 @@ spec:
           env:
             - name: TECHNITIUM_NODES
               value: "node1,node2"
-            - name: TECHNITIUM_CLUSTER_TOKEN_FILE
-              value: /secrets/cluster-token
             - name: TECHNITIUM_BACKGROUND_TOKEN_FILE
               value: /secrets/background-token
           volumeMounts:

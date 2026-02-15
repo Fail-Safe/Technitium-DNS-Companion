@@ -17,6 +17,19 @@ In short:
 - Patch releases `vX.Y.Z` are typically cut from `release/X.Y` (often created only when an urgent patch is needed).
 - Minor releases `vX.(Y+1).0` are cut from `main` after merging `next`.
 
+## Release-Night Checklist (v1.4.0)
+
+When releasing a larger minor version, do this pass before tagging:
+
+1. Ensure `CHANGELOG.md` has a finalized `## [1.4.0] - YYYY-MM-DD` section (not only `Unreleased`).
+2. Ensure release docs are aligned:
+   - `docs/release-notes.md`
+   - `docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md`
+   - `docs/features/HEALTH_CHECK_API.md`
+3. Confirm env/documentation consistency for removed/deprecated auth variables (especially cluster token references).
+4. Run workspace build/test smoke checks.
+5. Tag and push only after verifying the tag points at the commit containing all release docs/changelog updates.
+
 ## Quick Sanity Checklist (Do This Every Time)
 
 1. **Bump versions (if needed)**

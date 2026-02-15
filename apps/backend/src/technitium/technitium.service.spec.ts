@@ -594,16 +594,13 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
 });
 
 describe("TechnitiumService request (session auth)", () => {
-  const originalAuthSessionEnabled = process.env.AUTH_SESSION_ENABLED;
   let service: TechnitiumService;
 
   beforeEach(() => {
-    process.env.AUTH_SESSION_ENABLED = "true";
     service = new TechnitiumService([], new DhcpSnapshotService());
   });
 
   afterEach(() => {
-    process.env.AUTH_SESSION_ENABLED = originalAuthSessionEnabled;
     jest.restoreAllMocks();
     service.onModuleDestroy();
   });

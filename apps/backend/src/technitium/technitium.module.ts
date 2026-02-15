@@ -49,7 +49,6 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
       provide: TECHNITIUM_NODES_TOKEN,
       useFactory: (): TechnitiumNodeConfig[] => {
         const logger = new Logger("TechnitiumConfig");
-        const sessionAuthEnabled = process.env.AUTH_SESSION_ENABLED === "true";
         const isTestRunner =
           process.env.JEST_WORKER_ID !== undefined ||
           process.env.NODE_ENV === "test";
@@ -77,26 +76,14 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
           .map((value) => value.trim())
           .filter(Boolean);
 
-        // Cluster-wide token (deprecated legacy fallback for all nodes)
-        const clusterToken = process.env.TECHNITIUM_CLUSTER_TOKEN;
-
-        if ((clusterToken ?? "").trim().length > 0) {
-          logger.warn(
-            "TECHNITIUM_CLUSTER_TOKEN is deprecated as of v1.3.0 and is planned to be removed in v1.4. " +
-              "Prefer Technitium-backed session auth (AUTH_SESSION_ENABLED=true) for interactive UI usage and TECHNITIUM_BACKGROUND_TOKEN for background jobs. " +
-              "Per-node TECHNITIUM_<NODE>_TOKEN is legacy-only for Technitium DNS < v14.",
-          );
-        }
-
         const configs: TechnitiumNodeConfig[] = [];
 
         for (const id of ids) {
           const sanitizedKey = id.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
           const name = process.env[`TECHNITIUM_${sanitizedKey}_NAME`];
           const baseUrl = process.env[`TECHNITIUM_${sanitizedKey}_BASE_URL`];
-          // Check node-specific token first (legacy), then fall back to cluster token (deprecated)
-          const token =
-            process.env[`TECHNITIUM_${sanitizedKey}_TOKEN`] || clusterToken;
+          // Legacy env-token mode uses per-node tokens only (Technitium DNS < v14 / migration).
+          const token = process.env[`TECHNITIUM_${sanitizedKey}_TOKEN`];
           const queryLoggerAppName =
             process.env[`TECHNITIUM_${sanitizedKey}_QUERY_LOGGER_APP_NAME`];
           const queryLoggerClassPath =
@@ -109,16 +96,9 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
             continue;
           }
 
-          if (!token && !sessionAuthEnabled) {
+          if (!token) {
             logger.warn(
-              `Skipping node "${id}" because neither TECHNITIUM_${sanitizedKey}_TOKEN nor TECHNITIUM_CLUSTER_TOKEN is set.`,
-            );
-            continue;
-          }
-
-          if (!token && sessionAuthEnabled) {
-            logger.warn(
-              `Node "${id}" has no env token configured; AUTH_SESSION_ENABLED=true so it will require user login sessions.`,
+              `Node "${id}" has no env token configured; it will require user login sessions for interactive access (v1.4+).`,
             );
           }
 

@@ -1,32 +1,32 @@
 import {
-  faBan,
-  faCheck,
-  faCheckCircle,
-  faExclamationTriangle,
-  faExternalLinkAlt,
-  faGear,
-  faList,
-  faPencil,
-  faPlus,
-  faSearch,
-  faShieldAlt,
-  faSitemap,
-  faSpinner,
-  faSync,
-  faTimes,
-  faTrash,
+    faBan,
+    faCheck,
+    faCheckCircle,
+    faExclamationTriangle,
+    faExternalLinkAlt,
+    faGear,
+    faList,
+    faPencil,
+    faPlus,
+    faSearch,
+    faShieldAlt,
+    faSitemap,
+    faSpinner,
+    faSync,
+    faTimes,
+    faTrash,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTechnitiumState } from "../../context/useTechnitiumState";
 import { useToast } from "../../context/useToast";
 import {
-  useBlockListCatalog,
-  type HageziListInfo,
+    useBlockListCatalog,
+    type HageziListInfo,
 } from "../../hooks/useBlockListCatalog";
 import type {
-  BlockingSettings,
-  BuiltInBlockingSnapshot,
+    BlockingSettings,
+    BuiltInBlockingSnapshot,
 } from "../../types/builtInBlocking";
 import { validateDomain } from "../../utils/domainValidation";
 import "./BuiltInBlockingEditor.css";
@@ -204,7 +204,7 @@ export function BuiltInBlockingEditor({
     temporaryDisableBlocking,
     reEnableBlocking,
     forceBlockListUpdate,
-    createDnsFilteringSnapshot,
+    createConfigSnapshot,
   } = useTechnitiumState();
   const { pushToast } = useToast();
   const {
@@ -1047,7 +1047,7 @@ export function BuiltInBlockingEditor({
     try {
       // Capture an automatic snapshot for rollback before applying changes
       try {
-        await createDnsFilteringSnapshot(selectedNodeId, {
+        await createConfigSnapshot(selectedNodeId, {
           method: "built-in",
           origin: "automatic",
         });
@@ -1185,7 +1185,7 @@ export function BuiltInBlockingEditor({
   }, [
     selectedNodeId,
     isDirty,
-    createDnsFilteringSnapshot,
+    createConfigSnapshot,
     customAddressError,
     draftSettings,
     settings,

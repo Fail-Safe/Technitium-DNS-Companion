@@ -62,6 +62,28 @@ npm run test:e2e
 npm run test:e2e:ui
 ```
 
+#### One-time browser install (required on first run / after Playwright updates)
+Playwright downloads and manages its own browser binaries (Chromium / Firefox / WebKit). If you see errors like “Executable doesn't exist…”, install the browsers:
+
+```bash
+npx playwright install
+```
+
+If you’re on a fresh machine and WebKit has extra system requirements, you can also try:
+
+```bash
+npx playwright install --with-deps
+```
+
+#### Viewing the HTML report
+After a run, you can open the last HTML report with:
+
+```bash
+npx playwright show-report
+```
+
+By default, this starts a local report server (often `http://localhost:9323/`).
+
 **Note**: E2E tests require both backend and frontend to be running.
 
 ## Building

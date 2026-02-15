@@ -5,77 +5,59 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Testing
-coverage
-.nyc_output
-*.test.ts
-*.test.tsx
-*.spec.ts
-*.spec.tsx
-test/
-tests/
-__tests__/
-e2e/
-playwright-report/
-
-# Build outputs
-dist
-build
-.next
-out
-
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# IDE
-.vscode
-.idea
-*.swp
-*.swo
-*~
-.DS_Store
-
 # Git
 .git
 .gitignore
 .gitattributes
 
-# CI/CD
-.github
-
 # Documentation
+README.md
+CHANGELOG.md
 docs/
 *.md
-!README.md
+*.txt
+*.md.*
 
-# Logs
-logs
+# Testing
+test/
+coverage/
+.nyc_output/
 *.log
 
-# Temporary files
-tmp/
-temp/
-.cache
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# Backups
-backups/
+# Build artifacts
+dist/
+build/
+.next/
+out/
 
-# Scripts not needed in container
-scripts/
-*.sh
-!docker-entrypoint-dev.sh
+# Environment files (optional - comment out if you need them in the image)
+.env
+.env.*
+!.env.example
 
-# Docker files (don't need inside image)
+# Docker
 Dockerfile*
 docker-compose*.yml
 .dockerignore
+.docker
+*.dockerfile
 
-# Misc
-.prettierrc
-.eslintrc*
-eslint.config.*
-.editorconfig
-.nvmrc
-tsconfig.tsbuildinfo
+# CI/CD
+.github/
+.gitlab-ci.yml
+Jenkinsfile
+.travis.yml
+
+# Other
+*.bak
+*.tmp
+.cache/
+.parcel-cache/
+.turbo/

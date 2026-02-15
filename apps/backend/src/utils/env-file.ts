@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "fs";
 import { Logger } from "@nestjs/common";
+import { existsSync, readFileSync } from "fs";
 
 const logger = new Logger("EnvFile");
 
@@ -76,7 +76,6 @@ export function getEnvOrFile(
  * any module that reads environment variables.
  *
  * Supported variables:
- * - TECHNITIUM_CLUSTER_TOKEN
  * - TECHNITIUM_BACKGROUND_TOKEN
  * - TECHNITIUM_<NODE>_TOKEN (for each node in TECHNITIUM_NODES)
  *
@@ -85,10 +84,7 @@ export function getEnvOrFile(
  * resolveEnvFileVariables();
  */
 export function resolveEnvFileVariables(): void {
-  const sensitiveVars = [
-    "TECHNITIUM_CLUSTER_TOKEN",
-    "TECHNITIUM_BACKGROUND_TOKEN",
-  ];
+  const sensitiveVars = ["TECHNITIUM_BACKGROUND_TOKEN"];
 
   // Resolve statically-known sensitive variables
   for (const envVar of sensitiveVars) {

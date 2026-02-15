@@ -1,18 +1,18 @@
 import { CacheInterceptor, CacheTTL } from "@nestjs/cache-manager";
 import {
-  BadRequestException,
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Logger,
-  NotFoundException,
-  Param,
-  Patch,
-  Post,
-  Query,
-  Res,
-  UseInterceptors,
+    BadRequestException,
+    Body,
+    Controller,
+    Delete,
+    Get,
+    Logger,
+    NotFoundException,
+    Param,
+    Patch,
+    Post,
+    Query,
+    Res,
+    UseInterceptors,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import type { Response } from "express";
@@ -22,19 +22,19 @@ import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
 import { QueryLogSqliteService } from "./query-log-sqlite.service";
 import { TechnitiumService } from "./technitium.service";
 import type {
-  DhcpBulkSyncRequest,
-  DhcpSnapshotOrigin,
-  DnsFilteringSnapshot,
-  DnsFilteringSnapshotMetadata,
-  DnsFilteringSnapshotMethod,
-  DnsFilteringSnapshotOrigin,
-  DnsFilteringSnapshotRestoreResult,
-  TechnitiumCloneDhcpScopeRequest,
-  TechnitiumCreateDhcpScopeRequest,
-  TechnitiumQueryLogFilters,
-  TechnitiumRenameDhcpScopeRequest,
-  TechnitiumUpdateDhcpScopeRequest,
-  ZoneSnapshotOrigin,
+    DhcpBulkSyncRequest,
+    DhcpSnapshotOrigin,
+    DnsFilteringSnapshot,
+    DnsFilteringSnapshotMetadata,
+    DnsFilteringSnapshotMethod,
+    DnsFilteringSnapshotOrigin,
+    DnsFilteringSnapshotRestoreResult,
+    TechnitiumCloneDhcpScopeRequest,
+    TechnitiumCreateDhcpScopeRequest,
+    TechnitiumQueryLogFilters,
+    TechnitiumRenameDhcpScopeRequest,
+    TechnitiumUpdateDhcpScopeRequest,
+    ZoneSnapshotOrigin,
 } from "./technitium.types";
 
 @Controller("nodes")
@@ -367,9 +367,13 @@ export class TechnitiumController {
     },
   ): Promise<DnsFilteringSnapshotMetadata> {
     const method = body?.method;
-    if (method !== "built-in" && method !== "advanced-blocking") {
+    if (
+      method !== "built-in" &&
+      method !== "advanced-blocking" &&
+      method !== "rule-optimizer"
+    ) {
       throw new BadRequestException(
-        "method is required and must be 'built-in' or 'advanced-blocking'",
+        "method is required and must be 'built-in', 'advanced-blocking', or 'rule-optimizer'",
       );
     }
 
@@ -387,9 +391,13 @@ export class TechnitiumController {
     @Param("nodeId") nodeId: string,
     @Query("method") method?: DnsFilteringSnapshotMethod,
   ): Promise<DnsFilteringSnapshotMetadata[]> {
-    if (method !== "built-in" && method !== "advanced-blocking") {
+    if (
+      method !== "built-in" &&
+      method !== "advanced-blocking" &&
+      method !== "rule-optimizer"
+    ) {
       throw new BadRequestException(
-        "Query parameter 'method' is required and must be 'built-in' or 'advanced-blocking'",
+        "Query parameter 'method' is required and must be 'built-in', 'advanced-blocking', or 'rule-optimizer'",
       );
     }
     return this.dnsFilteringSnapshotService.listSnapshots(nodeId, method);

@@ -38,8 +38,6 @@ services:
       # - Option A: enable Companion HTTPS above and mount certs below
       # - Option B: terminate TLS in a reverse proxy and set TRUST_PROXY=true
       #
-      # Session auth toggle (recommended):
-      # AUTH_SESSION_ENABLED: "true"
       # v1.4+: the interactive UI requires session auth (Technitium DNS login/RBAC).
       # TRUST_PROXY: "true"
       # TRUST_PROXY_HOPS: "1"
@@ -56,13 +54,8 @@ services:
 
       # Legacy env-token mode (legacy/migration only)
       #
-      # In session-auth deployments, TECHNITIUM_*_TOKEN / TECHNITIUM_CLUSTER_TOKEN are OPTIONAL.
-      # If you leave tokens blank, API calls require a logged-in user session.
-      #
-      # Cluster token (legacy env-token mode)
-      # DEPRECATION NOTE: TECHNITIUM_CLUSTER_TOKEN is deprecated (v1.3) and will be removed in v1.4.
-      # Prefer Technitium-backed login sessions (interactive) + TECHNITIUM_BACKGROUND_TOKEN (background).
-      TECHNITIUM_CLUSTER_TOKEN: ${TECHNITIUM_CLUSTER_TOKEN:-}
+      # In v1.4+, interactive API calls require a logged-in user session.
+      # If you leave tokens blank, interactive calls work after login; legacy env-token mode is intended only for legacy/migration.
 
       # Node 1 Configuration
       TECHNITIUM_NODE1_NAME: "DNS Primary"
@@ -76,7 +69,7 @@ services:
       # TECHNITIUM_NODE1_TOKEN: ${TECHNITIUM_NODE1_TOKEN:-}
       # TECHNITIUM_NODE2_TOKEN: ${TECHNITIUM_NODE2_TOKEN:-}
 
-      # Optional: Background token (least-privilege) for background jobs when session auth is enabled
+      # Optional: Background token (least-privilege) for background jobs
       # If unset, background jobs that require a token may be disabled.
       # NOTE: This is expected to be REQUIRED when using session auth if you want background
       # features (PTR warming, scheduled sync) to run.
@@ -91,6 +84,17 @@ services:
     #   # Optional: Mount config directory
     #   - ./config:/app/config
     volumes: []
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget --no-check-certificate --no-verbose --tries=1 --spider https://localhost:${HTTPS_PORT:-3443}/api/health || wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/api/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
     networks:
       - technitium-dns-companion-network

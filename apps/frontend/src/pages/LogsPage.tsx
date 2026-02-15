@@ -24,7 +24,7 @@ import {
   SkeletonLogsSummary,
 } from "../components/common/LoadingSkeleton";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
-import { getAuthRedirectReason } from "../config";
+import { apiFetch, getAuthRedirectReason } from "../config";
 import { useTechnitiumState } from "../context/useTechnitiumState";
 import { useToast } from "../context/useToast";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
@@ -32,6 +32,7 @@ import type {
   AdvancedBlockingConfig,
   AdvancedBlockingGroup,
 } from "../types/advancedBlocking";
+import type { DomainCheckResult, DomainListEntry } from "../types/technitium";
 import type {
   TechnitiumCombinedNodeLogSnapshot,
   TechnitiumCombinedQueryLogEntry,
@@ -72,6 +73,13 @@ const REFRESH_OPTIONS = [
 // in-flight guard stuck and stops auto-refresh permanently until a focus/resume
 // event happens. Enforce a hard timeout so the page can self-recover.
 const LOGS_FETCH_TIMEOUT_MS = 25000;
+
+// Domain-list check calls can hang (sleep/VPN/offline). Enforce a hard timeout so
+// tooltip lookups don't get stuck showing "Looking up block sources…" forever.
+const DOMAIN_BLOCK_SOURCE_FETCH_TIMEOUT_MS = 12000;
+
+const DOMAIN_BLOCK_SOURCE_HOVER_DELAY_MS = 300;
+const DOMAIN_BLOCK_SOURCE_CACHE_MAX_ENTRIES = 500;
 
 type OptionalColumnKey = "protocol" | "qclass" | "answer" | "responseTime";
 
@@ -127,18 +135,6 @@ const DEDUPLICATE_DOMAINS_STORAGE_KEY = "technitiumLogs.deduplicateDomains";
 const FILTER_TIP_DISMISSED_KEY = "technitiumLogs.filterTipDismissed";
 const SELECTION_TIP_DISMISSED_KEY = "technitiumLogs.selectionTipDismissed";
 const MOBILE_LAYOUT_MODE_KEY = "technitiumLogs.mobileLayoutMode";
-const LOGS_DEBUG_RESUME_STORAGE_KEY = "technitiumLogs.debugResume";
-
-const isLogsResumeDebugEnabled = () => {
-  if (typeof window === "undefined") return false;
-  try {
-    return (
-      window.localStorage.getItem(LOGS_DEBUG_RESUME_STORAGE_KEY) === "true"
-    );
-  } catch {
-    return false;
-  }
-};
 
 const BLOCKED_RESPONSE_KEYWORDS = ["block", "filter", "deny"];
 const EMPTY_RESPONSE_FILTER_VALUE = "__EMPTY__";
@@ -181,11 +177,11 @@ function FloatingLiveToggle({
         isLive ? "Pause live updates" : (pausedTitle ?? "Resume live updates")
       }
       style={
-        isLive ?
-          ({
-            "--refresh-duration": `${refreshSeconds}s`,
-          } as React.CSSProperties)
-        : undefined
+        isLive
+          ? ({
+              "--refresh-duration": `${refreshSeconds}s`,
+            } as React.CSSProperties)
+          : undefined
       }
     >
       {/* Progress ring (only shown when live) */}
@@ -205,7 +201,7 @@ function FloatingLiveToggle({
       )}
 
       {/* Icon */}
-      {isLive ?
+      {isLive ? (
         <svg
           className="logs-page__floating-live-icon"
           viewBox="0 0 24 24"
@@ -218,7 +214,8 @@ function FloatingLiveToggle({
           <rect x="6" y="4" width="4" height="16" />
           <rect x="14" y="4" width="4" height="16" />
         </svg>
-      : <svg
+      ) : (
+        <svg
           className="logs-page__floating-live-icon"
           viewBox="0 0 24 24"
           fill="none"
@@ -229,7 +226,7 @@ function FloatingLiveToggle({
         >
           <polygon points="5 3 19 12 5 21 5 3" />
         </svg>
-      }
+      )}
     </button>
   );
 }
@@ -502,6 +499,7 @@ const buildTableColumns = (
     entry: TechnitiumCombinedQueryLogEntry,
     shiftKey: boolean,
   ) => void,
+  onDomainHover: (entry: TechnitiumCombinedQueryLogEntry) => void,
   selectedDomains: Set<string>,
   onToggleDomain: (domain: string) => void,
   domainToGroupMap: Map<string, number>,
@@ -613,7 +611,16 @@ const buildTableColumns = (
             className="logs-page__client-info"
             data-copy-ip={hasIp ? entry.clientIpAddress : undefined}
             data-copy-hostname={hasHostname ? entry.clientName : undefined}
-            onClick={(e) => onClientClick(entry, e.shiftKey)}
+            onMouseDown={(e) => {
+              // Prevent the browser from initiating text selection on Shift+Click.
+              // (Shift is also used as a modifier for filter composition.)
+              if (e.shiftKey) e.preventDefault();
+            }}
+            onClick={(e) => {
+              // Also prevent selection in cases where the browser already started selecting.
+              if (e.shiftKey) e.preventDefault();
+              onClientClick(entry, e.shiftKey);
+            }}
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
@@ -623,7 +630,7 @@ const buildTableColumns = (
               }
             }}
           >
-            {hasHostname && hasIp ?
+            {hasHostname && hasIp ? (
               <>
                 <div className="logs-page__client-hostname">
                   {entry.clientName}
@@ -632,14 +639,15 @@ const buildTableColumns = (
                   {entry.clientIpAddress}
                 </div>
               </>
-            : hasHostname ?
+            ) : hasHostname ? (
               <div className="logs-page__client-hostname">
                 {entry.clientName}
               </div>
-            : <div className="logs-page__client-ip">
+            ) : (
+              <div className="logs-page__client-ip">
                 {entry.clientIpAddress}
               </div>
-            }
+            )}
           </div>
         );
       },
@@ -711,9 +719,8 @@ const buildTableColumns = (
       cellClassName: "logs-page__cell--status",
       render: (entry) => {
         const blocked = isEntryBlocked(entry);
-        const statusClass =
-          blocked ?
-            "logs-page__status-button--blocked"
+        const statusClass = blocked
+          ? "logs-page__status-button--blocked"
           : "logs-page__status-button--allowed";
         const label = blocked ? "Blocked" : "Allowed";
         const hoverLabel = blocked ? "Allow?" : "Block?";
@@ -775,31 +782,61 @@ const buildTableColumns = (
           return domain;
         }
 
+        /**
+         * SECURITY NOTE (XSS):
+         * This column builds a small HTML snippet for the tooltip and later renders it via
+         * `dangerouslySetInnerHTML` (see the shared tooltip render() below).
+         *
+         * Query logs (domains/answers/etc.) can be influenced by network clients, so treat
+         * these values as untrusted input.
+         *
+         * Mitigation:
+         * - Every dynamic/untrusted value interpolated into the tooltip HTML MUST be escaped
+         *   using `escapeTooltipHtml()`.
+         * - Only static markup (our own <div>/<strong> structure and a few CSS classes) is
+         *   allowed to remain unescaped.
+         *
+         * If you add new fields to this tooltip, do not interpolate raw values.
+         */
+        const escapeTooltipHtml = (value: string): string => {
+          return value
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;");
+        };
+
+        const isBlocked = isEntryBlocked(entry);
+
         // Build comprehensive tooltip with entry and block/allow information
         const groupDetails = domainGroupDetailsMap.get(domain);
 
-        // Build HTML string for tooltip content
+        // Build HTML string for tooltip content.
+        // IMPORTANT: Any dynamic values must be escaped via `escapeTooltipHtml()`.
         // let tooltipHtml = `<div style="font-family: 'Menlo, Monaco, Consolas, monospace'; line-height: 1.5;">`;
-        let tooltipHtml = `<div><strong>Domain:</strong> ${domain}</div>`;
-        tooltipHtml += `<div><strong>Type:</strong> ${entry.qtype ?? "Unknown"}</div>`;
+        let tooltipHtml = `<div><strong>Domain:</strong> ${escapeTooltipHtml(domain)}</div>`;
+        tooltipHtml += `<div><strong>Type:</strong> ${escapeTooltipHtml(entry.qtype ?? "Unknown")}</div>`;
 
         if (entry.responseType) {
           const iconChar =
-            entry.responseType === "Blocked" ? "🚫"
-            : entry.responseType === "Allowed" ? "✅"
-            : "📄";
-          tooltipHtml += `<div style="margin-top: 8px;"><strong>Status:</strong> ${iconChar} ${entry.responseType}</div>`;
+            entry.responseType === "Blocked"
+              ? "🚫"
+              : entry.responseType === "Allowed"
+                ? "✅"
+                : "📄";
+          tooltipHtml += `<div style="margin-top: 8px;"><strong>Status:</strong> ${iconChar} ${escapeTooltipHtml(entry.responseType)}</div>`;
         }
 
         if (groupDetails) {
-          tooltipHtml += `<div style="margin-top: 8px;"><div><strong>Group:</strong> ${groupDetails.groupName}</div>`;
+          tooltipHtml += `<div style="margin-top: 8px;"><div><strong>Group:</strong> ${escapeTooltipHtml(groupDetails.groupName)}</div>`;
           if (groupDetails.blockedExact) {
             tooltipHtml += `<div class="tooltip-blocked" style="margin-left: 12px;">→ Blocked (Exact Match)</div>`;
           }
           if (groupDetails.blockedRegexMatches.length > 0) {
             tooltipHtml += `<div style="margin-left: 12px;"><div class="tooltip-blocked">→ Blocked by Regex:</div>`;
             groupDetails.blockedRegexMatches.forEach((pattern) => {
-              tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${pattern}</div>`;
+              tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${escapeTooltipHtml(pattern)}</div>`;
             });
             tooltipHtml += `</div>`;
           }
@@ -809,7 +846,7 @@ const buildTableColumns = (
           if (groupDetails.allowedRegexMatches.length > 0) {
             tooltipHtml += `<div style="margin-left: 12px;"><div class="tooltip-allowed">→ Allowed by Regex:</div>`;
             groupDetails.allowedRegexMatches.forEach((pattern) => {
-              tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${pattern}</div>`;
+              tooltipHtml += `<div style="margin-left: 24px; font-size: 12px;">${escapeTooltipHtml(pattern)}</div>`;
             });
             tooltipHtml += `</div>`;
           }
@@ -886,11 +923,11 @@ const buildTableColumns = (
               }
 
               const indent = "&nbsp;&nbsp;&nbsp;&nbsp;".repeat(level);
-              tooltipHtml += `<div style="margin-left: 12px; font-size: 12px;">${indent}${branch}${answer}</div>`;
+              tooltipHtml += `<div style="margin-left: 12px; font-size: 12px;">${indent}${branch}${escapeTooltipHtml(answer)}</div>`;
             });
           } else {
             // Single answer
-            tooltipHtml += `<div style="margin-left: 12px; font-size: 12px;">${answers[0]}</div>`;
+            tooltipHtml += `<div style="margin-left: 12px; font-size: 12px;">${escapeTooltipHtml(answers[0])}</div>`;
           }
 
           tooltipHtml += `</div>`;
@@ -901,7 +938,18 @@ const buildTableColumns = (
 
         return (
           <span
-            onClick={(e) => onDomainClick(entry, e.shiftKey)}
+            onMouseDown={(e) => {
+              // Prevent the browser from initiating text selection on Shift+Click.
+              // (Shift is also used as a modifier for filter composition.)
+              if (e.shiftKey) e.preventDefault();
+            }}
+            onClick={(e) => {
+              // Also prevent selection in cases where the browser already started selecting.
+              if (e.shiftKey) e.preventDefault();
+              onDomainClick(entry, e.shiftKey);
+            }}
+            onMouseEnter={() => onDomainHover(entry)}
+            onFocus={() => onDomainHover(entry)}
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
@@ -911,7 +959,12 @@ const buildTableColumns = (
               }
             }}
             data-tooltip-id="domain-tooltip-shared"
-            data-tooltip-html={tooltipHtml}
+            data-tooltip-content={tooltipHtml}
+            data-domain={domain}
+            data-node-id={entry.nodeId}
+            data-is-blocked={isBlocked ? "true" : "false"}
+            data-client-ip={entry.clientIpAddress ?? ""}
+            data-client-hostname={entry.clientName ?? ""}
           >
             {domain}
           </span>
@@ -1017,9 +1070,9 @@ function SwipeableCard({
     if (Math.abs(diffX) > maxSwipe) {
       const excess = Math.abs(diffX) - maxSwipe;
       offset =
-        diffX > 0 ?
-          maxSwipe + excess * resistanceFactor
-        : -maxSwipe - excess * resistanceFactor;
+        diffX > 0
+          ? maxSwipe + excess * resistanceFactor
+          : -maxSwipe - excess * resistanceFactor;
     }
 
     setTouchCurrent(currentX);
@@ -1149,9 +1202,9 @@ const renderCardsView = (
   if (entries.length === 0) {
     return (
       <div className="logs-page__cards-empty">
-        {isFilteringActive ?
-          "No log entries match the current filters."
-        : "No log entries found for the selected view."}
+        {isFilteringActive
+          ? "No log entries match the current filters."
+          : "No log entries found for the selected view."}
       </div>
     );
   }
@@ -1239,7 +1292,14 @@ const renderCardsView = (
               </div>
               <div
                 className="logs-page__card-domain"
-                onClick={(e) => onDomainClick(entry, e.shiftKey)}
+                onMouseDown={(e) => {
+                  // Prevent the browser from initiating text selection on Shift+Tap/Click.
+                  if (e.shiftKey) e.preventDefault();
+                }}
+                onClick={(e) => {
+                  if (e.shiftKey) e.preventDefault();
+                  onDomainClick(entry, e.shiftKey);
+                }}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
@@ -1256,9 +1316,9 @@ const renderCardsView = (
                 className={`logs-page__card-status logs-page__card-status--${responseBadge.className}`}
                 onClick={() => onStatusClick(entry)}
                 title={
-                  isBlocked ?
-                    "Blocked - Click to allow"
-                  : "Allowed - Click to block"
+                  isBlocked
+                    ? "Blocked - Click to allow"
+                    : "Allowed - Click to block"
                 }
               >
                 {responseBadge.icon}
@@ -1271,7 +1331,14 @@ const renderCardsView = (
                 <span className="logs-page__card-label">Client:</span>
                 <span
                   className="logs-page__card-value logs-page__card-value--clickable"
-                  onClick={(e) => onClientClick(entry, e.shiftKey)}
+                  onMouseDown={(e) => {
+                    // Prevent the browser from initiating text selection on Shift+Tap/Click.
+                    if (e.shiftKey) e.preventDefault();
+                  }}
+                  onClick={(e) => {
+                    if (e.shiftKey) e.preventDefault();
+                    onClientClick(entry, e.shiftKey);
+                  }}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {
@@ -1282,7 +1349,7 @@ const renderCardsView = (
                   }}
                   title="Click to filter by client"
                 >
-                  {entry.clientName && entry.clientName.trim().length > 0 ?
+                  {entry.clientName && entry.clientName.trim().length > 0 ? (
                     <div className="logs-page__card-client-info">
                       <div className="logs-page__card-client-hostname">
                         {entry.clientName}
@@ -1293,7 +1360,9 @@ const renderCardsView = (
                         </div>
                       )}
                     </div>
-                  : (entry.clientIpAddress ?? "—")}
+                  ) : (
+                    (entry.clientIpAddress ?? "—")
+                  )}
                 </span>
               </div>
               {!deduplicateDomains && (
@@ -1321,15 +1390,15 @@ const renderCardsView = (
               <div className="logs-page__card-row">
                 <span className="logs-page__card-label">Time:</span>
                 <span className="logs-page__card-value">
-                  {entry.timestamp ?
-                    new Date(entry.timestamp).toLocaleString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    })
-                  : "—"}
+                  {entry.timestamp
+                    ? new Date(entry.timestamp).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                      })
+                    : "—"}
                 </span>
               </div>
               {columnVisibility.responseTime &&
@@ -1492,6 +1561,11 @@ const loadDeduplicateDomains = (): boolean => {
 
 interface BlockDialogState {
   entry: TechnitiumCombinedQueryLogEntry;
+  /**
+   * When both Built-in Blocking and Advanced Blocking are enabled on the node,
+   * the user must choose which system this action should update.
+   */
+  selectedBlockingSystem?: "advanced" | "built-in";
 }
 
 // Memoized table row component to prevent unnecessary re-renders
@@ -1545,9 +1619,8 @@ const LogTableRow = React.memo<LogTableRowProps>(
         {activeColumns.map((column) => {
           const content = column.render(entry);
           const title = column.getTitle ? column.getTitle(entry) : undefined;
-          const cellClass =
-            column.cellClassName ?
-              `${column.cellClassName} logs-page__cell`
+          const cellClass = column.cellClassName
+            ? `${column.cellClassName} logs-page__cell`
             : "logs-page__cell";
 
           return (
@@ -1577,13 +1650,323 @@ export function LogsPage() {
     loadStoredCombinedLogs,
     loadStoredNodeLogs,
     advancedBlocking,
+    loadingAdvancedBlocking,
+    advancedBlockingError,
     reloadAdvancedBlocking,
     saveAdvancedBlockingConfig,
+    // Built-in blocking + blocking status
+    blockingStatus,
+    loadingBlockingStatus,
+    reloadBlockingStatus,
+    addAllowedDomain,
+    addBlockedDomain,
+    deleteAllowedDomain,
+    deleteBlockedDomain,
   } = useTechnitiumState();
 
   const { pushToast } = useToast();
 
-  type LogsTableContextMenuItem = { label: string; value: string };
+  type DomainBlockSourceLookupStatus = "idle" | "loading" | "loaded" | "error";
+
+  type DomainBlockSourceLookupState = {
+    status: DomainBlockSourceLookupStatus;
+    requestId?: string;
+    fetchedAt?: number;
+    result?: DomainCheckResult;
+    error?: string;
+  };
+
+  const normalizeDomainForLookup = useCallback((raw: string): string => {
+    return raw.trim().replace(/\.$/, "").toLowerCase();
+  }, []);
+
+  const getDomainBlockSourceCacheKey = useCallback(
+    (nodeId: string, domain: string): string => {
+      return `${nodeId}::${normalizeDomainForLookup(domain)}`;
+    },
+    [normalizeDomainForLookup],
+  );
+
+  const [domainBlockSourceByKey, setDomainBlockSourceByKey] = useState<
+    Record<string, DomainBlockSourceLookupState>
+  >({});
+  const domainBlockSourceRef = useRef(domainBlockSourceByKey);
+
+  useEffect(() => {
+    domainBlockSourceRef.current = domainBlockSourceByKey;
+  }, [domainBlockSourceByKey]);
+
+  const [activeDomainTooltipKey, setActiveDomainTooltipKey] = useState<
+    string | null
+  >(null);
+  const [expandedDomainTooltipKey, setExpandedDomainTooltipKey] = useState<
+    string | null
+  >(null);
+
+  useEffect(() => {
+    setExpandedDomainTooltipKey(null);
+  }, [activeDomainTooltipKey]);
+
+  const domainBlockSourceHoverTimerRef = useRef<number | null>(null);
+  const domainBlockSourceAbortRef = useRef<AbortController | null>(null);
+  const domainTooltipAnchorRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (domainBlockSourceHoverTimerRef.current !== null) {
+        window.clearTimeout(domainBlockSourceHoverTimerRef.current);
+        domainBlockSourceHoverTimerRef.current = null;
+      }
+      domainBlockSourceAbortRef.current?.abort();
+      domainBlockSourceAbortRef.current = null;
+    };
+  }, []);
+
+  const fetchDomainBlockSources = useCallback(
+    async (nodeId: string, domain: string, signal: AbortSignal) => {
+      const cleanDomain = normalizeDomainForLookup(domain);
+
+      const response = await apiFetch(
+        `/domain-lists/${encodeURIComponent(nodeId)}/check?domain=${encodeURIComponent(cleanDomain)}`,
+        { signal },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to check domain lists for ${nodeId} (${response.status})`,
+        );
+      }
+
+      const payload = (await response.json()) as
+        | DomainCheckResult
+        | { error: string };
+
+      if ("error" in payload) {
+        throw new Error(payload.error);
+      }
+
+      return payload;
+    },
+    [normalizeDomainForLookup],
+  );
+
+  const triggerDomainBlockSourceLookupImmediate = useCallback(
+    (nodeId: string, domain: string) => {
+      if (!nodeId || domain.trim().length === 0) {
+        return;
+      }
+
+      const key = getDomainBlockSourceCacheKey(nodeId, domain);
+      setActiveDomainTooltipKey(key);
+
+      const existing = domainBlockSourceRef.current[key];
+      if (existing?.status === "loaded" || existing?.status === "loading") {
+        return;
+      }
+
+      if (domainBlockSourceHoverTimerRef.current !== null) {
+        window.clearTimeout(domainBlockSourceHoverTimerRef.current);
+        domainBlockSourceHoverTimerRef.current = null;
+      }
+
+      domainBlockSourceAbortRef.current?.abort();
+      domainBlockSourceAbortRef.current = null;
+
+      const abortController = new AbortController();
+      domainBlockSourceAbortRef.current = abortController;
+
+      const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+      const timeoutId = window.setTimeout(() => {
+        try {
+          // Prefer tagging a reason so we can show a useful message.
+          abortController.abort("timeout");
+        } catch {
+          abortController.abort();
+        }
+      }, DOMAIN_BLOCK_SOURCE_FETCH_TIMEOUT_MS);
+
+      setDomainBlockSourceByKey((prev) => ({
+        ...prev,
+        [key]: { status: "loading", requestId },
+      }));
+
+      fetchDomainBlockSources(nodeId, domain, abortController.signal)
+        .then((result) => {
+          setDomainBlockSourceByKey((prev) => {
+            const current = prev[key];
+            if (current?.requestId && current.requestId !== requestId) {
+              return prev;
+            }
+
+            const now = Date.now();
+            const next: Record<string, DomainBlockSourceLookupState> = {
+              ...prev,
+              [key]: { status: "loaded", result, fetchedAt: now, requestId },
+            };
+
+            const keys = Object.keys(next);
+            if (keys.length <= DOMAIN_BLOCK_SOURCE_CACHE_MAX_ENTRIES) {
+              return next;
+            }
+
+            keys
+              .sort(
+                (a, b) => (next[a].fetchedAt ?? 0) - (next[b].fetchedAt ?? 0),
+              )
+              .slice(0, keys.length - DOMAIN_BLOCK_SOURCE_CACHE_MAX_ENTRIES)
+              .forEach((oldKey) => {
+                delete next[oldKey];
+              });
+
+            return next;
+          });
+        })
+        .catch((error: unknown) => {
+          const aborted = abortController.signal.aborted;
+
+          // If we aborted due to timeout, show a useful error; otherwise treat as
+          // a cancelled lookup and reset to idle so it can be retried.
+          const reason = (
+            abortController.signal as AbortSignal & { reason?: unknown }
+          ).reason;
+          const isTimeout =
+            reason === "timeout" ||
+            (reason instanceof Error && reason.message === "timeout");
+
+          const message =
+            error instanceof Error ? error.message : String(error);
+
+          setDomainBlockSourceByKey((prev) => {
+            const current = prev[key];
+            if (current?.requestId && current.requestId !== requestId) {
+              return prev;
+            }
+
+            if (aborted && !isTimeout) {
+              return { ...prev, [key]: { status: "idle", requestId } };
+            }
+
+            const finalMessage =
+              aborted && isTimeout ? "Lookup timed out" : message;
+
+            return {
+              ...prev,
+              [key]: {
+                status: "error",
+                error: finalMessage,
+                fetchedAt: Date.now(),
+                requestId,
+              },
+            };
+          });
+        })
+        .finally(() => {
+          window.clearTimeout(timeoutId);
+        });
+    },
+    [fetchDomainBlockSources, getDomainBlockSourceCacheKey],
+  );
+
+  const scheduleDomainBlockSourceLookup = useCallback(
+    (entry: TechnitiumCombinedQueryLogEntry) => {
+      if (!isEntryBlocked(entry)) {
+        return;
+      }
+
+      const nodeId = entry.nodeId;
+      const domain = entry.qname?.trim() ?? "";
+      if (!nodeId || domain.length === 0) {
+        return;
+      }
+
+      const key = getDomainBlockSourceCacheKey(nodeId, domain);
+      setActiveDomainTooltipKey(key);
+
+      const existing = domainBlockSourceRef.current[key];
+      if (existing?.status === "loaded" || existing?.status === "loading") {
+        return;
+      }
+
+      if (domainBlockSourceHoverTimerRef.current !== null) {
+        window.clearTimeout(domainBlockSourceHoverTimerRef.current);
+        domainBlockSourceHoverTimerRef.current = null;
+      }
+
+      // If we begin a new hover lookup, cancel any in-flight request for the prior anchor.
+      domainBlockSourceAbortRef.current?.abort();
+      domainBlockSourceAbortRef.current = null;
+
+      domainBlockSourceHoverTimerRef.current = window.setTimeout(() => {
+        domainBlockSourceHoverTimerRef.current = null;
+
+        const latest = domainBlockSourceRef.current[key];
+        if (latest?.status === "loaded" || latest?.status === "loading") {
+          return;
+        }
+
+        triggerDomainBlockSourceLookupImmediate(nodeId, domain);
+      }, DOMAIN_BLOCK_SOURCE_HOVER_DELAY_MS);
+    },
+    [getDomainBlockSourceCacheKey, triggerDomainBlockSourceLookupImmediate],
+  );
+
+  const isBlockMatch = useCallback((type: string | undefined): boolean => {
+    return (
+      type === "blocklist" ||
+      type === "regex-blocklist" ||
+      type === "manual-blocked"
+    );
+  }, []);
+
+  const getBlockMatchDedupeKey = useCallback(
+    (match: DomainListEntry): string => {
+      const sortedGroups = match.groups
+        ? [...match.groups].sort().join(",")
+        : "";
+
+      return [
+        match.type ?? "",
+        match.source ?? "",
+        match.groupName ?? "",
+        sortedGroups,
+        match.matchedPattern ?? "",
+        match.matchedDomain ?? "",
+      ].join("||");
+    },
+    [],
+  );
+
+  const formatBlockMatchLabel = useCallback(
+    (match: DomainListEntry): string => {
+      const typeLabel =
+        match.type === "manual-blocked"
+          ? "Manual"
+          : match.type === "regex-blocklist"
+            ? "Regex"
+            : "Blocklist";
+
+      const sourceLabel = match.source === "manual" ? "manual" : match.source;
+
+      const details: string[] = [];
+      if (match.groupName) details.push(`group=${match.groupName}`);
+      if (match.matchedPattern) details.push(`pattern=${match.matchedPattern}`);
+      if (match.matchedDomain) details.push(`match=${match.matchedDomain}`);
+      if (match.groups && match.groups.length > 0) {
+        details.push(`groups=${[...match.groups].sort().join(", ")}`);
+      }
+
+      return details.length > 0
+        ? `${typeLabel}: ${sourceLabel} (${details.join(", ")})`
+        : `${typeLabel}: ${sourceLabel}`;
+    },
+    [],
+  );
+
+  type LogsTableContextMenuItem =
+    | { label: string; action: "copy"; value: string }
+    | { label: string; action: "open"; href: string }
+    | { action: "separator" };
 
   type LogsTableContextMenuState = {
     x: number;
@@ -1671,6 +2054,229 @@ export function LogsPage() {
         return null;
       }
 
+      const isValidHttpUrl = (value: string): boolean => {
+        if (!value) {
+          return false;
+        }
+
+        try {
+          const parsed = new URL(value);
+          return parsed.protocol === "http:" || parsed.protocol === "https:";
+        } catch {
+          return false;
+        }
+      };
+
+      // If the user right-clicked inside the domain tooltip, provide tooltip-specific copy options.
+      const tooltipRoot =
+        (target.closest("#domain-tooltip-shared") as HTMLElement | null) ??
+        ((target.closest(".domain-tooltip") as HTMLElement | null)?.closest(
+          "#domain-tooltip-shared",
+        ) as HTMLElement | null);
+
+      if (tooltipRoot) {
+        const anchor = domainTooltipAnchorRef.current;
+        const anchorDomain = anchor?.getAttribute("data-domain")?.trim() ?? "";
+        const anchorNodeId = anchor?.getAttribute("data-node-id")?.trim() ?? "";
+
+        const matchTarget = target.closest(
+          "[data-logs-tooltip-block-source]",
+        ) as HTMLElement | null;
+
+        // If the user right-clicked a specific "Likely blocked by" match, offer granular options.
+        if (matchTarget) {
+          const label =
+            matchTarget.getAttribute("data-block-match-label") ?? "";
+          const source =
+            matchTarget.getAttribute("data-block-match-source") ?? "";
+          const pattern =
+            matchTarget.getAttribute("data-block-match-pattern") ?? "";
+
+          const items: LogsTableContextMenuItem[] = [];
+
+          if (anchorDomain) {
+            items.push({
+              label: "Copy Domain",
+              action: "copy",
+              value: anchorDomain,
+            });
+          }
+
+          if (label) {
+            items.push({ label: "Copy Match", action: "copy", value: label });
+          }
+
+          if (source) {
+            items.push({ label: "Copy Source", action: "copy", value: source });
+            if (isValidHttpUrl(source)) {
+              items.push({
+                label: "Open Source URL",
+                action: "open",
+                href: source,
+              });
+            }
+          }
+
+          if (pattern) {
+            items.push({
+              label: "Copy Pattern",
+              action: "copy",
+              value: pattern,
+            });
+          }
+
+          return items.length > 0 ? items : null;
+        }
+
+        // Otherwise, offer general tooltip copy options.
+        const anchorClientIp =
+          anchor?.getAttribute("data-client-ip")?.trim() ?? "";
+        const anchorClientNameRaw =
+          anchor?.getAttribute("data-client-hostname")?.trim() ?? "";
+
+        const anchorClientFqdn = anchorClientNameRaw.includes(".")
+          ? anchorClientNameRaw
+          : "";
+        const anchorClientHostname = anchorClientNameRaw.includes(".")
+          ? anchorClientNameRaw.split(".")[0]
+          : anchorClientNameRaw;
+
+        const items: LogsTableContextMenuItem[] = [];
+        if (anchorDomain) {
+          items.push({
+            label: "Copy Domain",
+            action: "copy",
+            value: anchorDomain,
+          });
+        }
+        if (anchorNodeId) {
+          items.push({
+            label: "Copy Node",
+            action: "copy",
+            value: anchorNodeId,
+          });
+        }
+        if (
+          (anchorDomain || anchorNodeId) &&
+          (anchorClientIp || anchorClientHostname || anchorClientFqdn)
+        ) {
+          items.push({
+            label: "────────────────────────",
+            action: "copy",
+            value: "",
+          });
+        }
+        if (anchorClientIp) {
+          items.push({
+            label: "Copy Client IP",
+            action: "copy",
+            value: anchorClientIp,
+          });
+        }
+        const clientItems: LogsTableContextMenuItem[] = [];
+
+        if (anchorClientIp) {
+          clientItems.push({
+            label: "Copy Client IP",
+            action: "copy",
+            value: anchorClientIp,
+          });
+        }
+        if (anchorClientHostname) {
+          clientItems.push({
+            label: "Copy Client Hostname",
+            action: "copy",
+            value: anchorClientHostname,
+          });
+        }
+        if (anchorClientFqdn) {
+          clientItems.push({
+            label: "Copy Client FQDN",
+            action: "copy",
+            value: anchorClientFqdn,
+          });
+        }
+
+        if (clientItems.length > 0) {
+          if (items.length > 0) {
+            items.push({ action: "separator" });
+          }
+          items.push(...clientItems);
+        }
+
+        return items.length > 0 ? items : null;
+      }
+
+      // Domain cell right-click: provide domain-specific actions.
+      const domainAnchor = target.closest(
+        '[data-tooltip-id="domain-tooltip-shared"][data-domain]',
+      ) as HTMLElement | null;
+      if (domainAnchor) {
+        const anchorDomain =
+          domainAnchor.getAttribute("data-domain")?.trim() ?? "";
+        const anchorNodeId =
+          domainAnchor.getAttribute("data-node-id")?.trim() ?? "";
+        const anchorClientIp =
+          domainAnchor.getAttribute("data-client-ip")?.trim() ?? "";
+        const anchorClientNameRaw =
+          domainAnchor.getAttribute("data-client-hostname")?.trim() ?? "";
+
+        const anchorClientFqdn = anchorClientNameRaw.includes(".")
+          ? anchorClientNameRaw
+          : "";
+        const anchorClientHostname = anchorClientNameRaw.includes(".")
+          ? anchorClientNameRaw.split(".")[0]
+          : anchorClientNameRaw;
+
+        const items: LogsTableContextMenuItem[] = [];
+        if (anchorDomain) {
+          items.push({
+            label: "Copy Domain",
+            action: "copy",
+            value: anchorDomain,
+          });
+        }
+        if (anchorNodeId) {
+          items.push({
+            label: "Copy Node",
+            action: "copy",
+            value: anchorNodeId,
+          });
+        }
+        const clientItems: LogsTableContextMenuItem[] = [];
+
+        if (anchorClientIp) {
+          clientItems.push({
+            label: "Copy Client IP",
+            action: "copy",
+            value: anchorClientIp,
+          });
+        }
+        if (anchorClientHostname) {
+          clientItems.push({
+            label: "Copy Client Hostname",
+            action: "copy",
+            value: anchorClientHostname,
+          });
+        }
+        if (anchorClientFqdn) {
+          clientItems.push({
+            label: "Copy Client FQDN",
+            action: "copy",
+            value: anchorClientFqdn,
+          });
+        }
+
+        if (clientItems.length > 0) {
+          if (items.length > 0) {
+            items.push({ action: "separator" });
+          }
+          items.push(...clientItems);
+        }
+
+        return items.length > 0 ? items : null;
+      }
+
       const cell = target.closest("td");
       if (!cell || !cell.closest("tbody")) {
         return null;
@@ -1686,26 +2292,42 @@ export function LogsPage() {
           return null;
         }
 
-        const ip = container.getAttribute("data-copy-ip")?.trim() ?? "";
-        const hostname =
+        const clientIp = container.getAttribute("data-copy-ip")?.trim() ?? "";
+        const clientNameRaw =
           container.getAttribute("data-copy-hostname")?.trim() ?? "";
 
-        if (ip.length > 0 && hostname.length > 0) {
-          return [
-            { label: "Copy IP", value: ip },
-            { label: "Copy Hostname", value: hostname },
-          ];
+        const clientFqdn = clientNameRaw.includes(".") ? clientNameRaw : "";
+        const clientHostname = clientNameRaw.includes(".")
+          ? clientNameRaw.split(".")[0]
+          : clientNameRaw;
+
+        const items: LogsTableContextMenuItem[] = [];
+
+        if (clientIp.length > 0) {
+          items.push({
+            label: "Copy Client IP",
+            action: "copy",
+            value: clientIp,
+          });
         }
 
-        if (ip.length > 0) {
-          return [{ label: "Copy IP", value: ip }];
+        if (clientHostname.length > 0) {
+          items.push({
+            label: "Copy Client Hostname",
+            action: "copy",
+            value: clientHostname,
+          });
         }
 
-        if (hostname.length > 0) {
-          return [{ label: "Copy Hostname", value: hostname }];
+        if (clientFqdn.length > 0) {
+          items.push({
+            label: "Copy Client FQDN",
+            action: "copy",
+            value: clientFqdn,
+          });
         }
 
-        return null;
+        return items.length > 0 ? items : null;
       }
 
       // Prefer explicit copy value inside the cell (Response, Status, Response Time, etc.)
@@ -1720,8 +2342,8 @@ export function LogsPage() {
           return null;
         }
 
-        return value.length > 0 && value !== "—" ?
-            [{ label: "Copy", value }]
+        return value.length > 0 && value !== "—"
+          ? [{ label: "Copy", action: "copy", value }]
           : null;
       }
 
@@ -1731,8 +2353,8 @@ export function LogsPage() {
         return null;
       }
 
-      return value.length > 0 && value !== "—" ?
-          [{ label: "Copy", value }]
+      return value.length > 0 && value !== "—"
+        ? [{ label: "Copy", action: "copy", value }]
         : null;
     },
     [],
@@ -1764,14 +2386,27 @@ export function LogsPage() {
     ],
   );
 
-  const handleCopyFromContextMenu = useCallback(
-    async (value: string) => {
-      if (!value) {
-        return;
-      }
+  const handleContextMenuAction = useCallback(
+    async (item: LogsTableContextMenuItem) => {
+      try {
+        if (item.action === "copy") {
+          if (!item.value) {
+            return;
+          }
+          await copyTextToClipboard(item.value);
+          return;
+        }
 
-      await copyTextToClipboard(value);
-      closeLogsTableContextMenu();
+        if (item.action === "open") {
+          if (!item.href) {
+            return;
+          }
+
+          window.open(item.href, "_blank", "noopener,noreferrer");
+        }
+      } finally {
+        closeLogsTableContextMenu();
+      }
     },
     [closeLogsTableContextMenu, copyTextToClipboard],
   );
@@ -1875,6 +2510,18 @@ export function LogsPage() {
     logsRefreshSecondsRef.current = refreshSeconds;
   }, [refreshSeconds]);
 
+  // Keep an always-current snapshot of refreshSeconds that can safely be read inside
+  // event handlers without risking stale-closure values.
+  //
+  // Why this exists:
+  // React state updates are async, and event handlers can capture stale values.
+  // In our case, "Pause" -> immediately open modal -> "Cancel" could restore a stale
+  // pre-pause refreshSeconds and unintentionally resume tailing. Using a ref avoids that.
+  const refreshSecondsRef = useRef<number>(refreshSeconds);
+  useEffect(() => {
+    refreshSecondsRef.current = refreshSeconds;
+  }, [refreshSeconds]);
+
   useEffect(() => {
     setLogsRefreshSecondsRef.current = setRefreshSeconds;
     setLogsIsAutoRefreshRef.current = setIsAutoRefresh;
@@ -1886,24 +2533,24 @@ export function LogsPage() {
   const queryLogRetentionHours = queryLogStorageStatus?.retentionHours ?? 24;
 
   const logsSourceKind =
-    displayMode === "tail" ? "live"
-    : storedLogsReady ? "stored"
-    : "live";
+    displayMode === "tail" ? "live" : storedLogsReady ? "stored" : "live";
 
   const logsSourceLabel =
     logsSourceKind === "stored" ? "Stored (SQLite)" : "Live (Nodes)";
   const logsSourceTitle =
-    logsSourceKind === "stored" ?
-      "Stored logs are served from Companion's SQLite store (fast + cacheable)."
-    : "Live logs are fetched directly from the Technitium DNS nodes.";
+    logsSourceKind === "stored"
+      ? "Stored logs are served from Companion's SQLite store (fast + cacheable)."
+      : "Live logs are fetched directly from the Technitium DNS nodes.";
 
   const storedResponseCache = queryLogStorageStatus?.responseCache;
   const storedResponseCacheLookups =
     (storedResponseCache?.hits ?? 0) + (storedResponseCache?.misses ?? 0);
   const storedResponseCacheHitRatePercent =
-    storedResponseCache && storedResponseCacheLookups > 0 ?
-      Math.round((storedResponseCache.hits / storedResponseCacheLookups) * 100)
-    : null;
+    storedResponseCache && storedResponseCacheLookups > 0
+      ? Math.round(
+          (storedResponseCache.hits / storedResponseCacheLookups) * 100,
+        )
+      : null;
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -1931,10 +2578,38 @@ export function LogsPage() {
   const [tailBuffer, setTailBuffer] = useState<
     TechnitiumCombinedQueryLogEntry[]
   >([]);
+  // Tail mode pause semantics (single source of truth):
+  // - refreshSeconds <= 0 means "paused" and must stop all fetching
+  // - refreshSeconds > 0 means "live" and should poll on an interval
+  //
+  // NOTE: tailPaused previously represented a second pause flag ("stop merging"),
+  // but that created conflicting states with the modal + pause button. We keep it
+  // only for backward-compat reads in a few places, but it is no longer used to
+  // drive pause/resume behavior. It should eventually be deleted.
   const [tailPaused, setTailPaused] = useState<boolean>(false);
   const [tailNewestTimestamp, setTailNewestTimestamp] = useState<string | null>(
     null,
   );
+
+  // When opening an allow/block modal in tail mode, we may temporarily force a pause.
+  // Track prior pause state so cancel/dismiss restores exactly what the user had.
+  //
+  // IMPORTANT: Use refs (not state/closures) to avoid capturing stale values right after
+  // a pause/resume click (a common cause of "Cancel unpauses" on first open after reload).
+  const tailPauseBeforeModalRef = useRef<{
+    tailPaused: boolean;
+    refreshSeconds: number;
+  } | null>(null);
+
+  // Initialize the snapshot to the current pause state so even if, for some reason,
+  // the first Status click happens before we set it, Cancel won't "restore live".
+  useEffect(() => {
+    tailPauseBeforeModalRef.current = {
+      tailPaused,
+      refreshSeconds: refreshSecondsRef.current,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [newEntryTimestamps, setNewEntryTimestamps] = useState<Set<string>>(
     new Set(),
   );
@@ -1966,7 +2641,6 @@ export function LogsPage() {
   // Prevent overlapping log loads (auto-refresh can otherwise stack requests if a call takes longer than refresh interval)
   const logsFetchInFlightRef = useRef<boolean>(false);
   const logsFetchAbortRef = useRef<AbortController | null>(null);
-  const logsResumeDebugToastAtRef = useRef<number>(0);
 
   const [blockDialog, setBlockDialog] = useState<
     BlockDialogState | undefined
@@ -2068,6 +2742,107 @@ export function LogsPage() {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }, []);
 
+  /**
+   * Tail-mode UX: after confirming an allow/block change while paused, reflect the new
+   * administrative state in-place (so the user sees the change immediately) without
+   * forcing a full refresh that can re-sort/re-dedupe and "jump" the table.
+   *
+   * NOTE: We intentionally keep this logic lightweight and UI-focused: it updates the
+   * currently-visible tail buffer entries only. A future live refresh will still
+   * reconcile with actual DNS server behavior, but we avoid a disruptive immediate reload.
+   */
+  const applyTailModeAdminActionPatch = useCallback(
+    (params: {
+      nodeId: string;
+      domain: string;
+      action: "block" | "allow";
+      blockingMethod: "advanced" | "built-in";
+    }) => {
+      const cleanDomain = params.domain.trim();
+      if (!cleanDomain) {
+        return;
+      }
+
+      // Only relevant for tail mode; in paginated mode we keep the existing refresh behavior.
+      if (displayMode !== "tail") {
+        return;
+      }
+
+      setTailBuffer((prev) => {
+        if (prev.length === 0) {
+          return prev;
+        }
+
+        let changed = false;
+
+        const next = prev.map((entry) => {
+          if (entry.nodeId !== params.nodeId) {
+            return entry;
+          }
+          if ((entry.qname ?? "").trim() !== cleanDomain) {
+            return entry;
+          }
+
+          // Patch the entry's textual response so our existing isEntryBlocked() heuristics
+          // reflect the new state without re-fetching.
+          //
+          // We only do this when the action would logically flip the blocked-ness.
+          // - "block": mark as blocked
+          // - "allow": ensure it's not marked as blocked
+          //
+          // The keywords are already defined by BLOCKED_RESPONSE_KEYWORDS; a well-known
+          // value like "blocked" should be enough to classify as blocked.
+          const currentResponse = entry.responseType ?? "";
+
+          if (params.action === "block") {
+            // If it's already classified as blocked, no need to mutate.
+            if (isEntryBlocked(entry)) {
+              return entry;
+            }
+
+            changed = true;
+            return {
+              ...entry,
+              // Ensure some "blocked" keyword for the classifier.
+              responseType:
+                currentResponse && currentResponse.trim().length > 0
+                  ? currentResponse
+                  : "blocked",
+            };
+          }
+
+          // action === "allow"
+          // If it's currently classified as blocked, remove blocked markers so it stops
+          // looking blocked in the UI.
+          if (!isEntryBlocked(entry)) {
+            return entry;
+          }
+
+          changed = true;
+
+          // Remove obvious blocked keywords; keep whatever else is there.
+          // If the response is now empty, set to a benign placeholder.
+          const lowered = currentResponse.toLowerCase();
+          const hasBlockedKeyword = BLOCKED_RESPONSE_KEYWORDS.some((kw) =>
+            lowered.includes(kw),
+          );
+
+          return {
+            ...entry,
+            responseType: hasBlockedKeyword
+              ? "recursive"
+              : currentResponse && currentResponse.trim().length > 0
+                ? currentResponse
+                : "recursive",
+          };
+        });
+
+        return changed ? next : prev;
+      });
+    },
+    [displayMode, setTailBuffer],
+  );
+
   const pullToRefresh = usePullToRefresh({
     onRefresh: handlePullToRefresh,
     threshold: 80,
@@ -2083,11 +2858,11 @@ export function LogsPage() {
       // Stored logs persist the best-known client hostname, so prefer hostname
       // when it exists (fallback to IP).
       const filterValue =
-        displayMode === "paginated" ?
-          hostname && hostname !== ip ?
-            hostname
-          : ip || hostname
-        : hostname || ip;
+        displayMode === "paginated"
+          ? hostname && hostname !== ip
+            ? hostname
+            : ip || hostname
+          : hostname || ip;
 
       if (!filterValue) {
         return;
@@ -2168,12 +2943,74 @@ export function LogsPage() {
     setBulkAction(null);
   }, []);
 
-  // Lazy load Advanced Blocking data - only when needed
+  // Lazy load Advanced Blocking data - only when needed.
+  // IMPORTANT: Don't depend on `advancedBlocking` being updated immediately after `reloadAdvancedBlocking()`.
+  // React state updates are async; a caller should re-read from state on the next render.
   const ensureAdvancedBlockingLoaded = useCallback(async () => {
-    if (!advancedBlocking) {
-      await reloadAdvancedBlocking();
+    // If a load is already in-flight, don't start another. The state will update on the next render.
+    if (loadingAdvancedBlocking) {
+      return;
     }
-  }, [advancedBlocking, reloadAdvancedBlocking]);
+
+    // If we already have a payload (even if some nodes have errors), don't refetch here.
+    if (advancedBlocking) {
+      return;
+    }
+
+    await reloadAdvancedBlocking();
+  }, [advancedBlocking, loadingAdvancedBlocking, reloadAdvancedBlocking]);
+
+  // Ensure blocking status is loaded before routing (advanced vs built-in).
+  // The Status click handler must not choose a blocking mode while status is missing.
+  const ensureBlockingStatusLoaded = useCallback(async () => {
+    if (loadingBlockingStatus) {
+      return;
+    }
+    if (!blockingStatus) {
+      await reloadBlockingStatus();
+    }
+  }, [blockingStatus, loadingBlockingStatus, reloadBlockingStatus]);
+
+  type BlockingUiMethod = "advanced" | "built-in";
+
+  const getUiBlockingMethodForNode = useCallback(
+    (nodeId: string): BlockingUiMethod => {
+      const nodeStatus = blockingStatus?.nodes?.find(
+        (n) => n.nodeId === nodeId,
+      );
+
+      // If both are enabled, we prompt the user to choose per-action in the modal.
+      // This function only answers "which modal do we have enough data to show?"
+      // In conflicts, default to Advanced Blocking UI so we can always render a usable modal.
+      if (nodeStatus?.builtInEnabled && nodeStatus?.advancedBlockingEnabled) {
+        return "advanced";
+      }
+
+      // Prefer Advanced Blocking only when it's installed AND enabled.
+      // `advancedBlockingEnabled` can sometimes appear true even when the app isn't installed;
+      // guarding on `advancedBlockingInstalled` avoids incorrectly routing to built-in UI.
+      if (
+        nodeStatus?.advancedBlockingInstalled === true &&
+        nodeStatus?.advancedBlockingEnabled === true
+      ) {
+        return "advanced";
+      }
+
+      // Otherwise, if built-in blocking is enabled, use built-in
+      if (nodeStatus?.builtInEnabled === true) {
+        return "built-in";
+      }
+
+      // Fallback: if AB is installed (even if enabled state is unknown), prefer AB UI
+      if (nodeStatus?.advancedBlockingInstalled === true) {
+        return "advanced";
+      }
+
+      // Last resort: built-in
+      return "built-in";
+    },
+    [blockingStatus],
+  );
 
   const initiateBulkAction = useCallback(
     async (action: "block" | "allow") => {
@@ -2204,82 +3041,144 @@ export function LogsPage() {
 
   const handleStatusClick = useCallback(
     async (entry: TechnitiumCombinedQueryLogEntry, forceToggle = false) => {
-      // Ensure advanced blocking data is loaded before opening dialog
-      await ensureAdvancedBlockingLoaded();
+      // Ensure we have blocking status before routing.
+      // NOTE: Status fetch updates React state asynchronously; after awaiting, re-check that status exists.
+      await ensureBlockingStatusLoaded();
 
-      const domain = entry.qname ?? "";
-      const snapshot = advancedBlocking?.nodes?.find(
-        (nodeConfig) => nodeConfig.nodeId === entry.nodeId,
+      const nodeStatusAfterEnsure = blockingStatus?.nodes?.find(
+        (n) => n.nodeId === entry.nodeId,
       );
-      const groups = snapshot?.config?.groups ?? [];
-      const defaultRegex = domain ? buildDefaultRegexPattern(domain) : "";
-      const blockSummary = collectActionOverrides(groups, domain, "block");
-      const allowSummary = collectActionOverrides(groups, domain, "allow");
-      const blockRegexPatterns = blockSummary.regexMatches;
-      const allowRegexPatterns = allowSummary.regexMatches;
-      const hasBlockedExact = blockSummary.hasExact;
-      const hasAllowedExact = allowSummary.hasExact;
 
-      const blockedDominant = blockRegexPatterns.length > 0 || hasBlockedExact;
-      const allowDominant = allowRegexPatterns.length > 0 || hasAllowedExact;
+      // If status is still not available (first click / slow network), don't mis-route to built-in.
+      // Default to Advanced UI in this case so we can render a consistent modal, then the user can
+      // proceed once data is available. (If Advanced is actually unavailable, the modal will surface
+      // that cleanly rather than silently doing the wrong thing.)
+      const uiMethod: BlockingUiMethod = nodeStatusAfterEnsure
+        ? getUiBlockingMethodForNode(entry.nodeId)
+        : "advanced";
 
-      // Default action should be the OPPOSITE of current state
-      // If currently blocked → offer to allow; if currently allowed → offer to block
-      let initialAction: "block" | "allow" =
-        blockedDominant ?
-          "allow" // Currently blocked, so offer to allow
-        : allowDominant ?
-          "block" // Currently allowed, so offer to block
-        : entry.responseType && isEntryBlocked(entry) ?
-          "allow" // Blocked by list, so offer to allow
-        : "block"; // Not blocked, so offer to block
+      if (uiMethod === "advanced") {
+        // Advanced Blocking modal behavior
 
-      // If called from swipe (forceToggle=true), invert the action again
-      if (forceToggle) {
-        initialAction = initialAction === "block" ? "allow" : "block";
+        await ensureAdvancedBlockingLoaded();
+
+        // Open the modal immediately (spinner UX) and let the modal content reflect
+        // Advanced Blocking loading state instead of forcing the user to retry.
+        const domain = entry.qname ?? "";
+        const snapshot = advancedBlocking?.nodes?.find(
+          (nodeConfig) => nodeConfig.nodeId === entry.nodeId,
+        );
+        const groups = snapshot?.config?.groups ?? [];
+
+        // If this node's snapshot couldn't be fetched, don't pretend there are no groups.
+        // Spinner UX: allow the modal to open and show loading/error states in-body.
+        // Only hard-fail early if we already have a payload and it explicitly errored for this node.
+        if (advancedBlocking && !snapshot?.config && snapshot?.error) {
+          setBlockError(
+            `Failed to load Advanced Blocking config for node "${entry.nodeId}": ${snapshot.error}`,
+          );
+        }
+
+        const defaultRegex = domain ? buildDefaultRegexPattern(domain) : "";
+        const blockSummary = collectActionOverrides(groups, domain, "block");
+        const allowSummary = collectActionOverrides(groups, domain, "allow");
+        const blockRegexPatterns = blockSummary.regexMatches;
+        const allowRegexPatterns = allowSummary.regexMatches;
+        const hasBlockedExact = blockSummary.hasExact;
+        const hasAllowedExact = allowSummary.hasExact;
+
+        const blockedDominant =
+          blockRegexPatterns.length > 0 || hasBlockedExact;
+        const allowDominant = allowRegexPatterns.length > 0 || hasAllowedExact;
+
+        // Default action should be the OPPOSITE of current state
+        // If currently blocked → offer to allow; if currently allowed → offer to block
+        let initialAction: "block" | "allow" = blockedDominant
+          ? "allow" // Currently blocked, so offer to allow
+          : allowDominant
+            ? "block" // Currently allowed, so offer to block
+            : entry.responseType && isEntryBlocked(entry)
+              ? "allow" // Blocked by list, so offer to allow
+              : "block"; // Not blocked, so offer to block
+
+        // If called from swipe (forceToggle=true), invert the action again
+        if (forceToggle) {
+          initialAction = initialAction === "block" ? "allow" : "block";
+        }
+
+        const sourceMatches =
+          initialAction === "block" ? blockRegexPatterns : allowRegexPatterns;
+        const initialMode: "exact" | "regex" =
+          initialAction === "block"
+            ? hasBlockedExact
+              ? "exact"
+              : sourceMatches.length > 0
+                ? "regex"
+                : "exact"
+            : hasAllowedExact
+              ? "exact"
+              : sourceMatches.length > 0
+                ? "regex"
+                : "exact";
+        const initialRegex =
+          sourceMatches.length > 0 ? sourceMatches[0] : defaultRegex;
+
+        const initialSelection =
+          initialAction === "block"
+            ? blockSummary.selected
+            : allowSummary.selected;
+        setBlockSelectedGroups(new Set(initialSelection));
+        setBlockingAction(initialAction);
+        setBlockMode(initialMode);
+        setBlockRegexValue(initialRegex);
+        setBlockError(undefined);
+        setIsBlocking(false);
+        setBlockDialog({ entry, selectedBlockingSystem: undefined });
+      } else {
+        // Built-in Blocking: no groups/regex; apply exact allow/block directly.
+        const domain = entry.qname?.trim();
+        if (!domain) {
+          setBlockError("This log entry does not include a domain name.");
+          return;
+        }
+
+        // Determine current blocked-ness from the log heuristics; offer opposite action
+        let initialAction: "block" | "allow" =
+          entry.responseType && isEntryBlocked(entry) ? "allow" : "block";
+
+        if (forceToggle) {
+          initialAction = initialAction === "block" ? "allow" : "block";
+        }
+
+        setBlockingAction(initialAction);
+        setBlockSelectedGroups(new Set<string>());
+        setBlockMode("exact");
+        setBlockRegexValue("");
+        setBlockError(undefined);
+        setIsBlocking(false);
+        setBlockDialog({ entry, selectedBlockingSystem: undefined });
       }
 
-      const sourceMatches =
-        initialAction === "block" ? blockRegexPatterns : allowRegexPatterns;
-      const initialMode: "exact" | "regex" =
-        initialAction === "block" ?
-          hasBlockedExact ? "exact"
-          : sourceMatches.length > 0 ? "regex"
-          : "exact"
-        : hasAllowedExact ? "exact"
-        : sourceMatches.length > 0 ? "regex"
-        : "exact";
-      const initialRegex =
-        sourceMatches.length > 0 ? sourceMatches[0] : defaultRegex;
-
-      const initialSelection =
-        initialAction === "block" ?
-          blockSummary.selected
-        : allowSummary.selected;
-      setBlockSelectedGroups(new Set(initialSelection));
-      setBlockingAction(initialAction);
-      setBlockMode(initialMode);
-      setBlockRegexValue(initialRegex);
-      setBlockError(undefined);
-      setIsBlocking(false);
-      setBlockDialog({ entry });
-
-      // Pause auto-refresh when opening the modal (similar to mobile swipe behavior)
+      // Tail mode: opening the modal should NOT mutate pause semantics.
+      // If the user is live, they remain live; if they are paused, they remain paused.
+      //
+      // We still stop the interval/fetching by relying exclusively on refreshSeconds,
+      // and we do not toggle tailPaused (which is now deprecated for pause semantics).
       if (displayMode === "tail") {
-        setTailPaused(true);
-        setRefreshSeconds(0);
+        tailPauseBeforeModalRef.current = {
+          tailPaused,
+          refreshSeconds: refreshSecondsRef.current,
+        };
       }
     },
     [
       advancedBlocking,
-      setBlockDialog,
-      setBlockError,
-      setBlockSelectedGroups,
-      setIsBlocking,
       ensureAdvancedBlockingLoaded,
+      ensureBlockingStatusLoaded,
+      getUiBlockingMethodForNode,
       displayMode,
-      setTailPaused,
-      setRefreshSeconds,
+      tailPaused,
+      blockingStatus?.nodes,
     ],
   );
 
@@ -2349,9 +3248,9 @@ export function LogsPage() {
         if (entry.qname) visibleDomains.add(entry.qname);
       });
     } else {
-      (mode === "combined" ?
-        combinedPage?.entries
-      : nodeSnapshot?.data.entries
+      (mode === "combined"
+        ? combinedPage?.entries
+        : nodeSnapshot?.data.entries
       )?.forEach((entry) => {
         if (entry.qname) visibleDomains.add(entry.qname);
       });
@@ -2376,6 +3275,7 @@ export function LogsPage() {
         handleStatusClick,
         handleClientClick,
         handleDomainClick,
+        scheduleDomainBlockSourceLookup,
         selectedDomains,
         toggleDomainSelection,
         domainToGroupMap,
@@ -2385,6 +3285,7 @@ export function LogsPage() {
       handleStatusClick,
       handleClientClick,
       handleDomainClick,
+      scheduleDomainBlockSourceLookup,
       selectedDomains,
       toggleDomainSelection,
       domainToGroupMap,
@@ -2679,12 +3580,51 @@ export function LogsPage() {
     () => (blockDomainValue ? buildDefaultRegexPattern(blockDomainValue) : ""),
     [blockDomainValue],
   );
-  const blockNodeLabel =
-    blockDialog ?
-      (nodeMap.get(blockDialog.entry.nodeId)?.name ?? blockDialog.entry.nodeId)
+  const blockNodeLabel = blockDialog
+    ? (nodeMap.get(blockDialog.entry.nodeId)?.name ?? blockDialog.entry.nodeId)
     : "";
-  const isBlockedEntry =
-    blockDialog ? isEntryBlocked(blockDialog.entry) : false;
+  const isBlockedEntry = blockDialog
+    ? isEntryBlocked(blockDialog.entry)
+    : false;
+
+  const blockDialogBlockingMethod: "advanced" | "built-in" | undefined =
+    useMemo(() => {
+      if (!blockDialog) {
+        return undefined;
+      }
+
+      // If blocking status isn't available yet, default to Advanced Blocking UI behavior.
+      // This prevents a built-in-only modal from flashing incorrectly while status is loading.
+      if (!blockingStatus || loadingBlockingStatus) {
+        return "advanced";
+      }
+
+      const nodeStatus = blockingStatus.nodes.find(
+        (n) => n.nodeId === blockDialog.entry.nodeId,
+      );
+
+      // If both are enabled, prompt the user to choose per-action.
+      // Use the user's explicit choice if present; otherwise show Advanced UI by default.
+      //
+      // IMPORTANT: Treat this as a conflict ONLY when Advanced Blocking is installed+enabled.
+      // This avoids incorrectly prompting (or misrouting to built-in UI) if the status payload
+      // reports `advancedBlockingEnabled` true while the app isn't installed.
+      if (
+        nodeStatus?.builtInEnabled === true &&
+        nodeStatus?.advancedBlockingInstalled === true &&
+        nodeStatus?.advancedBlockingEnabled === true
+      ) {
+        return blockDialog.selectedBlockingSystem ?? "advanced";
+      }
+
+      return getUiBlockingMethodForNode(blockDialog.entry.nodeId);
+    }, [
+      blockDialog,
+      blockingStatus,
+      loadingBlockingStatus,
+      getUiBlockingMethodForNode,
+    ]);
+
   const blockCoverage = useMemo<CoverageEntry[]>(() => {
     if (!blockDialog || !blockDialog.entry.qname) {
       return [];
@@ -2760,17 +3700,20 @@ export function LogsPage() {
   }, [bulkAction, advancedBlocking, blockAvailableGroups]);
 
   const modalTitle =
-    blockingAction === "allow" ? "Allow domain"
-    : isBlockedEntry ? "Update block"
-    : "Block domain";
-  const confirmButtonLabel =
-    isBlocking ? "Saving…"
-    : blockingAction === "block" ?
-      blockCoverage.length > 0 ?
-        "Save changes"
-      : "Block domain"
-    : allowCoverage.length > 0 ? "Save changes"
-    : "Allow domain";
+    blockingAction === "allow"
+      ? "Allow domain"
+      : isBlockedEntry
+        ? "Update block"
+        : "Block domain";
+  const confirmButtonLabel = isBlocking
+    ? "Saving…"
+    : blockingAction === "block"
+      ? blockCoverage.length > 0
+        ? "Save changes"
+        : "Block domain"
+      : allowCoverage.length > 0
+        ? "Save changes"
+        : "Allow domain";
 
   const handleToggleBlockGroup = useCallback(
     (groupName: string) => {
@@ -2812,10 +3755,11 @@ export function LogsPage() {
         domain,
         nextAction,
       );
-      const nextMode: "exact" | "regex" =
-        summary.hasExact ? "exact"
-        : summary.regexMatches.length > 0 ? "regex"
-        : "exact";
+      const nextMode: "exact" | "regex" = summary.hasExact
+        ? "exact"
+        : summary.regexMatches.length > 0
+          ? "regex"
+          : "exact";
 
       setBlockingAction(nextAction);
       setBlockSelectedGroups(new Set(summary.selected));
@@ -2841,25 +3785,49 @@ export function LogsPage() {
     ],
   );
 
-  const closeBlockDialog = useCallback(() => {
-    setBlockDialog(undefined);
-    setBlockSelectedGroups(new Set<string>());
-    setBlockError(undefined);
-    setIsBlocking(false);
-    setBlockMode("exact");
-    setBlockRegexValue("");
-    setBulkAction(null);
+  const closeBlockDialog = useCallback(
+    (reason?: "cancel" | "confirm" | "dismiss") => {
+      setBlockDialog(undefined);
+      setBlockSelectedGroups(new Set<string>());
+      setBlockError(undefined);
+      setIsBlocking(false);
+      setBlockMode("exact");
+      setBlockRegexValue("");
+      setBulkAction(null);
 
-    // Resume auto-refresh when closing the modal (similar to mobile swipe behavior)
-    if (displayMode === "tail" && tailPaused) {
-      setTailPaused(false);
-    }
-  }, [displayMode, tailPaused, setTailPaused]);
+      if (displayMode === "tail") {
+        const prior = tailPauseBeforeModalRef.current;
+        tailPauseBeforeModalRef.current = null;
+
+        // In tail mode, the modal must NOT change pause state at all.
+        // We restore the prior refreshSeconds, and we do NOT touch tailPaused here.
+        //
+        // This prevents "first cancel unpauses" and also prevents getting stuck in a state
+        // where resume no longer triggers fetching.
+        if (reason === "cancel" || reason === "dismiss") {
+          if (prior) {
+            setRefreshSeconds(prior.refreshSeconds);
+          }
+          return;
+        }
+
+        // For confirm: keep whatever pause state the user had before opening the modal.
+        // (The confirm handlers decide whether to trigger a refresh tick or patch in-place.)
+        if (prior) {
+          setRefreshSeconds(prior.refreshSeconds);
+        }
+      }
+    },
+    [displayMode, setRefreshSeconds],
+  );
 
   const handleConfirmBlock = useCallback(async () => {
     if (!blockDialog) {
       return;
     }
+
+    // Ensure status exists so we can apply via the correct blocking method
+    await ensureBlockingStatusLoaded();
 
     const domain = blockDialog.entry.qname?.trim();
     const isCurrentlyBlocked = isEntryBlocked(blockDialog.entry);
@@ -2869,6 +3837,77 @@ export function LogsPage() {
       return;
     }
 
+    // If both systems are enabled, require an explicit per-action choice.
+    // Only consider it a true conflict when Advanced Blocking is installed+enabled.
+    const nodeStatus = blockingStatus?.nodes?.find(
+      (n) => n.nodeId === blockDialog.entry.nodeId,
+    );
+    const hasConflict = Boolean(
+      nodeStatus?.builtInEnabled === true &&
+      nodeStatus?.advancedBlockingInstalled === true &&
+      nodeStatus?.advancedBlockingEnabled === true,
+    );
+    if (hasConflict && !blockDialog.selectedBlockingSystem) {
+      setBlockError(
+        "Choose which blocking system to update (Built-in Blocking or Advanced Blocking).",
+      );
+      return;
+    }
+
+    const uiMethod =
+      hasConflict && blockDialog.selectedBlockingSystem
+        ? blockDialog.selectedBlockingSystem
+        : getUiBlockingMethodForNode(blockDialog.entry.nodeId);
+
+    // Built-in Blocking path: apply exact allow/block immediately (no groups/regex)
+    if (uiMethod === "built-in") {
+      try {
+        setIsBlocking(true);
+
+        if (blockingAction === "block") {
+          // Ensure domain is in blocked list; also remove it from allowed list best-effort
+          await addBlockedDomain(blockDialog.entry.nodeId, domain);
+          try {
+            await deleteAllowedDomain(blockDialog.entry.nodeId, domain);
+          } catch {
+            // best-effort; ignore
+          }
+        } else {
+          // Ensure domain is in allowed list; also remove it from blocked list best-effort
+          await addAllowedDomain(blockDialog.entry.nodeId, domain);
+          try {
+            await deleteBlockedDomain(blockDialog.entry.nodeId, domain);
+          } catch {
+            // best-effort; ignore
+          }
+        }
+
+        // Tail mode UX: if paused, patch visible entries in-place rather than forcing
+        // a refresh that can reshuffle the table and lose the user's position.
+        if (displayMode === "tail" && tailPaused) {
+          applyTailModeAdminActionPatch({
+            nodeId: blockDialog.entry.nodeId,
+            domain,
+            action: blockingAction,
+            blockingMethod: "built-in",
+          });
+        } else {
+          setRefreshTick((prev) => prev + 1);
+        }
+
+        closeBlockDialog("confirm");
+      } catch (error) {
+        setBlockError(
+          error instanceof Error
+            ? error.message
+            : "Failed to apply built-in blocking change.",
+        );
+        setIsBlocking(false);
+      }
+      return;
+    }
+
+    // Advanced Blocking path (existing behavior)
     if (blockingAction === "block") {
       if (!isCurrentlyBlocked && blockSelectedGroups.size === 0) {
         setBlockError("Select at least one group to apply the block.");
@@ -2891,9 +3930,9 @@ export function LogsPage() {
     if (blockMode === "regex") {
       if (regexPattern.length === 0) {
         setBlockError(
-          blockingAction === "block" ?
-            "Provide a regex pattern to block."
-          : "Provide a regex pattern to allow.",
+          blockingAction === "block"
+            ? "Provide a regex pattern to block."
+            : "Provide a regex pattern to allow.",
         );
         return;
       }
@@ -3064,11 +4103,13 @@ export function LogsPage() {
         return {
           ...group,
           blocked: blockedChanged ? nextBlocked : group.blocked,
-          blockedRegex:
-            blockedRegexChanged ? nextBlockedRegex : group.blockedRegex,
+          blockedRegex: blockedRegexChanged
+            ? nextBlockedRegex
+            : group.blockedRegex,
           allowed: allowedChanged ? nextAllowed : group.allowed,
-          allowedRegex:
-            allowedRegexChanged ? nextAllowedRegex : group.allowedRegex,
+          allowedRegex: allowedRegexChanged
+            ? nextAllowedRegex
+            : group.allowedRegex,
         };
       }
 
@@ -3083,8 +4124,21 @@ export function LogsPage() {
     try {
       setIsBlocking(true);
       await saveAdvancedBlockingConfig(blockDialog.entry.nodeId, updatedConfig);
-      setRefreshTick((prev) => prev + 1);
-      closeBlockDialog();
+
+      // Tail mode UX: if paused, patch visible entries in-place rather than forcing
+      // a refresh that can reshuffle the table and lose the user's position.
+      if (displayMode === "tail" && tailPaused) {
+        applyTailModeAdminActionPatch({
+          nodeId: blockDialog.entry.nodeId,
+          domain,
+          action: blockingAction,
+          blockingMethod: "advanced",
+        });
+      } else {
+        setRefreshTick((prev) => prev + 1);
+      }
+
+      closeBlockDialog("confirm");
     } catch (error) {
       setBlockError(
         error instanceof Error ? error.message : "Failed to apply block.",
@@ -3104,6 +4158,16 @@ export function LogsPage() {
     setBlockError,
     setIsBlocking,
     allowCoverage,
+    ensureBlockingStatusLoaded,
+    getUiBlockingMethodForNode,
+    addAllowedDomain,
+    addBlockedDomain,
+    deleteAllowedDomain,
+    deleteBlockedDomain,
+    blockingStatus,
+    applyTailModeAdminActionPatch,
+    displayMode,
+    tailPaused,
   ]);
 
   const handleConfirmBulkAction = useCallback(async () => {
@@ -3184,14 +4248,45 @@ export function LogsPage() {
         await saveAdvancedBlockingConfig(snapshot.nodeId, updatedConfig);
       }
 
-      setRefreshTick((prev) => prev + 1);
+      // Tail mode UX: if paused, patch visible entries in-place rather than forcing
+      // a refresh that can reshuffle the table and lose the user's position.
+      if (displayMode === "tail" && tailPaused) {
+        // Apply the patch for all selected domains on the current node context (bulk action
+        // updates Advanced Blocking config across nodes; UI patch here is best-effort for
+        // what the user currently sees in the tail buffer).
+        //
+        // NOTE: applyTailModeAdminActionPatch is nodeId-specific. In bulk mode we don't
+        // have a single nodeId, so we patch for every nodeId present in the current tail buffer.
+        const nodeIdsInTail = Array.from(
+          new Set(
+            tailBuffer
+              .map((entry) => entry.nodeId)
+              .filter((nodeId): nodeId is string => Boolean(nodeId)),
+          ),
+        );
+        const action: "block" | "allow" = bulkAction;
+
+        for (const nodeId of nodeIdsInTail) {
+          for (const domain of selectedDomains) {
+            applyTailModeAdminActionPatch({
+              nodeId,
+              domain,
+              action,
+              blockingMethod: "advanced",
+            });
+          }
+        }
+      } else {
+        setRefreshTick((prev) => prev + 1);
+      }
+
       clearSelection();
-      closeBlockDialog();
+      closeBlockDialog("confirm");
     } catch (error) {
       setBlockError(
-        error instanceof Error ?
-          error.message
-        : `Failed to ${bulkAction} domains.`,
+        error instanceof Error
+          ? error.message
+          : `Failed to ${bulkAction} domains.`,
       );
       setIsBlocking(false);
     }
@@ -3204,6 +4299,10 @@ export function LogsPage() {
     setRefreshTick,
     clearSelection,
     closeBlockDialog,
+    displayMode,
+    tailPaused,
+    tailBuffer,
+    applyTailModeAdminActionPatch,
   ]);
 
   useEffect(() => {
@@ -3218,12 +4317,20 @@ export function LogsPage() {
   }, [mode, nodeMap, nodes, selectedNodeId]);
 
   useEffect(() => {
+    // Tail-mode pause should stop network fetching entirely.
+    // Single source of truth: refreshSeconds <= 0 is paused.
     if (refreshSeconds <= 0) {
       setIsAutoRefresh(false);
       return;
     }
 
     const triggerRefresh = () => {
+      // Belt-and-suspenders: even if an interval callback fires late,
+      // never trigger a refresh while paused.
+      if (refreshSeconds <= 0) {
+        return;
+      }
+
       if (!document.hidden) {
         // Skip auto-refresh ticks while a load is already in-flight.
         // This avoids request pile-ups and keeps the UI responsive.
@@ -3241,40 +4348,15 @@ export function LogsPage() {
 
     const handleVisibilityChange = () => {
       if (!document.hidden && refreshSeconds > 0) {
-        if (isLogsResumeDebugEnabled()) {
-          console.info("[LogsPage] visibility resume", {
-            at: new Date().toISOString(),
-            refreshSeconds,
-            inFlight: logsFetchInFlightRef.current,
-          });
-        }
         // Some browsers throttle/suspend network requests in background tabs.
         // If a log fetch was in-flight when the tab was backgrounded, the promise
         // may never resolve/reject, leaving logsFetchInFlightRef stuck and
         // preventing subsequent refresh ticks (which also stalls hostname
         // enrichment coming from the combined logs endpoint).
         if (logsFetchInFlightRef.current) {
-          if (isLogsResumeDebugEnabled()) {
-            console.warn(
-              "[LogsPage] Aborting in-flight log fetch on visibility resume (likely background-throttled).",
-              {
-                at: new Date().toISOString(),
-                visibilityState: document.visibilityState,
-                refreshSeconds,
-              },
-            );
-
-            const now = Date.now();
-            if (now - logsResumeDebugToastAtRef.current > 30000) {
-              logsResumeDebugToastAtRef.current = now;
-              pushToast({
-                tone: "info",
-                timeout: 7000,
-                message:
-                  "Logs debug: aborted a stuck in-flight fetch on resume (check console).",
-              });
-            }
-          }
+          // Some browsers can leave in-flight requests unresolved when backgrounded.
+          // If we detect that situation on resume, abort and clear the in-flight marker
+          // so tailing can continue.
           logsFetchAbortRef.current?.abort();
           logsFetchAbortRef.current = null;
           logsFetchInFlightRef.current = false;
@@ -3285,35 +4367,8 @@ export function LogsPage() {
 
     const handleWindowFocus = () => {
       if (!document.hidden && refreshSeconds > 0) {
-        if (isLogsResumeDebugEnabled()) {
-          console.info("[LogsPage] window focus", {
-            at: new Date().toISOString(),
-            refreshSeconds,
-            inFlight: logsFetchInFlightRef.current,
-          });
-        }
         if (logsFetchInFlightRef.current) {
-          if (isLogsResumeDebugEnabled()) {
-            console.warn(
-              "[LogsPage] Aborting in-flight log fetch on window focus (likely background-throttled).",
-              {
-                at: new Date().toISOString(),
-                visibilityState: document.visibilityState,
-                refreshSeconds,
-              },
-            );
-
-            const now = Date.now();
-            if (now - logsResumeDebugToastAtRef.current > 30000) {
-              logsResumeDebugToastAtRef.current = now;
-              pushToast({
-                tone: "info",
-                timeout: 7000,
-                message:
-                  "Logs debug: aborted a stuck in-flight fetch on focus (check console).",
-              });
-            }
-          }
+          // Same stuck in-flight protection as visibility resume.
           logsFetchAbortRef.current?.abort();
           logsFetchAbortRef.current = null;
           logsFetchInFlightRef.current = false;
@@ -3481,9 +4536,11 @@ export function LogsPage() {
 
     const load = async () => {
       const nextLoadingState =
-        displayMode === "tail" ? "refreshing"
-        : isAutoRefresh || hasLoadedAnyLogsRef.current ? "refreshing"
-        : "loading";
+        displayMode === "tail"
+          ? "refreshing"
+          : isAutoRefresh || hasLoadedAnyLogsRef.current
+            ? "refreshing"
+            : "loading";
       setLoadingState(nextLoadingState);
       setErrorMessage(undefined);
 
@@ -3493,9 +4550,11 @@ export function LogsPage() {
 
         if (mode === "combined") {
           const combinedLogsLoader =
-            displayMode === "tail" ? loadCombinedLogs
-            : storedLogsReady ? loadStoredCombinedLogs
-            : loadCombinedLogs;
+            displayMode === "tail"
+              ? loadCombinedLogs
+              : storedLogsReady
+                ? loadStoredCombinedLogs
+                : loadCombinedLogs;
 
           const filterParams = {
             pageNumber: effectivePageNumber,
@@ -3583,9 +4642,11 @@ export function LogsPage() {
           }
         } else if (selectedNodeId) {
           const nodeLogsLoader =
-            displayMode === "tail" ? loadNodeLogs
-            : storedLogsReady ? loadStoredNodeLogs
-            : loadNodeLogs;
+            displayMode === "tail"
+              ? loadNodeLogs
+              : storedLogsReady
+                ? loadStoredNodeLogs
+                : loadNodeLogs;
 
           const data = await nodeLogsLoader(
             selectedNodeId,
@@ -3869,9 +4930,9 @@ export function LogsPage() {
         if (responseFilter !== "all") {
           const entryResponse = entry.responseType?.trim() ?? "";
           const matchValue =
-            responseFilter === EMPTY_RESPONSE_FILTER_VALUE ? "" : (
-              responseFilter
-            );
+            responseFilter === EMPTY_RESPONSE_FILTER_VALUE
+              ? ""
+              : responseFilter;
           if (entryResponse !== matchValue) {
             return false;
           }
@@ -3993,12 +5054,12 @@ export function LogsPage() {
 
     // Calculate average response time
     const avgResponseTime =
-      stats.responseTimes.length > 0 ?
-        Math.round(
-          stats.responseTimes.reduce((sum, time) => sum + time, 0) /
-            stats.responseTimes.length,
-        )
-      : null;
+      stats.responseTimes.length > 0
+        ? Math.round(
+            stats.responseTimes.reduce((sum, time) => sum + time, 0) /
+              stats.responseTimes.length,
+          )
+        : null;
 
     // Calculate percentages
     const allowedPercent =
@@ -4183,6 +5244,187 @@ export function LogsPage() {
         id="domain-tooltip-shared"
         place="top"
         className="domain-tooltip"
+        clickable
+        afterShow={() => {
+          const anchor = domainTooltipAnchorRef.current;
+          if (!anchor) {
+            return;
+          }
+
+          const domain = anchor.getAttribute("data-domain") ?? "";
+          const nodeId = anchor.getAttribute("data-node-id") ?? "";
+          const isBlocked = anchor.getAttribute("data-is-blocked") === "true";
+
+          if (!isBlocked || !domain || !nodeId) {
+            return;
+          }
+
+          triggerDomainBlockSourceLookupImmediate(nodeId, domain);
+        }}
+        afterHide={() => {
+          setExpandedDomainTooltipKey(null);
+        }}
+        render={({
+          activeAnchor,
+          content,
+        }: {
+          activeAnchor: HTMLElement | null;
+          content: string | null;
+        }) => {
+          if (!activeAnchor) {
+            return null;
+          }
+
+          const anchor =
+            (activeAnchor.closest(
+              "[data-tooltip-id='domain-tooltip-shared']",
+            ) as HTMLElement | null) ?? activeAnchor;
+
+          domainTooltipAnchorRef.current = anchor;
+
+          const baseHtml =
+            typeof content === "string"
+              ? content
+              : (anchor.getAttribute("data-tooltip-content") ?? "");
+
+          const domain = anchor.getAttribute("data-domain") ?? "";
+          const nodeId = anchor.getAttribute("data-node-id") ?? "";
+          const isBlocked = anchor.getAttribute("data-is-blocked") === "true";
+
+          const key =
+            domain && nodeId
+              ? getDomainBlockSourceCacheKey(nodeId, domain)
+              : null;
+
+          const lookup = key ? domainBlockSourceByKey[key] : undefined;
+          const rawMatches =
+            lookup?.result?.foundIn?.filter((match) =>
+              isBlockMatch(match.type),
+            ) ?? [];
+
+          const allMatches =
+            rawMatches.length <= 1
+              ? rawMatches
+              : Array.from(
+                  new Map(
+                    rawMatches.map((match) => [
+                      getBlockMatchDedupeKey(match),
+                      match,
+                    ]),
+                  ).values(),
+                );
+          const expanded =
+            key !== null &&
+            expandedDomainTooltipKey === key &&
+            allMatches.length > 3;
+          const matchesToShow = expanded ? allMatches : allMatches.slice(0, 3);
+          const remaining = Math.max(
+            0,
+            allMatches.length - matchesToShow.length,
+          );
+
+          return (
+            <div onContextMenu={handleLogsTableContextMenu}>
+              {/*
+               * SECURITY NOTE (XSS): `baseHtml` originates from the domain-cell tooltip string.
+               * That string is constructed to escape all dynamic/untrusted values (see
+               * `escapeTooltipHtml()` in the Domain column renderer). Do not pass raw/unescaped
+               * values into that HTML.
+               */}
+              <div dangerouslySetInnerHTML={{ __html: baseHtml }} />
+
+              {isBlocked && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    paddingTop: 8,
+                    borderTop: "1px solid rgba(255, 255, 255, 0.15)",
+                  }}
+                >
+                  <div>
+                    <strong>Likely blocked by:</strong>
+                  </div>
+
+                  {(!lookup || lookup.status === "idle") && (
+                    <div style={{ marginTop: 6, opacity: 0.8 }}>
+                      Hover ~0.3s to check block sources…
+                    </div>
+                  )}
+
+                  {lookup?.status === "loading" && (
+                    <div style={{ marginTop: 6, opacity: 0.8 }}>
+                      Looking up block sources…
+                    </div>
+                  )}
+
+                  {lookup?.status === "error" && (
+                    <div style={{ marginTop: 6, opacity: 0.8 }}>
+                      Unable to determine block source: {lookup.error}
+                    </div>
+                  )}
+
+                  {lookup?.status === "loaded" && (
+                    <>
+                      {allMatches.length === 0 ? (
+                        <div style={{ marginTop: 6, opacity: 0.8 }}>
+                          No matching blocklist/rule found (may be blocked by a
+                          different mechanism).
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 6 }}>
+                          {matchesToShow.map((match, index) => (
+                            <div
+                              key={
+                                getBlockMatchDedupeKey(match) ||
+                                `${match.type}-${match.source}-${index}`
+                              }
+                              style={{ marginLeft: 12, fontSize: 12 }}
+                            >
+                              <span
+                                data-logs-tooltip-block-source="true"
+                                data-block-match-label={formatBlockMatchLabel(
+                                  match,
+                                )}
+                                data-block-match-source={match.source ?? ""}
+                                data-block-match-pattern={
+                                  match.matchedPattern ?? ""
+                                }
+                              >
+                                <span className="tooltip-blocked">→</span>{" "}
+                                {formatBlockMatchLabel(match)}
+                              </span>
+                            </div>
+                          ))}
+
+                          {allMatches.length > 3 && key && (
+                            <button
+                              type="button"
+                              className="domain-tooltip__show-more"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setExpandedDomainTooltipKey(
+                                  expanded ? null : key,
+                                );
+                              }}
+                              style={{ marginTop: 8 }}
+                            >
+                              {expanded
+                                ? "Show less"
+                                : remaining > 0
+                                  ? `Show ${remaining} more`
+                                  : "Show more"}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        }}
       />
       {/* Tooltip for response time cells */}
       <Tooltip
@@ -4203,18 +5445,19 @@ export function LogsPage() {
 
         {loadingState === "error" && errorMessage && (
           <div className="logs-page__error">
-            {(
-              getAuthRedirectReason() === "session-expired" &&
-              /\(401\)/.test(errorMessage)
-            ) ?
+            {getAuthRedirectReason() === "session-expired" &&
+            /\(401\)/.test(errorMessage) ? (
               <>Companion session expired — redirecting to sign in…</>
-            : <>Failed to load logs: {errorMessage}</>}
+            ) : (
+              <>Failed to load logs: {errorMessage}</>
+            )}
           </div>
         )}
 
-        {loadingState === "loading" ?
+        {loadingState === "loading" ? (
           <SkeletonLogsStats />
-        : <div
+        ) : (
+          <div
             className={`logs-page__statistics ${loadingState === "refreshing" ? "refreshing" : ""} ${statisticsExpanded ? "expanded" : "collapsed"}`}
           >
             <div className="logs-page__statistics-header">
@@ -4323,14 +5566,15 @@ export function LogsPage() {
               </div>
             )}
           </div>
-        }
+        )}
 
-        {loadingState === "loading" ?
+        {loadingState === "loading" ? (
           <SkeletonLogsSummary />
-        : <div
+        ) : (
+          <div
             className={`logs-page__summary ${loadingState === "refreshing" ? "refreshing" : ""}`}
           >
-            {displayMode === "tail" ?
+            {displayMode === "tail" ? (
               <>
                 <div>
                   <strong>Buffer size:</strong> {tailBuffer.length} /{" "}
@@ -4357,9 +5601,9 @@ export function LogsPage() {
                 </div>
                 <div>
                   <strong>Last update:</strong>{" "}
-                  {tailNewestTimestamp ?
-                    new Date(tailNewestTimestamp).toLocaleString()
-                  : "—"}
+                  {tailNewestTimestamp
+                    ? new Date(tailNewestTimestamp).toLocaleString()
+                    : "—"}
                 </div>
                 {isFilteringActive && (
                   <div>
@@ -4378,7 +5622,8 @@ export function LogsPage() {
                   </div>
                 )}
               </>
-            : <>
+            ) : (
+              <>
                 <div>
                   <strong>Total entries:</strong>{" "}
                   {totalEntries.toLocaleString()}
@@ -4388,13 +5633,13 @@ export function LogsPage() {
                 </div>
                 <div className="logs-page__summary-line">
                   <strong>Fetched:</strong>{" "}
-                  {mode === "combined" ?
-                    combinedPage?.fetchedAt ?
-                      new Date(combinedPage.fetchedAt).toLocaleString()
-                    : "—"
-                  : nodeSnapshot?.fetchedAt ?
-                    new Date(nodeSnapshot.fetchedAt).toLocaleString()
-                  : "—"}
+                  {mode === "combined"
+                    ? combinedPage?.fetchedAt
+                      ? new Date(combinedPage.fetchedAt).toLocaleString()
+                      : "—"
+                    : nodeSnapshot?.fetchedAt
+                      ? new Date(nodeSnapshot.fetchedAt).toLocaleString()
+                      : "—"}
                   <span className="logs-page__summary-pills">
                     <span
                       className={`logs-page__meta-pill logs-page__meta-pill--${logsSourceKind}`}
@@ -4408,9 +5653,9 @@ export function LogsPage() {
                         title={`SQLite stored-log response cache (server-side). TTL=${Math.round(storedResponseCache.ttlMs / 1000)}s, Size=${storedResponseCache.size}/${storedResponseCache.maxEntries}, Hits=${storedResponseCache.hits}, Misses=${storedResponseCache.misses}, Evictions=${storedResponseCache.evictions}`}
                       >
                         DB Cache
-                        {storedResponseCacheHitRatePercent !== null ?
-                          ` ${storedResponseCacheHitRatePercent}%`
-                        : ""}
+                        {storedResponseCacheHitRatePercent !== null
+                          ? ` ${storedResponseCacheHitRatePercent}%`
+                          : ""}
                       </span>
                     )}
                     {duplicatesRemoved > 0 && (
@@ -4430,9 +5675,9 @@ export function LogsPage() {
                   </div>
                 )}
               </>
-            }
+            )}
           </div>
-        }
+        )}
 
         {/* Mobile filter toggle button */}
         <button
@@ -4511,9 +5756,9 @@ export function LogsPage() {
               name="client-filter"
               type="text"
               placeholder={
-                displayMode === "paginated" ?
-                  "Hostname/IP contains… (or click client)"
-                : "Contains… (or click client)"
+                displayMode === "paginated"
+                  ? "Hostname/IP contains… (or click client)"
+                  : "Contains… (or click client)"
               }
               value={clientFilter}
               onChange={(event) => setClientFilter(event.target.value)}
@@ -4530,9 +5775,9 @@ export function LogsPage() {
               <option value="all">All</option>
               {responseFilterOptions.map((option) => (
                 <option key={option} value={option}>
-                  {option === EMPTY_RESPONSE_FILTER_VALUE ?
-                    "No response value"
-                  : option}
+                  {option === EMPTY_RESPONSE_FILTER_VALUE
+                    ? "No response value"
+                    : option}
                 </option>
               ))}
             </select>
@@ -4593,7 +5838,7 @@ export function LogsPage() {
             className={`logs-page__date-presets ${storedLogsReady ? "" : "logs-page__date-presets--disabled"}`}
             aria-disabled={!storedLogsReady}
           >
-            {storedLogsReady ?
+            {storedLogsReady ? (
               <button
                 type="button"
                 className="logs-page__date-preset"
@@ -4602,7 +5847,8 @@ export function LogsPage() {
               >
                 Last 24h
               </button>
-            : <span
+            ) : (
+              <span
                 className="logs-page__date-preset-disabled"
                 title="Requires stored logs (SQLite)"
               >
@@ -4615,9 +5861,9 @@ export function LogsPage() {
                   Last 24h
                 </button>
               </span>
-            }
+            )}
 
-            {storedLogsReady ?
+            {storedLogsReady ? (
               <button
                 type="button"
                 className="logs-page__date-preset"
@@ -4626,7 +5872,8 @@ export function LogsPage() {
               >
                 Last Hour
               </button>
-            : <span
+            ) : (
+              <span
                 className="logs-page__date-preset-disabled"
                 title="Requires stored logs (SQLite)"
               >
@@ -4639,9 +5886,9 @@ export function LogsPage() {
                   Last Hour
                 </button>
               </span>
-            }
+            )}
 
-            {storedLogsReady ?
+            {storedLogsReady ? (
               <button
                 type="button"
                 className="logs-page__date-preset"
@@ -4650,7 +5897,8 @@ export function LogsPage() {
               >
                 Yesterday
               </button>
-            : <span
+            ) : (
+              <span
                 className="logs-page__date-preset-disabled"
                 title="Requires stored logs (SQLite)"
               >
@@ -4663,9 +5911,9 @@ export function LogsPage() {
                   Yesterday
                 </button>
               </span>
-            }
+            )}
 
-            {storedLogsReady ?
+            {storedLogsReady ? (
               <button
                 type="button"
                 className="logs-page__date-preset"
@@ -4674,7 +5922,8 @@ export function LogsPage() {
               >
                 Today
               </button>
-            : <span
+            ) : (
+              <span
                 className="logs-page__date-preset-disabled"
                 title="Requires stored logs (SQLite)"
               >
@@ -4687,7 +5936,7 @@ export function LogsPage() {
                   Today
                 </button>
               </span>
-            }
+            )}
 
             {(startDate || endDate) && (
               <button
@@ -4777,10 +6026,9 @@ export function LogsPage() {
                   icon={displayMode === "paginated" ? faFile : faTowerBroadcast}
                 />{" "}
                 ·
-                {mode === "combined" ?
-                  " Combined"
-                : ` ${nodes.find((n) => n.id === selectedNodeId)?.name || "Node"}`
-                }{" "}
+                {mode === "combined"
+                  ? " Combined"
+                  : ` ${nodes.find((n) => n.id === selectedNodeId)?.name || "Node"}`}{" "}
                 · Page {pageNumber}/{totalPages}
               </span>
             )}
@@ -4794,9 +6042,9 @@ export function LogsPage() {
                 <button
                   type="button"
                   className={
-                    displayMode === "tail" ?
-                      "toggle-button active"
-                    : "toggle-button"
+                    displayMode === "tail"
+                      ? "toggle-button active"
+                      : "toggle-button"
                   }
                   onClick={() => handleDisplayModeChange("tail")}
                 >
@@ -4805,9 +6053,9 @@ export function LogsPage() {
                 <button
                   type="button"
                   className={
-                    displayMode === "paginated" ?
-                      "toggle-button active"
-                    : "toggle-button"
+                    displayMode === "paginated"
+                      ? "toggle-button active"
+                      : "toggle-button"
                   }
                   onClick={() => handleDisplayModeChange("paginated")}
                 >
@@ -4818,9 +6066,9 @@ export function LogsPage() {
                 <button
                   type="button"
                   className={
-                    mode === "combined" ?
-                      "toggle-button active"
-                    : "toggle-button"
+                    mode === "combined"
+                      ? "toggle-button active"
+                      : "toggle-button"
                   }
                   onClick={() => handleModeChange("combined")}
                 >
@@ -4869,7 +6117,7 @@ export function LogsPage() {
                         Prev
                       </button>
                       <span>
-                        {pageJumpOpen ?
+                        {pageJumpOpen ? (
                           <span className="logs-page__pager-page-jump">
                             <input
                               ref={pageJumpInputRef}
@@ -4901,7 +6149,8 @@ export function LogsPage() {
                               / {totalPages}
                             </span>
                           </span>
-                        : <button
+                        ) : (
+                          <button
                             type="button"
                             className="logs-page__pager-page-button"
                             onClick={openPageJump}
@@ -4909,7 +6158,7 @@ export function LogsPage() {
                           >
                             {pageNumber} / {totalPages}
                           </button>
-                        }
+                        )}
                         {hasMorePages && (
                           <span
                             className="logs-page__more-results-warning"
@@ -4936,9 +6185,9 @@ export function LogsPage() {
                 <button
                   type="button"
                   className={
-                    refreshSeconds === 0 ?
-                      "logs-page__live-toggle paused"
-                    : "logs-page__live-toggle live"
+                    refreshSeconds === 0
+                      ? "logs-page__live-toggle paused"
+                      : "logs-page__live-toggle live"
                   }
                   onClick={(event) => {
                     // Prevent any default behavior that could cause page jump
@@ -4972,29 +6221,30 @@ export function LogsPage() {
                     });
                   }}
                   title={
-                    refreshSeconds === 0 ?
-                      endDate.trim().length > 0 ?
-                        "Auto-refresh paused because End Date/Time is set. Clear it to resume."
-                      : logsTableContextMenu ?
-                        "Auto-refresh paused while the context menu is open."
-                      : "Click to resume auto-refresh"
-                    : "Click to pause auto-refresh"
+                    refreshSeconds === 0
+                      ? endDate.trim().length > 0
+                        ? "Auto-refresh paused because End Date/Time is set. Clear it to resume."
+                        : logsTableContextMenu
+                          ? "Auto-refresh paused while the context menu is open."
+                          : "Click to resume auto-refresh"
+                      : "Click to pause auto-refresh"
                   }
                 >
-                  {
-                    displayMode === "tail" ?
-                      // Tail mode: Show entry count in buffer
-                      refreshSeconds === 0 ?
-                        <>⏸️ Paused ({tailBuffer.length} entries)</>
-                      : <>🟢 Live ({tailBuffer.length} entries)</>
-                      // Paginated mode: No entry count, simpler labels
-                    : refreshSeconds === 0 ?
-                      <>⏸️ Paused</>
-                    : <>
-                        <FontAwesomeIcon icon={faRotate} /> Auto-refresh
-                      </>
-
-                  }
+                  {displayMode === "tail" ? (
+                    // Tail mode: Show entry count in buffer
+                    refreshSeconds === 0 ? (
+                      <>⏸️ Paused ({tailBuffer.length} entries)</>
+                    ) : (
+                      <>🟢 Live ({tailBuffer.length} entries)</>
+                    )
+                  ) : // Paginated mode: No entry count, simpler labels
+                  refreshSeconds === 0 ? (
+                    <>⏸️ Paused</>
+                  ) : (
+                    <>
+                      <FontAwesomeIcon icon={faRotate} /> Auto-refresh
+                    </>
+                  )}
                 </button>
                 <label className="logs-page__filter">
                   Refresh interval
@@ -5002,9 +6252,9 @@ export function LogsPage() {
                     id="refresh-interval"
                     name="refresh-interval"
                     value={
-                      refreshSeconds === 0 ?
-                        TAIL_MODE_DEFAULT_REFRESH
-                      : refreshSeconds
+                      refreshSeconds === 0
+                        ? TAIL_MODE_DEFAULT_REFRESH
+                        : refreshSeconds
                     }
                     onChange={(event) => {
                       setIsAutoRefresh(false);
@@ -5030,9 +6280,9 @@ export function LogsPage() {
                   ref={settingsButtonRef}
                   type="button"
                   className={
-                    settingsOpen ?
-                      "logs-page__settings-toggle active"
-                    : "logs-page__settings-toggle"
+                    settingsOpen
+                      ? "logs-page__settings-toggle active"
+                      : "logs-page__settings-toggle"
                   }
                   onClick={() => setSettingsOpen((prev) => !prev)}
                 >
@@ -5277,174 +6527,191 @@ export function LogsPage() {
         </div>
 
         {/* Conditionally render table or cards based on mobile layout mode */}
-        {
-          mobileLayoutMode === "card-view" && window.innerWidth < 768 ?
-            // Card view for mobile
-            <div
-              className={`logs-page__cards-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
-            >
-              {renderCardsView(
-                filteredEntries,
-                selectedDomains,
-                domainToGroupMap,
-                domainGroupDetailsMap,
-                toggleDomainSelection,
-                handleStatusClick,
-                handleClientClick,
-                handleDomainClick,
-                loadingState === "error" ? "idle" : loadingState,
-                isFilteringActive,
-                deduplicateDomains,
-                columnVisibility,
-                () => {
-                  // Pause auto-refresh when user starts swiping on a card
-                  setIsAutoRefresh(false);
-                  setRefreshSeconds(0);
-                },
-              )}
-            </div>
-            // Table view (desktop or compact-table mode on mobile)
-          : <div
-              className={`logs-page__table-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
-              onContextMenu={handleLogsTableContextMenu}
-            >
-              <table className="logs-page__table">
-                <colgroup>
-                  {activeColumns.map((column) => (
-                    <col key={column.id} className={column.className} />
-                  ))}
-                </colgroup>
-                <thead>
-                  <tr>
-                    {activeColumns.map((column) => {
-                      if (column.id === "group-badge") {
-                        return (
-                          <th
-                            key={column.id}
-                            className="logs-page__header--group-badge"
-                          ></th>
-                        );
-                      }
-                      if (column.id === "select") {
-                        const allSelected =
-                          filteredEntries.length > 0 &&
-                          selectedDomains.size === filteredEntries.length;
-                        const someSelected =
-                          selectedDomains.size > 0 &&
-                          selectedDomains.size < filteredEntries.length;
-                        return (
-                          <th
-                            key={column.id}
-                            className="logs-page__header--select"
-                          >
-                            <input
-                              id="logs-select-all"
-                              name="selectAll"
-                              type="checkbox"
-                              checked={allSelected}
-                              ref={(input) => {
-                                if (input) {
-                                  input.indeterminate = someSelected;
-                                }
-                              }}
-                              onChange={toggleSelectAll}
-                              aria-label="Select all domains"
-                              title={
-                                allSelected ? "Deselect all"
-                                : someSelected ?
-                                  "Select all"
-                                : "Select all"
+        {mobileLayoutMode === "card-view" && window.innerWidth < 768 ? (
+          // Card view for mobile
+          <div
+            className={`logs-page__cards-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
+          >
+            {renderCardsView(
+              filteredEntries,
+              selectedDomains,
+              domainToGroupMap,
+              domainGroupDetailsMap,
+              toggleDomainSelection,
+              handleStatusClick,
+              handleClientClick,
+              handleDomainClick,
+              loadingState === "error" ? "idle" : loadingState,
+              isFilteringActive,
+              deduplicateDomains,
+              columnVisibility,
+              () => {
+                // Pause auto-refresh when user starts swiping on a card
+                setIsAutoRefresh(false);
+                setRefreshSeconds(0);
+              },
+            )}
+          </div>
+        ) : (
+          // Table view (desktop or compact-table mode on mobile)
+          <div
+            className={`logs-page__table-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
+            onContextMenu={handleLogsTableContextMenu}
+          >
+            <table className="logs-page__table">
+              <colgroup>
+                {activeColumns.map((column) => (
+                  <col key={column.id} className={column.className} />
+                ))}
+              </colgroup>
+              <thead>
+                <tr>
+                  {activeColumns.map((column) => {
+                    if (column.id === "group-badge") {
+                      return (
+                        <th
+                          key={column.id}
+                          className="logs-page__header--group-badge"
+                        ></th>
+                      );
+                    }
+                    if (column.id === "select") {
+                      const allSelected =
+                        filteredEntries.length > 0 &&
+                        selectedDomains.size === filteredEntries.length;
+                      const someSelected =
+                        selectedDomains.size > 0 &&
+                        selectedDomains.size < filteredEntries.length;
+                      return (
+                        <th
+                          key={column.id}
+                          className="logs-page__header--select"
+                        >
+                          <input
+                            id="logs-select-all"
+                            name="selectAll"
+                            type="checkbox"
+                            checked={allSelected}
+                            ref={(input) => {
+                              if (input) {
+                                input.indeterminate = someSelected;
                               }
-                            />
-                          </th>
-                        );
-                      }
-                      return <th key={column.id}>{column.label}</th>;
-                    })}
+                            }}
+                            onChange={toggleSelectAll}
+                            aria-label="Select all domains"
+                            title={
+                              allSelected
+                                ? "Deselect all"
+                                : someSelected
+                                  ? "Select all"
+                                  : "Select all"
+                            }
+                          />
+                        </th>
+                      );
+                    }
+                    return <th key={column.id}>{column.label}</th>;
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {loadingState === "loading" ? (
+                  <tr>
+                    <td
+                      colSpan={activeColumns.length || 1}
+                      className="logs-page__loading"
+                    >
+                      Loading query logs…
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {loadingState === "loading" ?
-                    <tr>
-                      <td
-                        colSpan={activeColumns.length || 1}
-                        className="logs-page__loading"
-                      >
-                        Loading query logs…
-                      </td>
-                    </tr>
-                  : filteredEntries.length === 0 ?
-                    <tr>
-                      <td
-                        colSpan={activeColumns.length || 1}
-                        className="logs-page__empty"
-                      >
-                        {isFilteringActive ?
-                          "No log entries match the current filters."
+                ) : filteredEntries.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={activeColumns.length || 1}
+                      className="logs-page__empty"
+                    >
+                      {isFilteringActive
+                        ? "No log entries match the current filters."
                         : "No log entries found for the selected view."}
-                      </td>
-                    </tr>
-                    // Render only first 50 visible rows instead of all (virtualization will come later)
-                    // This is a quick fix until we refactor to use div-based virtualized table
-                  : filteredEntries
-                      .slice(0, 50)
-                      .map((entry) => (
-                        <LogTableRow
-                          key={`${entry.nodeId}-${entry.rowNumber}-${entry.timestamp}`}
-                          entry={entry}
-                          activeColumns={activeColumns}
-                          selectedDomains={selectedDomains}
-                          domainToGroupMap={domainToGroupMap}
-                          newEntryTimestamps={newEntryTimestamps}
-                          isEntryBlocked={isEntryBlocked}
-                        />
-                      ))
-                  }
-                </tbody>
-              </table>
+                    </td>
+                  </tr>
+                ) : (
+                  // Render only first 50 visible rows instead of all (virtualization will come later)
+                  // This is a quick fix until we refactor to use div-based virtualized table
+                  filteredEntries
+                    .slice(0, 50)
+                    .map((entry) => (
+                      <LogTableRow
+                        key={`${entry.nodeId}-${entry.rowNumber}-${entry.timestamp}`}
+                        entry={entry}
+                        activeColumns={activeColumns}
+                        selectedDomains={selectedDomains}
+                        domainToGroupMap={domainToGroupMap}
+                        newEntryTimestamps={newEntryTimestamps}
+                        isEntryBlocked={isEntryBlocked}
+                      />
+                    ))
+                )}
+              </tbody>
+            </table>
 
-              {logsTableContextMenu ?
+            {logsTableContextMenu ? (
+              <div
+                className="logs-page__context-menu-overlay"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  closeLogsTableContextMenu();
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  closeLogsTableContextMenu();
+                }}
+              >
                 <div
-                  className="logs-page__context-menu-overlay"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    closeLogsTableContextMenu();
+                  ref={logsTableContextMenuRef}
+                  className="logs-page__context-menu"
+                  style={{
+                    left: logsTableContextMenu.x,
+                    top: logsTableContextMenu.y,
                   }}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    closeLogsTableContextMenu();
+                  role="menu"
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
                   }}
                 >
-                  <div
-                    ref={logsTableContextMenuRef}
-                    className="logs-page__context-menu"
-                    style={{
-                      left: logsTableContextMenu.x,
-                      top: logsTableContextMenu.y,
-                    }}
-                    role="menu"
-                    onMouseDown={(event) => {
-                      event.stopPropagation();
-                    }}
-                  >
-                    {logsTableContextMenu.items.map((item) => (
+                  {logsTableContextMenu.items.map((item, index) => {
+                    if (item.action === "separator") {
+                      return (
+                        <div
+                          key={`separator-${index}`}
+                          className="logs-page__context-menu-separator"
+                          role="separator"
+                        />
+                      );
+                    }
+
+                    return (
                       <button
-                        key={`${item.label}-${item.value}`}
+                        key={
+                          item.action === "copy"
+                            ? `${item.label}-copy-${item.value}`
+                            : `${item.label}-open-${item.href}`
+                        }
                         type="button"
                         className="logs-page__context-menu-item"
-                        onClick={() => handleCopyFromContextMenu(item.value)}
+                        onClick={() => handleContextMenuAction(item)}
                       >
                         {item.label}
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-              : null}
-            </div>
+              </div>
+            ) : null}
+          </div>
+        )}
 
-        }
-
-        {mode === "combined" && combinedNodeSnapshots.length > 0 ?
+        {mode === "combined" && combinedNodeSnapshots.length > 0 ? (
           <section className="logs-page__nodes">
             <h2>Node snapshots</h2>
             <ul>
@@ -5452,46 +6719,45 @@ export function LogsPage() {
                 (snapshot: TechnitiumCombinedNodeLogSnapshot) => (
                   <li key={snapshot.nodeId}>
                     <strong>{snapshot.nodeId}</strong> —{" "}
-                    {snapshot.error ?
-                      `error: ${snapshot.error}`
-                    : `${snapshot.totalEntries?.toLocaleString() ?? "0"} entries across ${snapshot.totalPages ?? 0} pages`
-                    }{" "}
+                    {snapshot.error
+                      ? `error: ${snapshot.error}`
+                      : `${snapshot.totalEntries?.toLocaleString() ?? "0"} entries across ${snapshot.totalPages ?? 0} pages`}{" "}
                     (fetched {new Date(snapshot.fetchedAt).toLocaleString()})
                   </li>
                 ),
               )}
             </ul>
           </section>
-        : null}
+        ) : null}
 
-        {blockDialog || bulkAction ?
+        {blockDialog || bulkAction ? (
           <div
             className="logs-page__modal"
             role="dialog"
             aria-modal="true"
             onClick={(event) => {
               if (event.target === event.currentTarget) {
-                closeBlockDialog();
+                closeBlockDialog("dismiss");
               }
             }}
           >
             <div className="logs-page__modal-content">
               <header className="logs-page__modal-header">
                 <h2>
-                  {bulkAction ?
-                    `Bulk ${bulkAction === "block" ? "Block" : "Allow"} Domains`
-                  : modalTitle}
+                  {bulkAction
+                    ? `Bulk ${bulkAction === "block" ? "Block" : "Allow"} Domains`
+                    : modalTitle}
                 </h2>
                 <button
                   type="button"
                   className="logs-page__modal-close"
-                  onClick={closeBlockDialog}
+                  onClick={() => closeBlockDialog("dismiss")}
                 >
                   Close
                 </button>
               </header>
               <div className="logs-page__modal-body">
-                {bulkAction ?
+                {bulkAction ? (
                   <>
                     <p>
                       {bulkAction === "block" ? "Block" : "Allow"}{" "}
@@ -5508,8 +6774,9 @@ export function LogsPage() {
                       <ul className="logs-page__modal-summary-list logs-page__bulk-domain-list">
                         {Array.from(selectedDomains).map((domain) => {
                           const groupNumber = domainToGroupMap.get(domain);
-                          const colorIndex =
-                            groupNumber ? (groupNumber - 1) % 10 : 0;
+                          const colorIndex = groupNumber
+                            ? (groupNumber - 1) % 10
+                            : 0;
                           return (
                             <li
                               key={domain}
@@ -5531,47 +6798,203 @@ export function LogsPage() {
                       </ul>
                     </section>
                   </>
-                : <>
+                ) : (
+                  <>
                     <p>
-                      {isBlockedEntry ?
-                        "Adjust Advanced Blocking groups for"
-                      : "Add"}{" "}
-                      <strong>{blockDomainValue || "Unknown domain"}</strong>{" "}
-                      {isBlockedEntry ? "on" : "to Advanced Blocking on"} node{" "}
-                      <strong>{blockNodeLabel}</strong>.
+                      {(() => {
+                        const nodeStatus = blockingStatus?.nodes?.find(
+                          (n) => n.nodeId === blockDialog?.entry.nodeId,
+                        );
+                        const hasConflict = Boolean(
+                          nodeStatus?.builtInEnabled === true &&
+                          nodeStatus?.advancedBlockingInstalled === true &&
+                          nodeStatus?.advancedBlockingEnabled === true,
+                        );
+
+                        if (hasConflict) {
+                          return (
+                            <>
+                              Choose which blocking system to update for{" "}
+                              <strong>
+                                {blockDomainValue || "Unknown domain"}
+                              </strong>{" "}
+                              on node <strong>{blockNodeLabel}</strong>.
+                            </>
+                          );
+                        }
+
+                        return (
+                          <>
+                            {blockDialogBlockingMethod === "built-in"
+                              ? `${blockingAction === "allow" ? "Allow" : "Block"}`
+                              : isBlockedEntry
+                                ? "Adjust Advanced Blocking groups for"
+                                : "Add"}{" "}
+                            <strong>
+                              {blockDomainValue || "Unknown domain"}
+                            </strong>{" "}
+                            {blockDialogBlockingMethod === "built-in" ? (
+                              <>
+                                in Built-in Blocking on node{" "}
+                                <strong>{blockNodeLabel}</strong>.
+                              </>
+                            ) : (
+                              <>
+                                {isBlockedEntry
+                                  ? "on"
+                                  : "to Advanced Blocking on"}{" "}
+                                node <strong>{blockNodeLabel}</strong>.
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
                     </p>
-                    {isBlockedEntry && blockCoverage.length > 0 ?
-                      <section className="logs-page__modal-summary">
-                        <h3 className="logs-page__modal-summary-title">
-                          Current coverage
-                        </h3>
-                        <ul className="logs-page__modal-summary-list">
-                          {blockCoverage.map((entry) => (
-                            <li key={`${entry.name}-${entry.description}`}>
-                              <span className="logs-page__modal-summary-group">
-                                {entry.name}
+
+                    {(() => {
+                      const nodeStatus = blockingStatus?.nodes?.find(
+                        (n) => n.nodeId === blockDialog?.entry.nodeId,
+                      );
+                      const hasConflict = Boolean(
+                        nodeStatus?.builtInEnabled === true &&
+                        nodeStatus?.advancedBlockingInstalled === true &&
+                        nodeStatus?.advancedBlockingEnabled === true,
+                      );
+
+                      if (hasConflict) {
+                        return (
+                          <div className="logs-page__modal-notice">
+                            <strong>Both blocking systems are enabled</strong>
+                            <p>
+                              Technitium DNS strongly recommends not running
+                              Built-in Blocking and Advanced Blocking at the
+                              same time. For this action, choose which system
+                              you want to update. (The DNS Filtering page should
+                              guide you to disable one.)
+                            </p>
+                            <div className="logs-page__modal-action-toggle">
+                              <span className="logs-page__modal-action-label">
+                                Blocking system
                               </span>
-                              <span className="logs-page__modal-summary-detail">
-                                {entry.description}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </section>
-                    : null}
-                    {isBlockedEntry && blockCoverage.length === 0 ?
-                      <div className="logs-page__modal-notice">
-                        <strong>Blocked via downloaded list</strong>
-                        <p>
-                          Technitium DNS marked this query as blocked, but none
-                          of your manual overrides include the domain. It is
-                          likely coming from an external block list feed or an
-                          upstream integration. Select a group and save to add
-                          an explicit override.
-                        </p>
-                      </div>
-                    : null}
-                    {blockDomainValue ?
+                              <div className="logs-page__modal-action-buttons">
+                                <button
+                                  type="button"
+                                  className={
+                                    blockDialog?.selectedBlockingSystem ===
+                                    "built-in"
+                                      ? "toggle-button active"
+                                      : "toggle-button"
+                                  }
+                                  onClick={() => {
+                                    setBlockDialog((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            selectedBlockingSystem: "built-in",
+                                          }
+                                        : prev,
+                                    );
+                                    // Built-in mode is exact-only.
+                                    setBlockMode("exact");
+                                    setBlockRegexValue("");
+                                    setBlockSelectedGroups(new Set<string>());
+                                    setBlockError(undefined);
+                                  }}
+                                  disabled={isBlocking}
+                                  aria-pressed={
+                                    blockDialog?.selectedBlockingSystem ===
+                                    "built-in"
+                                  }
+                                >
+                                  Built-in Blocking (exact)
+                                </button>
+                                <button
+                                  type="button"
+                                  className={
+                                    blockDialog?.selectedBlockingSystem ===
+                                    "advanced"
+                                      ? "toggle-button active"
+                                      : "toggle-button"
+                                  }
+                                  onClick={() => {
+                                    setBlockDialog((prev) =>
+                                      prev
+                                        ? {
+                                            ...prev,
+                                            selectedBlockingSystem: "advanced",
+                                          }
+                                        : prev,
+                                    );
+                                    setBlockError(undefined);
+                                  }}
+                                  disabled={isBlocking}
+                                  aria-pressed={
+                                    blockDialog?.selectedBlockingSystem ===
+                                    "advanced"
+                                  }
+                                >
+                                  Advanced Blocking (groups)
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      if (blockDialogBlockingMethod !== "built-in") {
+                        return (
+                          <>
+                            {isBlockedEntry && blockCoverage.length > 0 ? (
+                              <section className="logs-page__modal-summary">
+                                <h3 className="logs-page__modal-summary-title">
+                                  Current coverage
+                                </h3>
+                                <ul className="logs-page__modal-summary-list">
+                                  {blockCoverage.map((entry) => (
+                                    <li
+                                      key={`${entry.name}-${entry.description}`}
+                                    >
+                                      <span className="logs-page__modal-summary-group">
+                                        {entry.name}
+                                      </span>
+                                      <span className="logs-page__modal-summary-detail">
+                                        {entry.description}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </section>
+                            ) : null}
+                            {isBlockedEntry && blockCoverage.length === 0 ? (
+                              <div className="logs-page__modal-notice">
+                                <strong>Blocked via downloaded list</strong>
+                                <p>
+                                  Technitium DNS marked this query as blocked,
+                                  but none of your manual overrides include the
+                                  domain. It is likely coming from an external
+                                  block list feed or an upstream integration.
+                                  Select a group and save to add an explicit
+                                  override.
+                                </p>
+                              </div>
+                            ) : null}
+                          </>
+                        );
+                      }
+
+                      return (
+                        <div className="logs-page__modal-notice">
+                          <strong>Built-in Blocking</strong>
+                          <p>
+                            Built-in Blocking supports exact domain allow/block
+                            entries only (no groups and no regex). Saving will
+                            apply the change immediately.
+                          </p>
+                        </div>
+                      );
+                    })()}
+
+                    {blockDomainValue ? (
                       <>
                         <div className="logs-page__modal-action-toggle">
                           <span className="logs-page__modal-action-label">
@@ -5581,9 +7004,9 @@ export function LogsPage() {
                             <button
                               type="button"
                               className={
-                                blockingAction === "block" ?
-                                  "toggle-button active"
-                                : "toggle-button"
+                                blockingAction === "block"
+                                  ? "toggle-button active"
+                                  : "toggle-button"
                               }
                               onClick={() => handleActionChange("block")}
                               disabled={isBlocking}
@@ -5594,9 +7017,9 @@ export function LogsPage() {
                             <button
                               type="button"
                               className={
-                                blockingAction === "allow" ?
-                                  "toggle-button active"
-                                : "toggle-button"
+                                blockingAction === "allow"
+                                  ? "toggle-button active"
+                                  : "toggle-button"
                               }
                               onClick={() => handleActionChange("allow")}
                               disabled={isBlocking}
@@ -5606,203 +7029,271 @@ export function LogsPage() {
                             </button>
                           </div>
                         </div>
-                        <fieldset className="logs-page__modal-mode">
-                          <legend>
-                            {blockingAction === "allow" ?
-                              "Allow method"
-                            : "Block method"}
-                          </legend>
-                          <label className="logs-page__modal-mode-option">
-                            <input
-                              type="radio"
-                              name="block-mode"
-                              value="exact"
-                              checked={blockMode === "exact"}
-                              onChange={() => setBlockMode("exact")}
-                            />
-                            <div>
-                              <span className="logs-page__modal-mode-title">
-                                Exact domain
-                              </span>
-                              <span className="logs-page__modal-mode-detail">
-                                {blockDomainValue}
-                              </span>
-                            </div>
-                          </label>
-                          <label className="logs-page__modal-mode-option">
-                            <input
-                              type="radio"
-                              name="block-mode"
-                              value="regex"
-                              checked={blockMode === "regex"}
-                              onChange={() => {
-                                setBlockMode("regex");
-                                if (blockRegexValue.trim().length === 0) {
-                                  setBlockRegexValue(
-                                    buildDefaultRegexPattern(blockDomainValue),
-                                  );
-                                }
-                              }}
-                            />
-                            <div>
-                              <span className="logs-page__modal-mode-title">
-                                Regex pattern
-                              </span>
-                              <span className="logs-page__modal-mode-description">
-                                Prefills a regex pattern to match this domain
-                                and its subdomains.
-                              </span>
+
+                        {blockDialogBlockingMethod !== "built-in" ? (
+                          <fieldset className="logs-page__modal-mode">
+                            <legend>
+                              {blockingAction === "allow"
+                                ? "Allow method"
+                                : "Block method"}
+                            </legend>
+                            <label className="logs-page__modal-mode-option">
                               <input
-                                type="text"
-                                className="logs-page__modal-mode-input"
-                                value={blockRegexValue}
-                                onChange={(event) =>
-                                  setBlockRegexValue(event.target.value)
-                                }
-                                disabled={blockMode !== "regex"}
+                                type="radio"
+                                name="block-mode"
+                                value="exact"
+                                checked={blockMode === "exact"}
+                                onChange={() => setBlockMode("exact")}
                               />
-                            </div>
-                          </label>
-                        </fieldset>
+                              <div>
+                                <span className="logs-page__modal-mode-title">
+                                  Exact domain
+                                </span>
+                                <span className="logs-page__modal-mode-detail">
+                                  {blockDomainValue}
+                                </span>
+                              </div>
+                            </label>
+                            <label className="logs-page__modal-mode-option">
+                              <input
+                                type="radio"
+                                name="block-mode"
+                                value="regex"
+                                checked={blockMode === "regex"}
+                                onChange={() => {
+                                  setBlockMode("regex");
+                                  if (blockRegexValue.trim().length === 0) {
+                                    setBlockRegexValue(
+                                      buildDefaultRegexPattern(
+                                        blockDomainValue,
+                                      ),
+                                    );
+                                  }
+                                }}
+                              />
+                              <div>
+                                <span className="logs-page__modal-mode-title">
+                                  Regex pattern
+                                </span>
+                                <span className="logs-page__modal-mode-description">
+                                  Prefills a regex pattern to match this domain
+                                  and its subdomains.
+                                </span>
+                                <input
+                                  type="text"
+                                  className="logs-page__modal-mode-input"
+                                  value={blockRegexValue}
+                                  onChange={(event) =>
+                                    setBlockRegexValue(event.target.value)
+                                  }
+                                  disabled={blockMode !== "regex"}
+                                />
+                              </div>
+                            </label>
+                          </fieldset>
+                        ) : null}
                       </>
-                    : null}
+                    ) : null}
                   </>
-                }
-                {availableGroupsForSelection.length === 0 ?
-                  <p className="logs-page__modal-empty">
-                    No Advanced Blocking groups are available
-                    {bulkAction ? "" : " for this node"}.
-                  </p>
-                : <fieldset className="logs-page__modal-groups">
-                    <legend>
-                      Select groups
-                      {bulkAction ? " (will apply to all nodes)" : ""}
-                    </legend>
-                    <div className="logs-page__modal-group-actions">
-                      <button
-                        type="button"
-                        onClick={handleSelectAllGroups}
-                        className="logs-page__modal-link"
-                      >
-                        All
-                      </button>
-                      <span aria-hidden="true">·</span>
-                      <button
-                        type="button"
-                        onClick={handleSelectNoGroups}
-                        className="logs-page__modal-link"
-                      >
-                        None
-                      </button>
-                    </div>
-                    {availableGroupsForSelection.map((group) => {
-                      const isSelected = blockSelectedGroups.has(group.name);
-                      const overrides =
-                        blockDomainValue ?
-                          extractGroupOverrides(group, blockDomainValue)
-                        : undefined;
-                      const trimmedRegex = blockRegexValue.trim();
-                      const pendingRegex =
-                        trimmedRegex || defaultRegexSuggestion;
-                      const hasBlockOverride = Boolean(
-                        overrides?.blockedExact ||
-                        (overrides && overrides.blockedRegexMatches.length > 0),
-                      );
-                      const hasAllowOverride = Boolean(
-                        overrides?.allowedExact ||
-                        (overrides && overrides.allowedRegexMatches.length > 0),
-                      );
-                      const firstBlockRegex = overrides?.blockedRegexMatches[0];
-                      const firstAllowRegex = overrides?.allowedRegexMatches[0];
+                )}
 
-                      let detailMessage: string;
+                {blockDialogBlockingMethod !== "built-in" ? (
+                  <>
+                    {(() => {
+                      // Spinner UX: when Advanced Blocking is selected (or assumed) but the overview
+                      // hasn't landed in state yet, show an in-modal loading state.
+                      if (!bulkAction && !advancedBlocking) {
+                        return (
+                          <div className="logs-page__modal-notice">
+                            <strong>Loading Advanced Blocking…</strong>
+                            <p>
+                              Fetching groups for this node. This should only
+                              take a moment.
+                            </p>
+                            <div
+                              className="logs-page__modal-loading"
+                              aria-busy="true"
+                              aria-label="Loading Advanced Blocking"
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 10,
+                                marginTop: 10,
+                              }}
+                            >
+                              <div
+                                className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"
+                                aria-hidden="true"
+                              ></div>
+                              <span className="logs-page__modal-empty">
+                                Loading…
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }
 
-                      if (blockingAction === "block") {
-                        if (hasBlockOverride) {
-                          detailMessage =
-                            overrides?.blockedExact ?
-                              "Currently blocked via exact match"
-                            : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
-                        } else if (hasAllowOverride) {
-                          detailMessage =
-                            overrides?.allowedExact ?
-                              "Currently allowed via exact override"
-                            : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
-                        } else {
-                          detailMessage =
-                            isBlockedEntry ?
-                              "No local override; blocked via list"
-                            : "No local override yet";
-                        }
+                      // If Advanced Blocking load failed, surface the error in the modal body.
+                      if (
+                        !bulkAction &&
+                        !advancedBlocking &&
+                        advancedBlockingError
+                      ) {
+                        return (
+                          <div className="logs-page__modal-notice">
+                            <strong>Failed to load Advanced Blocking</strong>
+                            <p>{advancedBlockingError}</p>
+                          </div>
+                        );
+                      }
 
-                        if (!isSelected && hasBlockOverride) {
-                          detailMessage = `${detailMessage} — will remove on save`;
-                        } else if (isSelected && !hasBlockOverride) {
-                          detailMessage =
-                            blockMode === "regex" ?
-                              pendingRegex ? `Will add regex ${pendingRegex}`
-                              : "Will add regex pattern"
-                            : "Will add exact match";
-                        }
-                      } else {
-                        if (hasAllowOverride) {
-                          detailMessage =
-                            overrides?.allowedExact ?
-                              "Currently allowed via exact override"
-                            : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
-                        } else if (hasBlockOverride) {
-                          detailMessage =
-                            overrides?.blockedExact ?
-                              "Currently blocked via exact match"
-                            : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
-                        } else {
-                          detailMessage = "No local override yet";
-                        }
-
-                        if (!isSelected && hasAllowOverride) {
-                          detailMessage = `${detailMessage} — will remove on save`;
-                        } else if (isSelected && !hasAllowOverride) {
-                          detailMessage =
-                            blockMode === "regex" ?
-                              pendingRegex ?
-                                `Will add allow regex ${pendingRegex}`
-                              : "Will add regex allow override"
-                            : "Will add exact allow override";
-                        }
+                      if (availableGroupsForSelection.length === 0) {
+                        return (
+                          <p className="logs-page__modal-empty">
+                            No Advanced Blocking groups are available
+                            {bulkAction ? "" : " for this node"}.
+                          </p>
+                        );
                       }
 
                       return (
-                        <label
-                          key={group.name}
-                          className="logs-page__modal-group"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => handleToggleBlockGroup(group.name)}
-                          />
-                          <div className="logs-page__modal-group-label">
-                            <span className="logs-page__modal-group-name">
-                              {group.name}
-                            </span>
-                            <span className="logs-page__modal-group-detail">
-                              {detailMessage}
-                            </span>
+                        <fieldset className="logs-page__modal-groups">
+                          <legend>
+                            Select groups
+                            {bulkAction ? " (will apply to all nodes)" : ""}
+                          </legend>
+                          <div className="logs-page__modal-group-actions">
+                            <button
+                              type="button"
+                              onClick={handleSelectAllGroups}
+                              className="logs-page__modal-link"
+                            >
+                              All
+                            </button>
+                            <span aria-hidden="true">·</span>
+                            <button
+                              type="button"
+                              onClick={handleSelectNoGroups}
+                              className="logs-page__modal-link"
+                            >
+                              None
+                            </button>
                           </div>
-                        </label>
+                          {availableGroupsForSelection.map((group) => {
+                            const isSelected = blockSelectedGroups.has(
+                              group.name,
+                            );
+                            const overrides = blockDomainValue
+                              ? extractGroupOverrides(group, blockDomainValue)
+                              : undefined;
+                            const trimmedRegex = blockRegexValue.trim();
+                            const pendingRegex =
+                              trimmedRegex || defaultRegexSuggestion;
+                            const hasBlockOverride = Boolean(
+                              overrides?.blockedExact ||
+                              (overrides &&
+                                overrides.blockedRegexMatches.length > 0),
+                            );
+                            const hasAllowOverride = Boolean(
+                              overrides?.allowedExact ||
+                              (overrides &&
+                                overrides.allowedRegexMatches.length > 0),
+                            );
+                            const firstBlockRegex =
+                              overrides?.blockedRegexMatches[0];
+                            const firstAllowRegex =
+                              overrides?.allowedRegexMatches[0];
+
+                            let detailMessage: string;
+
+                            if (blockingAction === "block") {
+                              if (hasBlockOverride) {
+                                detailMessage = overrides?.blockedExact
+                                  ? "Currently blocked via exact match"
+                                  : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
+                              } else if (hasAllowOverride) {
+                                detailMessage = overrides?.allowedExact
+                                  ? "Currently allowed via exact override"
+                                  : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
+                              } else {
+                                detailMessage = isBlockedEntry
+                                  ? "No local override; blocked via list"
+                                  : "No local override yet";
+                              }
+
+                              if (!isSelected && hasBlockOverride) {
+                                detailMessage = `${detailMessage} — will remove on save`;
+                              } else if (isSelected && !hasBlockOverride) {
+                                detailMessage =
+                                  blockMode === "regex"
+                                    ? pendingRegex
+                                      ? `Will add regex ${pendingRegex}`
+                                      : "Will add regex pattern"
+                                    : "Will add exact match";
+                              }
+                            } else {
+                              if (hasAllowOverride) {
+                                detailMessage = overrides?.allowedExact
+                                  ? "Currently allowed via exact override"
+                                  : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
+                              } else if (hasBlockOverride) {
+                                detailMessage = overrides?.blockedExact
+                                  ? "Currently blocked via exact match"
+                                  : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
+                              } else {
+                                detailMessage = "No local override yet";
+                              }
+
+                              if (!isSelected && hasAllowOverride) {
+                                detailMessage = `${detailMessage} — will remove on save`;
+                              } else if (isSelected && !hasAllowOverride) {
+                                detailMessage =
+                                  blockMode === "regex"
+                                    ? pendingRegex
+                                      ? `Will add allow regex ${pendingRegex}`
+                                      : "Will add regex allow override"
+                                    : "Will add exact allow override";
+                              }
+                            }
+
+                            return (
+                              <label
+                                key={group.name}
+                                className="logs-page__modal-group"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() =>
+                                    handleToggleBlockGroup(group.name)
+                                  }
+                                />
+                                <div className="logs-page__modal-group-label">
+                                  <span className="logs-page__modal-group-name">
+                                    {group.name}
+                                  </span>
+                                  <span className="logs-page__modal-group-detail">
+                                    {detailMessage}
+                                  </span>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </fieldset>
                       );
-                    })}
-                  </fieldset>
-                }
-                {blockError ?
+                    })()}
+                  </>
+                ) : null}
+
+                {blockError ? (
                   <div className="logs-page__modal-error">{blockError}</div>
-                : null}
+                ) : null}
               </div>
               <footer className="logs-page__modal-actions">
                 <button
                   type="button"
                   className="secondary"
-                  onClick={closeBlockDialog}
+                  onClick={() => closeBlockDialog("cancel")}
                   disabled={isBlocking}
                 >
                   Cancel
@@ -5815,32 +7306,38 @@ export function LogsPage() {
                   }
                   disabled={
                     isBlocking ||
-                    (bulkAction ? false : blockAvailableGroups.length === 0)
+                    (bulkAction
+                      ? false
+                      : blockDialogBlockingMethod === "built-in"
+                        ? false
+                        : !advancedBlocking ||
+                          loadingAdvancedBlocking ||
+                          blockAvailableGroups.length === 0)
                   }
                 >
-                  {bulkAction ?
-                    isBlocking ?
-                      "Applying..."
-                    : `${bulkAction === "block" ? "Block" : "Allow"} ${selectedDomains.size} Domains`
-
-                  : confirmButtonLabel}
+                  {bulkAction
+                    ? isBlocking
+                      ? "Applying..."
+                      : `${bulkAction === "block" ? "Block" : "Allow"} ${selectedDomains.size} Domains`
+                    : confirmButtonLabel}
                 </button>
               </footer>
             </div>
           </div>
-        : null}
+        ) : null}
 
         {/* Floating Live Toggle - Only show in tail mode */}
         {displayMode === "tail" && (
           <FloatingLiveToggle
+            // Tail mode "live" is derived solely from refreshSeconds (single source of truth).
             isLive={refreshSeconds > 0}
             refreshSeconds={refreshSeconds}
             pausedTitle={
-              endDate.trim().length > 0 ?
-                "Paused because End Date/Time is set. Clear it to resume."
-              : logsTableContextMenu ?
-                "Paused while the context menu is open."
-              : undefined
+              endDate.trim().length > 0
+                ? "Paused because End Date/Time is set. Clear it to resume."
+                : logsTableContextMenu
+                  ? "Paused while the context menu is open."
+                  : undefined
             }
             onToggle={(event) => {
               event.preventDefault();
@@ -5852,9 +7349,16 @@ export function LogsPage() {
                 event.currentTarget.blur();
               }
 
-              if (refreshSeconds > 0) {
+              // Tail mode pause semantics (single source of truth):
+              // - Pause: refreshSeconds = 0 (must stop ALL fetching)
+              // - Resume: refreshSeconds = default (restart polling) + immediate refresh tick
+              const currentlyLive = refreshSeconds > 0;
+
+              if (currentlyLive) {
                 setRefreshSeconds(0);
               } else {
+                setIsAutoRefresh(true);
+                setRefreshTick((prev) => prev + 1);
                 setRefreshSeconds(TAIL_MODE_DEFAULT_REFRESH);
               }
 

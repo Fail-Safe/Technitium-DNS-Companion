@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   HttpException,
   Inject,
   Injectable,
@@ -10,7 +9,6 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import axios, { AxiosError, AxiosRequestConfig, AxiosResponse } from "axios";
-import * as crypto from "crypto";
 import * as dns from "dns";
 import * as https from "https";
 import { promisify } from "util";
@@ -229,8 +227,7 @@ interface HostnameCacheEntry {
 @Injectable()
 export class TechnitiumService {
   private readonly logger = new Logger(TechnitiumService.name);
-  private readonly sessionAuthEnabled =
-    process.env.AUTH_SESSION_ENABLED === "true";
+  private readonly sessionAuthEnabled = true;
   private readonly backgroundToken =
     (process.env.TECHNITIUM_BACKGROUND_TOKEN ?? "").trim() || undefined;
 
@@ -401,36 +398,6 @@ export class TechnitiumService {
 
   getConfiguredNodeIds(): string[] {
     return this.nodeConfigs.map((node) => node.id);
-  }
-
-  /**
-   * Returns node ids that would fall back to TECHNITIUM_CLUSTER_TOKEN because
-   * a per-node TECHNITIUM_<NODE>_TOKEN is not configured.
-   *
-   * Notes:
-   * - This is for deprecation UX only (never exposes the token).
-   * - Per-node TECHNITIUM_<NODE>_TOKEN is legacy-only for Technitium DNS < v14.
-   *   We still treat the env var as a node-specific override if it is present.
-   */
-  getClusterTokenFallbackNodeIds(): string[] {
-    const clusterToken = (process.env.TECHNITIUM_CLUSTER_TOKEN ?? "").trim();
-    if (!clusterToken) {
-      return [];
-    }
-
-    const fallback: string[] = [];
-    for (const node of this.nodeConfigs) {
-      const sanitizedKey = node.id.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-      const perNodeToken = (
-        process.env[`TECHNITIUM_${sanitizedKey}_TOKEN`] ?? ""
-      ).trim();
-
-      if (!perNodeToken) {
-        fallback.push(node.id);
-      }
-    }
-
-    return fallback.sort((a, b) => a.localeCompare(b));
   }
 
   /**
@@ -1671,159 +1638,6 @@ export class TechnitiumService {
     }
 
     return { okForPtr: true, username: sessionInfo.username };
-  }
-
-  async migrateClusterTokenToBackgroundToken(): Promise<{
-    username: string;
-    tokenName: string;
-    token: string;
-  }> {
-    const clusterToken = (process.env.TECHNITIUM_CLUSTER_TOKEN ?? "").trim();
-    if (!clusterToken) {
-      throw new BadRequestException(
-        "TECHNITIUM_CLUSTER_TOKEN is not configured; migration cannot run.",
-      );
-    }
-
-    const node = await this.pickPrimaryNodeForAdminToken(clusterToken);
-
-    const baseUsername = "companion-readonly";
-    const displayName = "Technitium DNS Companion";
-    const tokenName = "Technitium-DNS-Companion Background";
-
-    let createdUsername: string | undefined;
-
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const suffix =
-        attempt === 0 ? "" : `-${crypto.randomBytes(3).toString("hex")}`;
-      const username = `${baseUsername}${suffix}`;
-      const password = crypto.randomBytes(18).toString("base64url");
-
-      try {
-        const createUserEnvelope = await this.requestWithExplicitToken<
-          TechnitiumApiResponse<{ displayName?: string; username?: string }>
-        >(
-          node,
-          {
-            method: "GET",
-            url: "/api/admin/users/create",
-            params: { displayName, user: username, pass: password },
-          },
-          clusterToken,
-        );
-
-        this.unwrapApiResponse(
-          createUserEnvelope,
-          node.id,
-          "create migration user",
-        );
-        createdUsername = username;
-        break;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.toLowerCase().includes("access was denied")) {
-          throw new ForbiddenException(
-            "Migration failed: TECHNITIUM_CLUSTER_TOKEN was denied permission to create users/tokens. " +
-              "This usually means the token belongs to a low-privilege (read-only) user. " +
-              "Temporarily provide an admin-capable cluster token to run migration, or manually create a least-privilege Technitium user/token and set TECHNITIUM_BACKGROUND_TOKEN.",
-          );
-        }
-        if (
-          message.toLowerCase().includes("already") &&
-          message.toLowerCase().includes("exist")
-        ) {
-          continue;
-        }
-        throw error;
-      }
-    }
-
-    if (!createdUsername) {
-      throw new ServiceUnavailableException(
-        "Unable to create a dedicated read-only user (username collisions). Try again or delete existing companion users in Technitium.",
-      );
-    }
-
-    // Ensure the user is not placed into any privileged groups.
-    // The default "Everyone" group is expected to be view-only and safe for background lookups.
-    try {
-      const setUserEnvelope = await this.requestWithExplicitToken<
-        TechnitiumApiResponse<{ username?: string }>
-      >(
-        node,
-        {
-          method: "GET",
-          url: "/api/admin/users/set",
-          params: { user: createdUsername, memberOfGroups: "Everyone" },
-        },
-        clusterToken,
-      );
-
-      this.unwrapApiResponse(
-        setUserEnvelope,
-        node.id,
-        "set migration user groups",
-      );
-    } catch (error) {
-      // If we can't enforce group membership (e.g., older TDNS versions or custom auth config),
-      // continue and rely on the least-privilege validation backstop below.
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(
-        `Migration could not set memberOfGroups for user "${createdUsername}": ${message}`,
-      );
-    }
-
-    const createTokenEnvelope = await this.requestWithExplicitToken<
-      TechnitiumApiResponse<{
-        username: string;
-        tokenName: string;
-        token: string;
-      }>
-    >(
-      node,
-      {
-        method: "GET",
-        url: "/api/admin/sessions/createToken",
-        params: { user: createdUsername, tokenName },
-      },
-      clusterToken,
-    );
-
-    const created = this.unwrapApiResponse(
-      createTokenEnvelope,
-      node.id,
-      "create migration API token",
-    );
-
-    const newToken = created.token;
-    if (!newToken) {
-      throw new ServiceUnavailableException(
-        "Technitium did not return a token value during migration.",
-      );
-    }
-
-    const sessionGetEnvelope = await this.requestWithExplicitToken(
-      node,
-      { method: "GET", url: "/api/user/session/get", params: {} },
-      newToken,
-    );
-
-    const policy = this.evaluatePtrTokenPolicy(sessionGetEnvelope);
-    if (!policy.okForPtr) {
-      throw new ServiceUnavailableException(
-        `Created token did not meet least-privilege requirements: ${policy.reason ?? "unknown reason"}`,
-      );
-    }
-
-    this.logger.log(
-      `Migration created background token user "${createdUsername}" on node "${node.id}" (tokenName: "${tokenName}").`,
-    );
-
-    return {
-      username: createdUsername,
-      tokenName: created.tokenName ?? tokenName,
-      token: newToken,
-    };
   }
 
   private stopPeriodicPtrLookups(): void {
@@ -4800,7 +4614,7 @@ export class TechnitiumService {
           effectiveToken = this.backgroundToken;
           if (!effectiveToken) {
             throw new UnauthorizedException(
-              `Authentication required for background access to Technitium node "${node.id}". When AUTH_SESSION_ENABLED=true, background timers do not use TECHNITIUM_CLUSTER_TOKEN; set TECHNITIUM_BACKGROUND_TOKEN (recommended) or disable AUTH_SESSION_ENABLED.`,
+              `Authentication required for background access to Technitium node "${node.id}". Set TECHNITIUM_BACKGROUND_TOKEN to enable background tasks.`,
             );
           }
         } else {
@@ -4814,7 +4628,7 @@ export class TechnitiumService {
         }
       } else {
         // Legacy mode: accept either a request-scoped session token (if any)
-        // or a configured node/cluster token.
+        // or a configured per-node token.
         effectiveToken = sessionToken ?? node.token;
       }
 
@@ -5524,8 +5338,9 @@ export class TechnitiumService {
     assign("qtype");
     assign("qclass");
 
-    console.log("🔍 buildQueryLogParams - filters:", filters);
-    console.log("🔍 buildQueryLogParams - params:", params);
+    this.logger.debug(
+      `buildQueryLogParams - filters=${JSON.stringify(filters)} params=${JSON.stringify(params)}`,
+    );
 
     return params;
   }

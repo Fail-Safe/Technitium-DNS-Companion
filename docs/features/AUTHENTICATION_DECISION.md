@@ -54,7 +54,7 @@ Existing deployments that rely on environment-provided tokens continue to work i
 Planned behavior:
 
 - If the backend is configured with env tokens, it can call Technitium APIs without interactive login (legacy behavior).
-- `TECHNITIUM_CLUSTER_TOKEN` is deprecated in v1.3 and planned to be removed in v1.4.
+- `TECHNITIUM_CLUSTER_TOKEN` is deprecated in v1.3 and removed in v1.4.
 - Per-node `TECHNITIUM_<NODE>_TOKEN` is legacy-only for Technitium DNS < v14.
 - Roadmap: starting in v1.4, the Companion UI requires Technitium login/RBAC (session auth); background tasks should use `TECHNITIUM_BACKGROUND_TOKEN`.
 
