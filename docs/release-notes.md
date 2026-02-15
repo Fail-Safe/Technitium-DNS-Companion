@@ -1,5 +1,41 @@
 # Release Notes
 
+## 1.4.0
+
+- **Authentication model finalized**:
+  - Interactive UI now runs with session-based auth as the supported path.
+  - Legacy no-login interactive mode has been removed.
+  - `TECHNITIUM_CLUSTER_TOKEN` and migration UX/API are removed; use `TECHNITIUM_BACKGROUND_TOKEN` for background work.
+
+- **Health checks improved for production operations**:
+  - `GET /api/health` is optimized for Docker/liveness checks.
+  - `GET /api/health/detailed` provides authenticated diagnostics for deeper monitoring.
+
+- **Rule Optimizer UX safety and clarity pass**:
+  - Preview/apply flow now uses explicit in-app confirmation.
+  - Redundancy-aware actions identify already-covered domains and offer **Remove redundant regex** semantics.
+  - Post-apply verification messaging and badges are clearer for rollback confidence.
+
+- **Frontend consistency + snapshot UX cleanup**:
+  - Snapshot drawer patterns were unified to reduce UI drift across configuration surfaces.
+  - App shell/theme/context wiring was cleaned up for more predictable behavior.
+
+- **Query Logs blocked-domain insight improvements**:
+  - Improved “Likely blocked by” tooltip behavior, including caching/debounce and clearer UX.
+
+### Upgrade notes
+
+- If you still rely on `TECHNITIUM_CLUSTER_TOKEN`, migrate to `TECHNITIUM_BACKGROUND_TOKEN` before or during this upgrade.
+- Verify your deployment is configured for session-auth expectations (HTTPS/TLS path as documented).
+- For Docker health checks, point probes to `/api/health`.
+
+### Tonight release sanity pass
+
+1. Confirm `CHANGELOG.md` includes `## [1.4.0] - 2026-02-14` on the tagged commit.
+2. Confirm environment docs/examples no longer imply `TECHNITIUM_CLUSTER_TOKEN` usage.
+3. Run backend build/tests and frontend build smoke checks.
+4. Tag from the intended release commit and push `v1.4.0`.
+
 ## 1.3.1
 
 - **Query Logs: paginated page size setting**: Rows-per-page is now configurable in “Table settings” (25/50/100/200) and defaults to **25** for new installs.

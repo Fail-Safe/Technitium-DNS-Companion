@@ -212,6 +212,30 @@ const renderExpandableNote = (
   return <span>{trimmed}</span>;
 };
 
+const parseRuleOptimizerNote = (
+  note?: string,
+): {
+  targetList?: string;
+  regexPattern?: string;
+  domainEntry?: string;
+  groupCount?: number;
+} | null => {
+  const trimmed = note?.trim();
+  if (!trimmed) return null;
+
+  const pattern =
+    /^Rule optimizer:\s+(?<targetList>[^\s]+)\s+"(?<regexPattern>.+?)"\s+→\s+"(?<domainEntry>.+?)"\s+\((?<groupCount>\d+)\s+group\(s\)\)$/;
+  const match = trimmed.match(pattern);
+  if (!match?.groups) return null;
+
+  return {
+    targetList: match.groups.targetList,
+    regexPattern: match.groups.regexPattern,
+    domainEntry: match.groups.domainEntry,
+    groupCount: Number.parseInt(match.groups.groupCount, 10),
+  };
+};
+
 export const ConfigSnapshotDrawer: React.FC<ConfigSnapshotDrawerProps> = ({
   isOpen,
   nodeId,
@@ -293,6 +317,50 @@ export const ConfigSnapshotDrawer: React.FC<ConfigSnapshotDrawerProps> = ({
       setLoading(false);
     }
   }, [listSnapshots, method, nodeId, pushToast]);
+
+  const copySnapshotContext = useCallback(
+    async (label: string, value?: string | number) => {
+      const text =
+        value === undefined || value === null ? "" : String(value).trim();
+      if (!text) {
+        pushToast({
+          message: `No ${label.toLowerCase()} value to copy`,
+          tone: "info",
+          timeout: 3000,
+        });
+        return;
+      }
+
+      try {
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.setAttribute("readonly", "");
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+        }
+
+        pushToast({
+          message: `${label} copied`,
+          tone: "success",
+          timeout: 2500,
+        });
+      } catch {
+        pushToast({
+          message: `Failed to copy ${label.toLowerCase()}`,
+          tone: "error",
+          timeout: 4000,
+        });
+      }
+    },
+    [pushToast],
+  );
 
   useEffect(() => {
     if (isOpen && nodeId) {
@@ -680,6 +748,117 @@ export const ConfigSnapshotDrawer: React.FC<ConfigSnapshotDrawerProps> = ({
                           : <span>No note</span>}
                         </div>
                       </div>
+
+                      {viewedSnapshot.metadata.method === "rule-optimizer" && (
+                        <div className="snapshot-drawer__note-card">
+                          <strong>Rule optimizer change</strong>
+                          {(() => {
+                            const parsed = parseRuleOptimizerNote(
+                              viewedSnapshot.metadata.note,
+                            );
+
+                            if (!parsed) {
+                              return (
+                                <span>
+                                  No conversion context was stored with this
+                                  snapshot. This can happen for manually created
+                                  snapshots.
+                                </span>
+                              );
+                            }
+
+                            return (
+                              <div className="snapshot-drawer__rule-optimizer-summary">
+                                <div className="snapshot-drawer__rule-optimizer-row">
+                                  <span className="snapshot-drawer__rule-optimizer-label">
+                                    List
+                                  </span>
+                                  <span className="app-code-inline">
+                                    {parsed.targetList ?? "—"}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn btn--ghost snapshot-drawer__rule-optimizer-copy"
+                                    onClick={() =>
+                                      void copySnapshotContext(
+                                        "List type",
+                                        parsed.targetList,
+                                      )
+                                    }
+                                  >
+                                    Copy
+                                  </button>
+                                </div>
+
+                                <div className="snapshot-drawer__rule-optimizer-row">
+                                  <span className="snapshot-drawer__rule-optimizer-label">
+                                    Groups
+                                  </span>
+                                  <span className="app-code-inline">
+                                    {typeof parsed.groupCount === "number" ?
+                                      parsed.groupCount
+                                    : "—"}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn btn--ghost snapshot-drawer__rule-optimizer-copy"
+                                    onClick={() =>
+                                      void copySnapshotContext(
+                                        "Group count",
+                                        parsed.groupCount,
+                                      )
+                                    }
+                                  >
+                                    Copy
+                                  </button>
+                                </div>
+
+                                <div className="snapshot-drawer__rule-optimizer-row">
+                                  <span className="snapshot-drawer__rule-optimizer-label">
+                                    Regex
+                                  </span>
+                                  <span className="app-code-inline snapshot-drawer__rule-optimizer-code">
+                                    {parsed.regexPattern ?? "—"}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn btn--ghost snapshot-drawer__rule-optimizer-copy"
+                                    onClick={() =>
+                                      void copySnapshotContext(
+                                        "Regex pattern",
+                                        parsed.regexPattern,
+                                      )
+                                    }
+                                  >
+                                    Copy
+                                  </button>
+                                </div>
+
+                                <div className="snapshot-drawer__rule-optimizer-row">
+                                  <span className="snapshot-drawer__rule-optimizer-label">
+                                    Domain entry
+                                  </span>
+                                  <span className="app-code-inline snapshot-drawer__rule-optimizer-code">
+                                    {parsed.domainEntry ?? "—"}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn btn--ghost snapshot-drawer__rule-optimizer-copy"
+                                    onClick={() =>
+                                      void copySnapshotContext(
+                                        "Domain entry",
+                                        parsed.domainEntry,
+                                      )
+                                    }
+                                  >
+                                    Copy
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
 
                       {viewedSnapshot.metadata.method === "built-in" && (
                         <div className="snapshot-drawer__note-card">

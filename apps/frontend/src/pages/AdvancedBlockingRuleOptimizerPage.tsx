@@ -16,6 +16,8 @@ type SuggestionKind =
   | "PERF_WARNING";
 
 type SuggestionConfidence = "safe" | "likely" | "warning";
+type SuggestionTab = "all" | SuggestionConfidence;
+type RuleTypeTab = "both" | "allow" | "block";
 
 type Suggestion = {
   id: string;
@@ -31,6 +33,23 @@ type Suggestion = {
   details: string[];
   perfScore?: number;
   confidence: SuggestionConfidence;
+};
+
+type RegexEntryCardModel = {
+  key: string;
+  primarySuggestionId: string;
+  representativeGroupName: string;
+  targetList: TargetList;
+  kind: SuggestionKind;
+  title: string;
+  summary: string;
+  regexPattern: string;
+  proposedDomainEntry?: string;
+  scopeExpansionRisk: boolean;
+  details: string[];
+  perfScore?: number;
+  confidence: SuggestionConfidence;
+  groupNames: string[];
 };
 
 type SuggestionsResponse = {
@@ -67,6 +86,27 @@ type ApplyResponse = {
   };
 };
 
+type RedundancySummary = {
+  selectedCount: number;
+  coveredCount: number;
+  allCovered: boolean;
+  exampleCoveringEntry?: string;
+};
+
+type PendingApply = {
+  card: RegexEntryCardModel;
+  selectedGroups: string[];
+  redundancy?: RedundancySummary;
+};
+
+type ApplyVerification = {
+  cardKey: string;
+  selectedCount: number;
+  appliedCount: number;
+  failedGroups: string[];
+  snapshotId?: string;
+};
+
 function encodePathParam(value: string): string {
   // Node IDs are typically safe, but group names can contain spaces.
   return encodeURIComponent(value);
@@ -78,25 +118,193 @@ function classNames(
   return parts.filter(Boolean).join(" ");
 }
 
+function selectedGroupsLabel(count: number): string {
+  return `selected group${count === 1 ? "" : "s"}`;
+}
+
+function normalizeDomainEntry(value: string): string {
+  return value.trim().toLowerCase().replace(/\.+$/, "");
+}
+
+function findCoveringDomainEntry(
+  proposedDomainEntry: string,
+  existingEntries: string[],
+): string | undefined {
+  const proposed = normalizeDomainEntry(proposedDomainEntry);
+  if (!proposed) return undefined;
+
+  let bestMatch: string | undefined;
+
+  for (const rawEntry of existingEntries) {
+    const entry = normalizeDomainEntry(rawEntry);
+    if (!entry) continue;
+
+    const isMatch = proposed === entry || proposed.endsWith(`.${entry}`);
+    if (!isMatch) continue;
+
+    if (!bestMatch || entry.length < bestMatch.length) {
+      bestMatch = entry;
+    }
+  }
+
+  return bestMatch;
+}
+const confidenceRank = (c: SuggestionConfidence): number =>
+  c === "safe" ? 0
+  : c === "likely" ? 1
+  : 2;
+
+const PERF_SCORE_MIN = 0;
+const PERF_SCORE_MAX = 18;
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, value));
+
+const getPerfToneColor = (score: number): string => {
+  const normalized =
+    (clamp(score, PERF_SCORE_MIN, PERF_SCORE_MAX) - PERF_SCORE_MIN) /
+    (PERF_SCORE_MAX - PERF_SCORE_MIN);
+
+  if (normalized <= 0.5) {
+    const warningPercent = Math.round((normalized / 0.5) * 100);
+    const successPercent = 100 - warningPercent;
+    return `color-mix(in srgb, var(--color-success) ${successPercent}%, var(--color-warning) ${warningPercent}%)`;
+  }
+
+  const dangerPercent = Math.round(((normalized - 0.5) / 0.5) * 100);
+  const warningPercent = 100 - dangerPercent;
+  return `color-mix(in srgb, var(--color-warning) ${warningPercent}%, var(--color-danger) ${dangerPercent}%)`;
+};
+
+const getPerfBadgeStyle = (score: number): React.CSSProperties => {
+  const tempColor = getPerfToneColor(score);
+
+  return {
+    border: `1px solid ${tempColor}`,
+    background: `color-mix(in srgb, ${tempColor} 18%, var(--color-bg-secondary) 82%)`,
+    color: tempColor,
+  };
+};
+
+const canAutoApplyCard = (card: RegexEntryCardModel): boolean =>
+  card.kind !== "MANUAL_REVIEW_ZONE_CANDIDATE" &&
+  card.kind !== "PERF_WARNING" &&
+  Boolean(card.proposedDomainEntry);
+
+const sortSuggestions = (a: Suggestion, b: Suggestion): number => {
+  const ra = confidenceRank(a.confidence);
+  const rb = confidenceRank(b.confidence);
+  if (ra !== rb) return ra - rb;
+
+  const pa = a.perfScore ?? 0;
+  const pb = b.perfScore ?? 0;
+  if (pa !== pb) return pb - pa;
+
+  if (a.targetList !== b.targetList) {
+    return a.targetList.localeCompare(b.targetList);
+  }
+
+  return a.regexPattern.localeCompare(b.regexPattern);
+};
+
+const toRegexEntryCards = (
+  suggestions: Suggestion[],
+): RegexEntryCardModel[] => {
+  const byKey = new Map<string, RegexEntryCardModel>();
+
+  for (const suggestion of suggestions) {
+    const key = `${suggestion.targetList}::${suggestion.regexPattern}`;
+    const existing = byKey.get(key);
+
+    if (!existing) {
+      byKey.set(key, {
+        key,
+        primarySuggestionId: suggestion.id,
+        representativeGroupName: suggestion.groupName,
+        targetList: suggestion.targetList,
+        kind: suggestion.kind,
+        title: suggestion.title,
+        summary: suggestion.summary,
+        regexPattern: suggestion.regexPattern,
+        proposedDomainEntry: suggestion.proposedDomainEntry,
+        scopeExpansionRisk: suggestion.scopeExpansionRisk,
+        details: suggestion.details,
+        perfScore: suggestion.perfScore,
+        confidence: suggestion.confidence,
+        groupNames: [suggestion.groupName],
+      });
+      continue;
+    }
+
+    if (!existing.groupNames.includes(suggestion.groupName)) {
+      existing.groupNames = [...existing.groupNames, suggestion.groupName].sort(
+        (a, b) => a.localeCompare(b),
+      );
+    }
+
+    const suggestionConfidence = confidenceRank(suggestion.confidence);
+    const existingConfidence = confidenceRank(existing.confidence);
+    const suggestionPerf = suggestion.perfScore ?? 0;
+    const existingPerf = existing.perfScore ?? 0;
+    const shouldPromote =
+      suggestionConfidence < existingConfidence ||
+      (suggestionConfidence === existingConfidence &&
+        suggestionPerf > existingPerf);
+
+    if (shouldPromote) {
+      existing.primarySuggestionId = suggestion.id;
+      existing.representativeGroupName = suggestion.groupName;
+      existing.kind = suggestion.kind;
+      existing.title = suggestion.title;
+      existing.summary = suggestion.summary;
+      existing.proposedDomainEntry = suggestion.proposedDomainEntry;
+      existing.scopeExpansionRisk = suggestion.scopeExpansionRisk;
+      existing.details = suggestion.details;
+      existing.perfScore = suggestion.perfScore;
+      existing.confidence = suggestion.confidence;
+    }
+  }
+
+  return [...byKey.values()].sort((a, b) => {
+    const ra = confidenceRank(a.confidence);
+    const rb = confidenceRank(b.confidence);
+    if (ra !== rb) return ra - rb;
+
+    const pa = a.perfScore ?? 0;
+    const pb = b.perfScore ?? 0;
+    if (pa !== pb) return pb - pa;
+
+    if (a.targetList !== b.targetList) {
+      return a.targetList.localeCompare(b.targetList);
+    }
+
+    return a.regexPattern.localeCompare(b.regexPattern);
+  });
+};
+
 function Badge({
   variant,
   children,
 }: {
-  variant: "safe" | "likely" | "warning" | "info";
+  variant: "safe" | "likely" | "warning" | "info" | "muted";
   children: string;
 }) {
-  const base =
-    "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border";
+  const base = "badge";
   const styles =
-    variant === "safe" ?
-      "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-200 dark:border-green-800"
-    : variant === "likely" ?
-      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-800"
-    : variant === "warning" ?
-      "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-200 dark:border-red-800"
-    : "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-200 dark:border-blue-800";
+    variant === "safe" ? "badge--success"
+    : variant === "likely" ? "badge--warning"
+    : variant === "warning" ? "badge--error"
+    : variant === "muted" ? "badge--muted"
+    : "badge--info";
 
-  return <span className={classNames(base, styles)}>{children}</span>;
+  return (
+    <span
+      className={classNames(base, styles)}
+      style={{ marginRight: "0.5rem", marginBottom: "0.25rem" }}
+    >
+      {children}
+    </span>
+  );
 }
 
 function Panel({
@@ -121,187 +329,262 @@ function Panel({
   );
 }
 
-function SuggestionCard({
-  suggestion,
+function RegexEntryCard({
+  card,
+  selectedGroups,
+  redundancy,
+  onToggleGroup,
   onValidate,
-  onApply,
   validating,
-  applying,
 }: {
-  suggestion: Suggestion;
-  onValidate: (s: Suggestion) => void;
-  onApply: (s: Suggestion) => void;
+  card: RegexEntryCardModel;
+  selectedGroups: string[];
+  redundancy?: RedundancySummary;
+  onToggleGroup: (cardKey: string, groupName: string) => void;
+  onValidate: (card: RegexEntryCardModel) => void;
   validating: boolean;
-  applying: boolean;
 }) {
   const confidenceLabel =
-    suggestion.confidence === "safe" ? "Safe"
-    : suggestion.confidence === "likely" ? "Likely"
+    card.confidence === "safe" ? "Safe"
+    : card.confidence === "likely" ? "Likely"
     : "Warning";
 
   const confidenceVariant =
-    suggestion.confidence === "safe" ? "safe"
-    : suggestion.confidence === "likely" ? "likely"
+    card.confidence === "safe" ? "safe"
+    : card.confidence === "likely" ? "likely"
     : "warning";
 
+  const isBlockRegex = card.targetList === "blockedRegex";
+
   const kindLabel =
-    suggestion.kind === "SAFE_TO_ZONE_DOMAIN_ENTRY" ? "Replace regex → domain"
-    : suggestion.kind === "LIKELY_TO_ZONE_DOMAIN_ENTRY_EXPANDS_SCOPE" ?
+    card.kind === "SAFE_TO_ZONE_DOMAIN_ENTRY" ? "Replace regex → domain"
+    : card.kind === "LIKELY_TO_ZONE_DOMAIN_ENTRY_EXPANDS_SCOPE" ?
       "Replace regex → domain (expands scope)"
-    : suggestion.kind === "MANUAL_REVIEW_ZONE_CANDIDATE" ?
-      "Manual review candidate"
+    : card.kind === "MANUAL_REVIEW_ZONE_CANDIDATE" ? "Manual review candidate"
     : "Perf warning";
 
-  const targetLabel =
-    suggestion.targetList === "blockedRegex" ?
-      "Blocked regex"
-    : "Allowed regex";
+  const conversionLabel =
+    isBlockRegex ?
+      "⛔ BLOCK REGEX → BLOCK DOMAIN"
+    : "✅ ALLOW REGEX → ALLOW DOMAIN";
+
+  const conversionVariant: "safe" | "warning" =
+    isBlockRegex ? "warning" : "safe";
+
+  const cardAccentClass =
+    isBlockRegex ?
+      "border-l-4 border-l-red-500 dark:border-l-red-400"
+    : "border-l-4 border-l-green-500 dark:border-l-green-400";
+  const cardBackground =
+    isBlockRegex ?
+      "linear-gradient(180deg, var(--color-danger-bg) 0%, var(--color-bg-secondary) 26%, var(--color-bg-secondary) 100%)"
+    : "linear-gradient(180deg, var(--color-success-bg) 0%, var(--color-bg-secondary) 26%, var(--color-bg-secondary) 100%)";
+  const toneAccent =
+    isBlockRegex ? "var(--color-danger)" : "var(--color-success)";
+  const perfBadgeStyle =
+    typeof card.perfScore === "number" ?
+      getPerfBadgeStyle(card.perfScore)
+    : undefined;
+  const detailPanelStyle: React.CSSProperties = {
+    background: "var(--color-bg-tertiary)",
+    border: "1px solid var(--color-border)",
+    borderRadius: "0.75rem",
+    padding: "0.875rem 1rem",
+  };
+
+  const hasSelectedGroups = selectedGroups.length > 0;
+  const canAutoApply = canAutoApplyCard(card);
+  const isRedundantCleanup = Boolean(redundancy?.allCovered);
 
   return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-800 p-4">
-      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+    <article
+      className={classNames(
+        "app-card relative overflow-hidden border-2 border-gray-200 dark:border-gray-700 shadow-sm",
+        cardAccentClass,
+      )}
+      style={{ background: cardBackground }}
+    >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-1"
+        style={{ background: toneAccent }}
+      />
+
+      <div className="relative z-10 flex flex-col gap-2 md:flex-row md:items-start md:justify-between border-b border-gray-200 dark:border-gray-700 pb-3 mb-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-1">
             <Badge variant={confidenceVariant}>{confidenceLabel}</Badge>
-            <Badge variant="info">{targetLabel}</Badge>
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              {kindLabel}
-            </span>
+            <Badge variant={conversionVariant}>{conversionLabel}</Badge>
+            <Badge variant="muted">{kindLabel}</Badge>
           </div>
 
-          <h3 className="app-card__subheading">{suggestion.title}</h3>
+          <h3 className="app-card__subheading">{card.title}</h3>
 
-          <p className="app-card__text">{suggestion.summary}</p>
+          <p className="app-card__text">{card.summary}</p>
         </div>
 
-        <div className="flex flex-col gap-2 md:items-end md:min-w-[220px]">
+        <div className="rule-optimizer-card__preview-actions flex flex-col gap-2">
           <button
             type="button"
             className={classNames(
               "button secondary",
               validating ? "opacity-60 cursor-not-allowed" : "",
             )}
-            onClick={() => onValidate(suggestion)}
-            disabled={validating || !suggestion.proposedDomainEntry}
+            onClick={() => onValidate(card)}
+            disabled={
+              validating || !card.proposedDomainEntry || !hasSelectedGroups
+            }
             title={
-              suggestion.proposedDomainEntry ?
-                "Validate using stored query logs (SQLite), if enabled"
+              !hasSelectedGroups ?
+                "Select at least one group on this regex entry"
+              : card.proposedDomainEntry ?
+                "Preview impact using stored query logs (SQLite), if enabled"
               : "No proposed domain entry for this suggestion"
             }
           >
-            {validating ? "Validating..." : "Validate"}
+            {validating ? "Previewing..." : "Preview impact"}
           </button>
 
-          <button
-            type="button"
-            className={classNames(
-              "button primary",
-              applying ? "opacity-60 cursor-not-allowed" : "",
-            )}
-            onClick={() => onApply(suggestion)}
-            disabled={
-              applying ||
-              suggestion.kind === "MANUAL_REVIEW_ZONE_CANDIDATE" ||
-              suggestion.kind === "PERF_WARNING" ||
-              !suggestion.proposedDomainEntry
-            }
-            title={
-              suggestion.kind === "MANUAL_REVIEW_ZONE_CANDIDATE" ?
-                "Manual-review candidates cannot be auto-applied"
-              : suggestion.kind === "PERF_WARNING" ?
-                "Perf warnings are advisory and cannot be auto-applied"
-              : suggestion.proposedDomainEntry ?
-                "Apply change (creates an Advanced Blocking snapshot first)"
-              : "No proposed domain entry for this suggestion"
-            }
-          >
-            {applying ? "Applying..." : "Apply"}
-          </button>
+          {canAutoApply ?
+            <span className="rule-optimizer-card__preview-note text-xs text-gray-500 dark:text-gray-400">
+              {isRedundantCleanup ?
+                <>
+                  <strong>Remove redundant regex</strong> is available from{" "}
+                  <strong>Preview impact</strong>.
+                </>
+              : <>
+                  Apply change is available from <strong>Preview impact</strong>
+                  .
+                </>
+              }
+            </span>
+          : null}
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div className="app-card app-card--muted">
+      <div className="relative z-10 mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div style={detailPanelStyle}>
           <div className="app-card__label">Regex pattern</div>
-          <div className="app-card__code">{suggestion.regexPattern}</div>
+          <div className="app-card__code">{card.regexPattern}</div>
         </div>
 
-        <div className="app-card app-card--muted">
+        <div style={detailPanelStyle}>
           <div className="app-card__label">Proposed inline domain entry</div>
           <div className="app-card__code">
-            {suggestion.proposedDomainEntry ?? "—"}
+            {card.proposedDomainEntry ?? "—"}
           </div>
-          {suggestion.scopeExpansionRisk ?
+          {card.scopeExpansionRisk ?
             <div className="app-callout app-callout--warning">
               <strong>Note:</strong> Advanced Blocking inline domains are zone
               rules (match subdomains). This change may expand scope.
             </div>
           : null}
+          {redundancy && redundancy.coveredCount > 0 ?
+            <div className="app-callout app-callout--warning mt-3">
+              <strong>Coverage notice:</strong>{" "}
+              {redundancy.allCovered ?
+                `Proposed domain is already covered by existing ${card.targetList === "allowedRegex" ? "allow" : "block"} domain entry${redundancy.exampleCoveringEntry ? ` "${redundancy.exampleCoveringEntry}"` : ""} in all selected groups. This is a redundant-regex cleanup.`
+              : `Proposed domain is already covered in ${redundancy.coveredCount}/${redundancy.selectedCount} ${selectedGroupsLabel(redundancy.selectedCount)}${redundancy.exampleCoveringEntry ? ` (for example "${redundancy.exampleCoveringEntry}")` : ""}.`
+              }
+            </div>
+          : null}
         </div>
       </div>
 
-      {suggestion.details?.length ?
-        <details className="mt-3">
+      <div className="relative z-10 mt-3" style={detailPanelStyle}>
+        <div className="app-card__label">Affected groups</div>
+        <div className="rule-optimizer-group-pills">
+          {card.groupNames.map((groupName) => {
+            const checked = selectedGroups.includes(groupName);
+            return (
+              <label
+                key={`${card.key}-${groupName}`}
+                className={classNames(
+                  "rule-optimizer-group-pill",
+                  checked && "rule-optimizer-group-pill--selected",
+                )}
+              >
+                <input
+                  className="rule-optimizer-group-pill__checkbox"
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => onToggleGroup(card.key, groupName)}
+                />
+                <span className="rule-optimizer-group-pill__label">
+                  {groupName}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+      {card.details?.length ?
+        <details className="relative z-10 mt-3">
           <summary className="cursor-pointer text-sm text-gray-700 dark:text-gray-200">
             Details
           </summary>
           <ul className="mt-2 list-disc pl-5 text-sm text-gray-700 dark:text-gray-300 space-y-1">
-            {suggestion.details.map((d, idx) => (
+            {card.details.map((d, idx) => (
               <li key={idx}>{d}</li>
             ))}
           </ul>
         </details>
       : null}
 
-      {typeof suggestion.perfScore === "number" ?
-        <div className="mt-3 text-xs text-gray-500 dark:text-gray-400">
-          Perf score: <span className="font-mono">{suggestion.perfScore}</span>
+      {typeof card.perfScore === "number" ?
+        <div className="relative z-10 mt-3">
+          <span
+            className="badge"
+            style={{
+              ...perfBadgeStyle,
+              marginRight: "0.5rem",
+              marginBottom: "0.25rem",
+            }}
+            title={`Perf impact ${card.perfScore} (0 = least impact, 18 = most impact)`}
+          >
+            Performance impact:{" "}
+            <span className="font-mono">{card.perfScore}</span> / 18
+          </span>
         </div>
       : null}
-    </div>
+    </article>
   );
 }
 
-function ValidationPanel({
-  result,
-  onClose,
-}: {
-  result: ValidationResponse;
-  onClose: () => void;
-}) {
+function ValidationPanel({ result }: { result: ValidationResponse }) {
   return (
     <div className="app-card">
-      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h3 className="app-card__subheading">Validation report</h3>
-          <p className="app-card__text">{result.note}</p>
-        </div>
-        <button type="button" className="button secondary" onClick={onClose}>
-          Close
-        </button>
+      <div>
+        <h3 className="app-card__subheading">Impact preview report</h3>
+        <p className="app-card__text">{result.note}</p>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="app-card app-card--muted">
-          <div className="app-card__label">Window</div>
-          <div className="app-card__text">
+      <div className="rule-optimizer-impact-metrics">
+        <div className="rule-optimizer-impact-metric">
+          <div className="rule-optimizer-impact-metric__label">Window</div>
+          <div className="rule-optimizer-impact-metric__value">
             Last <span className="app-code-inline">{result.windowHours}</span>{" "}
             hours
           </div>
         </div>
 
-        <div className="app-card app-card--muted">
-          <div className="app-card__label">Domains analyzed</div>
-          <div className="app-card__text">
+        <div className="rule-optimizer-impact-metric">
+          <div className="rule-optimizer-impact-metric__label">
+            Domains analyzed
+          </div>
+          <div className="rule-optimizer-impact-metric__value">
             <span className="app-code-inline">
               {result.distinctDomainsAnalyzed}
             </span>
           </div>
         </div>
 
-        <div className="app-card app-card--muted">
-          <div className="app-card__label">Additional subdomains matched</div>
-          <div className="app-card__text">
+        <div className="rule-optimizer-impact-metric">
+          <div className="rule-optimizer-impact-metric__label">
+            Additional subdomains matched
+          </div>
+          <div className="rule-optimizer-impact-metric__value">
             <span className="app-code-inline">
               {result.additionalMatchedDomainsCount}
             </span>
@@ -313,6 +596,14 @@ function ValidationPanel({
         <div className="app-card__label">Proposed domain entry</div>
         <div className="app-card__code">{result.proposedDomainEntry}</div>
       </div>
+
+      {!result.enabled ?
+        <div className="app-callout app-callout--warning mt-4">
+          Impact preview safety checks are unavailable because stored query logs
+          (SQLite) are not enabled/ready. You can still apply this suggestion,
+          but enable SQLite query log storage to get full preview capability.
+        </div>
+      : null}
 
       {result.enabled ?
         <div className="mt-4">
@@ -371,20 +662,82 @@ export default function AdvancedBlockingRuleOptimizerPage() {
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [groupsError, setGroupsError] = useState<string | null>(null);
   const [groups, setGroups] = useState<string[]>([]);
-  const [selectedGroup, setSelectedGroup] = useState<string>("");
+  const [groupInlineDomains, setGroupInlineDomains] = useState<
+    Record<string, { allowed: string[]; blocked: string[] }>
+  >({});
+  const [groupFilter, setGroupFilter] = useState<string>("all");
 
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [suggestionTab, setSuggestionTab] = useState<SuggestionTab>("all");
+  const [ruleTypeTab, setRuleTypeTab] = useState<RuleTypeTab>("both");
+  const [selectedGroupsByCard, setSelectedGroupsByCard] = useState<
+    Record<string, string[]>
+  >({});
 
   const [validation, setValidation] = useState<ValidationResponse | null>(null);
-  const [validatingSuggestionId, setValidatingSuggestionId] = useState<
-    string | null
-  >(null);
+  const [validationCard, setValidationCard] =
+    useState<RegexEntryCardModel | null>(null);
+  const [validatingCardKey, setValidatingCardKey] = useState<string | null>(
+    null,
+  );
 
-  const [applyingSuggestionId, setApplyingSuggestionId] = useState<
-    string | null
-  >(null);
+  const [applyingCardKey, setApplyingCardKey] = useState<string | null>(null);
+  const [pendingApply, setPendingApply] = useState<PendingApply | null>(null);
+  const [applyVerification, setApplyVerification] =
+    useState<ApplyVerification | null>(null);
+
+  const closeImpactModal = useCallback(() => {
+    setValidation(null);
+    setValidationCard(null);
+  }, []);
+
+  const closeApplyConfirmModal = useCallback(() => {
+    setPendingApply(null);
+    setApplyVerification(null);
+  }, []);
+
+  const hasOpenModal = Boolean(validation) || Boolean(pendingApply);
+
+  useEffect(() => {
+    if (!hasOpenModal) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (pendingApply) {
+          closeApplyConfirmModal();
+          return;
+        }
+
+        if (validation) {
+          closeImpactModal();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [
+    closeApplyConfirmModal,
+    closeImpactModal,
+    hasOpenModal,
+    pendingApply,
+    validation,
+  ]);
+
+  const validationCardSelectedGroups = useMemo(() => {
+    if (!validationCard) return [] as string[];
+    return (
+      selectedGroupsByCard[validationCard.key] ?? validationCard.groupNames
+    ).filter((groupName) => validationCard.groupNames.includes(groupName));
+  }, [validationCard, selectedGroupsByCard]);
 
   const allNodes = nodes ?? [];
   const primaryNode = usePrimaryNode(allNodes);
@@ -438,6 +791,39 @@ export default function AdvancedBlockingRuleOptimizerPage() {
     pushToast({ message, tone: "info", timeout: 5000 });
   }, [canOpenRuleOptimizerHistory, ruleOptimizerHistoryPullTitle, pushToast]);
 
+  const loadSuggestionsForGroups = useCallback(
+    async (
+      currentNodeId: string,
+      groupNames: string[],
+    ): Promise<Suggestion[]> => {
+      if (!currentNodeId || groupNames.length === 0) {
+        return [];
+      }
+
+      const payloads = await Promise.all(
+        groupNames.map(async (groupName) => {
+          const response = await apiFetch(
+            `/advanced-blocking/${encodePathParam(
+              currentNodeId,
+            )}/rule-optimizations/groups/${encodePathParam(groupName)}/suggestions`,
+          );
+
+          if (!response.ok) {
+            throw new Error(
+              `Failed to load suggestions for group "${groupName}" (${response.status})`,
+            );
+          }
+
+          return (await response.json()) as SuggestionsResponse;
+        }),
+      );
+
+      const merged = payloads.flatMap((payload) => payload?.suggestions ?? []);
+      return [...merged].sort(sortSuggestions);
+    },
+    [],
+  );
+
   // Load groups from Advanced Blocking snapshot
   useEffect(() => {
     let cancelled = false;
@@ -447,6 +833,8 @@ export default function AdvancedBlockingRuleOptimizerPage() {
       setLoadingGroups(true);
       setGroupsError(null);
       setGroups([]);
+      setGroupFilter("all");
+      setSelectedGroupsByCard({});
 
       try {
         const response = await apiFetch(
@@ -459,7 +847,13 @@ export default function AdvancedBlockingRuleOptimizerPage() {
         }
 
         const res = (await response.json()) as {
-          config?: { groups?: Array<{ name?: string }> };
+          config?: {
+            groups?: Array<{
+              name?: string;
+              allowed?: string[];
+              blocked?: string[];
+            }>;
+          };
           error?: string;
         };
 
@@ -470,16 +864,40 @@ export default function AdvancedBlockingRuleOptimizerPage() {
 
         const unique = [...new Set(names)].sort((a, b) => a.localeCompare(b));
 
+        const domainMap: Record<
+          string,
+          { allowed: string[]; blocked: string[] }
+        > = {};
+
+        for (const group of res?.config?.groups ?? []) {
+          const groupName = (group?.name ?? "").trim();
+          if (!groupName) continue;
+
+          const allowed =
+            Array.isArray(group.allowed) ?
+              group.allowed
+                .map((entry) => normalizeDomainEntry(String(entry ?? "")))
+                .filter((entry) => entry.length > 0)
+            : [];
+          const blocked =
+            Array.isArray(group.blocked) ?
+              group.blocked
+                .map((entry) => normalizeDomainEntry(String(entry ?? "")))
+                .filter((entry) => entry.length > 0)
+            : [];
+
+          domainMap[groupName] = { allowed, blocked };
+        }
+
         if (cancelled) return;
 
         setGroups(unique);
-        if (!selectedGroup && unique.length > 0) {
-          setSelectedGroup(unique[0]);
-        }
+        setGroupInlineDomains(domainMap);
       } catch (e) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
         setGroupsError(msg);
+        setGroupInlineDomains({});
       } finally {
         if (!cancelled) setLoadingGroups(false);
       }
@@ -490,56 +908,25 @@ export default function AdvancedBlockingRuleOptimizerPage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveNodeId]);
 
-  // Load suggestions when node/group changes
+  // Load suggestions when node/groups change
   useEffect(() => {
     let cancelled = false;
 
     async function run() {
-      if (!effectiveNodeId || !selectedGroup) return;
+      if (!effectiveNodeId) return;
       setLoadingSuggestions(true);
       setSuggestionsError(null);
       setSuggestions([]);
-      setValidation(null);
+      closeImpactModal();
+      closeApplyConfirmModal();
 
       try {
-        const response = await apiFetch(
-          `/advanced-blocking/${encodePathParam(
-            effectiveNodeId,
-          )}/rule-optimizations/groups/${encodePathParam(
-            selectedGroup,
-          )}/suggestions`,
-        );
-        if (!response.ok) {
-          throw new Error(`Failed to load suggestions (${response.status})`);
-        }
-
-        const res = (await response.json()) as SuggestionsResponse;
+        const res = await loadSuggestionsForGroups(effectiveNodeId, groups);
 
         if (cancelled) return;
-
-        const list = res?.suggestions ?? [];
-        // Sort: Safe first, then Likely, then Warning, then by perfScore desc.
-        const rank = (c: SuggestionConfidence) =>
-          c === "safe" ? 0
-          : c === "likely" ? 1
-          : 2;
-
-        const sorted = [...list].sort((a, b) => {
-          const ra = rank(a.confidence);
-          const rb = rank(b.confidence);
-          if (ra !== rb) return ra - rb;
-
-          const pa = a.perfScore ?? 0;
-          const pb = b.perfScore ?? 0;
-          if (pa !== pb) return pb - pa;
-
-          return a.regexPattern.localeCompare(b.regexPattern);
-        });
-
-        setSuggestions(sorted);
+        setSuggestions(res);
       } catch (e) {
         if (cancelled) return;
         const msg = e instanceof Error ? e.message : String(e);
@@ -554,14 +941,190 @@ export default function AdvancedBlockingRuleOptimizerPage() {
     return () => {
       cancelled = true;
     };
-  }, [effectiveNodeId, selectedGroup]);
+  }, [
+    effectiveNodeId,
+    groups,
+    loadSuggestionsForGroups,
+    closeApplyConfirmModal,
+  ]);
 
-  const handleValidate = async (s: Suggestion) => {
-    if (!effectiveNodeId || !selectedGroup) return;
-    if (!s.proposedDomainEntry) return;
+  const cards = useMemo(() => toRegexEntryCards(suggestions), [suggestions]);
 
-    setValidatingSuggestionId(s.id);
-    setValidation(null);
+  useEffect(() => {
+    setSelectedGroupsByCard((previous) => {
+      const next: Record<string, string[]> = {};
+      let changed = false;
+
+      for (const card of cards) {
+        const existing = previous[card.key] ?? [];
+        const filtered = existing.filter((groupName) =>
+          card.groupNames.includes(groupName),
+        );
+        const selected =
+          filtered.length > 0 ?
+            filtered
+          : [...card.groupNames].sort((a, b) => a.localeCompare(b));
+        next[card.key] = selected;
+
+        if (
+          existing.length !== selected.length ||
+          existing.some((value, index) => value !== selected[index])
+        ) {
+          changed = true;
+        }
+      }
+
+      if (Object.keys(previous).length !== Object.keys(next).length) {
+        changed = true;
+      }
+
+      return changed ? next : previous;
+    });
+  }, [cards]);
+
+  const filteredCards = useMemo(() => {
+    if (groupFilter === "all") return cards;
+    return cards.filter((card) => card.groupNames.includes(groupFilter));
+  }, [cards, groupFilter]);
+
+  const typeFilteredCards = useMemo(() => {
+    if (ruleTypeTab === "both") return filteredCards;
+    return filteredCards.filter((card) =>
+      ruleTypeTab === "allow" ?
+        card.targetList === "allowedRegex"
+      : card.targetList === "blockedRegex",
+    );
+  }, [filteredCards, ruleTypeTab]);
+
+  const visibleCards = useMemo(() => {
+    if (suggestionTab === "all") return typeFilteredCards;
+    return typeFilteredCards.filter(
+      (card) => card.confidence === suggestionTab,
+    );
+  }, [typeFilteredCards, suggestionTab]);
+
+  const tabCounts = useMemo(() => {
+    const safe = typeFilteredCards.filter(
+      (card) => card.confidence === "safe",
+    ).length;
+    const likely = typeFilteredCards.filter(
+      (card) => card.confidence === "likely",
+    ).length;
+    const warning = typeFilteredCards.filter(
+      (card) => card.confidence === "warning",
+    ).length;
+    return { all: typeFilteredCards.length, safe, likely, warning };
+  }, [typeFilteredCards]);
+
+  const ruleTypeCounts = useMemo(() => {
+    const allow = filteredCards.filter(
+      (card) => card.targetList === "allowedRegex",
+    ).length;
+    const block = filteredCards.filter(
+      (card) => card.targetList === "blockedRegex",
+    ).length;
+    return { both: filteredCards.length, allow, block };
+  }, [filteredCards]);
+
+  const getCardRedundancySummary = useCallback(
+    (
+      card: RegexEntryCardModel,
+      selectedGroups: string[],
+    ): RedundancySummary => {
+      const proposed = card.proposedDomainEntry;
+      if (!proposed || selectedGroups.length === 0) {
+        return {
+          selectedCount: selectedGroups.length,
+          coveredCount: 0,
+          allCovered: false,
+        };
+      }
+
+      const listKey =
+        card.targetList === "allowedRegex" ? "allowed" : "blocked";
+
+      let coveredCount = 0;
+      let exampleCoveringEntry: string | undefined;
+
+      for (const groupName of selectedGroups) {
+        const entries = groupInlineDomains[groupName]?.[listKey] ?? [];
+        const coveringEntry = findCoveringDomainEntry(proposed, entries);
+        if (!coveringEntry) continue;
+
+        coveredCount += 1;
+        if (!exampleCoveringEntry) {
+          exampleCoveringEntry = coveringEntry;
+        }
+      }
+
+      return {
+        selectedCount: selectedGroups.length,
+        coveredCount,
+        allCovered:
+          selectedGroups.length > 0 && coveredCount === selectedGroups.length,
+        exampleCoveringEntry,
+      };
+    },
+    [groupInlineDomains],
+  );
+
+  const groupTabCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: cards.length };
+    for (const groupName of groups) {
+      counts[groupName] = cards.filter((card) =>
+        card.groupNames.includes(groupName),
+      ).length;
+    }
+    return counts;
+  }, [cards, groups]);
+
+  const redundancyByCard = useMemo(() => {
+    const byCard: Record<string, RedundancySummary> = {};
+
+    for (const card of cards) {
+      const selected = (
+        selectedGroupsByCard[card.key] ?? card.groupNames
+      ).filter((groupName) => card.groupNames.includes(groupName));
+      byCard[card.key] = getCardRedundancySummary(card, selected);
+    }
+
+    return byCard;
+  }, [cards, getCardRedundancySummary, selectedGroupsByCard]);
+
+  const toggleCardGroup = useCallback((cardKey: string, groupName: string) => {
+    setSelectedGroupsByCard((previous) => {
+      const current = new Set(previous[cardKey] ?? []);
+      if (current.has(groupName)) {
+        current.delete(groupName);
+      } else {
+        current.add(groupName);
+      }
+
+      return {
+        ...previous,
+        [cardKey]: [...current].sort((a, b) => a.localeCompare(b)),
+      };
+    });
+  }, []);
+
+  const handleValidate = async (card: RegexEntryCardModel) => {
+    if (!effectiveNodeId) return;
+    if (!card.proposedDomainEntry) return;
+
+    const selectedGroups = selectedGroupsByCard[card.key] ?? card.groupNames;
+    const requestGroup = selectedGroups[0] ?? card.representativeGroupName;
+
+    if (!requestGroup) {
+      pushToast({
+        tone: "info",
+        message:
+          "Select at least one group on the regex entry before validating.",
+      });
+      return;
+    }
+
+    setValidatingCardKey(card.key);
+    closeImpactModal();
 
     try {
       const windowHours = 24;
@@ -571,16 +1134,16 @@ export default function AdvancedBlockingRuleOptimizerPage() {
         `/advanced-blocking/${encodePathParam(
           effectiveNodeId,
         )}/rule-optimizations/groups/${encodePathParam(
-          selectedGroup,
+          requestGroup,
         )}/validate?windowHours=${windowHours}&limit=${limit}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            suggestionId: s.id,
-            targetList: s.targetList,
-            regexPattern: s.regexPattern,
-            proposedDomainEntry: s.proposedDomainEntry,
+            suggestionId: card.primarySuggestionId,
+            targetList: card.targetList,
+            regexPattern: card.regexPattern,
+            proposedDomainEntry: card.proposedDomainEntry,
           }),
         },
       );
@@ -592,119 +1155,191 @@ export default function AdvancedBlockingRuleOptimizerPage() {
       const res = (await response.json()) as ValidationResponse;
 
       setValidation(res);
+      setValidationCard(card);
 
       if (!res.enabled) {
         pushToast({
           tone: "info",
           message:
-            "Validation is unavailable because stored query logs (SQLite) are not enabled/ready.",
+            "Impact preview is unavailable because stored query logs (SQLite) are not enabled/ready.",
         });
       } else {
-        pushToast({ tone: "success", message: "Validation completed." });
+        pushToast({
+          tone: "success",
+          message: "Impact preview completed. Opened in modal.",
+        });
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      pushToast({ tone: "error", message: `Validation failed: ${msg}` });
+      pushToast({ tone: "error", message: `Impact preview failed: ${msg}` });
     } finally {
-      setValidatingSuggestionId(null);
+      setValidatingCardKey(null);
     }
   };
 
-  const handleApply = async (s: Suggestion) => {
-    if (!effectiveNodeId || !selectedGroup) return;
-    if (!s.proposedDomainEntry) return;
+  const openApplyConfirmModal = useCallback(
+    (card: RegexEntryCardModel) => {
+      if (!effectiveNodeId) return;
+      if (!card.proposedDomainEntry) return;
 
-    const confirmMessage =
-      s.kind === "LIKELY_TO_ZONE_DOMAIN_ENTRY_EXPANDS_SCOPE" ?
-        `Apply this change?\n\nThis will remove the regex and add "${s.proposedDomainEntry}" as an inline domain entry.\n\nImportant: inline domains in Advanced Blocking are zone rules (match subdomains). This may expand scope. A snapshot will be created first for rollback.`
-      : `Apply this change?\n\nThis will remove the regex and add "${s.proposedDomainEntry}" as an inline domain entry.\n\nA snapshot will be created first for rollback.`;
+      const selectedGroups = (
+        selectedGroupsByCard[card.key] ?? card.groupNames
+      ).filter((groupName) => card.groupNames.includes(groupName));
 
-    const ok = window.confirm(confirmMessage);
-    if (!ok) return;
+      if (selectedGroups.length === 0) {
+        pushToast({
+          tone: "info",
+          message:
+            "Select at least one group on the regex entry before applying.",
+        });
+        return;
+      }
 
-    setApplyingSuggestionId(s.id);
+      const redundancy = getCardRedundancySummary(card, selectedGroups);
+
+      setApplyVerification(null);
+      setPendingApply({ card, selectedGroups, redundancy });
+    },
+    [effectiveNodeId, pushToast, selectedGroupsByCard],
+  );
+
+  const executeApply = async (
+    card: RegexEntryCardModel,
+    selectedGroups: string[],
+    redundancy?: RedundancySummary,
+  ): Promise<ApplyVerification | null> => {
+    if (!effectiveNodeId) return null;
+    if (!card.proposedDomainEntry) return null;
+
+    setApplyingCardKey(card.key);
 
     try {
-      const response = await apiFetch(
-        `/advanced-blocking/${encodePathParam(
-          effectiveNodeId,
-        )}/rule-optimizations/groups/${encodePathParam(selectedGroup)}/apply`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            suggestionId: s.id,
-            targetList: s.targetList,
-            regexPattern: s.regexPattern,
-            proposedDomainEntry: s.proposedDomainEntry,
-            takeSnapshot: true,
-            snapshotNote: `Rule optimizer: ${s.targetList} "${s.regexPattern}" → "${s.proposedDomainEntry}"`,
-          }),
-        },
-      );
+      let appliedCount = 0;
+      let snapshotId: string | undefined;
+      const failedGroups: string[] = [];
 
-      if (!response.ok) {
-        throw new Error(`Apply failed (${response.status})`);
+      for (let index = 0; index < selectedGroups.length; index += 1) {
+        const groupName = selectedGroups[index];
+        const response = await apiFetch(
+          `/advanced-blocking/${encodePathParam(
+            effectiveNodeId,
+          )}/rule-optimizations/groups/${encodePathParam(groupName)}/apply`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              suggestionId: card.primarySuggestionId,
+              targetList: card.targetList,
+              regexPattern: card.regexPattern,
+              proposedDomainEntry: card.proposedDomainEntry,
+              takeSnapshot: index === 0,
+              snapshotNote: `Rule optimizer: ${card.targetList} "${card.regexPattern}" → "${card.proposedDomainEntry}" (${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)})`,
+            }),
+          },
+        );
+
+        if (!response.ok) {
+          failedGroups.push(`${groupName} (${response.status})`);
+          continue;
+        }
+
+        const res = (await response.json()) as ApplyResponse;
+        if (!snapshotId && res.snapshotTaken?.id) {
+          snapshotId = res.snapshotTaken.id;
+        }
+        appliedCount += 1;
       }
 
-      const res = (await response.json()) as ApplyResponse;
+      if (appliedCount === 0) {
+        throw new Error("No selected groups were updated.");
+      }
+
+      const isRedundantCleanup = Boolean(redundancy?.allCovered);
 
       pushToast({
-        tone: "success",
+        tone: failedGroups.length > 0 ? "info" : "success",
         message:
-          res.snapshotTaken?.id ?
-            `Applied. Snapshot created: ${res.snapshotTaken.id}`
-          : "Applied.",
+          isRedundantCleanup ?
+            snapshotId ?
+              `Removed redundant regex in ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}. Snapshot created: ${snapshotId}`
+            : `Removed redundant regex in ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}.`
+          : snapshotId ?
+            `Applied to ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}. Snapshot created: ${snapshotId}`
+          : `Applied to ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}.`,
       });
 
-      // Refresh suggestions after apply
-      setLoadingSuggestions(true);
-      setSuggestionsError(null);
-      setValidation(null);
-
-      const refreshedResponse = await apiFetch(
-        `/advanced-blocking/${encodePathParam(
-          effectiveNodeId,
-        )}/rule-optimizations/groups/${encodePathParam(
-          selectedGroup,
-        )}/suggestions`,
-      );
-
-      if (!refreshedResponse.ok) {
-        throw new Error(
-          `Failed to refresh suggestions (${refreshedResponse.status})`,
-        );
+      if (failedGroups.length > 0) {
+        pushToast({
+          tone: "error",
+          message: `Failed groups: ${failedGroups.slice(0, 5).join(", ")}${failedGroups.length > 5 ? "…" : ""}`,
+        });
       }
 
-      const refreshed = (await refreshedResponse.json()) as SuggestionsResponse;
+      setLoadingSuggestions(true);
+      setSuggestionsError(null);
+      closeImpactModal();
 
-      const list = refreshed?.suggestions ?? [];
-      const rank = (c: SuggestionConfidence) =>
-        c === "safe" ? 0
-        : c === "likely" ? 1
-        : 2;
+      const refreshed = await loadSuggestionsForGroups(effectiveNodeId, groups);
+      setSuggestions(refreshed);
 
-      const sorted = [...list].sort((a, b) => {
-        const ra = rank(a.confidence);
-        const rb = rank(b.confidence);
-        if (ra !== rb) return ra - rb;
-
-        const pa = a.perfScore ?? 0;
-        const pb = b.perfScore ?? 0;
-        if (pa !== pb) return pb - pa;
-
-        return a.regexPattern.localeCompare(b.regexPattern);
-      });
-
-      setSuggestions(sorted);
+      return {
+        cardKey: card.key,
+        selectedCount: selectedGroups.length,
+        appliedCount,
+        failedGroups,
+        snapshotId,
+      };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       pushToast({ tone: "error", message: `Apply failed: ${msg}` });
+      return null;
     } finally {
-      setApplyingSuggestionId(null);
+      setApplyingCardKey(null);
       setLoadingSuggestions(false);
     }
   };
+
+  const handleConfirmApplyFromModal = useCallback(() => {
+    if (!pendingApply) return;
+    const { card, selectedGroups, redundancy } = pendingApply;
+    void executeApply(card, selectedGroups, redundancy).then((verification) => {
+      if (!verification) return;
+      setApplyVerification(verification);
+    });
+  }, [executeApply, pendingApply]);
+
+  const handleApplyFromImpactModal = useCallback(() => {
+    if (!validationCard) return;
+    openApplyConfirmModal(validationCard);
+  }, [validationCard, openApplyConfirmModal]);
+
+  const showModalApplyAction = Boolean(validationCard);
+  const isApplyingPending = Boolean(
+    pendingApply && applyingCardKey === pendingApply.card.key,
+  );
+  const hasVerificationResult = Boolean(
+    pendingApply &&
+    applyVerification &&
+    applyVerification.cardKey === pendingApply.card.key,
+  );
+  const canApplyFromModal =
+    validationCard ?
+      canAutoApplyCard(validationCard) &&
+      validationCardSelectedGroups.length > 0 &&
+      applyingCardKey !== validationCard.key
+    : false;
+
+  const validationCardRedundancy = useMemo(() => {
+    if (!validationCard) return undefined;
+    return getCardRedundancySummary(
+      validationCard,
+      validationCardSelectedGroups,
+    );
+  }, [getCardRedundancySummary, validationCard, validationCardSelectedGroups]);
+
+  const isValidationCardRedundantCleanup = Boolean(
+    validationCardRedundancy?.allCovered,
+  );
 
   return (
     <>
@@ -723,7 +1358,7 @@ export default function AdvancedBlockingRuleOptimizerPage() {
         DNS Rule Optimizer History
       </button>
 
-      <section className="automation">
+      <section className="automation rule-optimizer-page">
         <header className="automation__header">
           <h1>DNS Rule Optimizer</h1>
           <p>
@@ -738,7 +1373,7 @@ export default function AdvancedBlockingRuleOptimizerPage() {
           subtitle={
             lockToPrimary ?
               "Cluster mode detected. Using Primary node for analysis and apply actions."
-            : "Pick a node and an Advanced Blocking group to analyze."
+            : "Pick a node. Suggestions are aggregated across all Advanced Blocking groups."
           }
         >
           <div className="automation__content">
@@ -783,25 +1418,55 @@ export default function AdvancedBlockingRuleOptimizerPage() {
             </article>
 
             <article className="automation__card">
-              <label>
-                <strong>Group</strong>
-                <select
-                  value={selectedGroup}
-                  onChange={(e) => setSelectedGroup(e.target.value)}
-                  disabled={loadingGroups || groups.length === 0}
+              <div>
+                {/* <strong>Group filter</strong> */}
+                <div
+                  className="mt-2 flex flex-wrap gap-2"
+                  role="tablist"
+                  aria-label="Group filter"
                 >
                   {loadingGroups ?
-                    <option value="">Loading groups...</option>
+                    <button type="button" className="button secondary" disabled>
+                      Loading groups...
+                    </button>
                   : groups.length === 0 ?
-                    <option value="">No groups found</option>
-                  : groups.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))
+                    <button type="button" className="button secondary" disabled>
+                      No groups found
+                    </button>
+                  : <>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={groupFilter === "all"}
+                        className={
+                          groupFilter === "all" ? "button primary" : (
+                            "button secondary"
+                          )
+                        }
+                        onClick={() => setGroupFilter("all")}
+                      >
+                        All Groups ({groupTabCounts.all ?? 0})
+                      </button>
+                      {groups.map((groupName) => (
+                        <button
+                          key={groupName}
+                          type="button"
+                          role="tab"
+                          aria-selected={groupFilter === groupName}
+                          className={
+                            groupFilter === groupName ? "button primary" : (
+                              "button secondary"
+                            )
+                          }
+                          onClick={() => setGroupFilter(groupName)}
+                        >
+                          {groupName} ({groupTabCounts[groupName] ?? 0})
+                        </button>
+                      ))}
+                    </>
                   }
-                </select>
-              </label>
+                </div>
+              </div>
 
               {groupsError ?
                 <p className="app-error" role="alert">
@@ -811,6 +1476,75 @@ export default function AdvancedBlockingRuleOptimizerPage() {
             </article>
           </div>
         </Panel>
+
+        <div className="app-card mb-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <div className="app-card__label mb-2">Suggestion type</div>
+              <div
+                className="flex flex-wrap gap-2"
+                role="tablist"
+                aria-label="Suggestion type"
+              >
+                {(
+                  [
+                    ["all", "All"],
+                    ["safe", "SAFE"],
+                    ["likely", "LIKELY"],
+                    ["warning", "WARNING"],
+                  ] as Array<[SuggestionTab, string]>
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="tab"
+                    aria-selected={suggestionTab === value}
+                    className={
+                      suggestionTab === value ? "button primary" : (
+                        "button secondary"
+                      )
+                    }
+                    onClick={() => setSuggestionTab(value)}
+                  >
+                    {label} ({tabCounts[value]})
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="shrink-0 self-start">
+              <div className="app-card__label mb-2">Rule type</div>
+              <div
+                className="flex flex-wrap gap-2 justify-end"
+                role="tablist"
+                aria-label="Rule type"
+              >
+                {(
+                  [
+                    ["both", "BOTH"],
+                    ["allow", "ALLOW"],
+                    ["block", "BLOCK"],
+                  ] as Array<[RuleTypeTab, string]>
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="tab"
+                    aria-selected={ruleTypeTab === value}
+                    className={
+                      ruleTypeTab === value ? "button primary" : (
+                        "button secondary"
+                      )
+                    }
+                    onClick={() => setRuleTypeTab(value)}
+                  >
+                    {label} ({ruleTypeCounts[value]})
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
 
         <Panel
           title="Suggestions"
@@ -824,36 +1558,27 @@ export default function AdvancedBlockingRuleOptimizerPage() {
             <div className="text-sm text-red-600 dark:text-red-300">
               Failed to load suggestions: {suggestionsError}
             </div>
-          : suggestions.length === 0 ?
+          : visibleCards.length === 0 ?
             <div className="text-sm text-gray-700 dark:text-gray-300">
-              No suggestions found for this group.
+              No suggestions found for the current group/type filters.
             </div>
-          : <div className="space-y-3">
-              {suggestions.map((s) => (
-                <SuggestionCard
-                  key={s.id}
-                  suggestion={s}
+          : <div style={{ display: "grid", gap: "1.5rem" }}>
+              {visibleCards.map((card) => (
+                <RegexEntryCard
+                  key={card.key}
+                  card={card}
+                  redundancy={redundancyByCard[card.key]}
+                  selectedGroups={
+                    selectedGroupsByCard[card.key] ?? card.groupNames
+                  }
+                  onToggleGroup={toggleCardGroup}
                   onValidate={handleValidate}
-                  onApply={handleApply}
-                  validating={validatingSuggestionId === s.id}
-                  applying={applyingSuggestionId === s.id}
+                  validating={validatingCardKey === card.key}
                 />
               ))}
             </div>
           }
         </Panel>
-
-        {validation ?
-          <Panel
-            title="Validation"
-            subtitle="Validation uses stored query logs when enabled."
-          >
-            <ValidationPanel
-              result={validation}
-              onClose={() => setValidation(null)}
-            />
-          </Panel>
-        : null}
 
         <Panel
           title="How this works"
@@ -873,9 +1598,9 @@ export default function AdvancedBlockingRuleOptimizerPage() {
             </li>
             <li>
               For changes that might expand scope, use{" "}
-              <span className="font-medium">Validate</span> to see how many
-              additional recent subdomains would be affected (requires stored
-              query logs).
+              <span className="font-medium">Preview impact</span> to see how
+              many additional recent subdomains would be affected (requires
+              stored query logs).
             </li>
             <li>
               Applying a change creates a DNS Rule Optimizer snapshot first, so
@@ -885,6 +1610,248 @@ export default function AdvancedBlockingRuleOptimizerPage() {
           </ul>
         </Panel>
       </section>
+
+      {validation ?
+        <div
+          className="rule-optimizer-impact-modal__overlay"
+          onClick={closeImpactModal}
+        >
+          <div
+            className="rule-optimizer-impact-modal__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rule-optimizer-impact-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="rule-optimizer-impact-modal__header">
+              <div>
+                <h2
+                  id="rule-optimizer-impact-title"
+                  className="rule-optimizer-impact-modal__title"
+                >
+                  Impact Preview
+                </h2>
+                <p className="rule-optimizer-impact-modal__subtitle">
+                  Preview uses stored query logs when enabled.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="button secondary"
+                onClick={closeImpactModal}
+              >
+                Close
+              </button>
+            </div>
+
+            <ValidationPanel result={validation} />
+
+            {validationCard ?
+              <div className="rule-optimizer-impact-modal__groups">
+                <div className="app-card__label">Affected Groups</div>
+                <div className="rule-optimizer-group-pills">
+                  {validationCard.groupNames.map((groupName) => {
+                    const checked =
+                      validationCardSelectedGroups.includes(groupName);
+
+                    return (
+                      <label
+                        key={`impact-modal-${validationCard.key}-${groupName}`}
+                        className={classNames(
+                          "rule-optimizer-group-pill",
+                          checked && "rule-optimizer-group-pill--selected",
+                        )}
+                      >
+                        <input
+                          className="rule-optimizer-group-pill__checkbox"
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() =>
+                            toggleCardGroup(validationCard.key, groupName)
+                          }
+                        />
+                        <span className="rule-optimizer-group-pill__label">
+                          {groupName}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            : null}
+
+            {showModalApplyAction ?
+              <div className="rule-optimizer-impact-modal__actions">
+                <button
+                  type="button"
+                  className={classNames(
+                    "button primary",
+                    validationCard && applyingCardKey === validationCard.key ?
+                      "opacity-60 cursor-not-allowed"
+                    : "",
+                  )}
+                  onClick={handleApplyFromImpactModal}
+                  disabled={!canApplyFromModal}
+                  title={
+                    validationCard && !canAutoApplyCard(validationCard) ?
+                      "This suggestion is preview-only and cannot be auto-applied"
+                    : !validationCardSelectedGroups.length ?
+                      "Select at least one group before applying"
+                    : isValidationCardRedundantCleanup ?
+                      "Remove redundant regex (effective coverage already exists; snapshot created first)"
+                    : "Apply change (creates an Advanced Blocking snapshot first)"
+
+                  }
+                >
+                  {validationCard && applyingCardKey === validationCard.key ?
+                    isValidationCardRedundantCleanup ?
+                      "Removing..."
+                    : "Applying change..."
+                  : isValidationCardRedundantCleanup ?
+                    "Remove redundant regex"
+                  : "Apply change"}
+                </button>
+
+                {validationCard && !canAutoApplyCard(validationCard) ?
+                  <p className="rule-optimizer-impact-modal__apply-note">
+                    This suggestion is preview-only and cannot be auto-applied.
+                  </p>
+                : null}
+              </div>
+            : null}
+          </div>
+        </div>
+      : null}
+
+      {pendingApply ?
+        <div
+          className="rule-optimizer-confirm-modal__overlay"
+          onClick={closeApplyConfirmModal}
+        >
+          <div
+            className="rule-optimizer-confirm-modal__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rule-optimizer-confirm-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2
+              id="rule-optimizer-confirm-title"
+              className="rule-optimizer-confirm-modal__title"
+            >
+              {hasVerificationResult ?
+                pendingApply.redundancy?.allCovered ?
+                  "Redundant regex removed"
+                : "Change applied successfully"
+              : pendingApply.redundancy?.allCovered ?
+                `Remove redundant regex in ${pendingApply.selectedGroups.length} ${selectedGroupsLabel(pendingApply.selectedGroups.length)}?`
+              : `Apply this change to ${pendingApply.selectedGroups.length} ${selectedGroupsLabel(pendingApply.selectedGroups.length)}?`
+              }
+            </h2>
+
+            <p className="rule-optimizer-confirm-modal__text">
+              {hasVerificationResult ?
+                pendingApply.redundancy?.allCovered ?
+                  `Removed the redundant regex. Effective coverage for "${pendingApply.card.proposedDomainEntry}" was already present in the selected groups.`
+                : `Removed the regex and added "${pendingApply.card.proposedDomainEntry}" as an inline domain entry in the selected groups.`
+
+              : pendingApply.redundancy?.allCovered ?
+                `"${pendingApply.card.proposedDomainEntry}" is already covered by an existing ${pendingApply.card.targetList === "allowedRegex" ? "allow" : "block"} domain entry${pendingApply.redundancy.exampleCoveringEntry ? ` (for example "${pendingApply.redundancy.exampleCoveringEntry}")` : ""} in the selected groups. This action removes only the redundant regex.`
+              : `This will remove the regex and add "${pendingApply.card.proposedDomainEntry}" as an inline domain entry in each selected group.`
+              }
+            </p>
+
+            {(
+              pendingApply.card.kind ===
+                "LIKELY_TO_ZONE_DOMAIN_ENTRY_EXPANDS_SCOPE" &&
+              !hasVerificationResult
+            ) ?
+              <p className="rule-optimizer-confirm-modal__warning">
+                Important: inline domains in Advanced Blocking are zone rules
+                (match subdomains). This may expand scope.
+              </p>
+            : null}
+
+            <p className="rule-optimizer-confirm-modal__text">
+              {hasVerificationResult ?
+                "A snapshot was created for rollback."
+              : "A snapshot will be created first for rollback."}
+            </p>
+
+            {hasVerificationResult && applyVerification ?
+              <div className="rule-optimizer-confirm-modal__result">
+                <div className="rule-optimizer-confirm-modal__result-badges">
+                  <Badge
+                    variant={
+                      applyVerification.failedGroups.length > 0 ?
+                        "likely"
+                      : "safe"
+                    }
+                  >
+                    {`Updated ${applyVerification.appliedCount}/${applyVerification.selectedCount}`}
+                  </Badge>
+                  <Badge variant="info">Regex removed</Badge>
+                  <Badge variant="info">
+                    {pendingApply.redundancy?.allCovered ?
+                      "Coverage already present"
+                    : "Domain added"}
+                  </Badge>
+                  {applyVerification.snapshotId ?
+                    <Badge variant="muted">Snapshot created</Badge>
+                  : null}
+                </div>
+
+                {applyVerification.failedGroups.length > 0 ?
+                  <p className="rule-optimizer-confirm-modal__result-note">
+                    Some groups failed:{" "}
+                    {applyVerification.failedGroups.slice(0, 4).join(", ")}
+                    {applyVerification.failedGroups.length > 4 ? "…" : ""}
+                  </p>
+                : <p className="rule-optimizer-confirm-modal__result-note">
+                    Verification complete for selected groups.
+                  </p>
+                }
+              </div>
+            : null}
+
+            <div className="rule-optimizer-confirm-modal__actions">
+              {hasVerificationResult ?
+                <button
+                  type="button"
+                  className="button primary"
+                  onClick={closeApplyConfirmModal}
+                >
+                  Close
+                </button>
+              : <>
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={closeApplyConfirmModal}
+                    disabled={isApplyingPending}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="button primary"
+                    onClick={handleConfirmApplyFromModal}
+                    disabled={isApplyingPending}
+                  >
+                    {isApplyingPending ?
+                      pendingApply.redundancy?.allCovered ?
+                        "Removing..."
+                      : "Applying change..."
+                    : pendingApply.redundancy?.allCovered ?
+                      "Remove redundant regex"
+                    : "Apply change"}
+                  </button>
+                </>
+              }
+            </div>
+          </div>
+        </div>
+      : null}
 
       <ConfigSnapshotDrawer
         isOpen={ruleOptimizerHistoryOpen}
@@ -903,7 +1870,11 @@ export default function AdvancedBlockingRuleOptimizerPage() {
           if (!effectiveNodeId) return;
 
           setLoadingGroups(true);
+          setLoadingSuggestions(true);
           setGroupsError(null);
+          setSuggestionsError(null);
+          closeImpactModal();
+          closeApplyConfirmModal();
 
           try {
             const response = await apiFetch(
@@ -917,7 +1888,13 @@ export default function AdvancedBlockingRuleOptimizerPage() {
             }
 
             const res = (await response.json()) as {
-              config?: { groups?: Array<{ name?: string }> };
+              config?: {
+                groups?: Array<{
+                  name?: string;
+                  allowed?: string[];
+                  blocked?: string[];
+                }>;
+              };
             };
 
             const names =
@@ -929,65 +1906,44 @@ export default function AdvancedBlockingRuleOptimizerPage() {
               a.localeCompare(b),
             );
 
+            const domainMap: Record<
+              string,
+              { allowed: string[]; blocked: string[] }
+            > = {};
+
+            for (const group of res?.config?.groups ?? []) {
+              const groupName = (group?.name ?? "").trim();
+              if (!groupName) continue;
+
+              const allowed =
+                Array.isArray(group.allowed) ?
+                  group.allowed
+                    .map((entry) => normalizeDomainEntry(String(entry ?? "")))
+                    .filter((entry) => entry.length > 0)
+                : [];
+              const blocked =
+                Array.isArray(group.blocked) ?
+                  group.blocked
+                    .map((entry) => normalizeDomainEntry(String(entry ?? "")))
+                    .filter((entry) => entry.length > 0)
+                : [];
+
+              domainMap[groupName] = { allowed, blocked };
+            }
+
             setGroups(unique);
+            setGroupInlineDomains(domainMap);
 
-            const nextGroup =
-              unique.includes(selectedGroup) ? selectedGroup : (
-                (unique[0] ?? "")
-              );
-            setSelectedGroup(nextGroup);
-
-            if (!nextGroup) {
-              setSuggestions([]);
-              setValidation(null);
-              return;
-            }
-
-            setLoadingSuggestions(true);
-            setSuggestionsError(null);
-            setValidation(null);
-
-            const suggestionsResponse = await apiFetch(
-              `/advanced-blocking/${encodePathParam(
-                effectiveNodeId,
-              )}/rule-optimizations/groups/${encodePathParam(
-                nextGroup,
-              )}/suggestions`,
+            const refreshed = await loadSuggestionsForGroups(
+              effectiveNodeId,
+              unique,
             );
-
-            if (!suggestionsResponse.ok) {
-              throw new Error(
-                `Failed to load suggestions (${suggestionsResponse.status})`,
-              );
-            }
-
-            const suggestionsPayload =
-              (await suggestionsResponse.json()) as SuggestionsResponse;
-
-            const rank = (c: SuggestionConfidence) =>
-              c === "safe" ? 0
-              : c === "likely" ? 1
-              : 2;
-
-            const sorted = [...(suggestionsPayload?.suggestions ?? [])].sort(
-              (a, b) => {
-                const ra = rank(a.confidence);
-                const rb = rank(b.confidence);
-                if (ra !== rb) return ra - rb;
-
-                const pa = a.perfScore ?? 0;
-                const pb = b.perfScore ?? 0;
-                if (pa !== pb) return pb - pa;
-
-                return a.regexPattern.localeCompare(b.regexPattern);
-              },
-            );
-
-            setSuggestions(sorted);
+            setSuggestions(refreshed);
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             setGroupsError(msg);
             setSuggestionsError(msg);
+            setGroupInlineDomains({});
           } finally {
             setLoadingGroups(false);
             setLoadingSuggestions(false);
