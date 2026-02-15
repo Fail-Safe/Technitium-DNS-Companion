@@ -145,6 +145,39 @@ docker compose up -d --build
 - Port bind error ("port is already allocated"): pick different host ports (e.g., `-p 1234:3000 -p 1235:3443`) or stop the other container/service using that port.
 - Cannot connect to Technitium DNS nodes: Check URLs and tokens in `.env`.
 
+### Post-upgrade permissions check (v1.4+)
+
+Recent images run as a non-root user (`node`, uid/gid `1000`). If older bind mounts or volumes contain root-owned files, startup or background tasks may fail with permission errors such as:
+
+- `EACCES: permission denied, open /app/certs/...` (HTTPS certs not readable)
+- `attempt to write a readonly database` (SQLite query logs DB not writable)
+
+Quick check inside the container:
+
+```bash
+docker exec -it <container> sh -lc 'id; ls -ld /app/certs /app/config; ls -l /app/certs 2>/dev/null || true; ls -l /app/config 2>/dev/null || true'
+```
+
+Recommended permissions:
+
+- Certificate directories should be traversable/readable (commonly `755`)
+- Certificate/key files should be readable by the container user (commonly `644`)
+- SQLite DB path and related files (`.sqlite`, `-wal`, `-shm`) should be writable by uid `1000`
+
+Example remediation (adjust to your host paths/volume contents):
+
+```bash
+# Certs (host or volume content)
+chmod 755 /path/to/certs /path/to/certs/certs
+chmod 644 /path/to/certs/certs/*
+
+# App state volume (from container as root, then restart)
+docker exec -u 0 <container> sh -lc 'chown -R node:node /app/config'
+docker restart <container>
+```
+
+Temporary workaround only: run the container as root while fixing file ownership, then switch back to non-root.
+
 ## Docker Secrets / File-based Secrets
 
 For production deployments, you can use Docker secrets or file-based secrets instead of
