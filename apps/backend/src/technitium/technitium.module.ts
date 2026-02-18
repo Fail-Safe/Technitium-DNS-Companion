@@ -7,6 +7,8 @@ import { BuiltInBlockingController } from "./built-in-blocking.controller";
 import { BuiltInBlockingService } from "./built-in-blocking.service";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
+import { DomainGroupsController } from "./domain-groups.controller";
+import { DomainGroupsService } from "./domain-groups.service";
 import { DomainListController } from "./domain-list-cache.controller";
 import { DomainListCacheService } from "./domain-list-cache.service";
 import { DomainListPersistenceService } from "./domain-list-persistence.service";
@@ -42,6 +44,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     SplitHorizonPtrStateService,
     DomainListCacheService,
     DomainListPersistenceService,
+    DomainGroupsService,
     DnsFilteringSnapshotService,
     DhcpSnapshotService,
     ZoneSnapshotService,
@@ -126,6 +129,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     TechnitiumController,
     AdvancedBlockingController,
     BuiltInBlockingController,
+    DomainGroupsController,
     DomainListController,
     SplitHorizonPtrController,
   ],
