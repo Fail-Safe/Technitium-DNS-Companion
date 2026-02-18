@@ -11,7 +11,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- No unreleased changes yet.
+- Query Logs: added a client-side Domain Exclusion List (`Exclude Domains`) with wildcard support (`*`), persisted to localStorage for per-browser noise reduction.
+
+### Changed
+
+- DNS Filtering and Rule Optimizer: improved Advanced Blocking capability detection by preferring `blockingStatus` node install state, with fallback to node app discovery.
+- Docker Compose: replaced `wget`-based healthcheck probe with a Node.js HTTP/HTTPS probe (with protocol fallback) so checks work in minimal images without extra OS utilities.
+
+### Fixed
+
+- DNS Filtering bootstrap resilience: node configuration fetch now retries transient failures, emits a load-failed UI event, and surfaces clearer user feedback via toast + inline banner.
+- Rule Optimizer availability and nav gating now handle pre-auth / post-login capability hydration more reliably (reduces false negatives until full state is loaded).
+
+### Docs
+
+- Docker guide now documents healthcheck probe behavior and quick verification commands.
+- Query Logs filtering docs now include the Domain Exclusion List behavior (UI-only, wildcard matching, local persistence).
 
 ## [1.4.0] - 2026-02-14
 

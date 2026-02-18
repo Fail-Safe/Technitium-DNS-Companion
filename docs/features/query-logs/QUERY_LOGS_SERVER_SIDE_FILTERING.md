@@ -128,6 +128,19 @@ Implemented server-side filtering for query logs to provide accurate "Matching e
 - `end` - End timestamp (ISO 8601 format)
 - Entries within range: `start <= entry.timestamp <= end`
 
+### Domain Exclusion List (UI-Only Noise Reduction)
+
+- The Logs page also supports an **Exclude Domains** field for visual noise reduction.
+- This exclusion list is **client-side only** (no backend/API parameter).
+- Values are persisted in browser `localStorage` under `technitiumLogs.domainExclusionList`.
+- Syntax:
+  - Comma-separated and/or newline-separated values are supported.
+  - `*` wildcard is supported (example: `*.trackingdomain.com`).
+  - Exact match values are supported (example: `ads.example.net`).
+  - Matching is case-insensitive and ignores trailing dots.
+- The exclusion list is applied to both Live Tail and Paginated display results.
+- "Clear filters" also clears the exclusion list.
+
 ## Performance Considerations
 
 ### Combined Logs
