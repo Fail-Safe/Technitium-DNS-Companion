@@ -35,7 +35,7 @@ import { ConfigurationSkeleton } from "../components/configuration/Configuration
 import { ConfigurationSyncView } from "../components/configuration/ConfigurationSyncView.tsx";
 import { ListSourceEditor } from "../components/configuration/ListSourceEditor.tsx";
 import { NodeSelector } from "../components/configuration/NodeSelector.tsx";
-import { apiFetch } from "../config";
+import { apiFetch, getNodesConfigLoadFailedEventName } from "../config";
 import { useTechnitiumState } from "../context/useTechnitiumState";
 import { useToast } from "../context/useToast";
 import { useNavigationBlocker } from "../hooks/useNavigationBlocker";
@@ -113,6 +113,9 @@ export function ConfigurationPage() {
 
   // Track sync summary for badge display
   const [syncChangeCount, setSyncChangeCount] = useState(0);
+  const [nodesConfigLoadError, setNodesConfigLoadError] = useState<
+    string | undefined
+  >();
 
   // Node selection for multi-group editor
   const [selectedNodeId, setSelectedNodeId] = useState<string>("");
@@ -151,10 +154,24 @@ export function ConfigurationPage() {
     return node?.name;
   }, [nodes, configSnapshotNodeId]);
 
+  const advancedBlockingInstalledByNodeId = useMemo(() => {
+    const map = new Map<string, boolean>();
+    blockingStatus?.nodes?.forEach((nodeStatus) => {
+      map.set(nodeStatus.nodeId, nodeStatus.advancedBlockingInstalled);
+    });
+    return map;
+  }, [blockingStatus]);
+
   const isSelectedNodeAdvancedBlockingCapable = useMemo(() => {
+    const installedFromStatus =
+      advancedBlockingInstalledByNodeId.get(selectedNodeId);
+    if (installedFromStatus !== undefined) {
+      return installedFromStatus;
+    }
+
     const node = nodes.find((n) => n.id === selectedNodeId);
-    return Boolean(node?.hasAdvancedBlocking);
-  }, [nodes, selectedNodeId]);
+    return node?.hasAdvancedBlocking === true;
+  }, [advancedBlockingInstalledByNodeId, nodes, selectedNodeId]);
 
   const configSnapshotMethod =
     selectedBlockingMethod === "built-in" ?
@@ -352,6 +369,32 @@ export function ConfigurationPage() {
     disabled: false,
   });
 
+  // Show a persistent inline banner when initial node configuration fails.
+  useEffect(() => {
+    const eventName = getNodesConfigLoadFailedEventName();
+    const onNodesConfigLoadFailed = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      setNodesConfigLoadError(
+        detail?.message ??
+          "Unable to load nodes configuration from backend. Some DNS Filtering features may be temporarily unavailable.",
+      );
+    };
+
+    window.addEventListener(eventName, onNodesConfigLoadFailed as EventListener);
+    return () =>
+      window.removeEventListener(
+        eventName,
+        onNodesConfigLoadFailed as EventListener,
+      );
+  }, []);
+
+  // Clear the banner once nodes are loaded successfully.
+  useEffect(() => {
+    if (nodes.length > 0 && nodesConfigLoadError) {
+      setNodesConfigLoadError(undefined);
+    }
+  }, [nodes.length, nodesConfigLoadError]);
+
   // Auto-switch away from Sync tab if clustering is enabled
   useEffect(() => {
     if (isClusterEnabled && activeTab === "sync") {
@@ -437,9 +480,28 @@ export function ConfigurationPage() {
   ]);
 
   // Determine which nodes are missing Advanced Blocking app
-  const missingNodes = nodes
-    .filter((n) => !n.hasAdvancedBlocking)
-    .map((n) => ({ id: n.id, name: n.name }));
+  const missingNodes = useMemo(
+    () =>
+      nodes
+        .filter((node) => {
+          const installedFromStatus = advancedBlockingInstalledByNodeId.get(
+            node.id,
+          );
+
+          if (installedFromStatus !== undefined) {
+            return !installedFromStatus;
+          }
+
+          if (node.hasAdvancedBlocking !== undefined) {
+            return node.hasAdvancedBlocking === false;
+          }
+
+          // Unknown state: avoid showing a false "not installed" warning.
+          return false;
+        })
+        .map((node) => ({ id: node.id, name: node.name })),
+    [nodes, advancedBlockingInstalledByNodeId],
+  );
   const allMissing = nodes.length > 0 && missingNodes.length === nodes.length;
   const someMissing =
     missingNodes.length > 0 && missingNodes.length < nodes.length;
@@ -1455,11 +1517,24 @@ export function ConfigurationPage() {
         <BlockingMethodSelector
           selectedMethod={selectedBlockingMethod}
           onMethodChange={setSelectedBlockingMethod}
-          hasAdvancedBlocking={nodes.some((n) => n.hasAdvancedBlocking)}
+          hasAdvancedBlocking={
+            blockingStatus?.nodes?.some((n) => n.advancedBlockingInstalled) ??
+            nodes.some((n) => n.hasAdvancedBlocking === true)
+          }
           hasBuiltInBlocking={
             blockingStatus?.nodes?.some((n) => n.builtInEnabled) ?? false
           }
         />
+
+        {nodesConfigLoadError && (
+          <div className="alert-box alert-box--danger" role="status" aria-live="polite">
+            <p className="alert-box__title alert-box__title--danger">
+              <FontAwesomeIcon icon={faExclamationTriangle} />
+              Node configuration unavailable
+            </p>
+            <p>{nodesConfigLoadError}</p>
+          </div>
+        )}
 
         {/* Conflict Warning Banner - show when both methods are active */}
         <BlockingConflictBanner
@@ -1557,7 +1632,7 @@ export function ConfigurationPage() {
                   <span>Lists</span>
                 </button>
                 {/* Hide Sync tab in cluster mode - Primary automatically syncs to Secondaries */}
-                {!isClusterEnabled && (
+                {!isClusterEnabled && nodes.length > 0 && (
                   <button
                     type="button"
                     className={`configuration__tab ${activeTab === "sync" ? "configuration__tab--active" : ""}`}
@@ -2581,14 +2656,17 @@ export function ConfigurationPage() {
             )}
 
             {/* Sync Tab */}
-            {activeTab === "sync" && availableNodes.length > 0 && (
-              <ConfigurationSyncView
-                advancedBlocking={advancedBlocking}
-                onSync={handleSyncConfig}
-                disabled={loadingAdvancedBlocking}
-                nodes={nodes}
-              />
-            )}
+            {activeTab === "sync" &&
+              !isClusterEnabled &&
+              nodes.length > 0 &&
+              availableNodes.length > 0 && (
+                <ConfigurationSyncView
+                  advancedBlocking={advancedBlocking}
+                  onSync={handleSyncConfig}
+                  disabled={loadingAdvancedBlocking}
+                  nodes={nodes}
+                />
+              )}
           </section>
         }
       </section>

@@ -110,9 +110,8 @@ export function Header() {
   const blockingStatus = technitium?.blockingStatus;
 
   const canShowDnsRuleOptimizer = Boolean(
-    blockingStatus?.nodes?.some(
-      (n) => n.advancedBlockingInstalled && n.advancedBlockingEnabled,
-    ),
+    blockingStatus?.nodes?.some((n) => n.advancedBlockingInstalled) ||
+    technitium?.nodes?.some((node) => node.hasAdvancedBlocking === true),
   );
 
   const links = [

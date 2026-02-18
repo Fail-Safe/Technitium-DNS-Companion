@@ -1,63 +1,68 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch, triggerAuthRedirect } from "../config";
+import {
+  apiFetch,
+  isApiFetchNetworkError,
+  triggerNodesConfigLoadFailed,
+  triggerAuthRedirect,
+} from "../config";
 import type {
-    AdvancedBlockingConfig,
-    AdvancedBlockingOverview,
-    AdvancedBlockingSnapshot,
+  AdvancedBlockingConfig,
+  AdvancedBlockingOverview,
+  AdvancedBlockingSnapshot,
 } from "../types/advancedBlocking";
 import type {
-    BlockingMethod,
-    BlockingSettings,
-    BlockingStatusOverview,
-    BlockingZoneListResponse,
-    BlockingZoneOperationResult,
-    BuiltInBlockingOverview,
+  BlockingMethod,
+  BlockingSettings,
+  BlockingStatusOverview,
+  BlockingZoneListResponse,
+  BlockingZoneOperationResult,
+  BuiltInBlockingOverview,
 } from "../types/builtInBlocking";
 import type {
-    ConfigSnapshot,
-    ConfigSnapshotMetadata,
-    ConfigSnapshotMethod,
-    ConfigSnapshotOrigin,
-    ConfigSnapshotRestoreResult,
+  ConfigSnapshot,
+  ConfigSnapshotMetadata,
+  ConfigSnapshotMethod,
+  ConfigSnapshotOrigin,
+  ConfigSnapshotRestoreResult,
 } from "../types/configSnapshots";
 import type {
-    DhcpBulkSyncRequest,
-    DhcpBulkSyncResult,
-    DhcpSnapshot,
-    DhcpSnapshotMetadata,
-    DhcpSnapshotOrigin,
-    DhcpSnapshotRestoreOptions,
-    DhcpSnapshotRestoreResult,
-    TechnitiumCloneDhcpScopeRequest,
-    TechnitiumCloneDhcpScopeResult,
-    TechnitiumCreateDhcpScopeEnvelope,
-    TechnitiumCreateDhcpScopeRequest,
-    TechnitiumDhcpScope,
-    TechnitiumDhcpScopeEnvelope,
-    TechnitiumDhcpScopeListEnvelope,
-    TechnitiumRenameDhcpScopeRequest,
-    TechnitiumRenameDhcpScopeResult,
-    TechnitiumUpdateDhcpScopeEnvelope,
-    TechnitiumUpdateDhcpScopeRequest,
+  DhcpBulkSyncRequest,
+  DhcpBulkSyncResult,
+  DhcpSnapshot,
+  DhcpSnapshotMetadata,
+  DhcpSnapshotOrigin,
+  DhcpSnapshotRestoreOptions,
+  DhcpSnapshotRestoreResult,
+  TechnitiumCloneDhcpScopeRequest,
+  TechnitiumCloneDhcpScopeResult,
+  TechnitiumCreateDhcpScopeEnvelope,
+  TechnitiumCreateDhcpScopeRequest,
+  TechnitiumDhcpScope,
+  TechnitiumDhcpScopeEnvelope,
+  TechnitiumDhcpScopeListEnvelope,
+  TechnitiumRenameDhcpScopeRequest,
+  TechnitiumRenameDhcpScopeResult,
+  TechnitiumUpdateDhcpScopeEnvelope,
+  TechnitiumUpdateDhcpScopeRequest,
 } from "../types/dhcp";
 import type {
-    TechnitiumCombinedQueryLogPage,
-    TechnitiumNodeQueryLogEnvelope,
-    TechnitiumQueryLogFilters,
-    TechnitiumQueryLogStorageStatus,
+  TechnitiumCombinedQueryLogPage,
+  TechnitiumNodeQueryLogEnvelope,
+  TechnitiumQueryLogFilters,
+  TechnitiumQueryLogStorageStatus,
 } from "../types/technitiumLogs";
 import type {
-    TechnitiumCombinedZoneOverview,
-    TechnitiumCombinedZoneRecordsOverview,
-    TechnitiumZoneListEnvelope,
+  TechnitiumCombinedZoneOverview,
+  TechnitiumCombinedZoneRecordsOverview,
+  TechnitiumZoneListEnvelope,
 } from "../types/zones";
 import type {
-    ZoneSnapshot,
-    ZoneSnapshotCreateRequest,
-    ZoneSnapshotMetadata,
-    ZoneSnapshotRestoreOptions,
-    ZoneSnapshotRestoreResult,
+  ZoneSnapshot,
+  ZoneSnapshotCreateRequest,
+  ZoneSnapshotMetadata,
+  ZoneSnapshotRestoreOptions,
+  ZoneSnapshotRestoreResult,
 } from "../types/zoneSnapshots";
 import type { AuthStatus } from "./AuthContext";
 import { TechnitiumContext } from "./technitiumContextInstance";
@@ -337,36 +342,76 @@ export interface TechnitiumState {
 
 // Load nodes from backend API (configured on server side via environment variables)
 const fetchConfiguredNodes = async (): Promise<TechnitiumNode[]> => {
-  try {
-    const response = await apiFetch("/nodes");
-    if (!response.ok) {
-      throw new Error(
-        `Failed to load nodes configuration (${response.status})`,
-      );
-    }
-    const nodes: Array<{
-      id: string;
-      name: string;
-      baseUrl: string;
-      clusterState?: TechnitiumClusterState;
-      isPrimary?: boolean;
-    }> = await response.json();
+  const retryDelaysMs = [0, 500, 1500];
 
-    // Transform backend node config to frontend format
-    return nodes.map((node) => ({
-      id: node.id,
-      name: node.name || node.id,
-      baseUrl: node.baseUrl,
-      status: "unknown" as NodeStatus,
-      lastSync: new Date().toISOString(),
-      clusterState: node.clusterState,
-      isPrimary: node.isPrimary,
-    }));
-  } catch (error) {
-    console.error("Failed to load nodes configuration from backend:", error);
-    // Return empty array if configuration fails
-    return [];
-  }
+  const loadAttempt = async (attemptIndex: number): Promise<TechnitiumNode[]> => {
+    const delayMs = retryDelaysMs[attemptIndex] ?? 0;
+    if (delayMs > 0) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, delayMs);
+      });
+    }
+
+    try {
+      const response = await apiFetch("/nodes");
+      if (!response.ok) {
+        const canRetry =
+          response.status >= 500 && attemptIndex < retryDelaysMs.length - 1;
+
+        if (canRetry) {
+          console.warn(
+            `Failed to load nodes configuration (${response.status}); retrying (${attemptIndex + 1}/${retryDelaysMs.length - 1})...`,
+          );
+          return loadAttempt(attemptIndex + 1);
+        }
+
+        throw new Error(
+          `Failed to load nodes configuration (${response.status})`,
+        );
+      }
+
+      const nodes: Array<{
+        id: string;
+        name: string;
+        baseUrl: string;
+        clusterState?: TechnitiumClusterState;
+        isPrimary?: boolean;
+      }> = await response.json();
+
+      // Transform backend node config to frontend format
+      return nodes.map((node) => ({
+        id: node.id,
+        name: node.name || node.id,
+        baseUrl: node.baseUrl,
+        status: "unknown" as NodeStatus,
+        lastSync: new Date().toISOString(),
+        clusterState: node.clusterState,
+        isPrimary: node.isPrimary,
+      }));
+    } catch (error) {
+      const canRetry =
+        isApiFetchNetworkError(error) && attemptIndex < retryDelaysMs.length - 1;
+
+      if (canRetry) {
+        console.warn(
+          `Network error loading nodes configuration; retrying (${attemptIndex + 1}/${retryDelaysMs.length - 1})...`,
+          error,
+        );
+        return loadAttempt(attemptIndex + 1);
+      }
+
+      triggerNodesConfigLoadFailed({
+        message:
+          "Unable to load nodes configuration from backend. Some DNS Filtering features may be temporarily unavailable.",
+      });
+
+      console.error("Failed to load nodes configuration from backend:", error);
+      // Return empty array if configuration fails
+      return [];
+    }
+  };
+
+  return loadAttempt(0);
 };
 
 export function TechnitiumProvider({ children }: { children: ReactNode }) {
@@ -380,7 +425,6 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   const [advancedBlockingError, setAdvancedBlockingError] = useState<
     string | undefined
   >();
-  const hasCheckedApps = useRef(false);
 
   // Built-in Blocking state
   const [builtInBlocking, setBuiltInBlocking] = useState<
@@ -396,6 +440,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   >();
   const [loadingBlockingStatus, setLoadingBlockingStatus] =
     useState<boolean>(false);
+  const blockingStatusAuthKeyRef = useRef<string>("");
   const [selectedBlockingMethod, setSelectedBlockingMethod] =
     useState<BlockingMethod>("advanced");
 
@@ -410,6 +455,13 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     authStatusRef.current = auth?.status ?? null;
     authRefreshRef.current = auth?.refresh ?? null;
   }, [auth?.status, auth?.refresh]);
+
+  const authSessionEnabled = auth?.status?.sessionAuthEnabled === true;
+  const authAuthenticated = auth?.status?.authenticated === true;
+  const authNodeIdsKey = useMemo(() => {
+    const nodeIds = auth?.status?.nodeIds ?? [];
+    return [...nodeIds].sort().join(",");
+  }, [auth?.status?.nodeIds]);
 
   const logThrottleRef = useRef<Map<string, number>>(new Map());
   const logThrottled = useCallback(
@@ -927,13 +979,33 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     return promise;
   }, [isNodeAuthenticatedForSession, logThrottled]);
 
-  // Check node apps once after nodes are loaded
+  // Check node apps when needed.
+  // In session-auth mode this must re-run after login because an earlier
+  // pre-auth attempt may have left app capability fields undefined.
   useEffect(() => {
-    if (nodes.length > 0 && !hasCheckedApps.current) {
-      hasCheckedApps.current = true;
-      checkNodeApps();
+    if (nodes.length === 0) {
+      return;
     }
-  }, [nodes.length, checkNodeApps]);
+
+    if (isSessionAuthUnauthenticated()) {
+      return;
+    }
+
+    const hasUnknownAppState = nodes.some(
+      (node) => node.hasAdvancedBlocking === undefined,
+    );
+
+    if (hasUnknownAppState) {
+      void checkNodeApps();
+    }
+  }, [
+    nodes,
+    checkNodeApps,
+    isSessionAuthUnauthenticated,
+    authSessionEnabled,
+    authAuthenticated,
+    authNodeIdsKey,
+  ]);
 
   const reloadAdvancedBlocking = useCallback(async () => {
     setLoadingAdvancedBlocking(true);
@@ -2215,19 +2287,29 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
   // Ensure blocking capability state is initialized globally so header/route
   // gating does not depend on visiting the DNS Filtering page first.
+  // Re-run when auth context changes; early pre-auth attempts can otherwise
+  // leave stale/empty capability state until a manual page refresh.
   useEffect(() => {
     if (nodes.length === 0) {
       return;
     }
 
+    const authContextKey = `${authSessionEnabled ? "1" : "0"}:${authAuthenticated ? "1" : "0"}:${authNodeIdsKey}`;
+
     if (isSessionAuthUnauthenticated()) {
+      blockingStatusAuthKeyRef.current = "";
       return;
     }
 
-    if (blockingStatus || loadingBlockingStatus) {
+    if (loadingBlockingStatus) {
       return;
     }
 
+    if (blockingStatusAuthKeyRef.current === authContextKey) {
+      return;
+    }
+
+    blockingStatusAuthKeyRef.current = authContextKey;
     void reloadBlockingStatus();
   }, [
     nodes.length,
@@ -2235,6 +2317,9 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     blockingStatus,
     loadingBlockingStatus,
     reloadBlockingStatus,
+    authSessionEnabled,
+    authAuthenticated,
+    authNodeIdsKey,
   ]);
 
   const listAllowedDomains = useCallback(

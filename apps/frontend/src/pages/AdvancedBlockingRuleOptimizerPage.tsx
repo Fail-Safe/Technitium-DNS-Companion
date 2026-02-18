@@ -645,6 +645,7 @@ function ValidationPanel({ result }: { result: ValidationResponse }) {
 export default function AdvancedBlockingRuleOptimizerPage() {
   const {
     nodes,
+    blockingStatus,
     listConfigSnapshots,
     createConfigSnapshot,
     restoreConfigSnapshot,
@@ -739,7 +740,7 @@ export default function AdvancedBlockingRuleOptimizerPage() {
     ).filter((groupName) => validationCard.groupNames.includes(groupName));
   }, [validationCard, selectedGroupsByCard]);
 
-  const allNodes = nodes ?? [];
+  const allNodes = useMemo(() => nodes ?? [], [nodes]);
   const primaryNode = usePrimaryNode(allNodes);
   const isClusterEnabled = useIsClusterEnabled(allNodes);
   const lockToPrimary = isClusterEnabled && Boolean(primaryNode?.id);
@@ -765,10 +766,24 @@ export default function AdvancedBlockingRuleOptimizerPage() {
     return node?.name;
   }, [allNodes, effectiveNodeId]);
 
+  const advancedBlockingInstalledByNodeId = useMemo(() => {
+    const map = new Map<string, boolean>();
+    blockingStatus?.nodes?.forEach((nodeStatus) => {
+      map.set(nodeStatus.nodeId, nodeStatus.advancedBlockingInstalled);
+    });
+    return map;
+  }, [blockingStatus]);
+
   const isEffectiveNodeAdvancedBlockingCapable = useMemo(() => {
+    const installedFromStatus =
+      advancedBlockingInstalledByNodeId.get(effectiveNodeId);
+    if (installedFromStatus !== undefined) {
+      return installedFromStatus;
+    }
+
     const node = allNodes.find((n) => n.id === effectiveNodeId);
-    return Boolean(node?.hasAdvancedBlocking);
-  }, [allNodes, effectiveNodeId]);
+    return node?.hasAdvancedBlocking === true;
+  }, [advancedBlockingInstalledByNodeId, allNodes, effectiveNodeId]);
 
   const canOpenRuleOptimizerHistory =
     Boolean(effectiveNodeId) && isEffectiveNodeAdvancedBlockingCapable;
@@ -945,6 +960,7 @@ export default function AdvancedBlockingRuleOptimizerPage() {
     effectiveNodeId,
     groups,
     loadSuggestionsForGroups,
+    closeImpactModal,
     closeApplyConfirmModal,
   ]);
 
@@ -1200,104 +1216,121 @@ export default function AdvancedBlockingRuleOptimizerPage() {
       setApplyVerification(null);
       setPendingApply({ card, selectedGroups, redundancy });
     },
-    [effectiveNodeId, pushToast, selectedGroupsByCard],
+    [
+      effectiveNodeId,
+      getCardRedundancySummary,
+      pushToast,
+      selectedGroupsByCard,
+    ],
   );
 
-  const executeApply = async (
-    card: RegexEntryCardModel,
-    selectedGroups: string[],
-    redundancy?: RedundancySummary,
-  ): Promise<ApplyVerification | null> => {
-    if (!effectiveNodeId) return null;
-    if (!card.proposedDomainEntry) return null;
+  const executeApply = useCallback(
+    async (
+      card: RegexEntryCardModel,
+      selectedGroups: string[],
+      redundancy?: RedundancySummary,
+    ): Promise<ApplyVerification | null> => {
+      if (!effectiveNodeId) return null;
+      if (!card.proposedDomainEntry) return null;
 
-    setApplyingCardKey(card.key);
+      setApplyingCardKey(card.key);
 
-    try {
-      let appliedCount = 0;
-      let snapshotId: string | undefined;
-      const failedGroups: string[] = [];
+      try {
+        let appliedCount = 0;
+        let snapshotId: string | undefined;
+        const failedGroups: string[] = [];
 
-      for (let index = 0; index < selectedGroups.length; index += 1) {
-        const groupName = selectedGroups[index];
-        const response = await apiFetch(
-          `/advanced-blocking/${encodePathParam(
-            effectiveNodeId,
-          )}/rule-optimizations/groups/${encodePathParam(groupName)}/apply`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              suggestionId: card.primarySuggestionId,
-              targetList: card.targetList,
-              regexPattern: card.regexPattern,
-              proposedDomainEntry: card.proposedDomainEntry,
-              takeSnapshot: index === 0,
-              snapshotNote: `Rule optimizer: ${card.targetList} "${card.regexPattern}" → "${card.proposedDomainEntry}" (${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)})`,
-            }),
-          },
-        );
+        for (let index = 0; index < selectedGroups.length; index += 1) {
+          const groupName = selectedGroups[index];
+          const response = await apiFetch(
+            `/advanced-blocking/${encodePathParam(
+              effectiveNodeId,
+            )}/rule-optimizations/groups/${encodePathParam(groupName)}/apply`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                suggestionId: card.primarySuggestionId,
+                targetList: card.targetList,
+                regexPattern: card.regexPattern,
+                proposedDomainEntry: card.proposedDomainEntry,
+                takeSnapshot: index === 0,
+                snapshotNote: `Rule optimizer: ${card.targetList} "${card.regexPattern}" → "${card.proposedDomainEntry}" (${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)})`,
+              }),
+            },
+          );
 
-        if (!response.ok) {
-          failedGroups.push(`${groupName} (${response.status})`);
-          continue;
+          if (!response.ok) {
+            failedGroups.push(`${groupName} (${response.status})`);
+            continue;
+          }
+
+          const res = (await response.json()) as ApplyResponse;
+          if (!snapshotId && res.snapshotTaken?.id) {
+            snapshotId = res.snapshotTaken.id;
+          }
+          appliedCount += 1;
         }
 
-        const res = (await response.json()) as ApplyResponse;
-        if (!snapshotId && res.snapshotTaken?.id) {
-          snapshotId = res.snapshotTaken.id;
+        if (appliedCount === 0) {
+          throw new Error("No selected groups were updated.");
         }
-        appliedCount += 1;
-      }
 
-      if (appliedCount === 0) {
-        throw new Error("No selected groups were updated.");
-      }
+        const isRedundantCleanup = Boolean(redundancy?.allCovered);
 
-      const isRedundantCleanup = Boolean(redundancy?.allCovered);
-
-      pushToast({
-        tone: failedGroups.length > 0 ? "info" : "success",
-        message:
-          isRedundantCleanup ?
-            snapshotId ?
-              `Removed redundant regex in ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}. Snapshot created: ${snapshotId}`
-            : `Removed redundant regex in ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}.`
-          : snapshotId ?
-            `Applied to ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}. Snapshot created: ${snapshotId}`
-          : `Applied to ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}.`,
-      });
-
-      if (failedGroups.length > 0) {
         pushToast({
-          tone: "error",
-          message: `Failed groups: ${failedGroups.slice(0, 5).join(", ")}${failedGroups.length > 5 ? "…" : ""}`,
+          tone: failedGroups.length > 0 ? "info" : "success",
+          message:
+            isRedundantCleanup ?
+              snapshotId ?
+                `Removed redundant regex in ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}. Snapshot created: ${snapshotId}`
+              : `Removed redundant regex in ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}.`
+            : snapshotId ?
+              `Applied to ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}. Snapshot created: ${snapshotId}`
+            : `Applied to ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}.`,
         });
+
+        if (failedGroups.length > 0) {
+          pushToast({
+            tone: "error",
+            message: `Failed groups: ${failedGroups.slice(0, 5).join(", ")}${failedGroups.length > 5 ? "…" : ""}`,
+          });
+        }
+
+        setLoadingSuggestions(true);
+        setSuggestionsError(null);
+        closeImpactModal();
+
+        const refreshed = await loadSuggestionsForGroups(
+          effectiveNodeId,
+          groups,
+        );
+        setSuggestions(refreshed);
+
+        return {
+          cardKey: card.key,
+          selectedCount: selectedGroups.length,
+          appliedCount,
+          failedGroups,
+          snapshotId,
+        };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        pushToast({ tone: "error", message: `Apply failed: ${msg}` });
+        return null;
+      } finally {
+        setApplyingCardKey(null);
+        setLoadingSuggestions(false);
       }
-
-      setLoadingSuggestions(true);
-      setSuggestionsError(null);
-      closeImpactModal();
-
-      const refreshed = await loadSuggestionsForGroups(effectiveNodeId, groups);
-      setSuggestions(refreshed);
-
-      return {
-        cardKey: card.key,
-        selectedCount: selectedGroups.length,
-        appliedCount,
-        failedGroups,
-        snapshotId,
-      };
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      pushToast({ tone: "error", message: `Apply failed: ${msg}` });
-      return null;
-    } finally {
-      setApplyingCardKey(null);
-      setLoadingSuggestions(false);
-    }
-  };
+    },
+    [
+      closeImpactModal,
+      effectiveNodeId,
+      groups,
+      loadSuggestionsForGroups,
+      pushToast,
+    ],
+  );
 
   const handleConfirmApplyFromModal = useCallback(() => {
     if (!pendingApply) return;

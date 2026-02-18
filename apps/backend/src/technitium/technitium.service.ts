@@ -5338,10 +5338,6 @@ export class TechnitiumService {
     assign("qtype");
     assign("qclass");
 
-    this.logger.debug(
-      `buildQueryLogParams - filters=${JSON.stringify(filters)} params=${JSON.stringify(params)}`,
-    );
-
     return params;
   }
 

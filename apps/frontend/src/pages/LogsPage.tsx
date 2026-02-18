@@ -1,27 +1,27 @@
 import {
-  faBan,
-  faCheck,
-  faFile,
-  faRotate,
-  faSquare,
-  faSquareCheck,
-  faTowerBroadcast,
+    faBan,
+    faCheck,
+    faFile,
+    faRotate,
+    faSquare,
+    faSquareCheck,
+    faTowerBroadcast,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { ReactNode } from "react";
 import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
 } from "react";
 import { Tooltip } from "react-tooltip";
 import "react-tooltip/dist/react-tooltip.css";
 import {
-  SkeletonLogEntries,
-  SkeletonLogsStats,
-  SkeletonLogsSummary,
+    SkeletonLogEntries,
+    SkeletonLogsStats,
+    SkeletonLogsSummary,
 } from "../components/common/LoadingSkeleton";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
 import { apiFetch, getAuthRedirectReason } from "../config";
@@ -29,17 +29,21 @@ import { useTechnitiumState } from "../context/useTechnitiumState";
 import { useToast } from "../context/useToast";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type {
-  AdvancedBlockingConfig,
-  AdvancedBlockingGroup,
+    AdvancedBlockingConfig,
+    AdvancedBlockingGroup,
 } from "../types/advancedBlocking";
 import type { DomainCheckResult, DomainListEntry } from "../types/technitium";
 import type {
-  TechnitiumCombinedNodeLogSnapshot,
-  TechnitiumCombinedQueryLogEntry,
-  TechnitiumCombinedQueryLogPage,
-  TechnitiumNodeQueryLogEnvelope,
-  TechnitiumQueryLogStorageStatus,
+    TechnitiumCombinedNodeLogSnapshot,
+    TechnitiumCombinedQueryLogEntry,
+    TechnitiumCombinedQueryLogPage,
+    TechnitiumNodeQueryLogEnvelope,
+    TechnitiumQueryLogStorageStatus,
 } from "../types/technitiumLogs";
+import {
+    buildDomainExclusionMatchers,
+    isDomainExcluded,
+} from "../utils/domainExclusion";
 
 type ViewMode = "combined" | "node";
 
@@ -132,6 +136,7 @@ const TAIL_BUFFER_SIZE_STORAGE_KEY = "technitiumLogs.tailBufferSize";
 const PAGINATED_ROWS_PER_PAGE_STORAGE_KEY =
   "technitiumLogs.paginatedRowsPerPage";
 const DEDUPLICATE_DOMAINS_STORAGE_KEY = "technitiumLogs.deduplicateDomains";
+const DOMAIN_EXCLUSION_LIST_STORAGE_KEY = "technitiumLogs.domainExclusionList";
 const FILTER_TIP_DISMISSED_KEY = "technitiumLogs.filterTipDismissed";
 const SELECTION_TIP_DISMISSED_KEY = "technitiumLogs.selectionTipDismissed";
 const MOBILE_LAYOUT_MODE_KEY = "technitiumLogs.mobileLayoutMode";
@@ -177,11 +182,11 @@ function FloatingLiveToggle({
         isLive ? "Pause live updates" : (pausedTitle ?? "Resume live updates")
       }
       style={
-        isLive
-          ? ({
-              "--refresh-duration": `${refreshSeconds}s`,
-            } as React.CSSProperties)
-          : undefined
+        isLive ?
+          ({
+            "--refresh-duration": `${refreshSeconds}s`,
+          } as React.CSSProperties)
+        : undefined
       }
     >
       {/* Progress ring (only shown when live) */}
@@ -201,7 +206,7 @@ function FloatingLiveToggle({
       )}
 
       {/* Icon */}
-      {isLive ? (
+      {isLive ?
         <svg
           className="logs-page__floating-live-icon"
           viewBox="0 0 24 24"
@@ -214,8 +219,7 @@ function FloatingLiveToggle({
           <rect x="6" y="4" width="4" height="16" />
           <rect x="14" y="4" width="4" height="16" />
         </svg>
-      ) : (
-        <svg
+      : <svg
           className="logs-page__floating-live-icon"
           viewBox="0 0 24 24"
           fill="none"
@@ -226,7 +230,7 @@ function FloatingLiveToggle({
         >
           <polygon points="5 3 19 12 5 21 5 3" />
         </svg>
-      )}
+      }
     </button>
   );
 }
@@ -630,7 +634,7 @@ const buildTableColumns = (
               }
             }}
           >
-            {hasHostname && hasIp ? (
+            {hasHostname && hasIp ?
               <>
                 <div className="logs-page__client-hostname">
                   {entry.clientName}
@@ -639,15 +643,14 @@ const buildTableColumns = (
                   {entry.clientIpAddress}
                 </div>
               </>
-            ) : hasHostname ? (
+            : hasHostname ?
               <div className="logs-page__client-hostname">
                 {entry.clientName}
               </div>
-            ) : (
-              <div className="logs-page__client-ip">
+            : <div className="logs-page__client-ip">
                 {entry.clientIpAddress}
               </div>
-            )}
+            }
           </div>
         );
       },
@@ -719,8 +722,9 @@ const buildTableColumns = (
       cellClassName: "logs-page__cell--status",
       render: (entry) => {
         const blocked = isEntryBlocked(entry);
-        const statusClass = blocked
-          ? "logs-page__status-button--blocked"
+        const statusClass =
+          blocked ?
+            "logs-page__status-button--blocked"
           : "logs-page__status-button--allowed";
         const label = blocked ? "Blocked" : "Allowed";
         const hoverLabel = blocked ? "Allow?" : "Block?";
@@ -820,11 +824,9 @@ const buildTableColumns = (
 
         if (entry.responseType) {
           const iconChar =
-            entry.responseType === "Blocked"
-              ? "🚫"
-              : entry.responseType === "Allowed"
-                ? "✅"
-                : "📄";
+            entry.responseType === "Blocked" ? "🚫"
+            : entry.responseType === "Allowed" ? "✅"
+            : "📄";
           tooltipHtml += `<div style="margin-top: 8px;"><strong>Status:</strong> ${iconChar} ${escapeTooltipHtml(entry.responseType)}</div>`;
         }
 
@@ -1070,9 +1072,9 @@ function SwipeableCard({
     if (Math.abs(diffX) > maxSwipe) {
       const excess = Math.abs(diffX) - maxSwipe;
       offset =
-        diffX > 0
-          ? maxSwipe + excess * resistanceFactor
-          : -maxSwipe - excess * resistanceFactor;
+        diffX > 0 ?
+          maxSwipe + excess * resistanceFactor
+        : -maxSwipe - excess * resistanceFactor;
     }
 
     setTouchCurrent(currentX);
@@ -1202,9 +1204,9 @@ const renderCardsView = (
   if (entries.length === 0) {
     return (
       <div className="logs-page__cards-empty">
-        {isFilteringActive
-          ? "No log entries match the current filters."
-          : "No log entries found for the selected view."}
+        {isFilteringActive ?
+          "No log entries match the current filters."
+        : "No log entries found for the selected view."}
       </div>
     );
   }
@@ -1316,9 +1318,9 @@ const renderCardsView = (
                 className={`logs-page__card-status logs-page__card-status--${responseBadge.className}`}
                 onClick={() => onStatusClick(entry)}
                 title={
-                  isBlocked
-                    ? "Blocked - Click to allow"
-                    : "Allowed - Click to block"
+                  isBlocked ?
+                    "Blocked - Click to allow"
+                  : "Allowed - Click to block"
                 }
               >
                 {responseBadge.icon}
@@ -1349,7 +1351,7 @@ const renderCardsView = (
                   }}
                   title="Click to filter by client"
                 >
-                  {entry.clientName && entry.clientName.trim().length > 0 ? (
+                  {entry.clientName && entry.clientName.trim().length > 0 ?
                     <div className="logs-page__card-client-info">
                       <div className="logs-page__card-client-hostname">
                         {entry.clientName}
@@ -1360,9 +1362,7 @@ const renderCardsView = (
                         </div>
                       )}
                     </div>
-                  ) : (
-                    (entry.clientIpAddress ?? "—")
-                  )}
+                  : (entry.clientIpAddress ?? "—")}
                 </span>
               </div>
               {!deduplicateDomains && (
@@ -1390,15 +1390,15 @@ const renderCardsView = (
               <div className="logs-page__card-row">
                 <span className="logs-page__card-label">Time:</span>
                 <span className="logs-page__card-value">
-                  {entry.timestamp
-                    ? new Date(entry.timestamp).toLocaleString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
-                      })
-                    : "—"}
+                  {entry.timestamp ?
+                    new Date(entry.timestamp).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })
+                  : "—"}
                 </span>
               </div>
               {columnVisibility.responseTime &&
@@ -1559,6 +1559,19 @@ const loadDeduplicateDomains = (): boolean => {
   }
 };
 
+const loadDomainExclusionList = (): string => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  try {
+    return window.localStorage.getItem(DOMAIN_EXCLUSION_LIST_STORAGE_KEY) ?? "";
+  } catch (error) {
+    console.warn("Failed to load domain exclusion list", error);
+    return "";
+  }
+};
+
 interface BlockDialogState {
   entry: TechnitiumCombinedQueryLogEntry;
   /**
@@ -1619,8 +1632,9 @@ const LogTableRow = React.memo<LogTableRowProps>(
         {activeColumns.map((column) => {
           const content = column.render(entry);
           const title = column.getTitle ? column.getTitle(entry) : undefined;
-          const cellClass = column.cellClassName
-            ? `${column.cellClassName} logs-page__cell`
+          const cellClass =
+            column.cellClassName ?
+              `${column.cellClassName} logs-page__cell`
             : "logs-page__cell";
 
           return (
@@ -1921,9 +1935,8 @@ export function LogsPage() {
 
   const getBlockMatchDedupeKey = useCallback(
     (match: DomainListEntry): string => {
-      const sortedGroups = match.groups
-        ? [...match.groups].sort().join(",")
-        : "";
+      const sortedGroups =
+        match.groups ? [...match.groups].sort().join(",") : "";
 
       return [
         match.type ?? "",
@@ -1940,11 +1953,9 @@ export function LogsPage() {
   const formatBlockMatchLabel = useCallback(
     (match: DomainListEntry): string => {
       const typeLabel =
-        match.type === "manual-blocked"
-          ? "Manual"
-          : match.type === "regex-blocklist"
-            ? "Regex"
-            : "Blocklist";
+        match.type === "manual-blocked" ? "Manual"
+        : match.type === "regex-blocklist" ? "Regex"
+        : "Blocklist";
 
       const sourceLabel = match.source === "manual" ? "manual" : match.source;
 
@@ -1956,8 +1967,8 @@ export function LogsPage() {
         details.push(`groups=${[...match.groups].sort().join(", ")}`);
       }
 
-      return details.length > 0
-        ? `${typeLabel}: ${sourceLabel} (${details.join(", ")})`
+      return details.length > 0 ?
+          `${typeLabel}: ${sourceLabel} (${details.join(", ")})`
         : `${typeLabel}: ${sourceLabel}`;
     },
     [],
@@ -2134,11 +2145,11 @@ export function LogsPage() {
         const anchorClientNameRaw =
           anchor?.getAttribute("data-client-hostname")?.trim() ?? "";
 
-        const anchorClientFqdn = anchorClientNameRaw.includes(".")
-          ? anchorClientNameRaw
-          : "";
-        const anchorClientHostname = anchorClientNameRaw.includes(".")
-          ? anchorClientNameRaw.split(".")[0]
+        const anchorClientFqdn =
+          anchorClientNameRaw.includes(".") ? anchorClientNameRaw : "";
+        const anchorClientHostname =
+          anchorClientNameRaw.includes(".") ?
+            anchorClientNameRaw.split(".")[0]
           : anchorClientNameRaw;
 
         const items: LogsTableContextMenuItem[] = [];
@@ -2221,11 +2232,11 @@ export function LogsPage() {
         const anchorClientNameRaw =
           domainAnchor.getAttribute("data-client-hostname")?.trim() ?? "";
 
-        const anchorClientFqdn = anchorClientNameRaw.includes(".")
-          ? anchorClientNameRaw
-          : "";
-        const anchorClientHostname = anchorClientNameRaw.includes(".")
-          ? anchorClientNameRaw.split(".")[0]
+        const anchorClientFqdn =
+          anchorClientNameRaw.includes(".") ? anchorClientNameRaw : "";
+        const anchorClientHostname =
+          anchorClientNameRaw.includes(".") ?
+            anchorClientNameRaw.split(".")[0]
           : anchorClientNameRaw;
 
         const items: LogsTableContextMenuItem[] = [];
@@ -2297,8 +2308,9 @@ export function LogsPage() {
           container.getAttribute("data-copy-hostname")?.trim() ?? "";
 
         const clientFqdn = clientNameRaw.includes(".") ? clientNameRaw : "";
-        const clientHostname = clientNameRaw.includes(".")
-          ? clientNameRaw.split(".")[0]
+        const clientHostname =
+          clientNameRaw.includes(".") ?
+            clientNameRaw.split(".")[0]
           : clientNameRaw;
 
         const items: LogsTableContextMenuItem[] = [];
@@ -2342,8 +2354,8 @@ export function LogsPage() {
           return null;
         }
 
-        return value.length > 0 && value !== "—"
-          ? [{ label: "Copy", action: "copy", value }]
+        return value.length > 0 && value !== "—" ?
+            [{ label: "Copy", action: "copy", value }]
           : null;
       }
 
@@ -2353,8 +2365,8 @@ export function LogsPage() {
         return null;
       }
 
-      return value.length > 0 && value !== "—"
-        ? [{ label: "Copy", action: "copy", value }]
+      return value.length > 0 && value !== "—" ?
+          [{ label: "Copy", action: "copy", value }]
         : null;
     },
     [],
@@ -2533,24 +2545,24 @@ export function LogsPage() {
   const queryLogRetentionHours = queryLogStorageStatus?.retentionHours ?? 24;
 
   const logsSourceKind =
-    displayMode === "tail" ? "live" : storedLogsReady ? "stored" : "live";
+    displayMode === "tail" ? "live"
+    : storedLogsReady ? "stored"
+    : "live";
 
   const logsSourceLabel =
     logsSourceKind === "stored" ? "Stored (SQLite)" : "Live (Nodes)";
   const logsSourceTitle =
-    logsSourceKind === "stored"
-      ? "Stored logs are served from Companion's SQLite store (fast + cacheable)."
-      : "Live logs are fetched directly from the Technitium DNS nodes.";
+    logsSourceKind === "stored" ?
+      "Stored logs are served from Companion's SQLite store (fast + cacheable)."
+    : "Live logs are fetched directly from the Technitium DNS nodes.";
 
   const storedResponseCache = queryLogStorageStatus?.responseCache;
   const storedResponseCacheLookups =
     (storedResponseCache?.hits ?? 0) + (storedResponseCache?.misses ?? 0);
   const storedResponseCacheHitRatePercent =
-    storedResponseCache && storedResponseCacheLookups > 0
-      ? Math.round(
-          (storedResponseCache.hits / storedResponseCacheLookups) * 100,
-        )
-      : null;
+    storedResponseCache && storedResponseCacheLookups > 0 ?
+      Math.round((storedResponseCache.hits / storedResponseCacheLookups) * 100)
+    : null;
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -2656,6 +2668,9 @@ export function LogsPage() {
     "block",
   );
   const [domainFilter, setDomainFilter] = useState<string>("");
+  const [domainExclusionList, setDomainExclusionList] = useState<string>(
+    loadDomainExclusionList,
+  );
   const [clientFilter, setClientFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [responseFilter, setResponseFilter] = useState<string>("all");
@@ -2805,9 +2820,9 @@ export function LogsPage() {
               ...entry,
               // Ensure some "blocked" keyword for the classifier.
               responseType:
-                currentResponse && currentResponse.trim().length > 0
-                  ? currentResponse
-                  : "blocked",
+                currentResponse && currentResponse.trim().length > 0 ?
+                  currentResponse
+                : "blocked",
             };
           }
 
@@ -2829,11 +2844,11 @@ export function LogsPage() {
 
           return {
             ...entry,
-            responseType: hasBlockedKeyword
-              ? "recursive"
-              : currentResponse && currentResponse.trim().length > 0
-                ? currentResponse
-                : "recursive",
+            responseType:
+              hasBlockedKeyword ? "recursive"
+              : currentResponse && currentResponse.trim().length > 0 ?
+                currentResponse
+              : "recursive",
           };
         });
 
@@ -2858,11 +2873,11 @@ export function LogsPage() {
       // Stored logs persist the best-known client hostname, so prefer hostname
       // when it exists (fallback to IP).
       const filterValue =
-        displayMode === "paginated"
-          ? hostname && hostname !== ip
-            ? hostname
-            : ip || hostname
-          : hostname || ip;
+        displayMode === "paginated" ?
+          hostname && hostname !== ip ?
+            hostname
+          : ip || hostname
+        : hostname || ip;
 
       if (!filterValue) {
         return;
@@ -3053,8 +3068,9 @@ export function LogsPage() {
       // Default to Advanced UI in this case so we can render a consistent modal, then the user can
       // proceed once data is available. (If Advanced is actually unavailable, the modal will surface
       // that cleanly rather than silently doing the wrong thing.)
-      const uiMethod: BlockingUiMethod = nodeStatusAfterEnsure
-        ? getUiBlockingMethodForNode(entry.nodeId)
+      const uiMethod: BlockingUiMethod =
+        nodeStatusAfterEnsure ?
+          getUiBlockingMethodForNode(entry.nodeId)
         : "advanced";
 
       if (uiMethod === "advanced") {
@@ -3093,13 +3109,14 @@ export function LogsPage() {
 
         // Default action should be the OPPOSITE of current state
         // If currently blocked → offer to allow; if currently allowed → offer to block
-        let initialAction: "block" | "allow" = blockedDominant
-          ? "allow" // Currently blocked, so offer to allow
-          : allowDominant
-            ? "block" // Currently allowed, so offer to block
-            : entry.responseType && isEntryBlocked(entry)
-              ? "allow" // Blocked by list, so offer to allow
-              : "block"; // Not blocked, so offer to block
+        let initialAction: "block" | "allow" =
+          blockedDominant ?
+            "allow" // Currently blocked, so offer to allow
+          : allowDominant ?
+            "block" // Currently allowed, so offer to block
+          : entry.responseType && isEntryBlocked(entry) ?
+            "allow" // Blocked by list, so offer to allow
+          : "block"; // Not blocked, so offer to block
 
         // If called from swipe (forceToggle=true), invert the action again
         if (forceToggle) {
@@ -3109,24 +3126,20 @@ export function LogsPage() {
         const sourceMatches =
           initialAction === "block" ? blockRegexPatterns : allowRegexPatterns;
         const initialMode: "exact" | "regex" =
-          initialAction === "block"
-            ? hasBlockedExact
-              ? "exact"
-              : sourceMatches.length > 0
-                ? "regex"
-                : "exact"
-            : hasAllowedExact
-              ? "exact"
-              : sourceMatches.length > 0
-                ? "regex"
-                : "exact";
+          initialAction === "block" ?
+            hasBlockedExact ? "exact"
+            : sourceMatches.length > 0 ? "regex"
+            : "exact"
+          : hasAllowedExact ? "exact"
+          : sourceMatches.length > 0 ? "regex"
+          : "exact";
         const initialRegex =
           sourceMatches.length > 0 ? sourceMatches[0] : defaultRegex;
 
         const initialSelection =
-          initialAction === "block"
-            ? blockSummary.selected
-            : allowSummary.selected;
+          initialAction === "block" ?
+            blockSummary.selected
+          : allowSummary.selected;
         setBlockSelectedGroups(new Set(initialSelection));
         setBlockingAction(initialAction);
         setBlockMode(initialMode);
@@ -3248,9 +3261,9 @@ export function LogsPage() {
         if (entry.qname) visibleDomains.add(entry.qname);
       });
     } else {
-      (mode === "combined"
-        ? combinedPage?.entries
-        : nodeSnapshot?.data.entries
+      (mode === "combined" ?
+        combinedPage?.entries
+      : nodeSnapshot?.data.entries
       )?.forEach((entry) => {
         if (entry.qname) visibleDomains.add(entry.qname);
       });
@@ -3408,6 +3421,24 @@ export function LogsPage() {
       );
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        DOMAIN_EXCLUSION_LIST_STORAGE_KEY,
+        domainExclusionList,
+      );
+    } catch (error) {
+      console.warn(
+        "Failed to save domain exclusion list to localStorage",
+        error,
+      );
+    }
+  }, [domainExclusionList]);
 
   const toggleDeduplicateDomains = useCallback(() => {
     setDeduplicateDomains((prev) => {
@@ -3580,12 +3611,12 @@ export function LogsPage() {
     () => (blockDomainValue ? buildDefaultRegexPattern(blockDomainValue) : ""),
     [blockDomainValue],
   );
-  const blockNodeLabel = blockDialog
-    ? (nodeMap.get(blockDialog.entry.nodeId)?.name ?? blockDialog.entry.nodeId)
+  const blockNodeLabel =
+    blockDialog ?
+      (nodeMap.get(blockDialog.entry.nodeId)?.name ?? blockDialog.entry.nodeId)
     : "";
-  const isBlockedEntry = blockDialog
-    ? isEntryBlocked(blockDialog.entry)
-    : false;
+  const isBlockedEntry =
+    blockDialog ? isEntryBlocked(blockDialog.entry) : false;
 
   const blockDialogBlockingMethod: "advanced" | "built-in" | undefined =
     useMemo(() => {
@@ -3700,20 +3731,17 @@ export function LogsPage() {
   }, [bulkAction, advancedBlocking, blockAvailableGroups]);
 
   const modalTitle =
-    blockingAction === "allow"
-      ? "Allow domain"
-      : isBlockedEntry
-        ? "Update block"
-        : "Block domain";
-  const confirmButtonLabel = isBlocking
-    ? "Saving…"
-    : blockingAction === "block"
-      ? blockCoverage.length > 0
-        ? "Save changes"
-        : "Block domain"
-      : allowCoverage.length > 0
-        ? "Save changes"
-        : "Allow domain";
+    blockingAction === "allow" ? "Allow domain"
+    : isBlockedEntry ? "Update block"
+    : "Block domain";
+  const confirmButtonLabel =
+    isBlocking ? "Saving…"
+    : blockingAction === "block" ?
+      blockCoverage.length > 0 ?
+        "Save changes"
+      : "Block domain"
+    : allowCoverage.length > 0 ? "Save changes"
+    : "Allow domain";
 
   const handleToggleBlockGroup = useCallback(
     (groupName: string) => {
@@ -3755,11 +3783,10 @@ export function LogsPage() {
         domain,
         nextAction,
       );
-      const nextMode: "exact" | "regex" = summary.hasExact
-        ? "exact"
-        : summary.regexMatches.length > 0
-          ? "regex"
-          : "exact";
+      const nextMode: "exact" | "regex" =
+        summary.hasExact ? "exact"
+        : summary.regexMatches.length > 0 ? "regex"
+        : "exact";
 
       setBlockingAction(nextAction);
       setBlockSelectedGroups(new Set(summary.selected));
@@ -3855,9 +3882,9 @@ export function LogsPage() {
     }
 
     const uiMethod =
-      hasConflict && blockDialog.selectedBlockingSystem
-        ? blockDialog.selectedBlockingSystem
-        : getUiBlockingMethodForNode(blockDialog.entry.nodeId);
+      hasConflict && blockDialog.selectedBlockingSystem ?
+        blockDialog.selectedBlockingSystem
+      : getUiBlockingMethodForNode(blockDialog.entry.nodeId);
 
     // Built-in Blocking path: apply exact allow/block immediately (no groups/regex)
     if (uiMethod === "built-in") {
@@ -3898,9 +3925,9 @@ export function LogsPage() {
         closeBlockDialog("confirm");
       } catch (error) {
         setBlockError(
-          error instanceof Error
-            ? error.message
-            : "Failed to apply built-in blocking change.",
+          error instanceof Error ?
+            error.message
+          : "Failed to apply built-in blocking change.",
         );
         setIsBlocking(false);
       }
@@ -3930,9 +3957,9 @@ export function LogsPage() {
     if (blockMode === "regex") {
       if (regexPattern.length === 0) {
         setBlockError(
-          blockingAction === "block"
-            ? "Provide a regex pattern to block."
-            : "Provide a regex pattern to allow.",
+          blockingAction === "block" ?
+            "Provide a regex pattern to block."
+          : "Provide a regex pattern to allow.",
         );
         return;
       }
@@ -4103,13 +4130,11 @@ export function LogsPage() {
         return {
           ...group,
           blocked: blockedChanged ? nextBlocked : group.blocked,
-          blockedRegex: blockedRegexChanged
-            ? nextBlockedRegex
-            : group.blockedRegex,
+          blockedRegex:
+            blockedRegexChanged ? nextBlockedRegex : group.blockedRegex,
           allowed: allowedChanged ? nextAllowed : group.allowed,
-          allowedRegex: allowedRegexChanged
-            ? nextAllowedRegex
-            : group.allowedRegex,
+          allowedRegex:
+            allowedRegexChanged ? nextAllowedRegex : group.allowedRegex,
         };
       }
 
@@ -4284,9 +4309,9 @@ export function LogsPage() {
       closeBlockDialog("confirm");
     } catch (error) {
       setBlockError(
-        error instanceof Error
-          ? error.message
-          : `Failed to ${bulkAction} domains.`,
+        error instanceof Error ?
+          error.message
+        : `Failed to ${bulkAction} domains.`,
       );
       setIsBlocking(false);
     }
@@ -4536,11 +4561,9 @@ export function LogsPage() {
 
     const load = async () => {
       const nextLoadingState =
-        displayMode === "tail"
-          ? "refreshing"
-          : isAutoRefresh || hasLoadedAnyLogsRef.current
-            ? "refreshing"
-            : "loading";
+        displayMode === "tail" ? "refreshing"
+        : isAutoRefresh || hasLoadedAnyLogsRef.current ? "refreshing"
+        : "loading";
       setLoadingState(nextLoadingState);
       setErrorMessage(undefined);
 
@@ -4550,11 +4573,9 @@ export function LogsPage() {
 
         if (mode === "combined") {
           const combinedLogsLoader =
-            displayMode === "tail"
-              ? loadCombinedLogs
-              : storedLogsReady
-                ? loadStoredCombinedLogs
-                : loadCombinedLogs;
+            displayMode === "tail" ? loadCombinedLogs
+            : storedLogsReady ? loadStoredCombinedLogs
+            : loadCombinedLogs;
 
           const filterParams = {
             pageNumber: effectivePageNumber,
@@ -4642,11 +4663,9 @@ export function LogsPage() {
           }
         } else if (selectedNodeId) {
           const nodeLogsLoader =
-            displayMode === "tail"
-              ? loadNodeLogs
-              : storedLogsReady
-                ? loadStoredNodeLogs
-                : loadNodeLogs;
+            displayMode === "tail" ? loadNodeLogs
+            : storedLogsReady ? loadStoredNodeLogs
+            : loadNodeLogs;
 
           const data = await nodeLogsLoader(
             selectedNodeId,
@@ -4883,75 +4902,77 @@ export function LogsPage() {
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }, [displayEntries]);
 
+  const domainExclusionMatchers = useMemo(
+    () => buildDomainExclusionMatchers(domainExclusionList),
+    [domainExclusionList],
+  );
+
   // Note: Filtering is done server-side for paginated mode via API parameters
   // In tail mode, we also need to apply client-side filtering to the buffer
   const filteredEntries = useMemo(() => {
-    if (displayMode === "tail") {
-      // Apply client-side filters to tail buffer
-      return displayEntries.filter((entry) => {
-        // Domain filter
-        if (
-          domainFilter.trim() &&
-          !entry.qname
-            ?.toLowerCase()
-            .includes(domainFilter.trim().toLowerCase())
-        ) {
-          return false;
-        }
+    return displayEntries.filter((entry) => {
+      if (isDomainExcluded(entry.qname, domainExclusionMatchers)) {
+        return false;
+      }
 
-        // Client IP/hostname filter - check both clientIpAddress and clientName
-        if (clientFilter.trim()) {
-          const filterLower = clientFilter.trim().toLowerCase();
-          const matchesIp = entry.clientIpAddress
-            ?.toLowerCase()
-            .includes(filterLower);
-          const matchesName = entry.clientName
-            ?.toLowerCase()
-            .includes(filterLower);
-          if (!matchesIp && !matchesName) {
-            return false;
-          }
-        }
-
-        // Status filter (blocked/allowed)
-        if (statusFilter !== "all") {
-          const isBlocked =
-            entry.responseType === "Blocked" ||
-            entry.responseType === "BlockedEDNS";
-          if (statusFilter === "blocked" && !isBlocked) {
-            return false;
-          }
-          if (statusFilter === "allowed" && isBlocked) {
-            return false;
-          }
-        }
-
-        // Response type filter
-        if (responseFilter !== "all") {
-          const entryResponse = entry.responseType?.trim() ?? "";
-          const matchValue =
-            responseFilter === EMPTY_RESPONSE_FILTER_VALUE
-              ? ""
-              : responseFilter;
-          if (entryResponse !== matchValue) {
-            return false;
-          }
-        }
-
-        // Query type filter
-        if (qtypeFilter !== "all" && entry.qtype !== qtypeFilter) {
-          return false;
-        }
-
+      if (displayMode !== "tail") {
         return true;
-      });
-    }
+      }
 
-    // Paginated mode: entries are already filtered by API
-    return displayEntries;
+      // Domain filter
+      if (
+        domainFilter.trim() &&
+        !entry.qname?.toLowerCase().includes(domainFilter.trim().toLowerCase())
+      ) {
+        return false;
+      }
+
+      // Client IP/hostname filter - check both clientIpAddress and clientName
+      if (clientFilter.trim()) {
+        const filterLower = clientFilter.trim().toLowerCase();
+        const matchesIp = entry.clientIpAddress
+          ?.toLowerCase()
+          .includes(filterLower);
+        const matchesName = entry.clientName
+          ?.toLowerCase()
+          .includes(filterLower);
+        if (!matchesIp && !matchesName) {
+          return false;
+        }
+      }
+
+      // Status filter (blocked/allowed)
+      if (statusFilter !== "all") {
+        const blocked = isEntryBlocked(entry);
+        if (statusFilter === "blocked" && !blocked) {
+          return false;
+        }
+        if (statusFilter === "allowed" && blocked) {
+          return false;
+        }
+      }
+
+      // Response type filter
+      if (responseFilter !== "all") {
+        const entryResponse = entry.responseType?.trim() ?? "";
+        const matchValue =
+          responseFilter === EMPTY_RESPONSE_FILTER_VALUE ? "" : responseFilter;
+        if (entryResponse !== matchValue) {
+          return false;
+        }
+      }
+
+      // Query type filter
+      if (qtypeFilter !== "all" && entry.qtype !== qtypeFilter) {
+        return false;
+      }
+
+      return true;
+    });
   }, [
     displayMode,
     displayEntries,
+    domainExclusionMatchers,
     domainFilter,
     clientFilter,
     statusFilter,
@@ -4986,6 +5007,7 @@ export function LogsPage() {
 
   const isFilteringActive = useMemo(() => {
     return (
+      domainExclusionMatchers.length > 0 ||
       domainFilter.trim().length > 0 ||
       clientFilter.trim().length > 0 ||
       statusFilter !== "all" ||
@@ -4995,6 +5017,7 @@ export function LogsPage() {
       endDate.trim().length > 0
     );
   }, [
+    domainExclusionMatchers,
     domainFilter,
     clientFilter,
     statusFilter,
@@ -5054,12 +5077,12 @@ export function LogsPage() {
 
     // Calculate average response time
     const avgResponseTime =
-      stats.responseTimes.length > 0
-        ? Math.round(
-            stats.responseTimes.reduce((sum, time) => sum + time, 0) /
-              stats.responseTimes.length,
-          )
-        : null;
+      stats.responseTimes.length > 0 ?
+        Math.round(
+          stats.responseTimes.reduce((sum, time) => sum + time, 0) /
+            stats.responseTimes.length,
+        )
+      : null;
 
     // Calculate percentages
     const allowedPercent =
@@ -5085,6 +5108,7 @@ export function LogsPage() {
   }, [displayEntries]);
 
   const resetFilters = useCallback(() => {
+    setDomainExclusionList("");
     setDomainFilter("");
     setClientFilter("");
     setStatusFilter("all");
@@ -5119,8 +5143,9 @@ export function LogsPage() {
   }, [mode, combinedPage, nodeSnapshot]);
 
   const totalMatchingEntries = useMemo(() => {
-    // In tail mode, use the filtered entries count (client-side filtering)
-    if (displayMode === "tail") {
+    // In tail mode, use the filtered entries count (client-side filtering).
+    // Domain exclusions are always client-side, including paginated mode.
+    if (displayMode === "tail" || domainExclusionMatchers.length > 0) {
       return filteredEntries.length;
     }
 
@@ -5134,7 +5159,14 @@ export function LogsPage() {
     }
 
     return 0;
-  }, [displayMode, filteredEntries, mode, combinedPage, nodeSnapshot]);
+  }, [
+    displayMode,
+    filteredEntries,
+    mode,
+    combinedPage,
+    nodeSnapshot,
+    domainExclusionMatchers.length,
+  ]);
 
   const duplicatesRemoved = useMemo(() => {
     // Only combined mode with deduplication enabled shows duplicate count
@@ -5283,18 +5315,18 @@ export function LogsPage() {
           domainTooltipAnchorRef.current = anchor;
 
           const baseHtml =
-            typeof content === "string"
-              ? content
-              : (anchor.getAttribute("data-tooltip-content") ?? "");
+            typeof content === "string" ? content : (
+              (anchor.getAttribute("data-tooltip-content") ?? "")
+            );
 
           const domain = anchor.getAttribute("data-domain") ?? "";
           const nodeId = anchor.getAttribute("data-node-id") ?? "";
           const isBlocked = anchor.getAttribute("data-is-blocked") === "true";
 
           const key =
-            domain && nodeId
-              ? getDomainBlockSourceCacheKey(nodeId, domain)
-              : null;
+            domain && nodeId ?
+              getDomainBlockSourceCacheKey(nodeId, domain)
+            : null;
 
           const lookup = key ? domainBlockSourceByKey[key] : undefined;
           const rawMatches =
@@ -5303,16 +5335,16 @@ export function LogsPage() {
             ) ?? [];
 
           const allMatches =
-            rawMatches.length <= 1
-              ? rawMatches
-              : Array.from(
-                  new Map(
-                    rawMatches.map((match) => [
-                      getBlockMatchDedupeKey(match),
-                      match,
-                    ]),
-                  ).values(),
-                );
+            rawMatches.length <= 1 ?
+              rawMatches
+            : Array.from(
+                new Map(
+                  rawMatches.map((match) => [
+                    getBlockMatchDedupeKey(match),
+                    match,
+                  ]),
+                ).values(),
+              );
           const expanded =
             key !== null &&
             expandedDomainTooltipKey === key &&
@@ -5365,13 +5397,12 @@ export function LogsPage() {
 
                   {lookup?.status === "loaded" && (
                     <>
-                      {allMatches.length === 0 ? (
+                      {allMatches.length === 0 ?
                         <div style={{ marginTop: 6, opacity: 0.8 }}>
                           No matching blocklist/rule found (may be blocked by a
                           different mechanism).
                         </div>
-                      ) : (
-                        <div style={{ marginTop: 6 }}>
+                      : <div style={{ marginTop: 6 }}>
                           {matchesToShow.map((match, index) => (
                             <div
                               key={
@@ -5409,15 +5440,15 @@ export function LogsPage() {
                               }}
                               style={{ marginTop: 8 }}
                             >
-                              {expanded
-                                ? "Show less"
-                                : remaining > 0
-                                  ? `Show ${remaining} more`
-                                  : "Show more"}
+                              {expanded ?
+                                "Show less"
+                              : remaining > 0 ?
+                                `Show ${remaining} more`
+                              : "Show more"}
                             </button>
                           )}
                         </div>
-                      )}
+                      }
                     </>
                   )}
                 </div>
@@ -5445,19 +5476,18 @@ export function LogsPage() {
 
         {loadingState === "error" && errorMessage && (
           <div className="logs-page__error">
-            {getAuthRedirectReason() === "session-expired" &&
-            /\(401\)/.test(errorMessage) ? (
+            {(
+              getAuthRedirectReason() === "session-expired" &&
+              /\(401\)/.test(errorMessage)
+            ) ?
               <>Companion session expired — redirecting to sign in…</>
-            ) : (
-              <>Failed to load logs: {errorMessage}</>
-            )}
+            : <>Failed to load logs: {errorMessage}</>}
           </div>
         )}
 
-        {loadingState === "loading" ? (
+        {loadingState === "loading" ?
           <SkeletonLogsStats />
-        ) : (
-          <div
+        : <div
             className={`logs-page__statistics ${loadingState === "refreshing" ? "refreshing" : ""} ${statisticsExpanded ? "expanded" : "collapsed"}`}
           >
             <div className="logs-page__statistics-header">
@@ -5566,15 +5596,14 @@ export function LogsPage() {
               </div>
             )}
           </div>
-        )}
+        }
 
-        {loadingState === "loading" ? (
+        {loadingState === "loading" ?
           <SkeletonLogsSummary />
-        ) : (
-          <div
+        : <div
             className={`logs-page__summary ${loadingState === "refreshing" ? "refreshing" : ""}`}
           >
-            {displayMode === "tail" ? (
+            {displayMode === "tail" ?
               <>
                 <div>
                   <strong>Buffer size:</strong> {tailBuffer.length} /{" "}
@@ -5601,9 +5630,9 @@ export function LogsPage() {
                 </div>
                 <div>
                   <strong>Last update:</strong>{" "}
-                  {tailNewestTimestamp
-                    ? new Date(tailNewestTimestamp).toLocaleString()
-                    : "—"}
+                  {tailNewestTimestamp ?
+                    new Date(tailNewestTimestamp).toLocaleString()
+                  : "—"}
                 </div>
                 {isFilteringActive && (
                   <div>
@@ -5622,8 +5651,7 @@ export function LogsPage() {
                   </div>
                 )}
               </>
-            ) : (
-              <>
+            : <>
                 <div>
                   <strong>Total entries:</strong>{" "}
                   {totalEntries.toLocaleString()}
@@ -5633,13 +5661,13 @@ export function LogsPage() {
                 </div>
                 <div className="logs-page__summary-line">
                   <strong>Fetched:</strong>{" "}
-                  {mode === "combined"
-                    ? combinedPage?.fetchedAt
-                      ? new Date(combinedPage.fetchedAt).toLocaleString()
-                      : "—"
-                    : nodeSnapshot?.fetchedAt
-                      ? new Date(nodeSnapshot.fetchedAt).toLocaleString()
-                      : "—"}
+                  {mode === "combined" ?
+                    combinedPage?.fetchedAt ?
+                      new Date(combinedPage.fetchedAt).toLocaleString()
+                    : "—"
+                  : nodeSnapshot?.fetchedAt ?
+                    new Date(nodeSnapshot.fetchedAt).toLocaleString()
+                  : "—"}
                   <span className="logs-page__summary-pills">
                     <span
                       className={`logs-page__meta-pill logs-page__meta-pill--${logsSourceKind}`}
@@ -5653,9 +5681,9 @@ export function LogsPage() {
                         title={`SQLite stored-log response cache (server-side). TTL=${Math.round(storedResponseCache.ttlMs / 1000)}s, Size=${storedResponseCache.size}/${storedResponseCache.maxEntries}, Hits=${storedResponseCache.hits}, Misses=${storedResponseCache.misses}, Evictions=${storedResponseCache.evictions}`}
                       >
                         DB Cache
-                        {storedResponseCacheHitRatePercent !== null
-                          ? ` ${storedResponseCacheHitRatePercent}%`
-                          : ""}
+                        {storedResponseCacheHitRatePercent !== null ?
+                          ` ${storedResponseCacheHitRatePercent}%`
+                        : ""}
                       </span>
                     )}
                     {duplicatesRemoved > 0 && (
@@ -5675,9 +5703,9 @@ export function LogsPage() {
                   </div>
                 )}
               </>
-            )}
+            }
           </div>
-        )}
+        }
 
         {/* Mobile filter toggle button */}
         <button
@@ -5756,9 +5784,9 @@ export function LogsPage() {
               name="client-filter"
               type="text"
               placeholder={
-                displayMode === "paginated"
-                  ? "Hostname/IP contains… (or click client)"
-                  : "Contains… (or click client)"
+                displayMode === "paginated" ?
+                  "Hostname/IP contains… (or click client)"
+                : "Contains… (or click client)"
               }
               value={clientFilter}
               onChange={(event) => setClientFilter(event.target.value)}
@@ -5775,9 +5803,9 @@ export function LogsPage() {
               <option value="all">All</option>
               {responseFilterOptions.map((option) => (
                 <option key={option} value={option}>
-                  {option === EMPTY_RESPONSE_FILTER_VALUE
-                    ? "No response value"
-                    : option}
+                  {option === EMPTY_RESPONSE_FILTER_VALUE ?
+                    "No response value"
+                  : option}
                 </option>
               ))}
             </select>
@@ -5826,6 +5854,17 @@ export function LogsPage() {
               onChange={(event) => setDomainFilter(event.target.value)}
             />
           </label>
+          <label className="logs-page__quick-filter">
+            <span>Exclude Domains</span>
+            <input
+              id="domain-exclusion-filter"
+              name="domain-exclusion-filter"
+              type="text"
+              placeholder="*.trackingdomain.com, ads.example.net"
+              value={domainExclusionList}
+              onChange={(event) => setDomainExclusionList(event.target.value)}
+            />
+          </label>
           <button
             type="button"
             className="logs-page__filters-reset"
@@ -5838,7 +5877,7 @@ export function LogsPage() {
             className={`logs-page__date-presets ${storedLogsReady ? "" : "logs-page__date-presets--disabled"}`}
             aria-disabled={!storedLogsReady}
           >
-            {storedLogsReady ? (
+            {storedLogsReady ?
               <button
                 type="button"
                 className="logs-page__date-preset"
@@ -5847,8 +5886,7 @@ export function LogsPage() {
               >
                 Last 24h
               </button>
-            ) : (
-              <span
+            : <span
                 className="logs-page__date-preset-disabled"
                 title="Requires stored logs (SQLite)"
               >
@@ -5861,9 +5899,9 @@ export function LogsPage() {
                   Last 24h
                 </button>
               </span>
-            )}
+            }
 
-            {storedLogsReady ? (
+            {storedLogsReady ?
               <button
                 type="button"
                 className="logs-page__date-preset"
@@ -5872,8 +5910,7 @@ export function LogsPage() {
               >
                 Last Hour
               </button>
-            ) : (
-              <span
+            : <span
                 className="logs-page__date-preset-disabled"
                 title="Requires stored logs (SQLite)"
               >
@@ -5886,9 +5923,9 @@ export function LogsPage() {
                   Last Hour
                 </button>
               </span>
-            )}
+            }
 
-            {storedLogsReady ? (
+            {storedLogsReady ?
               <button
                 type="button"
                 className="logs-page__date-preset"
@@ -5897,8 +5934,7 @@ export function LogsPage() {
               >
                 Yesterday
               </button>
-            ) : (
-              <span
+            : <span
                 className="logs-page__date-preset-disabled"
                 title="Requires stored logs (SQLite)"
               >
@@ -5911,9 +5947,9 @@ export function LogsPage() {
                   Yesterday
                 </button>
               </span>
-            )}
+            }
 
-            {storedLogsReady ? (
+            {storedLogsReady ?
               <button
                 type="button"
                 className="logs-page__date-preset"
@@ -5922,8 +5958,7 @@ export function LogsPage() {
               >
                 Today
               </button>
-            ) : (
-              <span
+            : <span
                 className="logs-page__date-preset-disabled"
                 title="Requires stored logs (SQLite)"
               >
@@ -5936,7 +5971,7 @@ export function LogsPage() {
                   Today
                 </button>
               </span>
-            )}
+            }
 
             {(startDate || endDate) && (
               <button
@@ -6026,9 +6061,10 @@ export function LogsPage() {
                   icon={displayMode === "paginated" ? faFile : faTowerBroadcast}
                 />{" "}
                 ·
-                {mode === "combined"
-                  ? " Combined"
-                  : ` ${nodes.find((n) => n.id === selectedNodeId)?.name || "Node"}`}{" "}
+                {mode === "combined" ?
+                  " Combined"
+                : ` ${nodes.find((n) => n.id === selectedNodeId)?.name || "Node"}`
+                }{" "}
                 · Page {pageNumber}/{totalPages}
               </span>
             )}
@@ -6042,9 +6078,9 @@ export function LogsPage() {
                 <button
                   type="button"
                   className={
-                    displayMode === "tail"
-                      ? "toggle-button active"
-                      : "toggle-button"
+                    displayMode === "tail" ?
+                      "toggle-button active"
+                    : "toggle-button"
                   }
                   onClick={() => handleDisplayModeChange("tail")}
                 >
@@ -6053,9 +6089,9 @@ export function LogsPage() {
                 <button
                   type="button"
                   className={
-                    displayMode === "paginated"
-                      ? "toggle-button active"
-                      : "toggle-button"
+                    displayMode === "paginated" ?
+                      "toggle-button active"
+                    : "toggle-button"
                   }
                   onClick={() => handleDisplayModeChange("paginated")}
                 >
@@ -6066,9 +6102,9 @@ export function LogsPage() {
                 <button
                   type="button"
                   className={
-                    mode === "combined"
-                      ? "toggle-button active"
-                      : "toggle-button"
+                    mode === "combined" ?
+                      "toggle-button active"
+                    : "toggle-button"
                   }
                   onClick={() => handleModeChange("combined")}
                 >
@@ -6117,7 +6153,7 @@ export function LogsPage() {
                         Prev
                       </button>
                       <span>
-                        {pageJumpOpen ? (
+                        {pageJumpOpen ?
                           <span className="logs-page__pager-page-jump">
                             <input
                               ref={pageJumpInputRef}
@@ -6149,8 +6185,7 @@ export function LogsPage() {
                               / {totalPages}
                             </span>
                           </span>
-                        ) : (
-                          <button
+                        : <button
                             type="button"
                             className="logs-page__pager-page-button"
                             onClick={openPageJump}
@@ -6158,7 +6193,7 @@ export function LogsPage() {
                           >
                             {pageNumber} / {totalPages}
                           </button>
-                        )}
+                        }
                         {hasMorePages && (
                           <span
                             className="logs-page__more-results-warning"
@@ -6185,9 +6220,9 @@ export function LogsPage() {
                 <button
                   type="button"
                   className={
-                    refreshSeconds === 0
-                      ? "logs-page__live-toggle paused"
-                      : "logs-page__live-toggle live"
+                    refreshSeconds === 0 ?
+                      "logs-page__live-toggle paused"
+                    : "logs-page__live-toggle live"
                   }
                   onClick={(event) => {
                     // Prevent any default behavior that could cause page jump
@@ -6221,30 +6256,29 @@ export function LogsPage() {
                     });
                   }}
                   title={
-                    refreshSeconds === 0
-                      ? endDate.trim().length > 0
-                        ? "Auto-refresh paused because End Date/Time is set. Clear it to resume."
-                        : logsTableContextMenu
-                          ? "Auto-refresh paused while the context menu is open."
-                          : "Click to resume auto-refresh"
-                      : "Click to pause auto-refresh"
+                    refreshSeconds === 0 ?
+                      endDate.trim().length > 0 ?
+                        "Auto-refresh paused because End Date/Time is set. Clear it to resume."
+                      : logsTableContextMenu ?
+                        "Auto-refresh paused while the context menu is open."
+                      : "Click to resume auto-refresh"
+                    : "Click to pause auto-refresh"
                   }
                 >
-                  {displayMode === "tail" ? (
-                    // Tail mode: Show entry count in buffer
-                    refreshSeconds === 0 ? (
-                      <>⏸️ Paused ({tailBuffer.length} entries)</>
-                    ) : (
-                      <>🟢 Live ({tailBuffer.length} entries)</>
-                    )
-                  ) : // Paginated mode: No entry count, simpler labels
-                  refreshSeconds === 0 ? (
-                    <>⏸️ Paused</>
-                  ) : (
-                    <>
-                      <FontAwesomeIcon icon={faRotate} /> Auto-refresh
-                    </>
-                  )}
+                  {
+                    displayMode === "tail" ?
+                      // Tail mode: Show entry count in buffer
+                      refreshSeconds === 0 ?
+                        <>⏸️ Paused ({tailBuffer.length} entries)</>
+                      : <>🟢 Live ({tailBuffer.length} entries)</>
+                      // Paginated mode: No entry count, simpler labels
+                    : refreshSeconds === 0 ?
+                      <>⏸️ Paused</>
+                    : <>
+                        <FontAwesomeIcon icon={faRotate} /> Auto-refresh
+                      </>
+
+                  }
                 </button>
                 <label className="logs-page__filter">
                   Refresh interval
@@ -6252,9 +6286,9 @@ export function LogsPage() {
                     id="refresh-interval"
                     name="refresh-interval"
                     value={
-                      refreshSeconds === 0
-                        ? TAIL_MODE_DEFAULT_REFRESH
-                        : refreshSeconds
+                      refreshSeconds === 0 ?
+                        TAIL_MODE_DEFAULT_REFRESH
+                      : refreshSeconds
                     }
                     onChange={(event) => {
                       setIsAutoRefresh(false);
@@ -6280,9 +6314,9 @@ export function LogsPage() {
                   ref={settingsButtonRef}
                   type="button"
                   className={
-                    settingsOpen
-                      ? "logs-page__settings-toggle active"
-                      : "logs-page__settings-toggle"
+                    settingsOpen ?
+                      "logs-page__settings-toggle active"
+                    : "logs-page__settings-toggle"
                   }
                   onClick={() => setSettingsOpen((prev) => !prev)}
                 >
@@ -6527,191 +6561,190 @@ export function LogsPage() {
         </div>
 
         {/* Conditionally render table or cards based on mobile layout mode */}
-        {mobileLayoutMode === "card-view" && window.innerWidth < 768 ? (
-          // Card view for mobile
-          <div
-            className={`logs-page__cards-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
-          >
-            {renderCardsView(
-              filteredEntries,
-              selectedDomains,
-              domainToGroupMap,
-              domainGroupDetailsMap,
-              toggleDomainSelection,
-              handleStatusClick,
-              handleClientClick,
-              handleDomainClick,
-              loadingState === "error" ? "idle" : loadingState,
-              isFilteringActive,
-              deduplicateDomains,
-              columnVisibility,
-              () => {
-                // Pause auto-refresh when user starts swiping on a card
-                setIsAutoRefresh(false);
-                setRefreshSeconds(0);
-              },
-            )}
-          </div>
-        ) : (
-          // Table view (desktop or compact-table mode on mobile)
-          <div
-            className={`logs-page__table-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
-            onContextMenu={handleLogsTableContextMenu}
-          >
-            <table className="logs-page__table">
-              <colgroup>
-                {activeColumns.map((column) => (
-                  <col key={column.id} className={column.className} />
-                ))}
-              </colgroup>
-              <thead>
-                <tr>
-                  {activeColumns.map((column) => {
-                    if (column.id === "group-badge") {
-                      return (
-                        <th
-                          key={column.id}
-                          className="logs-page__header--group-badge"
-                        ></th>
-                      );
-                    }
-                    if (column.id === "select") {
-                      const allSelected =
-                        filteredEntries.length > 0 &&
-                        selectedDomains.size === filteredEntries.length;
-                      const someSelected =
-                        selectedDomains.size > 0 &&
-                        selectedDomains.size < filteredEntries.length;
-                      return (
-                        <th
-                          key={column.id}
-                          className="logs-page__header--select"
-                        >
-                          <input
-                            id="logs-select-all"
-                            name="selectAll"
-                            type="checkbox"
-                            checked={allSelected}
-                            ref={(input) => {
-                              if (input) {
-                                input.indeterminate = someSelected;
+        {
+          mobileLayoutMode === "card-view" && window.innerWidth < 768 ?
+            // Card view for mobile
+            <div
+              className={`logs-page__cards-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
+            >
+              {renderCardsView(
+                filteredEntries,
+                selectedDomains,
+                domainToGroupMap,
+                domainGroupDetailsMap,
+                toggleDomainSelection,
+                handleStatusClick,
+                handleClientClick,
+                handleDomainClick,
+                loadingState === "error" ? "idle" : loadingState,
+                isFilteringActive,
+                deduplicateDomains,
+                columnVisibility,
+                () => {
+                  // Pause auto-refresh when user starts swiping on a card
+                  setIsAutoRefresh(false);
+                  setRefreshSeconds(0);
+                },
+              )}
+            </div>
+            // Table view (desktop or compact-table mode on mobile)
+          : <div
+              className={`logs-page__table-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
+              onContextMenu={handleLogsTableContextMenu}
+            >
+              <table className="logs-page__table">
+                <colgroup>
+                  {activeColumns.map((column) => (
+                    <col key={column.id} className={column.className} />
+                  ))}
+                </colgroup>
+                <thead>
+                  <tr>
+                    {activeColumns.map((column) => {
+                      if (column.id === "group-badge") {
+                        return (
+                          <th
+                            key={column.id}
+                            className="logs-page__header--group-badge"
+                          ></th>
+                        );
+                      }
+                      if (column.id === "select") {
+                        const allSelected =
+                          filteredEntries.length > 0 &&
+                          selectedDomains.size === filteredEntries.length;
+                        const someSelected =
+                          selectedDomains.size > 0 &&
+                          selectedDomains.size < filteredEntries.length;
+                        return (
+                          <th
+                            key={column.id}
+                            className="logs-page__header--select"
+                          >
+                            <input
+                              id="logs-select-all"
+                              name="selectAll"
+                              type="checkbox"
+                              checked={allSelected}
+                              ref={(input) => {
+                                if (input) {
+                                  input.indeterminate = someSelected;
+                                }
+                              }}
+                              onChange={toggleSelectAll}
+                              aria-label="Select all domains"
+                              title={
+                                allSelected ? "Deselect all"
+                                : someSelected ?
+                                  "Select all"
+                                : "Select all"
                               }
-                            }}
-                            onChange={toggleSelectAll}
-                            aria-label="Select all domains"
-                            title={
-                              allSelected
-                                ? "Deselect all"
-                                : someSelected
-                                  ? "Select all"
-                                  : "Select all"
-                            }
-                          />
-                        </th>
-                      );
-                    }
-                    return <th key={column.id}>{column.label}</th>;
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {loadingState === "loading" ? (
-                  <tr>
-                    <td
-                      colSpan={activeColumns.length || 1}
-                      className="logs-page__loading"
-                    >
-                      Loading query logs…
-                    </td>
+                            />
+                          </th>
+                        );
+                      }
+                      return <th key={column.id}>{column.label}</th>;
+                    })}
                   </tr>
-                ) : filteredEntries.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={activeColumns.length || 1}
-                      className="logs-page__empty"
-                    >
-                      {isFilteringActive
-                        ? "No log entries match the current filters."
+                </thead>
+                <tbody>
+                  {loadingState === "loading" ?
+                    <tr>
+                      <td
+                        colSpan={activeColumns.length || 1}
+                        className="logs-page__loading"
+                      >
+                        Loading query logs…
+                      </td>
+                    </tr>
+                  : filteredEntries.length === 0 ?
+                    <tr>
+                      <td
+                        colSpan={activeColumns.length || 1}
+                        className="logs-page__empty"
+                      >
+                        {isFilteringActive ?
+                          "No log entries match the current filters."
                         : "No log entries found for the selected view."}
-                    </td>
-                  </tr>
-                ) : (
-                  // Render only first 50 visible rows instead of all (virtualization will come later)
-                  // This is a quick fix until we refactor to use div-based virtualized table
-                  filteredEntries
-                    .slice(0, 50)
-                    .map((entry) => (
-                      <LogTableRow
-                        key={`${entry.nodeId}-${entry.rowNumber}-${entry.timestamp}`}
-                        entry={entry}
-                        activeColumns={activeColumns}
-                        selectedDomains={selectedDomains}
-                        domainToGroupMap={domainToGroupMap}
-                        newEntryTimestamps={newEntryTimestamps}
-                        isEntryBlocked={isEntryBlocked}
-                      />
-                    ))
-                )}
-              </tbody>
-            </table>
+                      </td>
+                    </tr>
+                    // Render only first 50 visible rows instead of all (virtualization will come later)
+                    // This is a quick fix until we refactor to use div-based virtualized table
+                  : filteredEntries
+                      .slice(0, 50)
+                      .map((entry) => (
+                        <LogTableRow
+                          key={`${entry.nodeId}-${entry.rowNumber}-${entry.timestamp}`}
+                          entry={entry}
+                          activeColumns={activeColumns}
+                          selectedDomains={selectedDomains}
+                          domainToGroupMap={domainToGroupMap}
+                          newEntryTimestamps={newEntryTimestamps}
+                          isEntryBlocked={isEntryBlocked}
+                        />
+                      ))
+                  }
+                </tbody>
+              </table>
 
-            {logsTableContextMenu ? (
-              <div
-                className="logs-page__context-menu-overlay"
-                onMouseDown={(event) => {
-                  event.preventDefault();
-                  closeLogsTableContextMenu();
-                }}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  closeLogsTableContextMenu();
-                }}
-              >
+              {logsTableContextMenu ?
                 <div
-                  ref={logsTableContextMenuRef}
-                  className="logs-page__context-menu"
-                  style={{
-                    left: logsTableContextMenu.x,
-                    top: logsTableContextMenu.y,
-                  }}
-                  role="menu"
+                  className="logs-page__context-menu-overlay"
                   onMouseDown={(event) => {
-                    event.stopPropagation();
+                    event.preventDefault();
+                    closeLogsTableContextMenu();
+                  }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    closeLogsTableContextMenu();
                   }}
                 >
-                  {logsTableContextMenu.items.map((item, index) => {
-                    if (item.action === "separator") {
+                  <div
+                    ref={logsTableContextMenuRef}
+                    className="logs-page__context-menu"
+                    style={{
+                      left: logsTableContextMenu.x,
+                      top: logsTableContextMenu.y,
+                    }}
+                    role="menu"
+                    onMouseDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                  >
+                    {logsTableContextMenu.items.map((item, index) => {
+                      if (item.action === "separator") {
+                        return (
+                          <div
+                            key={`separator-${index}`}
+                            className="logs-page__context-menu-separator"
+                            role="separator"
+                          />
+                        );
+                      }
+
                       return (
-                        <div
-                          key={`separator-${index}`}
-                          className="logs-page__context-menu-separator"
-                          role="separator"
-                        />
-                      );
-                    }
-
-                    return (
-                      <button
-                        key={
-                          item.action === "copy"
-                            ? `${item.label}-copy-${item.value}`
+                        <button
+                          key={
+                            item.action === "copy" ?
+                              `${item.label}-copy-${item.value}`
                             : `${item.label}-open-${item.href}`
-                        }
-                        type="button"
-                        className="logs-page__context-menu-item"
-                        onClick={() => handleContextMenuAction(item)}
-                      >
-                        {item.label}
-                      </button>
-                    );
-                  })}
+                          }
+                          type="button"
+                          className="logs-page__context-menu-item"
+                          onClick={() => handleContextMenuAction(item)}
+                        >
+                          {item.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </div>
-        )}
+              : null}
+            </div>
 
-        {mode === "combined" && combinedNodeSnapshots.length > 0 ? (
+        }
+
+        {mode === "combined" && combinedNodeSnapshots.length > 0 ?
           <section className="logs-page__nodes">
             <h2>Node snapshots</h2>
             <ul>
@@ -6719,18 +6752,19 @@ export function LogsPage() {
                 (snapshot: TechnitiumCombinedNodeLogSnapshot) => (
                   <li key={snapshot.nodeId}>
                     <strong>{snapshot.nodeId}</strong> —{" "}
-                    {snapshot.error
-                      ? `error: ${snapshot.error}`
-                      : `${snapshot.totalEntries?.toLocaleString() ?? "0"} entries across ${snapshot.totalPages ?? 0} pages`}{" "}
+                    {snapshot.error ?
+                      `error: ${snapshot.error}`
+                    : `${snapshot.totalEntries?.toLocaleString() ?? "0"} entries across ${snapshot.totalPages ?? 0} pages`
+                    }{" "}
                     (fetched {new Date(snapshot.fetchedAt).toLocaleString()})
                   </li>
                 ),
               )}
             </ul>
           </section>
-        ) : null}
+        : null}
 
-        {blockDialog || bulkAction ? (
+        {blockDialog || bulkAction ?
           <div
             className="logs-page__modal"
             role="dialog"
@@ -6744,9 +6778,9 @@ export function LogsPage() {
             <div className="logs-page__modal-content">
               <header className="logs-page__modal-header">
                 <h2>
-                  {bulkAction
-                    ? `Bulk ${bulkAction === "block" ? "Block" : "Allow"} Domains`
-                    : modalTitle}
+                  {bulkAction ?
+                    `Bulk ${bulkAction === "block" ? "Block" : "Allow"} Domains`
+                  : modalTitle}
                 </h2>
                 <button
                   type="button"
@@ -6757,7 +6791,7 @@ export function LogsPage() {
                 </button>
               </header>
               <div className="logs-page__modal-body">
-                {bulkAction ? (
+                {bulkAction ?
                   <>
                     <p>
                       {bulkAction === "block" ? "Block" : "Allow"}{" "}
@@ -6774,9 +6808,8 @@ export function LogsPage() {
                       <ul className="logs-page__modal-summary-list logs-page__bulk-domain-list">
                         {Array.from(selectedDomains).map((domain) => {
                           const groupNumber = domainToGroupMap.get(domain);
-                          const colorIndex = groupNumber
-                            ? (groupNumber - 1) % 10
-                            : 0;
+                          const colorIndex =
+                            groupNumber ? (groupNumber - 1) % 10 : 0;
                           return (
                             <li
                               key={domain}
@@ -6798,8 +6831,7 @@ export function LogsPage() {
                       </ul>
                     </section>
                   </>
-                ) : (
-                  <>
+                : <>
                     <p>
                       {(() => {
                         const nodeStatus = blockingStatus?.nodes?.find(
@@ -6825,27 +6857,26 @@ export function LogsPage() {
 
                         return (
                           <>
-                            {blockDialogBlockingMethod === "built-in"
-                              ? `${blockingAction === "allow" ? "Allow" : "Block"}`
-                              : isBlockedEntry
-                                ? "Adjust Advanced Blocking groups for"
-                                : "Add"}{" "}
+                            {blockDialogBlockingMethod === "built-in" ?
+                              `${blockingAction === "allow" ? "Allow" : "Block"}`
+                            : isBlockedEntry ?
+                              "Adjust Advanced Blocking groups for"
+                            : "Add"}{" "}
                             <strong>
                               {blockDomainValue || "Unknown domain"}
                             </strong>{" "}
-                            {blockDialogBlockingMethod === "built-in" ? (
+                            {blockDialogBlockingMethod === "built-in" ?
                               <>
                                 in Built-in Blocking on node{" "}
                                 <strong>{blockNodeLabel}</strong>.
                               </>
-                            ) : (
-                              <>
-                                {isBlockedEntry
-                                  ? "on"
-                                  : "to Advanced Blocking on"}{" "}
+                            : <>
+                                {isBlockedEntry ?
+                                  "on"
+                                : "to Advanced Blocking on"}{" "}
                                 node <strong>{blockNodeLabel}</strong>.
                               </>
-                            )}
+                            }
                           </>
                         );
                       })()}
@@ -6880,19 +6911,21 @@ export function LogsPage() {
                                 <button
                                   type="button"
                                   className={
-                                    blockDialog?.selectedBlockingSystem ===
-                                    "built-in"
-                                      ? "toggle-button active"
-                                      : "toggle-button"
+                                    (
+                                      blockDialog?.selectedBlockingSystem ===
+                                      "built-in"
+                                    ) ?
+                                      "toggle-button active"
+                                    : "toggle-button"
                                   }
                                   onClick={() => {
                                     setBlockDialog((prev) =>
-                                      prev
-                                        ? {
-                                            ...prev,
-                                            selectedBlockingSystem: "built-in",
-                                          }
-                                        : prev,
+                                      prev ?
+                                        {
+                                          ...prev,
+                                          selectedBlockingSystem: "built-in",
+                                        }
+                                      : prev,
                                     );
                                     // Built-in mode is exact-only.
                                     setBlockMode("exact");
@@ -6911,19 +6944,21 @@ export function LogsPage() {
                                 <button
                                   type="button"
                                   className={
-                                    blockDialog?.selectedBlockingSystem ===
-                                    "advanced"
-                                      ? "toggle-button active"
-                                      : "toggle-button"
+                                    (
+                                      blockDialog?.selectedBlockingSystem ===
+                                      "advanced"
+                                    ) ?
+                                      "toggle-button active"
+                                    : "toggle-button"
                                   }
                                   onClick={() => {
                                     setBlockDialog((prev) =>
-                                      prev
-                                        ? {
-                                            ...prev,
-                                            selectedBlockingSystem: "advanced",
-                                          }
-                                        : prev,
+                                      prev ?
+                                        {
+                                          ...prev,
+                                          selectedBlockingSystem: "advanced",
+                                        }
+                                      : prev,
                                     );
                                     setBlockError(undefined);
                                   }}
@@ -6944,7 +6979,7 @@ export function LogsPage() {
                       if (blockDialogBlockingMethod !== "built-in") {
                         return (
                           <>
-                            {isBlockedEntry && blockCoverage.length > 0 ? (
+                            {isBlockedEntry && blockCoverage.length > 0 ?
                               <section className="logs-page__modal-summary">
                                 <h3 className="logs-page__modal-summary-title">
                                   Current coverage
@@ -6964,8 +6999,8 @@ export function LogsPage() {
                                   ))}
                                 </ul>
                               </section>
-                            ) : null}
-                            {isBlockedEntry && blockCoverage.length === 0 ? (
+                            : null}
+                            {isBlockedEntry && blockCoverage.length === 0 ?
                               <div className="logs-page__modal-notice">
                                 <strong>Blocked via downloaded list</strong>
                                 <p>
@@ -6977,7 +7012,7 @@ export function LogsPage() {
                                   override.
                                 </p>
                               </div>
-                            ) : null}
+                            : null}
                           </>
                         );
                       }
@@ -6994,7 +7029,7 @@ export function LogsPage() {
                       );
                     })()}
 
-                    {blockDomainValue ? (
+                    {blockDomainValue ?
                       <>
                         <div className="logs-page__modal-action-toggle">
                           <span className="logs-page__modal-action-label">
@@ -7004,9 +7039,9 @@ export function LogsPage() {
                             <button
                               type="button"
                               className={
-                                blockingAction === "block"
-                                  ? "toggle-button active"
-                                  : "toggle-button"
+                                blockingAction === "block" ?
+                                  "toggle-button active"
+                                : "toggle-button"
                               }
                               onClick={() => handleActionChange("block")}
                               disabled={isBlocking}
@@ -7017,9 +7052,9 @@ export function LogsPage() {
                             <button
                               type="button"
                               className={
-                                blockingAction === "allow"
-                                  ? "toggle-button active"
-                                  : "toggle-button"
+                                blockingAction === "allow" ?
+                                  "toggle-button active"
+                                : "toggle-button"
                               }
                               onClick={() => handleActionChange("allow")}
                               disabled={isBlocking}
@@ -7030,12 +7065,12 @@ export function LogsPage() {
                           </div>
                         </div>
 
-                        {blockDialogBlockingMethod !== "built-in" ? (
+                        {blockDialogBlockingMethod !== "built-in" ?
                           <fieldset className="logs-page__modal-mode">
                             <legend>
-                              {blockingAction === "allow"
-                                ? "Allow method"
-                                : "Block method"}
+                              {blockingAction === "allow" ?
+                                "Allow method"
+                              : "Block method"}
                             </legend>
                             <label className="logs-page__modal-mode-option">
                               <input
@@ -7091,13 +7126,13 @@ export function LogsPage() {
                               </div>
                             </label>
                           </fieldset>
-                        ) : null}
+                        : null}
                       </>
-                    ) : null}
+                    : null}
                   </>
-                )}
+                }
 
-                {blockDialogBlockingMethod !== "built-in" ? (
+                {blockDialogBlockingMethod !== "built-in" ?
                   <>
                     {(() => {
                       // Spinner UX: when Advanced Blocking is selected (or assumed) but the overview
@@ -7183,8 +7218,9 @@ export function LogsPage() {
                             const isSelected = blockSelectedGroups.has(
                               group.name,
                             );
-                            const overrides = blockDomainValue
-                              ? extractGroupOverrides(group, blockDomainValue)
+                            const overrides =
+                              blockDomainValue ?
+                                extractGroupOverrides(group, blockDomainValue)
                               : undefined;
                             const trimmedRegex = blockRegexValue.trim();
                             const pendingRegex =
@@ -7208,16 +7244,19 @@ export function LogsPage() {
 
                             if (blockingAction === "block") {
                               if (hasBlockOverride) {
-                                detailMessage = overrides?.blockedExact
-                                  ? "Currently blocked via exact match"
+                                detailMessage =
+                                  overrides?.blockedExact ?
+                                    "Currently blocked via exact match"
                                   : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
                               } else if (hasAllowOverride) {
-                                detailMessage = overrides?.allowedExact
-                                  ? "Currently allowed via exact override"
+                                detailMessage =
+                                  overrides?.allowedExact ?
+                                    "Currently allowed via exact override"
                                   : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
                               } else {
-                                detailMessage = isBlockedEntry
-                                  ? "No local override; blocked via list"
+                                detailMessage =
+                                  isBlockedEntry ?
+                                    "No local override; blocked via list"
                                   : "No local override yet";
                               }
 
@@ -7225,20 +7264,22 @@ export function LogsPage() {
                                 detailMessage = `${detailMessage} — will remove on save`;
                               } else if (isSelected && !hasBlockOverride) {
                                 detailMessage =
-                                  blockMode === "regex"
-                                    ? pendingRegex
-                                      ? `Will add regex ${pendingRegex}`
-                                      : "Will add regex pattern"
-                                    : "Will add exact match";
+                                  blockMode === "regex" ?
+                                    pendingRegex ?
+                                      `Will add regex ${pendingRegex}`
+                                    : "Will add regex pattern"
+                                  : "Will add exact match";
                               }
                             } else {
                               if (hasAllowOverride) {
-                                detailMessage = overrides?.allowedExact
-                                  ? "Currently allowed via exact override"
+                                detailMessage =
+                                  overrides?.allowedExact ?
+                                    "Currently allowed via exact override"
                                   : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
                               } else if (hasBlockOverride) {
-                                detailMessage = overrides?.blockedExact
-                                  ? "Currently blocked via exact match"
+                                detailMessage =
+                                  overrides?.blockedExact ?
+                                    "Currently blocked via exact match"
                                   : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
                               } else {
                                 detailMessage = "No local override yet";
@@ -7248,11 +7289,11 @@ export function LogsPage() {
                                 detailMessage = `${detailMessage} — will remove on save`;
                               } else if (isSelected && !hasAllowOverride) {
                                 detailMessage =
-                                  blockMode === "regex"
-                                    ? pendingRegex
-                                      ? `Will add allow regex ${pendingRegex}`
-                                      : "Will add regex allow override"
-                                    : "Will add exact allow override";
+                                  blockMode === "regex" ?
+                                    pendingRegex ?
+                                      `Will add allow regex ${pendingRegex}`
+                                    : "Will add regex allow override"
+                                  : "Will add exact allow override";
                               }
                             }
 
@@ -7283,11 +7324,11 @@ export function LogsPage() {
                       );
                     })()}
                   </>
-                ) : null}
+                : null}
 
-                {blockError ? (
+                {blockError ?
                   <div className="logs-page__modal-error">{blockError}</div>
-                ) : null}
+                : null}
               </div>
               <footer className="logs-page__modal-actions">
                 <button
@@ -7306,25 +7347,24 @@ export function LogsPage() {
                   }
                   disabled={
                     isBlocking ||
-                    (bulkAction
-                      ? false
-                      : blockDialogBlockingMethod === "built-in"
-                        ? false
-                        : !advancedBlocking ||
-                          loadingAdvancedBlocking ||
-                          blockAvailableGroups.length === 0)
+                    (bulkAction ? false
+                    : blockDialogBlockingMethod === "built-in" ? false
+                    : !advancedBlocking ||
+                      loadingAdvancedBlocking ||
+                      blockAvailableGroups.length === 0)
                   }
                 >
-                  {bulkAction
-                    ? isBlocking
-                      ? "Applying..."
-                      : `${bulkAction === "block" ? "Block" : "Allow"} ${selectedDomains.size} Domains`
-                    : confirmButtonLabel}
+                  {bulkAction ?
+                    isBlocking ?
+                      "Applying..."
+                    : `${bulkAction === "block" ? "Block" : "Allow"} ${selectedDomains.size} Domains`
+
+                  : confirmButtonLabel}
                 </button>
               </footer>
             </div>
           </div>
-        ) : null}
+        : null}
 
         {/* Floating Live Toggle - Only show in tail mode */}
         {displayMode === "tail" && (
@@ -7333,11 +7373,11 @@ export function LogsPage() {
             isLive={refreshSeconds > 0}
             refreshSeconds={refreshSeconds}
             pausedTitle={
-              endDate.trim().length > 0
-                ? "Paused because End Date/Time is set. Clear it to resume."
-                : logsTableContextMenu
-                  ? "Paused while the context menu is open."
-                  : undefined
+              endDate.trim().length > 0 ?
+                "Paused because End Date/Time is set. Clear it to resume."
+              : logsTableContextMenu ?
+                "Paused while the context menu is open."
+              : undefined
             }
             onToggle={(event) => {
               event.preventDefault();

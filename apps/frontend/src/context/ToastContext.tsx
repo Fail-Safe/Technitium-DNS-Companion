@@ -10,6 +10,7 @@ import {
 import {
   getAuthRedirectReason,
   getAuthRedirectToastShownReason,
+  getNodesConfigLoadFailedEventName,
   getAuthUnauthorizedEventName,
   getNetworkErrorEventName,
   getNetworkRecoveredEventName,
@@ -203,6 +204,49 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const eventName = getNetworkRecoveredEventName();
     window.addEventListener(eventName, onNetworkRecovered);
     return () => window.removeEventListener(eventName, onNetworkRecovered);
+  }, [pushToast]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // Avoid repeated error bursts if bootstrap retries fail multiple times.
+    const throttleMs = 60_000;
+    let lastShownAt = 0;
+
+    const onNodesConfigLoadFailed = (event: Event) => {
+      const now = Date.now();
+      if (now - lastShownAt < throttleMs) {
+        return;
+      }
+
+      // If auth is expiring and redirecting, suppress additional noise.
+      const redirectReason = getAuthRedirectReason();
+      if (
+        redirectReason === "session-expired" ||
+        redirectReason === "node-session-expired"
+      ) {
+        return;
+      }
+
+      lastShownAt = now;
+
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      pushToast({
+        message:
+          detail?.message ??
+          "Unable to load nodes configuration from backend.",
+        tone: "error",
+        timeout: 6500,
+      });
+    };
+
+    const eventName = getNodesConfigLoadFailedEventName();
+    window.addEventListener(eventName, onNodesConfigLoadFailed as EventListener);
+    return () =>
+      window.removeEventListener(
+        eventName,
+        onNodesConfigLoadFailed as EventListener,
+      );
   }, [pushToast]);
 
   const value = useMemo<ToastContextValue>(

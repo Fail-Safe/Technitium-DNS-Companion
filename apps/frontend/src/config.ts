@@ -27,6 +27,7 @@ const AUTH_REDIRECT_TOAST_SHOWN_KEY = "technitium.auth.redirectToastShown";
 
 const NETWORK_ERROR_EVENT = "technitium.network.error";
 const NETWORK_RECOVERED_EVENT = "technitium.network.recovered";
+const NODES_CONFIG_LOAD_FAILED_EVENT = "technitium.nodes-config.load-failed";
 
 let lastNetworkErrorAt: number | null = null;
 
@@ -115,6 +116,20 @@ export const triggerNetworkRecovered = (detail: {
   if (typeof window === "undefined") return;
   try {
     window.dispatchEvent(new CustomEvent(NETWORK_RECOVERED_EVENT, { detail }));
+  } catch {
+    // ignore
+  }
+};
+
+export const triggerNodesConfigLoadFailed = (detail: {
+  message: string;
+  status?: number;
+}): void => {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent(NODES_CONFIG_LOAD_FAILED_EVENT, { detail }),
+    );
   } catch {
     // ignore
   }
@@ -212,6 +227,9 @@ export const getNetworkErrorEventName = (): string => NETWORK_ERROR_EVENT;
 
 export const getNetworkRecoveredEventName = (): string =>
   NETWORK_RECOVERED_EVENT;
+
+export const getNodesConfigLoadFailedEventName = (): string =>
+  NODES_CONFIG_LOAD_FAILED_EVENT;
 
 export const getAuthRedirectToastShownReason = (): string | null => {
   if (typeof window === "undefined") return null;
