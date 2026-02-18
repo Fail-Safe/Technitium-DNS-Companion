@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Query Logs: added a client-side Domain Exclusion List (`Exclude Domains`) with wildcard support (`*`), persisted to localStorage for per-browser noise reduction.
+- Domain Groups (backend MVP): added opt-in global SQLite-backed Domain Group CRUD (`DOMAIN_GROUPS_ENABLED=true`) with optional group descriptions, per-entry notes, bindings to Advanced Blocking groups, materialization preview, and apply/dry-run endpoints with conflict blocking and cluster primary-write guard (override via `allowSecondaryWrites=true`).
 
 ### Changed
 
