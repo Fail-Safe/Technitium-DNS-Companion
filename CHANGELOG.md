@@ -13,6 +13,12 @@ All notable changes to this project will be documented in this file.
 
 - No unreleased changes yet.
 
+## [1.4.1] - 2026-02-18
+
+### Fixed
+
+- Login path stability: fixed a `Maximum update depth exceeded` render loop in `TechnitiumProvider` app-capability checks by deduplicating in-flight node app requests and avoiding no-op node state rewrites.
+
 ## [1.4.0] - 2026-02-14
 
 ### Added
@@ -275,7 +281,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.2.5...v1.3.0

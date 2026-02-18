@@ -2,62 +2,62 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, triggerAuthRedirect } from "../config";
 import type {
-    AdvancedBlockingConfig,
-    AdvancedBlockingOverview,
-    AdvancedBlockingSnapshot,
+  AdvancedBlockingConfig,
+  AdvancedBlockingOverview,
+  AdvancedBlockingSnapshot,
 } from "../types/advancedBlocking";
 import type {
-    BlockingMethod,
-    BlockingSettings,
-    BlockingStatusOverview,
-    BlockingZoneListResponse,
-    BlockingZoneOperationResult,
-    BuiltInBlockingOverview,
+  BlockingMethod,
+  BlockingSettings,
+  BlockingStatusOverview,
+  BlockingZoneListResponse,
+  BlockingZoneOperationResult,
+  BuiltInBlockingOverview,
 } from "../types/builtInBlocking";
 import type {
-    ConfigSnapshot,
-    ConfigSnapshotMetadata,
-    ConfigSnapshotMethod,
-    ConfigSnapshotOrigin,
-    ConfigSnapshotRestoreResult,
+  ConfigSnapshot,
+  ConfigSnapshotMetadata,
+  ConfigSnapshotMethod,
+  ConfigSnapshotOrigin,
+  ConfigSnapshotRestoreResult,
 } from "../types/configSnapshots";
 import type {
-    DhcpBulkSyncRequest,
-    DhcpBulkSyncResult,
-    DhcpSnapshot,
-    DhcpSnapshotMetadata,
-    DhcpSnapshotOrigin,
-    DhcpSnapshotRestoreOptions,
-    DhcpSnapshotRestoreResult,
-    TechnitiumCloneDhcpScopeRequest,
-    TechnitiumCloneDhcpScopeResult,
-    TechnitiumCreateDhcpScopeEnvelope,
-    TechnitiumCreateDhcpScopeRequest,
-    TechnitiumDhcpScope,
-    TechnitiumDhcpScopeEnvelope,
-    TechnitiumDhcpScopeListEnvelope,
-    TechnitiumRenameDhcpScopeRequest,
-    TechnitiumRenameDhcpScopeResult,
-    TechnitiumUpdateDhcpScopeEnvelope,
-    TechnitiumUpdateDhcpScopeRequest,
+  DhcpBulkSyncRequest,
+  DhcpBulkSyncResult,
+  DhcpSnapshot,
+  DhcpSnapshotMetadata,
+  DhcpSnapshotOrigin,
+  DhcpSnapshotRestoreOptions,
+  DhcpSnapshotRestoreResult,
+  TechnitiumCloneDhcpScopeRequest,
+  TechnitiumCloneDhcpScopeResult,
+  TechnitiumCreateDhcpScopeEnvelope,
+  TechnitiumCreateDhcpScopeRequest,
+  TechnitiumDhcpScope,
+  TechnitiumDhcpScopeEnvelope,
+  TechnitiumDhcpScopeListEnvelope,
+  TechnitiumRenameDhcpScopeRequest,
+  TechnitiumRenameDhcpScopeResult,
+  TechnitiumUpdateDhcpScopeEnvelope,
+  TechnitiumUpdateDhcpScopeRequest,
 } from "../types/dhcp";
 import type {
-    TechnitiumCombinedQueryLogPage,
-    TechnitiumNodeQueryLogEnvelope,
-    TechnitiumQueryLogFilters,
-    TechnitiumQueryLogStorageStatus,
+  TechnitiumCombinedQueryLogPage,
+  TechnitiumNodeQueryLogEnvelope,
+  TechnitiumQueryLogFilters,
+  TechnitiumQueryLogStorageStatus,
 } from "../types/technitiumLogs";
 import type {
-    TechnitiumCombinedZoneOverview,
-    TechnitiumCombinedZoneRecordsOverview,
-    TechnitiumZoneListEnvelope,
+  TechnitiumCombinedZoneOverview,
+  TechnitiumCombinedZoneRecordsOverview,
+  TechnitiumZoneListEnvelope,
 } from "../types/zones";
 import type {
-    ZoneSnapshot,
-    ZoneSnapshotCreateRequest,
-    ZoneSnapshotMetadata,
-    ZoneSnapshotRestoreOptions,
-    ZoneSnapshotRestoreResult,
+  ZoneSnapshot,
+  ZoneSnapshotCreateRequest,
+  ZoneSnapshotMetadata,
+  ZoneSnapshotRestoreOptions,
+  ZoneSnapshotRestoreResult,
 } from "../types/zoneSnapshots";
 import type { AuthStatus } from "./AuthContext";
 import { TechnitiumContext } from "./technitiumContextInstance";
@@ -344,6 +344,7 @@ const fetchConfiguredNodes = async (): Promise<TechnitiumNode[]> => {
         `Failed to load nodes configuration (${response.status})`,
       );
     }
+
     const nodes: Array<{
       id: string;
       name: string;
@@ -474,6 +475,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
   // Track in-flight overview fetch to prevent duplicate requests
   const overviewFetchInProgress = useRef<Promise<void> | null>(null);
+  const nodeAppsFetchInProgress = useRef<Promise<void> | null>(null);
 
   // Keep ref in sync with latest nodes array
   useEffect(() => {
@@ -490,54 +492,78 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
   // Fetch Advanced Blocking app status for all nodes
   const checkNodeApps = useCallback(async () => {
-    setNodes((currentNodes) => {
-      if (currentNodes.length === 0) return currentNodes;
+    if (nodeAppsFetchInProgress.current) {
+      return nodeAppsFetchInProgress.current;
+    }
 
-      // Kick off async fetch without blocking the return
-      (async () => {
-        const updatedNodes = await Promise.all(
-          currentNodes.map(async (node) => {
-            try {
-              if (!isNodeAuthenticatedForSession(node.id)) {
-                return node;
-              }
+    const promise = (async () => {
+      const currentNodes = nodesRef.current;
+      if (currentNodes.length === 0) {
+        return;
+      }
 
-              const response = await apiFetch(
-                `/nodes/${encodeURIComponent(node.id)}/apps`,
-              );
-
-              if (response.status === 401) {
-                // Session may still be valid, but per-node token might have expired.
-                // Refresh /auth/me so we stop calling nodes we can't access.
-                void authRefreshRef.current?.({ silent: true });
-              }
-
-              if (response.ok) {
-                const appsData =
-                  (await response.json()) as TechnitiumNodeAppsResponse;
-                return {
-                  ...node,
-                  hasAdvancedBlocking: appsData.hasAdvancedBlocking,
-                };
-              }
-            } catch (error) {
-              logThrottled(
-                `node-apps-${node.id}`,
-                "warn",
-                `Failed to check apps for node ${node.id}:`,
-                error,
-                60_000,
-              );
+      const updatedNodes = await Promise.all(
+        currentNodes.map(async (node) => {
+          try {
+            if (!isNodeAuthenticatedForSession(node.id)) {
+              return node;
             }
-            return node;
-          }),
-        );
-        setNodes(updatedNodes);
-      })();
 
-      // Return current state immediately to avoid blocking
-      return currentNodes;
-    });
+            const response = await apiFetch(
+              `/nodes/${encodeURIComponent(node.id)}/apps`,
+            );
+
+            if (response.status === 401) {
+              // Session may still be valid, but per-node token might have expired.
+              // Refresh /auth/me so we stop calling nodes we can't access.
+              void authRefreshRef.current?.({ silent: true });
+            }
+
+            if (response.ok) {
+              const appsData =
+                (await response.json()) as TechnitiumNodeAppsResponse;
+              return {
+                ...node,
+                hasAdvancedBlocking: appsData.hasAdvancedBlocking,
+              };
+            }
+          } catch (error) {
+            logThrottled(
+              `node-apps-${node.id}`,
+              "warn",
+              `Failed to check apps for node ${node.id}:`,
+              error,
+              60_000,
+            );
+          }
+          return node;
+        }),
+      );
+
+      setNodes((previousNodes) => {
+        if (previousNodes.length !== updatedNodes.length) {
+          return updatedNodes;
+        }
+
+        const hasChange = previousNodes.some((node, index) => {
+          const updatedNode = updatedNodes[index];
+          return (
+            node.id !== updatedNode.id ||
+            node.hasAdvancedBlocking !== updatedNode.hasAdvancedBlocking
+          );
+        });
+
+        return hasChange ? updatedNodes : previousNodes;
+      });
+    })();
+
+    nodeAppsFetchInProgress.current = promise;
+
+    try {
+      await promise;
+    } finally {
+      nodeAppsFetchInProgress.current = null;
+    }
   }, [isNodeAuthenticatedForSession, logThrottled]);
 
   // Cluster role polling state
