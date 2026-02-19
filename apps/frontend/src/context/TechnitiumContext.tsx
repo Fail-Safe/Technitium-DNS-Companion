@@ -3,8 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   apiFetch,
   isApiFetchNetworkError,
-  triggerNodesConfigLoadFailed,
   triggerAuthRedirect,
+  triggerNodesConfigLoadFailed,
 } from "../config";
 import type {
   AdvancedBlockingConfig,
@@ -344,7 +344,9 @@ export interface TechnitiumState {
 const fetchConfiguredNodes = async (): Promise<TechnitiumNode[]> => {
   const retryDelaysMs = [0, 500, 1500];
 
-  const loadAttempt = async (attemptIndex: number): Promise<TechnitiumNode[]> => {
+  const loadAttempt = async (
+    attemptIndex: number,
+  ): Promise<TechnitiumNode[]> => {
     const delayMs = retryDelaysMs[attemptIndex] ?? 0;
     if (delayMs > 0) {
       await new Promise<void>((resolve) => {
@@ -390,7 +392,8 @@ const fetchConfiguredNodes = async (): Promise<TechnitiumNode[]> => {
       }));
     } catch (error) {
       const canRetry =
-        isApiFetchNetworkError(error) && attemptIndex < retryDelaysMs.length - 1;
+        isApiFetchNetworkError(error) &&
+        attemptIndex < retryDelaysMs.length - 1;
 
       if (canRetry) {
         console.warn(
