@@ -25,6 +25,123 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Technitium DNS Companion backend notes
+
+### Log Alerts SMTP configuration
+
+The log alerts SMTP endpoints are available under `/api/nodes/log-alerts/*`.
+
+Set these environment variables in your `.env`:
+
+```dotenv
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=alerts@example.com
+SMTP_PASS=app-password-or-smtp-password
+SMTP_FROM=Technitium DNS Companion <alerts@example.com>
+```
+
+Optional variables:
+
+```dotenv
+SMTP_REPLY_TO=admin@example.com
+```
+
+Compatibility fallback (prefer `SMTP_FROM`):
+
+```dotenv
+ALERTS_EMAIL_FROM=alerts@example.com
+```
+
+### SMTP endpoint examples
+
+Check SMTP configuration status:
+
+```bash
+curl -s http://localhost:3000/api/nodes/log-alerts/smtp/status
+```
+
+Send SMTP test email:
+
+```bash
+curl -s -X POST http://localhost:3000/api/nodes/log-alerts/smtp/test \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "to": ["admin@example.com"],
+    "subject": "SMTP test from Technitium DNS Companion",
+    "text": "If you received this, SMTP is configured correctly."
+  }'
+```
+
+### Log alert rules storage (MVP)
+
+Log alert rule management endpoints:
+
+- `GET /api/nodes/log-alerts/rules/status`
+- `GET /api/nodes/log-alerts/rules`
+- `POST /api/nodes/log-alerts/rules`
+- `PATCH /api/nodes/log-alerts/rules/:ruleId/enabled`
+- `DELETE /api/nodes/log-alerts/rules/:ruleId`
+- `GET /api/nodes/log-alerts/evaluator/status`
+- `POST /api/nodes/log-alerts/evaluator/run`
+
+Optional environment variables:
+
+```dotenv
+LOG_ALERT_RULES_ENABLED=true
+LOG_ALERT_RULES_SQLITE_PATH=/data/log-alert-rules.sqlite
+LOG_ALERTS_EVALUATOR_ENABLED=false
+LOG_ALERTS_EVALUATOR_INTERVAL_MS=60000
+LOG_ALERTS_EVALUATOR_LOOKBACK_SECONDS=900
+LOG_ALERTS_EVALUATOR_MAX_ENTRIES_PER_PAGE=500
+LOG_ALERTS_EVALUATOR_MAX_PAGES_PER_RUN=3
+```
+
+Create rule example:
+
+```bash
+curl -s -X POST http://localhost:3000/api/nodes/log-alerts/rules \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "rule": {
+      "name": "Blocked ads for kid devices",
+      "enabled": true,
+      "outcomeMode": "blocked-only",
+      "domainPattern": "*.ads.example.com",
+      "domainPatternType": "wildcard",
+      "clientIdentifier": "kid-tablet",
+      "debounceSeconds": 900,
+      "emailRecipients": ["admin@example.com"]
+    }
+  }'
+```
+
+Run evaluator manually (dry run):
+
+```bash
+curl -s -X POST http://localhost:3000/api/nodes/log-alerts/evaluator/run \
+  -H 'Content-Type: application/json' \
+  -d '{"dryRun":true}'
+```
+
+### SMTP troubleshooting
+
+If SMTP test returns `535 5.7.0` (invalid login), check these first:
+
+- Confirm provider-specific auth requirements (for example, app passwords when MFA is enabled).
+- Verify `SMTP_USER` and `SMTP_PASS` are the exact SMTP credentials expected by your provider.
+- Verify TLS mode matches port:
+  - `SMTP_PORT=587` with `SMTP_SECURE=false` (STARTTLS)
+  - `SMTP_PORT=465` with `SMTP_SECURE=true` (implicit TLS)
+- Temporarily set `SMTP_FROM` to the same mailbox as `SMTP_USER` to isolate sender-identity restrictions.
+
+Credential-change behavior:
+
+- The backend caches the SMTP transporter for reuse.
+- Changing SMTP settings that affect auth now invalidates that cache key, including `SMTP_PASS`.
+- If needed, restart/recreate the backend container after `.env` changes to ensure all runtime state is refreshed.
+
 ## Project setup
 
 ```bash

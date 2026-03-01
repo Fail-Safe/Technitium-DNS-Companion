@@ -5,6 +5,7 @@ import { AdvancedBlockingController } from "./advanced-blocking.controller";
 import { AdvancedBlockingService } from "./advanced-blocking.service";
 import { BuiltInBlockingController } from "./built-in-blocking.controller";
 import { BuiltInBlockingService } from "./built-in-blocking.service";
+import { CompanionDbService } from "./companion-db.service";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
 import { DomainGroupsController } from "./domain-groups.controller";
@@ -12,6 +13,11 @@ import { DomainGroupsService } from "./domain-groups.service";
 import { DomainListController } from "./domain-list-cache.controller";
 import { DomainListCacheService } from "./domain-list-cache.service";
 import { DomainListPersistenceService } from "./domain-list-persistence.service";
+import { LogAlertsEmailService } from "./log-alerts-email.service";
+import { LogAlertsController } from "./log-alerts.controller";
+import { LogAlertsEvaluatorService } from "./log-alerts-evaluator.service";
+import { LogAlertsRulesService } from "./log-alerts-rules.service";
+import { NodeOverviewCacheInterceptor } from "./node-overview-cache.interceptor";
 import { QueryLogSqliteService } from "./query-log-sqlite.service";
 import { SplitHorizonPtrStateService } from "./split-horizon-ptr/split-horizon-ptr-state.service";
 import { SplitHorizonPtrController } from "./split-horizon-ptr/split-horizon-ptr.controller";
@@ -37,6 +43,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
   ],
   providers: [
     TechnitiumService,
+    CompanionDbService,
     QueryLogSqliteService,
     AdvancedBlockingService,
     BuiltInBlockingService,
@@ -44,7 +51,11 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     SplitHorizonPtrStateService,
     DomainListCacheService,
     DomainListPersistenceService,
+    LogAlertsEmailService,
+    LogAlertsEvaluatorService,
+    LogAlertsRulesService,
     DomainGroupsService,
+    NodeOverviewCacheInterceptor,
     DnsFilteringSnapshotService,
     DhcpSnapshotService,
     ZoneSnapshotService,
@@ -131,6 +142,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     BuiltInBlockingController,
     DomainGroupsController,
     DomainListController,
+    LogAlertsController,
     SplitHorizonPtrController,
   ],
   exports: [

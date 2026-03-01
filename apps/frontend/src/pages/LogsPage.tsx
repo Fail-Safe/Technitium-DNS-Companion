@@ -1,27 +1,28 @@
 import {
-    faBan,
-    faCheck,
-    faFile,
-    faRotate,
-    faSquare,
-    faSquareCheck,
-    faTowerBroadcast,
+  faBan,
+  faCheck,
+  faChevronUp,
+  faFile,
+  faRotate,
+  faSquare,
+  faSquareCheck,
+  faTowerBroadcast,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { ReactNode } from "react";
 import React, {
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
 import { Tooltip } from "react-tooltip";
 import "react-tooltip/dist/react-tooltip.css";
 import {
-    SkeletonLogEntries,
-    SkeletonLogsStats,
-    SkeletonLogsSummary,
+  SkeletonLogEntries,
+  SkeletonLogsStats,
+  SkeletonLogsSummary,
 } from "../components/common/LoadingSkeleton";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
 import { apiFetch, getAuthRedirectReason } from "../config";
@@ -29,20 +30,30 @@ import { useTechnitiumState } from "../context/useTechnitiumState";
 import { useToast } from "../context/useToast";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type {
-    AdvancedBlockingConfig,
-    AdvancedBlockingGroup,
+  AdvancedBlockingConfig,
+  AdvancedBlockingGroup,
 } from "../types/advancedBlocking";
+import type {
+  LogAlertEvaluatorStatus,
+  LogAlertCapabilitiesResponse,
+  LogAlertRule,
+  LogAlertRuleDraft,
+  RunLogAlertEvaluatorResponse,
+  LogAlertRulesStorageStatus,
+  LogAlertsSendTestEmailResponse,
+  LogAlertsSmtpStatus,
+} from "../types/logAlerts";
 import type { DomainCheckResult, DomainListEntry } from "../types/technitium";
 import type {
-    TechnitiumCombinedNodeLogSnapshot,
-    TechnitiumCombinedQueryLogEntry,
-    TechnitiumCombinedQueryLogPage,
-    TechnitiumNodeQueryLogEnvelope,
-    TechnitiumQueryLogStorageStatus,
+  TechnitiumCombinedNodeLogSnapshot,
+  TechnitiumCombinedQueryLogEntry,
+  TechnitiumCombinedQueryLogPage,
+  TechnitiumNodeQueryLogEnvelope,
+  TechnitiumQueryLogStorageStatus,
 } from "../types/technitiumLogs";
 import {
-    buildDomainExclusionMatchers,
-    isDomainExcluded,
+  buildDomainExclusionMatchers,
+  isDomainExcluded,
 } from "../utils/domainExclusion";
 
 type ViewMode = "combined" | "node";
@@ -84,6 +95,33 @@ const DOMAIN_BLOCK_SOURCE_FETCH_TIMEOUT_MS = 12000;
 
 const DOMAIN_BLOCK_SOURCE_HOVER_DELAY_MS = 300;
 const DOMAIN_BLOCK_SOURCE_CACHE_MAX_ENTRIES = 500;
+
+function formatLocalDateTime(iso: string | undefined | null): string {
+  if (!iso) return "Never";
+  try {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    return date.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
 
 type OptionalColumnKey = "protocol" | "qclass" | "answer" | "responseTime";
 
@@ -156,6 +194,45 @@ const isEntryBlocked = (entry: TechnitiumCombinedQueryLogEntry): boolean => {
   return false;
 };
 
+const readApiErrorMessage = async (
+  response: Response,
+  fallback: string,
+): Promise<string> => {
+  try {
+    const payload = (await response.json()) as
+      | { message?: string; missing?: string[]; error?: string }
+      | string;
+
+    if (typeof payload === "string" && payload.trim().length > 0) {
+      return payload;
+    }
+
+    if (payload && typeof payload === "object") {
+      const message =
+        typeof payload.message === "string" ? payload.message.trim() : "";
+      const missing = Array.isArray(payload.missing) ? payload.missing : [];
+      const error =
+        typeof payload.error === "string" ? payload.error.trim() : "";
+
+      if (message && missing.length > 0) {
+        return `${message} Missing: ${missing.join(", ")}`;
+      }
+
+      if (message) {
+        return message;
+      }
+
+      if (error) {
+        return error;
+      }
+    }
+  } catch {
+    // ignore parse errors and use fallback
+  }
+
+  return fallback;
+};
+
 /**
  * Floating action button for toggling live tail mode
  */
@@ -182,11 +259,11 @@ function FloatingLiveToggle({
         isLive ? "Pause live updates" : (pausedTitle ?? "Resume live updates")
       }
       style={
-        isLive ?
-          ({
-            "--refresh-duration": `${refreshSeconds}s`,
-          } as React.CSSProperties)
-        : undefined
+        isLive
+          ? ({
+              "--refresh-duration": `${refreshSeconds}s`,
+            } as React.CSSProperties)
+          : undefined
       }
     >
       {/* Progress ring (only shown when live) */}
@@ -206,7 +283,7 @@ function FloatingLiveToggle({
       )}
 
       {/* Icon */}
-      {isLive ?
+      {isLive ? (
         <svg
           className="logs-page__floating-live-icon"
           viewBox="0 0 24 24"
@@ -219,7 +296,8 @@ function FloatingLiveToggle({
           <rect x="6" y="4" width="4" height="16" />
           <rect x="14" y="4" width="4" height="16" />
         </svg>
-      : <svg
+      ) : (
+        <svg
           className="logs-page__floating-live-icon"
           viewBox="0 0 24 24"
           fill="none"
@@ -230,7 +308,7 @@ function FloatingLiveToggle({
         >
           <polygon points="5 3 19 12 5 21 5 3" />
         </svg>
-      }
+      )}
     </button>
   );
 }
@@ -634,7 +712,7 @@ const buildTableColumns = (
               }
             }}
           >
-            {hasHostname && hasIp ?
+            {hasHostname && hasIp ? (
               <>
                 <div className="logs-page__client-hostname">
                   {entry.clientName}
@@ -643,14 +721,15 @@ const buildTableColumns = (
                   {entry.clientIpAddress}
                 </div>
               </>
-            : hasHostname ?
+            ) : hasHostname ? (
               <div className="logs-page__client-hostname">
                 {entry.clientName}
               </div>
-            : <div className="logs-page__client-ip">
+            ) : (
+              <div className="logs-page__client-ip">
                 {entry.clientIpAddress}
               </div>
-            }
+            )}
           </div>
         );
       },
@@ -722,9 +801,8 @@ const buildTableColumns = (
       cellClassName: "logs-page__cell--status",
       render: (entry) => {
         const blocked = isEntryBlocked(entry);
-        const statusClass =
-          blocked ?
-            "logs-page__status-button--blocked"
+        const statusClass = blocked
+          ? "logs-page__status-button--blocked"
           : "logs-page__status-button--allowed";
         const label = blocked ? "Blocked" : "Allowed";
         const hoverLabel = blocked ? "Allow?" : "Block?";
@@ -824,9 +902,11 @@ const buildTableColumns = (
 
         if (entry.responseType) {
           const iconChar =
-            entry.responseType === "Blocked" ? "🚫"
-            : entry.responseType === "Allowed" ? "✅"
-            : "📄";
+            entry.responseType === "Blocked"
+              ? "🚫"
+              : entry.responseType === "Allowed"
+                ? "✅"
+                : "📄";
           tooltipHtml += `<div style="margin-top: 8px;"><strong>Status:</strong> ${iconChar} ${escapeTooltipHtml(entry.responseType)}</div>`;
         }
 
@@ -1072,9 +1152,9 @@ function SwipeableCard({
     if (Math.abs(diffX) > maxSwipe) {
       const excess = Math.abs(diffX) - maxSwipe;
       offset =
-        diffX > 0 ?
-          maxSwipe + excess * resistanceFactor
-        : -maxSwipe - excess * resistanceFactor;
+        diffX > 0
+          ? maxSwipe + excess * resistanceFactor
+          : -maxSwipe - excess * resistanceFactor;
     }
 
     setTouchCurrent(currentX);
@@ -1204,9 +1284,9 @@ const renderCardsView = (
   if (entries.length === 0) {
     return (
       <div className="logs-page__cards-empty">
-        {isFilteringActive ?
-          "No log entries match the current filters."
-        : "No log entries found for the selected view."}
+        {isFilteringActive
+          ? "No log entries match the current filters."
+          : "No log entries found for the selected view."}
       </div>
     );
   }
@@ -1318,9 +1398,9 @@ const renderCardsView = (
                 className={`logs-page__card-status logs-page__card-status--${responseBadge.className}`}
                 onClick={() => onStatusClick(entry)}
                 title={
-                  isBlocked ?
-                    "Blocked - Click to allow"
-                  : "Allowed - Click to block"
+                  isBlocked
+                    ? "Blocked - Click to allow"
+                    : "Allowed - Click to block"
                 }
               >
                 {responseBadge.icon}
@@ -1351,7 +1431,7 @@ const renderCardsView = (
                   }}
                   title="Click to filter by client"
                 >
-                  {entry.clientName && entry.clientName.trim().length > 0 ?
+                  {entry.clientName && entry.clientName.trim().length > 0 ? (
                     <div className="logs-page__card-client-info">
                       <div className="logs-page__card-client-hostname">
                         {entry.clientName}
@@ -1362,7 +1442,9 @@ const renderCardsView = (
                         </div>
                       )}
                     </div>
-                  : (entry.clientIpAddress ?? "—")}
+                  ) : (
+                    (entry.clientIpAddress ?? "—")
+                  )}
                 </span>
               </div>
               {!deduplicateDomains && (
@@ -1390,15 +1472,15 @@ const renderCardsView = (
               <div className="logs-page__card-row">
                 <span className="logs-page__card-label">Time:</span>
                 <span className="logs-page__card-value">
-                  {entry.timestamp ?
-                    new Date(entry.timestamp).toLocaleString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                    })
-                  : "—"}
+                  {entry.timestamp
+                    ? new Date(entry.timestamp).toLocaleString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        second: "2-digit",
+                      })
+                    : "—"}
                 </span>
               </div>
               {columnVisibility.responseTime &&
@@ -1632,9 +1714,8 @@ const LogTableRow = React.memo<LogTableRowProps>(
         {activeColumns.map((column) => {
           const content = column.render(entry);
           const title = column.getTitle ? column.getTitle(entry) : undefined;
-          const cellClass =
-            column.cellClassName ?
-              `${column.cellClassName} logs-page__cell`
+          const cellClass = column.cellClassName
+            ? `${column.cellClassName} logs-page__cell`
             : "logs-page__cell";
 
           return (
@@ -1679,6 +1760,852 @@ export function LogsPage() {
   } = useTechnitiumState();
 
   const { pushToast } = useToast();
+
+  const [smtpStatus, setSmtpStatus] = useState<LogAlertsSmtpStatus | null>(
+    null,
+  );
+  const [smtpStatusLoading, setSmtpStatusLoading] = useState(false);
+  const [smtpStatusError, setSmtpStatusError] = useState<string | null>(null);
+  const [smtpTestSending, setSmtpTestSending] = useState(false);
+  const [smtpTestRecipient, setSmtpTestRecipient] = useState("");
+  const [smtpTestSubject, setSmtpTestSubject] = useState(
+    "Technitium DNS Companion SMTP test",
+  );
+  const [smtpTestBody, setSmtpTestBody] = useState(
+    "If you received this message, log alerts SMTP is configured correctly.",
+  );
+  const [logAlertCapabilities, setLogAlertCapabilities] =
+    useState<LogAlertCapabilitiesResponse | null>(null);
+  const [logAlertRulesStorageStatus, setLogAlertRulesStorageStatus] =
+    useState<LogAlertRulesStorageStatus | null>(null);
+  const [logAlertRules, setLogAlertRules] = useState<LogAlertRule[]>([]);
+  const [logAlertRulesLoading, setLogAlertRulesLoading] = useState(false);
+  const [logAlertRulesError, setLogAlertRulesError] = useState<string | null>(
+    null,
+  );
+  const [logAlertEvaluatorStatus, setLogAlertEvaluatorStatus] =
+    useState<LogAlertEvaluatorStatus | null>(null);
+  const [logAlertEvaluatorLoading, setLogAlertEvaluatorLoading] =
+    useState(false);
+  const [logAlertEvaluatorRunning, setLogAlertEvaluatorRunning] =
+    useState(false);
+  const [logAlertEvaluatorToggling, setLogAlertEvaluatorToggling] =
+    useState(false);
+  const [logAlertRuleSubmitting, setLogAlertRuleSubmitting] = useState(false);
+  const [logAlertRuleActionId, setLogAlertRuleActionId] = useState<
+    string | null
+  >(null);
+  const [logAlertRuleRecipientsInput, setLogAlertRuleRecipientsInput] =
+    useState("");
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [isSmtpExpanded, setIsSmtpExpanded] = useState(false);
+  const [evaluatorIntervalInput, setEvaluatorIntervalInput] = useState("");
+  const [evaluatorIntervalSaving, setEvaluatorIntervalSaving] = useState(false);
+  const [evaluatorLookbackInput, setEvaluatorLookbackInput] = useState("");
+  const [evaluatorLookbackSaving, setEvaluatorLookbackSaving] = useState(false);
+  const [logAlertRuleDraft, setLogAlertRuleDraft] = useState<LogAlertRuleDraft>(
+    {
+      name: "",
+      enabled: true,
+      outcomeMode: "blocked-only",
+      domainPattern: "",
+      domainPatternType: "exact",
+      clientIdentifier: "",
+      advancedBlockingGroupNames: [],
+      debounceSeconds: 900,
+      emailRecipients: [],
+    },
+  );
+  const logAlertDefaultsAppliedRef = useRef(false);
+  const [activeTab, setActiveTab] = useState<"logs" | "alerts">("logs");
+  const [availableAbGroups, setAvailableAbGroups] = useState<string[]>([]);
+  const [knownClients, setKnownClients] = useState<
+    { ip: string; hostname?: string }[]
+  >([]);
+
+  const isAdvancedBlockingActive =
+    blockingStatus?.nodes?.some(
+      (n) => n.advancedBlockingInstalled === true && n.advancedBlockingEnabled === true,
+    ) ?? false;
+
+  const loadSmtpStatus = useCallback(async () => {
+    setSmtpStatusLoading(true);
+    setSmtpStatusError(null);
+
+    try {
+      const response = await apiFetch("/nodes/log-alerts/smtp/status");
+      if (!response.ok) {
+        const message = await readApiErrorMessage(
+          response,
+          `Failed to load SMTP status (${response.status}).`,
+        );
+        throw new Error(message);
+      }
+
+      const payload = (await response.json()) as LogAlertsSmtpStatus;
+      setSmtpStatus(payload);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to load SMTP status.";
+      setSmtpStatusError(message);
+      pushToast({ message, tone: "info", timeout: 5000 });
+    } finally {
+      setSmtpStatusLoading(false);
+    }
+  }, [pushToast]);
+
+  const sendSmtpTestEmail = useCallback(async () => {
+    const recipient = smtpTestRecipient.trim();
+    if (!recipient) {
+      pushToast({
+        message: "Enter at least one email recipient.",
+        tone: "info",
+        timeout: 4000,
+      });
+      return;
+    }
+
+    setSmtpTestSending(true);
+    try {
+      const response = await apiFetch("/nodes/log-alerts/smtp/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: recipient
+            .split(",")
+            .map((value) => value.trim())
+            .filter((value) => value.length > 0),
+          subject: smtpTestSubject.trim() || undefined,
+          text: smtpTestBody.trim() || undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const message = await readApiErrorMessage(
+          response,
+          `Failed to send SMTP test email (${response.status}).`,
+        );
+        throw new Error(message);
+      }
+
+      const payload = (await response.json()) as LogAlertsSendTestEmailResponse;
+      const acceptedCount = payload.accepted?.length ?? 0;
+      const rejectedCount = payload.rejected?.length ?? 0;
+
+      pushToast({
+        message: `SMTP test sent. Accepted: ${acceptedCount}${rejectedCount > 0 ? `, rejected: ${rejectedCount}` : ""}.`,
+        tone: rejectedCount > 0 ? "info" : "success",
+        timeout: 5000,
+      });
+
+      await loadSmtpStatus();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to send SMTP test.";
+      pushToast({ message, tone: "error", timeout: 6000 });
+    } finally {
+      setSmtpTestSending(false);
+    }
+  }, [
+    loadSmtpStatus,
+    pushToast,
+    smtpTestBody,
+    smtpTestRecipient,
+    smtpTestSubject,
+  ]);
+
+  useEffect(() => {
+    void loadSmtpStatus();
+  }, [loadSmtpStatus]);
+
+  const parseEmailRecipients = useCallback((raw: string): string[] => {
+    return raw
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+  }, []);
+
+  const loadLogAlertEvaluatorStatus = useCallback(async () => {
+    setLogAlertEvaluatorLoading(true);
+    try {
+      const response = await apiFetch("/nodes/log-alerts/evaluator/status");
+      if (!response.ok) {
+        const message = await readApiErrorMessage(
+          response,
+          `Failed to load log alert evaluator status (${response.status}).`,
+        );
+        throw new Error(message);
+      }
+
+      const payload =
+        (await response.json()) as Partial<LogAlertEvaluatorStatus>;
+      setLogAlertEvaluatorStatus({
+        enabled: payload.enabled === true,
+        running: payload.running === true,
+        intervalMs:
+          typeof payload.intervalMs === "number" && payload.intervalMs > 0
+            ? payload.intervalMs
+            : 60_000,
+        maxEntriesPerPage:
+          typeof payload.maxEntriesPerPage === "number" &&
+          payload.maxEntriesPerPage > 0
+            ? payload.maxEntriesPerPage
+            : 500,
+        maxPagesPerRun:
+          typeof payload.maxPagesPerRun === "number" &&
+          payload.maxPagesPerRun > 0
+            ? payload.maxPagesPerRun
+            : 3,
+        lookbackSeconds:
+          typeof payload.lookbackSeconds === "number" &&
+          payload.lookbackSeconds > 0
+            ? payload.lookbackSeconds
+            : 900,
+        sqliteReady: payload.sqliteReady === true,
+        smtpReady: payload.smtpReady === true,
+        lastRunAt: payload.lastRunAt,
+        lastSuccessfulRunAt: payload.lastSuccessfulRunAt,
+        lastRunError: payload.lastRunError,
+        lastRunDryRun: payload.lastRunDryRun,
+        lastScannedEntries: payload.lastScannedEntries,
+        lastEvaluatedRules: payload.lastEvaluatedRules,
+        lastMatchedRules: payload.lastMatchedRules,
+        lastAlertsSent: payload.lastAlertsSent,
+      });
+      const intervalSec = Math.round(
+        (typeof payload.intervalMs === "number" && payload.intervalMs > 0
+          ? payload.intervalMs
+          : 60_000) / 1000,
+      );
+      setEvaluatorIntervalInput(String(intervalSec));
+      setEvaluatorLookbackInput(
+        String(
+          typeof payload.lookbackSeconds === "number" &&
+            payload.lookbackSeconds > 0
+            ? payload.lookbackSeconds
+            : 900,
+        ),
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to load evaluator status.";
+      pushToast({ message, tone: "info", timeout: 5000 });
+    } finally {
+      setLogAlertEvaluatorLoading(false);
+    }
+  }, [pushToast]);
+
+  const toggleEvaluatorEnabled = useCallback(async () => {
+    const newEnabled = !logAlertEvaluatorStatus?.enabled;
+    setLogAlertEvaluatorToggling(true);
+    try {
+      const response = await apiFetch("/nodes/log-alerts/evaluator/enabled", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: newEnabled }),
+      });
+      if (!response.ok) {
+        const message = await readApiErrorMessage(
+          response,
+          `Failed to update evaluator (${response.status}).`,
+        );
+        throw new Error(message);
+      }
+      const payload =
+        (await response.json()) as Partial<LogAlertEvaluatorStatus>;
+      setLogAlertEvaluatorStatus((previous) =>
+        previous
+          ? { ...previous, enabled: payload.enabled === true }
+          : previous,
+      );
+      pushToast({
+        message: newEnabled ? "Evaluator enabled." : "Evaluator disabled.",
+        tone: "success",
+        timeout: 3000,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to update evaluator.";
+      pushToast({ message, tone: "error", timeout: 5000 });
+    } finally {
+      setLogAlertEvaluatorToggling(false);
+    }
+  }, [logAlertEvaluatorStatus?.enabled, pushToast]);
+
+  const saveEvaluatorInterval = useCallback(async () => {
+    const seconds = Number.parseInt(evaluatorIntervalInput, 10);
+    if (!Number.isFinite(seconds) || seconds < 10) {
+      pushToast({
+        message: "Interval must be at least 10 seconds.",
+        tone: "info",
+        timeout: 4000,
+      });
+      return;
+    }
+    setEvaluatorIntervalSaving(true);
+    try {
+      const response = await apiFetch("/nodes/log-alerts/evaluator/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intervalMs: seconds * 1000 }),
+      });
+      if (!response.ok) {
+        const message = await readApiErrorMessage(
+          response,
+          `Failed to update evaluator interval (${response.status}).`,
+        );
+        throw new Error(message);
+      }
+      const payload =
+        (await response.json()) as Partial<LogAlertEvaluatorStatus>;
+      setLogAlertEvaluatorStatus((previous) =>
+        previous
+          ? {
+              ...previous,
+              intervalMs: payload.intervalMs ?? previous.intervalMs,
+            }
+          : previous,
+      );
+      pushToast({
+        message: "Evaluator interval updated.",
+        tone: "success",
+        timeout: 3000,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to update evaluator interval.";
+      pushToast({ message, tone: "error", timeout: 5000 });
+    } finally {
+      setEvaluatorIntervalSaving(false);
+    }
+  }, [evaluatorIntervalInput, pushToast]);
+
+  const saveEvaluatorLookback = useCallback(async () => {
+    const seconds = Number.parseInt(evaluatorLookbackInput, 10);
+    if (!Number.isFinite(seconds) || seconds < 60) {
+      pushToast({
+        message: "Lookback must be at least 60 seconds.",
+        tone: "info",
+        timeout: 4000,
+      });
+      return;
+    }
+    setEvaluatorLookbackSaving(true);
+    try {
+      const response = await apiFetch("/nodes/log-alerts/evaluator/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lookbackSeconds: seconds }),
+      });
+      if (!response.ok) {
+        const message = await readApiErrorMessage(
+          response,
+          `Failed to update evaluator lookback (${response.status}).`,
+        );
+        throw new Error(message);
+      }
+      const payload =
+        (await response.json()) as Partial<LogAlertEvaluatorStatus>;
+      setLogAlertEvaluatorStatus((previous) =>
+        previous
+          ? {
+              ...previous,
+              lookbackSeconds:
+                payload.lookbackSeconds ?? previous.lookbackSeconds,
+            }
+          : previous,
+      );
+      pushToast({
+        message: "Evaluator lookback updated.",
+        tone: "success",
+        timeout: 3000,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to update evaluator lookback.";
+      pushToast({ message, tone: "error", timeout: 5000 });
+    } finally {
+      setEvaluatorLookbackSaving(false);
+    }
+  }, [evaluatorLookbackInput, pushToast]);
+
+  const loadLogAlertRulesSection = useCallback(async () => {
+    try {
+      const [capabilitiesResponse, statusResponse] = await Promise.all([
+        apiFetch("/nodes/log-alerts/capabilities"),
+        apiFetch("/nodes/log-alerts/rules/status"),
+      ]);
+
+      if (!capabilitiesResponse.ok) {
+        const message = await readApiErrorMessage(
+          capabilitiesResponse,
+          `Failed to load log alert capabilities (${capabilitiesResponse.status}).`,
+        );
+        throw new Error(message);
+      }
+      if (!statusResponse.ok) {
+        const message = await readApiErrorMessage(
+          statusResponse,
+          `Failed to load log alert rules status (${statusResponse.status}).`,
+        );
+        throw new Error(message);
+      }
+
+      const capabilitiesPayload =
+        (await capabilitiesResponse.json()) as Partial<LogAlertCapabilitiesResponse>;
+      const statusPayload =
+        (await statusResponse.json()) as Partial<LogAlertRulesStorageStatus>;
+
+      const isOutcomeMode = (
+        value: unknown,
+      ): value is LogAlertRuleDraft["outcomeMode"] =>
+        value === "blocked-only" || value === "all-outcomes";
+      const isDomainPatternType = (
+        value: unknown,
+      ): value is LogAlertRuleDraft["domainPatternType"] =>
+        value === "exact" || value === "wildcard" || value === "regex";
+      const defaultOutcomeModes: LogAlertCapabilitiesResponse["outcomeModes"] =
+        ["blocked-only", "all-outcomes"];
+      const defaultPatternTypes: LogAlertCapabilitiesResponse["domainPatternTypes"] =
+        ["exact", "wildcard", "regex"];
+
+      const normalizedOutcomeModes =
+        Array.isArray(capabilitiesPayload.outcomeModes) &&
+        capabilitiesPayload.outcomeModes.length > 0
+          ? (() => {
+              const values =
+                capabilitiesPayload.outcomeModes.filter(isOutcomeMode);
+              return values.length > 0 ? values : defaultOutcomeModes;
+            })()
+          : defaultOutcomeModes;
+      const normalizedPatternTypes =
+        Array.isArray(capabilitiesPayload.domainPatternTypes) &&
+        capabilitiesPayload.domainPatternTypes.length > 0
+          ? (() => {
+              const values =
+                capabilitiesPayload.domainPatternTypes.filter(
+                  isDomainPatternType,
+                );
+              return values.length > 0 ? values : defaultPatternTypes;
+            })()
+          : defaultPatternTypes;
+
+      const capabilities: LogAlertCapabilitiesResponse = {
+        outcomeModes: normalizedOutcomeModes,
+        domainPatternTypes: normalizedPatternTypes,
+        defaults: {
+          outcomeMode:
+            capabilitiesPayload.defaults?.outcomeMode &&
+            normalizedOutcomeModes.includes(
+              capabilitiesPayload.defaults.outcomeMode,
+            )
+              ? capabilitiesPayload.defaults.outcomeMode
+              : "blocked-only",
+          domainPatternType:
+            capabilitiesPayload.defaults?.domainPatternType &&
+            normalizedPatternTypes.includes(
+              capabilitiesPayload.defaults.domainPatternType,
+            )
+              ? capabilitiesPayload.defaults.domainPatternType
+              : "exact",
+          debounceSeconds:
+            typeof capabilitiesPayload.defaults?.debounceSeconds === "number" &&
+            capabilitiesPayload.defaults.debounceSeconds > 0
+              ? capabilitiesPayload.defaults.debounceSeconds
+              : 900,
+        },
+        notes: Array.isArray(capabilitiesPayload.notes)
+          ? capabilitiesPayload.notes
+          : [],
+      };
+      const status: LogAlertRulesStorageStatus = {
+        enabled: statusPayload.enabled !== false,
+        ready: statusPayload.ready === true,
+        dbPath: statusPayload.dbPath,
+      };
+      setLogAlertCapabilities(capabilities);
+      setLogAlertRulesStorageStatus(status);
+
+      if (!logAlertDefaultsAppliedRef.current) {
+        setLogAlertRuleDraft((previous) => ({
+          ...previous,
+          outcomeMode: capabilities.defaults.outcomeMode,
+          domainPatternType: capabilities.defaults.domainPatternType,
+          debounceSeconds: capabilities.defaults.debounceSeconds,
+        }));
+        logAlertDefaultsAppliedRef.current = true;
+      }
+
+      if (!status.ready) {
+        setLogAlertRules([]);
+        return;
+      }
+
+      const rulesResponse = await apiFetch("/nodes/log-alerts/rules");
+      if (!rulesResponse.ok) {
+        const message = await readApiErrorMessage(
+          rulesResponse,
+          `Failed to load log alert rules (${rulesResponse.status}).`,
+        );
+        throw new Error(message);
+      }
+      const rules = (await rulesResponse.json()) as LogAlertRule[];
+      setLogAlertRules(rules);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to load log alert rules.";
+      setLogAlertRulesError(message);
+      pushToast({ message, tone: "info", timeout: 5000 });
+    } finally {
+      setLogAlertRulesLoading(false);
+    }
+  }, [pushToast]);
+
+  useEffect(() => {
+    void loadLogAlertRulesSection();
+  }, [loadLogAlertRulesSection]);
+
+  useEffect(() => {
+    void loadLogAlertEvaluatorStatus();
+  }, [loadLogAlertEvaluatorStatus]);
+
+  const resetLogAlertRuleDraft = useCallback(() => {
+    setLogAlertRuleDraft({
+      name: "",
+      enabled: true,
+      outcomeMode: logAlertCapabilities?.defaults.outcomeMode ?? "blocked-only",
+      domainPattern: "",
+      domainPatternType:
+        logAlertCapabilities?.defaults.domainPatternType ?? "exact",
+      clientIdentifier: "",
+      advancedBlockingGroupNames: [],
+      debounceSeconds: logAlertCapabilities?.defaults.debounceSeconds ?? 900,
+      emailRecipients: [],
+    });
+    setLogAlertRuleRecipientsInput("");
+  }, [logAlertCapabilities]);
+
+  const createLogAlertRule = useCallback(async () => {
+    const recipients = parseEmailRecipients(logAlertRuleRecipientsInput);
+
+    if (recipients.length === 0) {
+      pushToast({
+        message: "Enter at least one rule recipient email address.",
+        tone: "info",
+        timeout: 4000,
+      });
+      return;
+    }
+
+    const clientId = logAlertRuleDraft.clientIdentifier?.trim();
+    const hasGroups = (logAlertRuleDraft.advancedBlockingGroupNames?.length ?? 0) > 0;
+    if (!clientId && !hasGroups) {
+      pushToast({
+        message:
+          "Enter a client identifier, select an Advanced Blocking group, or both.",
+        tone: "info",
+        timeout: 5000,
+      });
+      return;
+    }
+
+    setLogAlertRuleSubmitting(true);
+    try {
+      const response = await apiFetch("/nodes/log-alerts/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rule: {
+            ...logAlertRuleDraft,
+            name: logAlertRuleDraft.name.trim(),
+            domainPattern: logAlertRuleDraft.domainPattern.trim(),
+            clientIdentifier:
+              logAlertRuleDraft.clientIdentifier?.trim() || undefined,
+            advancedBlockingGroupNames:
+              logAlertRuleDraft.advancedBlockingGroupNames?.length
+                ? logAlertRuleDraft.advancedBlockingGroupNames
+                : undefined,
+            debounceSeconds: Math.max(
+              1,
+              Math.floor(Number(logAlertRuleDraft.debounceSeconds) || 0),
+            ),
+            emailRecipients: recipients,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const message = await readApiErrorMessage(
+          response,
+          `Failed to create log alert rule (${response.status}).`,
+        );
+        throw new Error(message);
+      }
+
+      pushToast({
+        message: "Log alert rule created.",
+        tone: "success",
+        timeout: 4000,
+      });
+
+      resetLogAlertRuleDraft();
+      await loadLogAlertRulesSection();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to create log alert rule.";
+      pushToast({ message, tone: "error", timeout: 6000 });
+    } finally {
+      setLogAlertRuleSubmitting(false);
+    }
+  }, [
+    loadLogAlertRulesSection,
+    logAlertRuleDraft,
+    logAlertRuleRecipientsInput,
+    parseEmailRecipients,
+    pushToast,
+    resetLogAlertRuleDraft,
+  ]);
+
+  const updateLogAlertRule = useCallback(async () => {
+    if (!editingRuleId) return;
+    const recipients = parseEmailRecipients(logAlertRuleRecipientsInput);
+    if (recipients.length === 0) {
+      pushToast({
+        message: "Enter at least one rule recipient email address.",
+        tone: "info",
+        timeout: 4000,
+      });
+      return;
+    }
+    const clientId = logAlertRuleDraft.clientIdentifier?.trim();
+    const hasGroups = (logAlertRuleDraft.advancedBlockingGroupNames?.length ?? 0) > 0;
+    if (!clientId && !hasGroups) {
+      pushToast({
+        message:
+          "Enter a client identifier, select an Advanced Blocking group, or both.",
+        tone: "info",
+        timeout: 5000,
+      });
+      return;
+    }
+    setLogAlertRuleSubmitting(true);
+    try {
+      const response = await apiFetch(
+        `/nodes/log-alerts/rules/${editingRuleId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rule: {
+              ...logAlertRuleDraft,
+              name: logAlertRuleDraft.name.trim(),
+              domainPattern: logAlertRuleDraft.domainPattern.trim(),
+              clientIdentifier:
+                logAlertRuleDraft.clientIdentifier?.trim() || undefined,
+              advancedBlockingGroupNames:
+                logAlertRuleDraft.advancedBlockingGroupNames?.length
+                  ? logAlertRuleDraft.advancedBlockingGroupNames
+                  : undefined,
+              debounceSeconds: Math.max(
+                1,
+                Math.floor(Number(logAlertRuleDraft.debounceSeconds) || 0),
+              ),
+              emailRecipients: recipients,
+            },
+          }),
+        },
+      );
+      if (!response.ok) {
+        const message = await readApiErrorMessage(
+          response,
+          `Failed to update log alert rule (${response.status}).`,
+        );
+        throw new Error(message);
+      }
+      pushToast({
+        message: "Log alert rule updated.",
+        tone: "success",
+        timeout: 4000,
+      });
+      setEditingRuleId(null);
+      resetLogAlertRuleDraft();
+      await loadLogAlertRulesSection();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to update log alert rule.";
+      pushToast({ message, tone: "error", timeout: 6000 });
+    } finally {
+      setLogAlertRuleSubmitting(false);
+    }
+  }, [
+    editingRuleId,
+    loadLogAlertRulesSection,
+    logAlertRuleDraft,
+    logAlertRuleRecipientsInput,
+    parseEmailRecipients,
+    pushToast,
+    resetLogAlertRuleDraft,
+  ]);
+
+  const startEditRule = useCallback((rule: LogAlertRule) => {
+    setEditingRuleId(rule.id);
+    setLogAlertRuleDraft({
+      name: rule.name,
+      enabled: rule.enabled,
+      outcomeMode: rule.outcomeMode,
+      domainPattern: rule.domainPattern,
+      domainPatternType: rule.domainPatternType,
+      clientIdentifier: rule.clientIdentifier ?? "",
+      advancedBlockingGroupNames: rule.advancedBlockingGroupNames ?? [],
+      debounceSeconds: rule.debounceSeconds,
+      emailRecipients: rule.emailRecipients,
+    });
+    setLogAlertRuleRecipientsInput(rule.emailRecipients.join(", "));
+  }, []);
+
+  const startCloneRule = useCallback((rule: LogAlertRule) => {
+    setEditingRuleId(null);
+    setLogAlertRuleDraft({
+      name: `Copy of ${rule.name}`,
+      enabled: rule.enabled,
+      outcomeMode: rule.outcomeMode,
+      domainPattern: rule.domainPattern,
+      domainPatternType: rule.domainPatternType,
+      clientIdentifier: rule.clientIdentifier ?? "",
+      advancedBlockingGroupNames: rule.advancedBlockingGroupNames ?? [],
+      debounceSeconds: rule.debounceSeconds,
+      emailRecipients: rule.emailRecipients,
+    });
+    setLogAlertRuleRecipientsInput(rule.emailRecipients.join(", "));
+  }, []);
+
+  const toggleLogAlertRuleEnabled = useCallback(
+    async (ruleId: string, enabled: boolean) => {
+      setLogAlertRuleActionId(ruleId);
+      try {
+        const response = await apiFetch(
+          `/nodes/log-alerts/rules/${ruleId}/enabled`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ enabled }),
+          },
+        );
+
+        if (!response.ok) {
+          const message = await readApiErrorMessage(
+            response,
+            `Failed to update log alert rule (${response.status}).`,
+          );
+          throw new Error(message);
+        }
+
+        const updatedRule = (await response.json()) as LogAlertRule;
+        setLogAlertRules((previous) =>
+          previous.map((rule) =>
+            rule.id === updatedRule.id ? updatedRule : rule,
+          ),
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to update log alert rule.";
+        pushToast({ message, tone: "error", timeout: 6000 });
+      } finally {
+        setLogAlertRuleActionId(null);
+      }
+    },
+    [pushToast],
+  );
+
+  const deleteLogAlertRule = useCallback(
+    async (ruleId: string) => {
+      setLogAlertRuleActionId(ruleId);
+      try {
+        const response = await apiFetch(`/nodes/log-alerts/rules/${ruleId}`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok) {
+          const message = await readApiErrorMessage(
+            response,
+            `Failed to delete log alert rule (${response.status}).`,
+          );
+          throw new Error(message);
+        }
+
+        setLogAlertRules((previous) =>
+          previous.filter((rule) => rule.id !== ruleId),
+        );
+        pushToast({
+          message: "Log alert rule deleted.",
+          tone: "success",
+          timeout: 4000,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to delete log alert rule.";
+        pushToast({ message, tone: "error", timeout: 6000 });
+      } finally {
+        setLogAlertRuleActionId(null);
+      }
+    },
+    [pushToast],
+  );
+
+  const runLogAlertEvaluator = useCallback(
+    async (dryRun: boolean) => {
+      setLogAlertEvaluatorRunning(true);
+      try {
+        const response = await apiFetch("/nodes/log-alerts/evaluator/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dryRun }),
+        });
+        if (!response.ok) {
+          const message = await readApiErrorMessage(
+            response,
+            `Failed to run log alert evaluator (${response.status}).`,
+          );
+          throw new Error(message);
+        }
+
+        const payload = (await response.json()) as RunLogAlertEvaluatorResponse;
+        pushToast({
+          message: dryRun
+            ? `Evaluator dry run complete. Rules matched: ${payload.matchedRules}.`
+            : `Evaluator run complete. Alerts sent: ${payload.alertsSent}.`,
+          tone: "success",
+          timeout: 5000,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to run log alert evaluator.";
+        pushToast({ message, tone: "error", timeout: 6000 });
+      } finally {
+        setLogAlertEvaluatorRunning(false);
+        await loadLogAlertEvaluatorStatus();
+      }
+    },
+    [loadLogAlertEvaluatorStatus, pushToast],
+  );
 
   type DomainBlockSourceLookupStatus = "idle" | "loading" | "loaded" | "error";
 
@@ -1935,8 +2862,9 @@ export function LogsPage() {
 
   const getBlockMatchDedupeKey = useCallback(
     (match: DomainListEntry): string => {
-      const sortedGroups =
-        match.groups ? [...match.groups].sort().join(",") : "";
+      const sortedGroups = match.groups
+        ? [...match.groups].sort().join(",")
+        : "";
 
       return [
         match.type ?? "",
@@ -1953,9 +2881,11 @@ export function LogsPage() {
   const formatBlockMatchLabel = useCallback(
     (match: DomainListEntry): string => {
       const typeLabel =
-        match.type === "manual-blocked" ? "Manual"
-        : match.type === "regex-blocklist" ? "Regex"
-        : "Blocklist";
+        match.type === "manual-blocked"
+          ? "Manual"
+          : match.type === "regex-blocklist"
+            ? "Regex"
+            : "Blocklist";
 
       const sourceLabel = match.source === "manual" ? "manual" : match.source;
 
@@ -1967,8 +2897,8 @@ export function LogsPage() {
         details.push(`groups=${[...match.groups].sort().join(", ")}`);
       }
 
-      return details.length > 0 ?
-          `${typeLabel}: ${sourceLabel} (${details.join(", ")})`
+      return details.length > 0
+        ? `${typeLabel}: ${sourceLabel} (${details.join(", ")})`
         : `${typeLabel}: ${sourceLabel}`;
     },
     [],
@@ -2145,11 +3075,11 @@ export function LogsPage() {
         const anchorClientNameRaw =
           anchor?.getAttribute("data-client-hostname")?.trim() ?? "";
 
-        const anchorClientFqdn =
-          anchorClientNameRaw.includes(".") ? anchorClientNameRaw : "";
-        const anchorClientHostname =
-          anchorClientNameRaw.includes(".") ?
-            anchorClientNameRaw.split(".")[0]
+        const anchorClientFqdn = anchorClientNameRaw.includes(".")
+          ? anchorClientNameRaw
+          : "";
+        const anchorClientHostname = anchorClientNameRaw.includes(".")
+          ? anchorClientNameRaw.split(".")[0]
           : anchorClientNameRaw;
 
         const items: LogsTableContextMenuItem[] = [];
@@ -2232,11 +3162,11 @@ export function LogsPage() {
         const anchorClientNameRaw =
           domainAnchor.getAttribute("data-client-hostname")?.trim() ?? "";
 
-        const anchorClientFqdn =
-          anchorClientNameRaw.includes(".") ? anchorClientNameRaw : "";
-        const anchorClientHostname =
-          anchorClientNameRaw.includes(".") ?
-            anchorClientNameRaw.split(".")[0]
+        const anchorClientFqdn = anchorClientNameRaw.includes(".")
+          ? anchorClientNameRaw
+          : "";
+        const anchorClientHostname = anchorClientNameRaw.includes(".")
+          ? anchorClientNameRaw.split(".")[0]
           : anchorClientNameRaw;
 
         const items: LogsTableContextMenuItem[] = [];
@@ -2308,9 +3238,8 @@ export function LogsPage() {
           container.getAttribute("data-copy-hostname")?.trim() ?? "";
 
         const clientFqdn = clientNameRaw.includes(".") ? clientNameRaw : "";
-        const clientHostname =
-          clientNameRaw.includes(".") ?
-            clientNameRaw.split(".")[0]
+        const clientHostname = clientNameRaw.includes(".")
+          ? clientNameRaw.split(".")[0]
           : clientNameRaw;
 
         const items: LogsTableContextMenuItem[] = [];
@@ -2354,8 +3283,8 @@ export function LogsPage() {
           return null;
         }
 
-        return value.length > 0 && value !== "—" ?
-            [{ label: "Copy", action: "copy", value }]
+        return value.length > 0 && value !== "—"
+          ? [{ label: "Copy", action: "copy", value }]
           : null;
       }
 
@@ -2365,8 +3294,8 @@ export function LogsPage() {
         return null;
       }
 
-      return value.length > 0 && value !== "—" ?
-          [{ label: "Copy", action: "copy", value }]
+      return value.length > 0 && value !== "—"
+        ? [{ label: "Copy", action: "copy", value }]
         : null;
     },
     [],
@@ -2545,24 +3474,24 @@ export function LogsPage() {
   const queryLogRetentionHours = queryLogStorageStatus?.retentionHours ?? 24;
 
   const logsSourceKind =
-    displayMode === "tail" ? "live"
-    : storedLogsReady ? "stored"
-    : "live";
+    displayMode === "tail" ? "live" : storedLogsReady ? "stored" : "live";
 
   const logsSourceLabel =
     logsSourceKind === "stored" ? "Stored (SQLite)" : "Live (Nodes)";
   const logsSourceTitle =
-    logsSourceKind === "stored" ?
-      "Stored logs are served from Companion's SQLite store (fast + cacheable)."
-    : "Live logs are fetched directly from the Technitium DNS nodes.";
+    logsSourceKind === "stored"
+      ? "Stored logs are served from Companion's SQLite store (fast + cacheable)."
+      : "Live logs are fetched directly from the Technitium DNS nodes.";
 
   const storedResponseCache = queryLogStorageStatus?.responseCache;
   const storedResponseCacheLookups =
     (storedResponseCache?.hits ?? 0) + (storedResponseCache?.misses ?? 0);
   const storedResponseCacheHitRatePercent =
-    storedResponseCache && storedResponseCacheLookups > 0 ?
-      Math.round((storedResponseCache.hits / storedResponseCacheLookups) * 100)
-    : null;
+    storedResponseCache && storedResponseCacheLookups > 0
+      ? Math.round(
+          (storedResponseCache.hits / storedResponseCacheLookups) * 100,
+        )
+      : null;
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -2820,9 +3749,9 @@ export function LogsPage() {
               ...entry,
               // Ensure some "blocked" keyword for the classifier.
               responseType:
-                currentResponse && currentResponse.trim().length > 0 ?
-                  currentResponse
-                : "blocked",
+                currentResponse && currentResponse.trim().length > 0
+                  ? currentResponse
+                  : "blocked",
             };
           }
 
@@ -2844,11 +3773,11 @@ export function LogsPage() {
 
           return {
             ...entry,
-            responseType:
-              hasBlockedKeyword ? "recursive"
-              : currentResponse && currentResponse.trim().length > 0 ?
-                currentResponse
-              : "recursive",
+            responseType: hasBlockedKeyword
+              ? "recursive"
+              : currentResponse && currentResponse.trim().length > 0
+                ? currentResponse
+                : "recursive",
           };
         });
 
@@ -2873,11 +3802,11 @@ export function LogsPage() {
       // Stored logs persist the best-known client hostname, so prefer hostname
       // when it exists (fallback to IP).
       const filterValue =
-        displayMode === "paginated" ?
-          hostname && hostname !== ip ?
-            hostname
-          : ip || hostname
-        : hostname || ip;
+        displayMode === "paginated"
+          ? hostname && hostname !== ip
+            ? hostname
+            : ip || hostname
+          : hostname || ip;
 
       if (!filterValue) {
         return;
@@ -3068,9 +3997,8 @@ export function LogsPage() {
       // Default to Advanced UI in this case so we can render a consistent modal, then the user can
       // proceed once data is available. (If Advanced is actually unavailable, the modal will surface
       // that cleanly rather than silently doing the wrong thing.)
-      const uiMethod: BlockingUiMethod =
-        nodeStatusAfterEnsure ?
-          getUiBlockingMethodForNode(entry.nodeId)
+      const uiMethod: BlockingUiMethod = nodeStatusAfterEnsure
+        ? getUiBlockingMethodForNode(entry.nodeId)
         : "advanced";
 
       if (uiMethod === "advanced") {
@@ -3109,14 +4037,13 @@ export function LogsPage() {
 
         // Default action should be the OPPOSITE of current state
         // If currently blocked → offer to allow; if currently allowed → offer to block
-        let initialAction: "block" | "allow" =
-          blockedDominant ?
-            "allow" // Currently blocked, so offer to allow
-          : allowDominant ?
-            "block" // Currently allowed, so offer to block
-          : entry.responseType && isEntryBlocked(entry) ?
-            "allow" // Blocked by list, so offer to allow
-          : "block"; // Not blocked, so offer to block
+        let initialAction: "block" | "allow" = blockedDominant
+          ? "allow" // Currently blocked, so offer to allow
+          : allowDominant
+            ? "block" // Currently allowed, so offer to block
+            : entry.responseType && isEntryBlocked(entry)
+              ? "allow" // Blocked by list, so offer to allow
+              : "block"; // Not blocked, so offer to block
 
         // If called from swipe (forceToggle=true), invert the action again
         if (forceToggle) {
@@ -3126,20 +4053,24 @@ export function LogsPage() {
         const sourceMatches =
           initialAction === "block" ? blockRegexPatterns : allowRegexPatterns;
         const initialMode: "exact" | "regex" =
-          initialAction === "block" ?
-            hasBlockedExact ? "exact"
-            : sourceMatches.length > 0 ? "regex"
-            : "exact"
-          : hasAllowedExact ? "exact"
-          : sourceMatches.length > 0 ? "regex"
-          : "exact";
+          initialAction === "block"
+            ? hasBlockedExact
+              ? "exact"
+              : sourceMatches.length > 0
+                ? "regex"
+                : "exact"
+            : hasAllowedExact
+              ? "exact"
+              : sourceMatches.length > 0
+                ? "regex"
+                : "exact";
         const initialRegex =
           sourceMatches.length > 0 ? sourceMatches[0] : defaultRegex;
 
         const initialSelection =
-          initialAction === "block" ?
-            blockSummary.selected
-          : allowSummary.selected;
+          initialAction === "block"
+            ? blockSummary.selected
+            : allowSummary.selected;
         setBlockSelectedGroups(new Set(initialSelection));
         setBlockingAction(initialAction);
         setBlockMode(initialMode);
@@ -3261,9 +4192,9 @@ export function LogsPage() {
         if (entry.qname) visibleDomains.add(entry.qname);
       });
     } else {
-      (mode === "combined" ?
-        combinedPage?.entries
-      : nodeSnapshot?.data.entries
+      (mode === "combined"
+        ? combinedPage?.entries
+        : nodeSnapshot?.data.entries
       )?.forEach((entry) => {
         if (entry.qname) visibleDomains.add(entry.qname);
       });
@@ -3611,12 +4542,12 @@ export function LogsPage() {
     () => (blockDomainValue ? buildDefaultRegexPattern(blockDomainValue) : ""),
     [blockDomainValue],
   );
-  const blockNodeLabel =
-    blockDialog ?
-      (nodeMap.get(blockDialog.entry.nodeId)?.name ?? blockDialog.entry.nodeId)
+  const blockNodeLabel = blockDialog
+    ? (nodeMap.get(blockDialog.entry.nodeId)?.name ?? blockDialog.entry.nodeId)
     : "";
-  const isBlockedEntry =
-    blockDialog ? isEntryBlocked(blockDialog.entry) : false;
+  const isBlockedEntry = blockDialog
+    ? isEntryBlocked(blockDialog.entry)
+    : false;
 
   const blockDialogBlockingMethod: "advanced" | "built-in" | undefined =
     useMemo(() => {
@@ -3731,17 +4662,20 @@ export function LogsPage() {
   }, [bulkAction, advancedBlocking, blockAvailableGroups]);
 
   const modalTitle =
-    blockingAction === "allow" ? "Allow domain"
-    : isBlockedEntry ? "Update block"
-    : "Block domain";
-  const confirmButtonLabel =
-    isBlocking ? "Saving…"
-    : blockingAction === "block" ?
-      blockCoverage.length > 0 ?
-        "Save changes"
-      : "Block domain"
-    : allowCoverage.length > 0 ? "Save changes"
-    : "Allow domain";
+    blockingAction === "allow"
+      ? "Allow domain"
+      : isBlockedEntry
+        ? "Update block"
+        : "Block domain";
+  const confirmButtonLabel = isBlocking
+    ? "Saving…"
+    : blockingAction === "block"
+      ? blockCoverage.length > 0
+        ? "Save changes"
+        : "Block domain"
+      : allowCoverage.length > 0
+        ? "Save changes"
+        : "Allow domain";
 
   const handleToggleBlockGroup = useCallback(
     (groupName: string) => {
@@ -3783,10 +4717,11 @@ export function LogsPage() {
         domain,
         nextAction,
       );
-      const nextMode: "exact" | "regex" =
-        summary.hasExact ? "exact"
-        : summary.regexMatches.length > 0 ? "regex"
-        : "exact";
+      const nextMode: "exact" | "regex" = summary.hasExact
+        ? "exact"
+        : summary.regexMatches.length > 0
+          ? "regex"
+          : "exact";
 
       setBlockingAction(nextAction);
       setBlockSelectedGroups(new Set(summary.selected));
@@ -3882,9 +4817,9 @@ export function LogsPage() {
     }
 
     const uiMethod =
-      hasConflict && blockDialog.selectedBlockingSystem ?
-        blockDialog.selectedBlockingSystem
-      : getUiBlockingMethodForNode(blockDialog.entry.nodeId);
+      hasConflict && blockDialog.selectedBlockingSystem
+        ? blockDialog.selectedBlockingSystem
+        : getUiBlockingMethodForNode(blockDialog.entry.nodeId);
 
     // Built-in Blocking path: apply exact allow/block immediately (no groups/regex)
     if (uiMethod === "built-in") {
@@ -3925,9 +4860,9 @@ export function LogsPage() {
         closeBlockDialog("confirm");
       } catch (error) {
         setBlockError(
-          error instanceof Error ?
-            error.message
-          : "Failed to apply built-in blocking change.",
+          error instanceof Error
+            ? error.message
+            : "Failed to apply built-in blocking change.",
         );
         setIsBlocking(false);
       }
@@ -3957,9 +4892,9 @@ export function LogsPage() {
     if (blockMode === "regex") {
       if (regexPattern.length === 0) {
         setBlockError(
-          blockingAction === "block" ?
-            "Provide a regex pattern to block."
-          : "Provide a regex pattern to allow.",
+          blockingAction === "block"
+            ? "Provide a regex pattern to block."
+            : "Provide a regex pattern to allow.",
         );
         return;
       }
@@ -4130,11 +5065,13 @@ export function LogsPage() {
         return {
           ...group,
           blocked: blockedChanged ? nextBlocked : group.blocked,
-          blockedRegex:
-            blockedRegexChanged ? nextBlockedRegex : group.blockedRegex,
+          blockedRegex: blockedRegexChanged
+            ? nextBlockedRegex
+            : group.blockedRegex,
           allowed: allowedChanged ? nextAllowed : group.allowed,
-          allowedRegex:
-            allowedRegexChanged ? nextAllowedRegex : group.allowedRegex,
+          allowedRegex: allowedRegexChanged
+            ? nextAllowedRegex
+            : group.allowedRegex,
         };
       }
 
@@ -4309,9 +5246,9 @@ export function LogsPage() {
       closeBlockDialog("confirm");
     } catch (error) {
       setBlockError(
-        error instanceof Error ?
-          error.message
-        : `Failed to ${bulkAction} domains.`,
+        error instanceof Error
+          ? error.message
+          : `Failed to ${bulkAction} domains.`,
       );
       setIsBlocking(false);
     }
@@ -4561,9 +5498,11 @@ export function LogsPage() {
 
     const load = async () => {
       const nextLoadingState =
-        displayMode === "tail" ? "refreshing"
-        : isAutoRefresh || hasLoadedAnyLogsRef.current ? "refreshing"
-        : "loading";
+        displayMode === "tail"
+          ? "refreshing"
+          : isAutoRefresh || hasLoadedAnyLogsRef.current
+            ? "refreshing"
+            : "loading";
       setLoadingState(nextLoadingState);
       setErrorMessage(undefined);
 
@@ -4573,9 +5512,11 @@ export function LogsPage() {
 
         if (mode === "combined") {
           const combinedLogsLoader =
-            displayMode === "tail" ? loadCombinedLogs
-            : storedLogsReady ? loadStoredCombinedLogs
-            : loadCombinedLogs;
+            displayMode === "tail"
+              ? loadCombinedLogs
+              : storedLogsReady
+                ? loadStoredCombinedLogs
+                : loadCombinedLogs;
 
           const filterParams = {
             pageNumber: effectivePageNumber,
@@ -4663,9 +5604,11 @@ export function LogsPage() {
           }
         } else if (selectedNodeId) {
           const nodeLogsLoader =
-            displayMode === "tail" ? loadNodeLogs
-            : storedLogsReady ? loadStoredNodeLogs
-            : loadNodeLogs;
+            displayMode === "tail"
+              ? loadNodeLogs
+              : storedLogsReady
+                ? loadStoredNodeLogs
+                : loadNodeLogs;
 
           const data = await nodeLogsLoader(
             selectedNodeId,
@@ -5077,12 +6020,12 @@ export function LogsPage() {
 
     // Calculate average response time
     const avgResponseTime =
-      stats.responseTimes.length > 0 ?
-        Math.round(
-          stats.responseTimes.reduce((sum, time) => sum + time, 0) /
-            stats.responseTimes.length,
-        )
-      : null;
+      stats.responseTimes.length > 0
+        ? Math.round(
+            stats.responseTimes.reduce((sum, time) => sum + time, 0) /
+              stats.responseTimes.length,
+          )
+        : null;
 
     // Calculate percentages
     const allowedPercent =
@@ -5259,6 +6202,42 @@ export function LogsPage() {
     return () => window.cancelAnimationFrame(id);
   }, [pageJumpOpen]);
 
+  useEffect(() => {
+    if (!isAdvancedBlockingActive) {
+      setAvailableAbGroups([]);
+      return;
+    }
+    // Trigger a load if advancedBlocking hasn't been fetched yet.
+    void ensureAdvancedBlockingLoaded();
+    const names = [
+      ...new Set(
+        (advancedBlocking?.nodes ?? [])
+          .flatMap((n) => n.config?.groups ?? [])
+          .map((g) => g.name)
+          .filter(Boolean),
+      ),
+    ].sort();
+    setAvailableAbGroups(names);
+  }, [isAdvancedBlockingActive, advancedBlocking, ensureAdvancedBlockingLoaded]);
+
+  useEffect(() => {
+    if (activeTab !== "alerts") return;
+    void (async () => {
+      try {
+        const response = await apiFetch("/nodes/known-clients");
+        if (response.ok) {
+          const data = (await response.json()) as {
+            ip: string;
+            hostname?: string;
+          }[];
+          setKnownClients(data);
+        }
+      } catch {
+        // best-effort; leave list empty
+      }
+    })();
+  }, [activeTab]);
+
   const handleModeChange = (nextMode: ViewMode) => {
     setIsAutoRefresh(false);
     setMode(nextMode);
@@ -5315,18 +6294,18 @@ export function LogsPage() {
           domainTooltipAnchorRef.current = anchor;
 
           const baseHtml =
-            typeof content === "string" ? content : (
-              (anchor.getAttribute("data-tooltip-content") ?? "")
-            );
+            typeof content === "string"
+              ? content
+              : (anchor.getAttribute("data-tooltip-content") ?? "");
 
           const domain = anchor.getAttribute("data-domain") ?? "";
           const nodeId = anchor.getAttribute("data-node-id") ?? "";
           const isBlocked = anchor.getAttribute("data-is-blocked") === "true";
 
           const key =
-            domain && nodeId ?
-              getDomainBlockSourceCacheKey(nodeId, domain)
-            : null;
+            domain && nodeId
+              ? getDomainBlockSourceCacheKey(nodeId, domain)
+              : null;
 
           const lookup = key ? domainBlockSourceByKey[key] : undefined;
           const rawMatches =
@@ -5335,16 +6314,16 @@ export function LogsPage() {
             ) ?? [];
 
           const allMatches =
-            rawMatches.length <= 1 ?
-              rawMatches
-            : Array.from(
-                new Map(
-                  rawMatches.map((match) => [
-                    getBlockMatchDedupeKey(match),
-                    match,
-                  ]),
-                ).values(),
-              );
+            rawMatches.length <= 1
+              ? rawMatches
+              : Array.from(
+                  new Map(
+                    rawMatches.map((match) => [
+                      getBlockMatchDedupeKey(match),
+                      match,
+                    ]),
+                  ).values(),
+                );
           const expanded =
             key !== null &&
             expandedDomainTooltipKey === key &&
@@ -5397,12 +6376,13 @@ export function LogsPage() {
 
                   {lookup?.status === "loaded" && (
                     <>
-                      {allMatches.length === 0 ?
+                      {allMatches.length === 0 ? (
                         <div style={{ marginTop: 6, opacity: 0.8 }}>
                           No matching blocklist/rule found (may be blocked by a
                           different mechanism).
                         </div>
-                      : <div style={{ marginTop: 6 }}>
+                      ) : (
+                        <div style={{ marginTop: 6 }}>
                           {matchesToShow.map((match, index) => (
                             <div
                               key={
@@ -5440,15 +6420,15 @@ export function LogsPage() {
                               }}
                               style={{ marginTop: 8 }}
                             >
-                              {expanded ?
-                                "Show less"
-                              : remaining > 0 ?
-                                `Show ${remaining} more`
-                              : "Show more"}
+                              {expanded
+                                ? "Show less"
+                                : remaining > 0
+                                  ? `Show ${remaining} more`
+                                  : "Show more"}
                             </button>
                           )}
                         </div>
-                      }
+                      )}
                     </>
                   )}
                 </div>
@@ -5474,1939 +6454,2802 @@ export function LogsPage() {
           </div>
         </header>
 
-        {loadingState === "error" && errorMessage && (
-          <div className="logs-page__error">
-            {(
-              getAuthRedirectReason() === "session-expired" &&
-              /\(401\)/.test(errorMessage)
-            ) ?
-              <>Companion session expired — redirecting to sign in…</>
-            : <>Failed to load logs: {errorMessage}</>}
-          </div>
-        )}
-
-        {loadingState === "loading" ?
-          <SkeletonLogsStats />
-        : <div
-            className={`logs-page__statistics ${loadingState === "refreshing" ? "refreshing" : ""} ${statisticsExpanded ? "expanded" : "collapsed"}`}
-          >
-            <div className="logs-page__statistics-header">
-              <button
-                type="button"
-                className="logs-page__statistics-toggle"
-                onClick={() => setStatisticsExpanded(!statisticsExpanded)}
-                aria-expanded={statisticsExpanded}
-              >
-                <span className="logs-page__statistics-toggle-icon">
-                  {statisticsExpanded ? "▼" : "▶"}
-                </span>
-                {!statisticsExpanded && (
-                  <span className="logs-page__statistics-summary">
-                    <strong>{statistics.total}</strong> queries ·
-                    <span className="stat-blocked">
-                      {" "}
-                      {statistics.blocked} blocked ({statistics.blockedPercent}
-                      %)
-                    </span>{" "}
-                    ·
-                    <span className="stat-allowed">
-                      {" "}
-                      {statistics.allowed} allowed ({statistics.allowedPercent}
-                      %)
-                    </span>
-                  </span>
-                )}
-                {statisticsExpanded && <span>Statistics</span>}
-              </button>
-            </div>
-
-            {statisticsExpanded && (
-              <div className="logs-page__statistics-content">
-                <div className="logs-page__stat logs-page__stat--total">
-                  <span className="logs-page__stat-icon" aria-hidden="true">
-                    📊
-                  </span>
-                  <span className="logs-page__stat-value">
-                    {statistics.total.toLocaleString()}
-                  </span>
-                  <span className="logs-page__stat-label">queries</span>
-                </div>
-                <div className="logs-page__stat logs-page__stat--allowed">
-                  <span className="logs-page__stat-icon" aria-hidden="true">
-                    ✓
-                  </span>
-                  <span className="logs-page__stat-value">
-                    {statistics.allowed.toLocaleString()}
-                  </span>
-                  <span className="logs-page__stat-label">
-                    Allowed ({statistics.allowedPercent}%)
-                  </span>
-                </div>
-                <div className="logs-page__stat logs-page__stat--blocked">
-                  <span className="logs-page__stat-icon" aria-hidden="true">
-                    ✕
-                  </span>
-                  <span className="logs-page__stat-value">
-                    {statistics.blocked.toLocaleString()}
-                  </span>
-                  <span className="logs-page__stat-label">
-                    Blocked ({statistics.blockedPercent}%)
-                  </span>
-                </div>
-                <div className="logs-page__stat logs-page__stat--cached">
-                  <span className="logs-page__stat-icon" aria-hidden="true">
-                    ⚡
-                  </span>
-                  <span className="logs-page__stat-value">
-                    {statistics.cached.toLocaleString()}
-                  </span>
-                  <span className="logs-page__stat-label">
-                    Cached ({statistics.cachedPercent}%)
-                  </span>
-                </div>
-                <div className="logs-page__stat logs-page__stat--clients">
-                  <span className="logs-page__stat-icon" aria-hidden="true">
-                    👥
-                  </span>
-                  <span className="logs-page__stat-value">
-                    {statistics.uniqueClients}
-                  </span>
-                  <span className="logs-page__stat-label">unique clients</span>
-                </div>
-                <div className="logs-page__stat logs-page__stat--domains">
-                  <span className="logs-page__stat-icon" aria-hidden="true">
-                    🌐
-                  </span>
-                  <span className="logs-page__stat-value">
-                    {statistics.uniqueDomains}
-                  </span>
-                  <span className="logs-page__stat-label">unique domains</span>
-                </div>
-                {statistics.avgResponseTime !== null && (
-                  <div className="logs-page__stat logs-page__stat--response-time">
-                    <span className="logs-page__stat-icon" aria-hidden="true">
-                      ⏱️
-                    </span>
-                    <span className="logs-page__stat-value">
-                      {statistics.avgResponseTime}ms
-                    </span>
-                    <span className="logs-page__stat-label">avg response</span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        }
-
-        {loadingState === "loading" ?
-          <SkeletonLogsSummary />
-        : <div
-            className={`logs-page__summary ${loadingState === "refreshing" ? "refreshing" : ""}`}
-          >
-            {displayMode === "tail" ?
-              <>
-                <div>
-                  <strong>Buffer size:</strong> {tailBuffer.length} /{" "}
-                  {tailBufferSize}
-                </div>
-                <div className="logs-page__summary-line">
-                  <strong>Mode:</strong> Live Tail
-                  <span className="logs-page__summary-pills">
-                    <span
-                      className={`logs-page__meta-pill logs-page__meta-pill--${logsSourceKind}`}
-                      title={logsSourceTitle}
-                    >
-                      {logsSourceLabel}
-                    </span>
-                    {duplicatesRemoved > 0 && (
-                      <span
-                        className="logs-page__meta-pill logs-page__meta-pill--dedupe"
-                        title="Duplicates removed by domain deduplication"
-                      >
-                        Deduped {duplicatesRemoved.toLocaleString()}
-                      </span>
-                    )}
-                  </span>
-                </div>
-                <div>
-                  <strong>Last update:</strong>{" "}
-                  {tailNewestTimestamp ?
-                    new Date(tailNewestTimestamp).toLocaleString()
-                  : "—"}
-                </div>
-                {isFilteringActive && (
-                  <div>
-                    <strong>Matching entries:</strong>{" "}
-                    {totalMatchingEntries.toLocaleString()}
-                  </div>
-                )}
-                {duplicatesRemoved > 0 && (
-                  <div className="logs-page__duplicate-info">
-                    <strong>
-                      <FontAwesomeIcon icon={faRotate} /> Duplicates removed:
-                    </strong>{" "}
-                    <span className="logs-page__duplicate-count">
-                      {duplicatesRemoved.toLocaleString()}
-                    </span>
-                  </div>
-                )}
-              </>
-            : <>
-                <div>
-                  <strong>Total entries:</strong>{" "}
-                  {totalEntries.toLocaleString()}
-                </div>
-                <div>
-                  <strong>Rows per page:</strong> {paginatedRowsPerPage}
-                </div>
-                <div className="logs-page__summary-line">
-                  <strong>Fetched:</strong>{" "}
-                  {mode === "combined" ?
-                    combinedPage?.fetchedAt ?
-                      new Date(combinedPage.fetchedAt).toLocaleString()
-                    : "—"
-                  : nodeSnapshot?.fetchedAt ?
-                    new Date(nodeSnapshot.fetchedAt).toLocaleString()
-                  : "—"}
-                  <span className="logs-page__summary-pills">
-                    <span
-                      className={`logs-page__meta-pill logs-page__meta-pill--${logsSourceKind}`}
-                      title={logsSourceTitle}
-                    >
-                      {logsSourceLabel}
-                    </span>
-                    {storedLogsReady && storedResponseCache?.enabled && (
-                      <span
-                        className="logs-page__meta-pill logs-page__meta-pill--cache"
-                        title={`SQLite stored-log response cache (server-side). TTL=${Math.round(storedResponseCache.ttlMs / 1000)}s, Size=${storedResponseCache.size}/${storedResponseCache.maxEntries}, Hits=${storedResponseCache.hits}, Misses=${storedResponseCache.misses}, Evictions=${storedResponseCache.evictions}`}
-                      >
-                        DB Cache
-                        {storedResponseCacheHitRatePercent !== null ?
-                          ` ${storedResponseCacheHitRatePercent}%`
-                        : ""}
-                      </span>
-                    )}
-                    {duplicatesRemoved > 0 && (
-                      <span
-                        className="logs-page__meta-pill logs-page__meta-pill--dedupe"
-                        title="Duplicates removed by domain deduplication"
-                      >
-                        Deduped {duplicatesRemoved.toLocaleString()}
-                      </span>
-                    )}
-                  </span>
-                </div>
-                {isFilteringActive && (
-                  <div>
-                    <strong>Matching entries:</strong>{" "}
-                    {totalMatchingEntries.toLocaleString()}
-                  </div>
-                )}
-              </>
-            }
-          </div>
-        }
-
-        {/* Mobile filter toggle button */}
-        <button
-          type="button"
-          className={`logs-page__filters-toggle ${filtersVisible ? "active" : ""}`}
-          onClick={() => setFiltersVisible(!filtersVisible)}
-          title={filtersVisible ? "Hide filters" : "Show filters"}
-        >
-          🔍 {filtersVisible ? "Hide" : "Show"} Filters
-          {isFilteringActive && !filtersVisible && (
-            <span className="logs-page__filters-badge">●</span>
-          )}
-        </button>
-
-        <div
-          className={`logs-page__quick-filters ${loadingState === "refreshing" ? "refreshing" : ""} ${!filtersVisible ? "logs-page__quick-filters--mobile-hidden" : ""}`}
-        >
-          {!filterTipDismissed && (
-            <div className="logs-page__filter-hint">
-              <span className="logs-page__filter-hint-text">
-                💡 <strong>Tip:</strong> Click any client or domain in the table
-                to filter. Hold Shift to combine filters.
-              </span>
-              <button
-                type="button"
-                className="logs-page__filter-hint-dismiss"
-                onClick={dismissFilterTip}
-                aria-label="Dismiss tip"
-                title="Don't show this again"
-              >
-                ✕
-              </button>
-            </div>
-          )}
-          <label className="logs-page__quick-filter">
-            <span>Start Date/Time</span>
-            <input
-              id="start-date-filter"
-              name="start-date-filter"
-              type="datetime-local"
-              value={startDate}
-              min={formatDateForInput(
-                new Date(Date.now() - queryLogRetentionHours * 60 * 60 * 1000),
-              )}
-              max={endDate || formatDateForInput(new Date())}
-              onChange={(event) => clampDateRange(event.target.value, endDate)}
-              placeholder="Start date/time"
-            />
-          </label>
-          <label className="logs-page__quick-filter">
-            <span>End Date/Time</span>
-            <input
-              id="end-date-filter"
-              name="end-date-filter"
-              type="datetime-local"
-              value={endDate}
-              min={
-                startDate ||
-                formatDateForInput(
-                  new Date(
-                    Date.now() - queryLogRetentionHours * 60 * 60 * 1000,
-                  ),
-                )
-              }
-              max={formatDateForInput(new Date())}
-              onChange={(event) =>
-                clampDateRange(startDate, event.target.value)
-              }
-              placeholder="End date/time"
-            />
-          </label>
-          <label className="logs-page__quick-filter">
-            <span>Client</span>
-            <input
-              id="client-filter"
-              name="client-filter"
-              type="text"
-              placeholder={
-                displayMode === "paginated" ?
-                  "Hostname/IP contains… (or click client)"
-                : "Contains… (or click client)"
-              }
-              value={clientFilter}
-              onChange={(event) => setClientFilter(event.target.value)}
-            />
-          </label>
-          <label className="logs-page__quick-filter">
-            <span>Response</span>
-            <select
-              id="response-filter"
-              name="response-filter"
-              value={responseFilter}
-              onChange={(event) => setResponseFilter(event.target.value)}
-            >
-              <option value="all">All</option>
-              {responseFilterOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option === EMPTY_RESPONSE_FILTER_VALUE ?
-                    "No response value"
-                  : option}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="logs-page__quick-filter">
-            <span>Status</span>
-            <select
-              id="status-filter"
-              name="status-filter"
-              value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(event.target.value as StatusFilter)
-              }
-            >
-              <option value="all">All</option>
-              <option value="blocked">Blocked</option>
-              <option value="allowed">Allowed</option>
-            </select>
-          </label>
-          {!deduplicateDomains && (
-            <label className="logs-page__quick-filter">
-              <span>Query Type</span>
-              <select
-                id="qtype-filter"
-                name="qtype-filter"
-                value={qtypeFilter}
-                onChange={(event) => setQtypeFilter(event.target.value)}
-              >
-                <option value="all">All</option>
-                {qtypeFilterOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          <label className="logs-page__quick-filter">
-            <span>Domain</span>
-            <input
-              id="domain-filter"
-              name="domain-filter"
-              type="text"
-              placeholder="Contains… (or click domain)"
-              value={domainFilter}
-              onChange={(event) => setDomainFilter(event.target.value)}
-            />
-          </label>
-          <label className="logs-page__quick-filter">
-            <span>Exclude Domains</span>
-            <input
-              id="domain-exclusion-filter"
-              name="domain-exclusion-filter"
-              type="text"
-              placeholder="*.trackingdomain.com, ads.example.net"
-              value={domainExclusionList}
-              onChange={(event) => setDomainExclusionList(event.target.value)}
-            />
-          </label>
+        <nav className="logs-page__tabs" aria-label="Query Logs tabs">
           <button
             type="button"
-            className="logs-page__filters-reset"
-            onClick={resetFilters}
-            disabled={!isFilteringActive}
+            className={
+              activeTab === "logs" ? "logs-page__tab active" : "logs-page__tab"
+            }
+            onClick={() => setActiveTab("logs")}
           >
-            Clear filters
+            Query Logs
           </button>
-          <div
-            className={`logs-page__date-presets ${storedLogsReady ? "" : "logs-page__date-presets--disabled"}`}
-            aria-disabled={!storedLogsReady}
-          >
-            {storedLogsReady ?
-              <button
-                type="button"
-                className="logs-page__date-preset"
-                onClick={() => applyDatePreset("last-24h")}
-                title="Show logs from the last 24 hours"
-              >
-                Last 24h
-              </button>
-            : <span
-                className="logs-page__date-preset-disabled"
-                title="Requires stored logs (SQLite)"
-              >
-                <button
-                  type="button"
-                  className="logs-page__date-preset"
-                  disabled
-                  aria-disabled="true"
-                >
-                  Last 24h
-                </button>
-              </span>
-            }
-
-            {storedLogsReady ?
-              <button
-                type="button"
-                className="logs-page__date-preset"
-                onClick={() => applyDatePreset("last-hour")}
-                title="Show logs from the last hour"
-              >
-                Last Hour
-              </button>
-            : <span
-                className="logs-page__date-preset-disabled"
-                title="Requires stored logs (SQLite)"
-              >
-                <button
-                  type="button"
-                  className="logs-page__date-preset"
-                  disabled
-                  aria-disabled="true"
-                >
-                  Last Hour
-                </button>
-              </span>
-            }
-
-            {storedLogsReady ?
-              <button
-                type="button"
-                className="logs-page__date-preset"
-                onClick={() => applyDatePreset("yesterday")}
-                title="Show logs from yesterday"
-              >
-                Yesterday
-              </button>
-            : <span
-                className="logs-page__date-preset-disabled"
-                title="Requires stored logs (SQLite)"
-              >
-                <button
-                  type="button"
-                  className="logs-page__date-preset"
-                  disabled
-                  aria-disabled="true"
-                >
-                  Yesterday
-                </button>
-              </span>
-            }
-
-            {storedLogsReady ?
-              <button
-                type="button"
-                className="logs-page__date-preset"
-                onClick={() => applyDatePreset("today")}
-                title="Show logs from today"
-              >
-                Today
-              </button>
-            : <span
-                className="logs-page__date-preset-disabled"
-                title="Requires stored logs (SQLite)"
-              >
-                <button
-                  type="button"
-                  className="logs-page__date-preset"
-                  disabled
-                  aria-disabled="true"
-                >
-                  Today
-                </button>
-              </span>
-            }
-
-            {(startDate || endDate) && (
-              <button
-                type="button"
-                className="logs-page__date-preset logs-page__date-preset--clear"
-                onClick={() => applyDatePreset("clear")}
-                title="Clear date filters"
-              >
-                Clear Dates
-              </button>
-            )}
-          </div>
-        </div>
-
-        {!selectionTipDismissed && (
-          <div className="logs-page__selection-tip">
-            <div className="logs-page__selection-tip-content">
-              <span className="logs-page__selection-tip-icon">💡</span>
-              <span className="logs-page__selection-tip-text">
-                <strong>Selection tip:</strong> Selecting a domain affects all
-                query types (A, AAAA, HTTPS, etc.) for that domain. Rows are
-                grouped by domain for easier identification.
-              </span>
-            </div>
-            <button
-              type="button"
-              className="logs-page__selection-tip-dismiss"
-              onClick={dismissSelectionTip}
-              aria-label="Dismiss selection tip"
-            >
-              ×
-            </button>
-          </div>
-        )}
-
-        <div
-          className={`logs-page__bulk-actions ${selectedDomains.size > 0 ? "visible" : "hidden"}`}
-        >
-          <div className="logs-page__bulk-actions-info">
-            <strong>{selectedDomains.size}</strong> domain
-            {selectedDomains.size !== 1 ? "s" : ""} selected
-          </div>
-          <div className="logs-page__bulk-actions-buttons">
-            <button
-              type="button"
-              className="logs-page__bulk-action-btn logs-page__bulk-action-btn--block"
-              onClick={() => initiateBulkAction("block")}
-            >
-              <FontAwesomeIcon icon={faBan} /> Block Selected
-            </button>
-            <button
-              type="button"
-              className="logs-page__bulk-action-btn logs-page__bulk-action-btn--allow"
-              onClick={() => initiateBulkAction("allow")}
-            >
-              ✓ Allow Selected
-            </button>
-            <button
-              type="button"
-              className="logs-page__bulk-action-btn logs-page__bulk-action-btn--clear"
-              onClick={clearSelection}
-            >
-              Clear Selection
-            </button>
-          </div>
-        </div>
-
-        {/* Mobile-optimized: Collapsible controls section */}
-        <div
-          className={`logs-page__mobile-controls ${mobileControlsExpanded ? "expanded" : "collapsed"}`}
-        >
           <button
             type="button"
-            className="logs-page__mobile-controls-toggle"
-            onClick={() => setMobileControlsExpanded(!mobileControlsExpanded)}
-            aria-expanded={mobileControlsExpanded}
+            className={
+              activeTab === "alerts"
+                ? "logs-page__tab active"
+                : "logs-page__tab"
+            }
+            onClick={() => setActiveTab("alerts")}
           >
-            <span className="logs-page__mobile-controls-icon">
-              {mobileControlsExpanded ? "▼" : "▶"}
-            </span>
-            <span className="logs-page__mobile-controls-label">
-              {mobileControlsExpanded ? "Hide Controls" : "Show Controls"}
-            </span>
-            {!mobileControlsExpanded && (
-              <span className="logs-page__mobile-controls-summary">
-                <FontAwesomeIcon
-                  icon={displayMode === "paginated" ? faFile : faTowerBroadcast}
-                />{" "}
-                ·
-                {mode === "combined" ?
-                  " Combined"
-                : ` ${nodes.find((n) => n.id === selectedNodeId)?.name || "Node"}`
-                }{" "}
-                · Page {pageNumber}/{totalPages}
-              </span>
-            )}
+            Alert Rules
           </button>
+        </nav>
 
-          <div
-            className={`logs-page__controls-content ${mobileControlsExpanded ? "visible" : "hidden"}`}
-          >
-            <div className="logs-page__controls">
-              <div className="logs-page__mode-toggle">
-                <button
-                  type="button"
-                  className={
-                    displayMode === "tail" ?
-                      "toggle-button active"
-                    : "toggle-button"
-                  }
-                  onClick={() => handleDisplayModeChange("tail")}
-                >
-                  📡 Live Tail
-                </button>
-                <button
-                  type="button"
-                  className={
-                    displayMode === "paginated" ?
-                      "toggle-button active"
-                    : "toggle-button"
-                  }
-                  onClick={() => handleDisplayModeChange("paginated")}
-                >
-                  <FontAwesomeIcon icon={faFile} /> Paginated
-                </button>
-              </div>
-              <div className="logs-page__mode-toggle">
-                <button
-                  type="button"
-                  className={
-                    mode === "combined" ?
-                      "toggle-button active"
-                    : "toggle-button"
-                  }
-                  onClick={() => handleModeChange("combined")}
-                >
-                  Combined View
-                </button>
-                <button
-                  type="button"
-                  className={
-                    mode === "node" ? "toggle-button active" : "toggle-button"
-                  }
-                  onClick={() => handleModeChange("node")}
-                >
-                  Per Node
-                </button>
-              </div>
-
-              <div className="logs-page__filters">
-                <label className="logs-page__filter">
-                  Node
-                  <select
-                    id="logs-node-selector"
-                    name="node"
-                    value={selectedNodeId}
-                    onChange={(event) => {
-                      setIsAutoRefresh(false);
-                      setSelectedNodeId(event.target.value);
+        {activeTab === "alerts" && (
+          <>
+            <section
+              className="logs-page__smtp-card"
+              aria-label="Log Alert SMTP Settings"
+            >
+              <div
+                className="logs-page__smtp-card-header"
+                style={{ cursor: "pointer" }}
+                onClick={() => setIsSmtpExpanded((v) => !v)}
+              >
+                <div>
+                  <h2>Log Alert SMTP Settings</h2>
+                  <p>
+                    {isSmtpExpanded
+                      ? "Check SMTP readiness and send a test email."
+                      : smtpStatus?.ready
+                        ? "SMTP: Ready"
+                        : "SMTP: Not configured"}
+                  </p>
+                </div>
+                <div className="logs-page__smtp-actions">
+                  {isSmtpExpanded && (
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void loadSmtpStatus();
+                      }}
+                      disabled={smtpStatusLoading}
+                    >
+                      {smtpStatusLoading ? "Refreshing…" : "Refresh status"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: "0 0.25rem",
+                      cursor: "pointer",
+                      color: "var(--color-text-secondary)",
+                      fontSize: "0.9rem",
+                      display: "flex",
+                      alignItems: "center",
+                      transition: "transform 0.3s",
+                      transform: isSmtpExpanded
+                        ? "rotate(-180deg)"
+                        : "rotate(0deg)",
                     }}
-                    disabled={mode === "combined"}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsSmtpExpanded((v) => !v);
+                    }}
+                    aria-label={
+                      isSmtpExpanded ? "Collapse SMTP" : "Expand SMTP"
+                    }
                   >
-                    {nodes.map((node) => (
-                      <option key={node.id} value={node.id}>
-                        {node.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {displayMode === "paginated" && (
-                  <label className="logs-page__filter">
-                    Page
-                    <div className="logs-page__pager">
-                      <button
-                        type="button"
-                        onClick={handlePrevPage}
-                        disabled={pageNumber <= 1 || loadingState === "loading"}
-                      >
-                        Prev
-                      </button>
-                      <span>
-                        {pageJumpOpen ?
-                          <span className="logs-page__pager-page-jump">
-                            <input
-                              ref={pageJumpInputRef}
-                              className="logs-page__pager-page-input"
-                              type="number"
-                              inputMode="numeric"
-                              min={1}
-                              max={totalPages}
-                              value={pageJumpValue}
-                              onChange={(event) =>
-                                setPageJumpValue(event.target.value)
-                              }
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                  event.preventDefault();
-                                  commitPageJump();
-                                  return;
-                                }
+                    <FontAwesomeIcon icon={faChevronUp} />
+                  </button>
+                </div>
+              </div>
 
-                                if (event.key === "Escape") {
-                                  event.preventDefault();
-                                  closePageJump();
-                                }
-                              }}
-                              onBlur={() => commitPageJump()}
-                              aria-label={`Jump to page (1 to ${totalPages})`}
-                            />
-                            <span className="logs-page__pager-page-total">
-                              / {totalPages}
-                            </span>
-                          </span>
-                        : <button
-                            type="button"
-                            className="logs-page__pager-page-button"
-                            onClick={openPageJump}
-                            title="Jump to page"
-                          >
-                            {pageNumber} / {totalPages}
-                          </button>
+              {isSmtpExpanded && (
+                <>
+                  {smtpStatusError && (
+                    <div className="logs-page__smtp-error">
+                      {smtpStatusError}
+                    </div>
+                  )}
+
+                  <div className="logs-page__smtp-status-grid">
+                    <div>
+                      <span>Status</span>
+                      <strong>
+                        {smtpStatusLoading && !smtpStatus
+                          ? "Loading…"
+                          : smtpStatus?.ready
+                            ? "Ready"
+                            : "Not ready"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Host</span>
+                      <strong>{smtpStatus?.host || "—"}</strong>
+                    </div>
+                    <div>
+                      <span>Port</span>
+                      <strong>{smtpStatus?.port ?? "—"}</strong>
+                    </div>
+                    <div>
+                      <span>Secure</span>
+                      <strong>{smtpStatus?.secure ? "Yes" : "No"}</strong>
+                    </div>
+                    <div>
+                      <span>From</span>
+                      <strong>{smtpStatus?.from || "—"}</strong>
+                    </div>
+                    <div>
+                      <span>Auth</span>
+                      <strong>
+                        {smtpStatus?.authConfigured ? "Configured" : "Missing"}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {smtpStatus && smtpStatus.missing.length > 0 && (
+                    <p className="logs-page__smtp-missing">
+                      Missing env vars: {smtpStatus.missing.join(", ")}
+                    </p>
+                  )}
+
+                  <form
+                    className="logs-page__smtp-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void sendSmtpTestEmail();
+                    }}
+                  >
+                    <label>
+                      Recipients (comma-separated)
+                      <input
+                        type="text"
+                        value={smtpTestRecipient}
+                        onChange={(event) =>
+                          setSmtpTestRecipient(event.target.value)
                         }
-                        {hasMorePages && (
+                        placeholder="admin@example.com"
+                        disabled={smtpTestSending}
+                      />
+                    </label>
+
+                    <label>
+                      Subject
+                      <input
+                        type="text"
+                        value={smtpTestSubject}
+                        onChange={(event) =>
+                          setSmtpTestSubject(event.target.value)
+                        }
+                        disabled={smtpTestSending}
+                      />
+                    </label>
+
+                    <label>
+                      Message
+                      <textarea
+                        value={smtpTestBody}
+                        onChange={(event) =>
+                          setSmtpTestBody(event.target.value)
+                        }
+                        rows={3}
+                        disabled={smtpTestSending}
+                      />
+                    </label>
+
+                    <div className="logs-page__smtp-actions">
+                      <button
+                        type="submit"
+                        className="btn btn--primary"
+                        disabled={smtpTestSending || smtpStatusLoading}
+                      >
+                        {smtpTestSending ? "Sending…" : "Send test email"}
+                      </button>
+                    </div>
+                  </form>
+                </>
+              )}
+            </section>
+
+            <section
+              className="logs-page__log-alert-rules-card"
+              aria-label="Log alert rules"
+            >
+              <div className="logs-page__log-alert-rules-header">
+                <div>
+                  <h2>Log Alert Rules</h2>
+                  <p>
+                    Create and manage rule definitions for log-based email
+                    alerts.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={() => {
+                    void loadLogAlertRulesSection();
+                    void loadLogAlertEvaluatorStatus();
+                  }}
+                  disabled={logAlertRulesLoading || logAlertEvaluatorLoading}
+                >
+                  {logAlertRulesLoading || logAlertEvaluatorLoading
+                    ? "Refreshing…"
+                    : "Refresh rules"}
+                </button>
+              </div>
+
+              {logAlertRulesError && (
+                <div className="logs-page__smtp-error">
+                  {logAlertRulesError}
+                </div>
+              )}
+
+              <div className="logs-page__log-alert-rules-status">
+                <div>
+                  <span>Storage</span>
+                  <strong>
+                    {logAlertRulesStorageStatus?.ready
+                      ? "Ready"
+                      : "Unavailable"}
+                  </strong>
+                </div>
+                <div>
+                  <span>Enabled</span>
+                  <strong>
+                    {logAlertRulesStorageStatus?.enabled === false
+                      ? "No"
+                      : "Yes"}
+                  </strong>
+                </div>
+                <div>
+                  <span>Rule count</span>
+                  <strong>{logAlertRules.length}</strong>
+                </div>
+              </div>
+
+              <div className="logs-page__log-alert-evaluator-panel">
+                <div className="logs-page__log-alert-evaluator-summary">
+                  <strong>
+                    Evaluator:{" "}
+                    {logAlertEvaluatorStatus?.enabled ? "Enabled" : "Disabled"}
+                  </strong>
+                  <span>
+                    {logAlertEvaluatorStatus?.sqliteReady
+                      ? "SQLite ready"
+                      : "SQLite not ready"}{" "}
+                    ·{" "}
+                    {logAlertEvaluatorStatus?.smtpReady
+                      ? "SMTP ready"
+                      : "SMTP not ready"}
+                  </span>
+                  <span>
+                    <label className="logs-page__evaluator-interval-label">
+                      Interval (seconds):{" "}
+                      <input
+                        type="number"
+                        min={10}
+                        step={1}
+                        value={evaluatorIntervalInput}
+                        onChange={(e) =>
+                          setEvaluatorIntervalInput(e.target.value)
+                        }
+                        className="logs-page__evaluator-interval-input"
+                        disabled={evaluatorIntervalSaving}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--xs"
+                      onClick={() => {
+                        void saveEvaluatorInterval();
+                      }}
+                      disabled={evaluatorIntervalSaving}
+                    >
+                      {evaluatorIntervalSaving ? "Saving…" : "Save"}
+                    </button>
+                  </span>
+                  <span>
+                    <label className="logs-page__evaluator-interval-label">
+                      Lookback (seconds):{" "}
+                      <input
+                        type="number"
+                        min={60}
+                        step={1}
+                        value={evaluatorLookbackInput}
+                        onChange={(e) =>
+                          setEvaluatorLookbackInput(e.target.value)
+                        }
+                        className="logs-page__evaluator-interval-input"
+                        disabled={evaluatorLookbackSaving}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--xs"
+                      onClick={() => {
+                        void saveEvaluatorLookback();
+                      }}
+                      disabled={evaluatorLookbackSaving}
+                    >
+                      {evaluatorLookbackSaving ? "Saving…" : "Save"}
+                    </button>
+                  </span>
+                  <span>
+                    Last run: {formatLocalDateTime(logAlertEvaluatorStatus?.lastRunAt)} ·
+                    Last sent: {logAlertEvaluatorStatus?.lastAlertsSent ?? 0}
+                  </span>
+                  {logAlertEvaluatorStatus?.lastRunError && (
+                    <span className="logs-page__smtp-error">
+                      Last evaluator error:{" "}
+                      {logAlertEvaluatorStatus.lastRunError}
+                    </span>
+                  )}
+                </div>
+                <div className="logs-page__smtp-actions">
+                  <button
+                    type="button"
+                    className={
+                      logAlertEvaluatorStatus?.enabled
+                        ? "btn btn--ghost"
+                        : "btn btn--primary"
+                    }
+                    onClick={() => {
+                      void toggleEvaluatorEnabled();
+                    }}
+                    disabled={
+                      logAlertEvaluatorToggling || logAlertEvaluatorLoading
+                    }
+                  >
+                    {logAlertEvaluatorToggling
+                      ? "Saving…"
+                      : logAlertEvaluatorStatus?.enabled
+                        ? "Disable evaluator"
+                        : "Enable evaluator"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--ghost"
+                    onClick={() => {
+                      void runLogAlertEvaluator(true);
+                    }}
+                    disabled={logAlertEvaluatorRunning}
+                  >
+                    {logAlertEvaluatorRunning ? "Running…" : "Test evaluation"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    onClick={() => {
+                      void runLogAlertEvaluator(false);
+                    }}
+                    disabled={logAlertEvaluatorRunning}
+                  >
+                    {logAlertEvaluatorRunning
+                      ? "Running…"
+                      : "Run evaluator now"}
+                  </button>
+                </div>
+              </div>
+
+              {!logAlertRulesStorageStatus?.ready && (
+                <p className="logs-page__smtp-missing">
+                  Rule storage is not ready. Configure backend log-alert storage
+                  and refresh.
+                </p>
+              )}
+
+              <form
+                className="logs-page__smtp-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (editingRuleId) {
+                    void updateLogAlertRule();
+                  } else {
+                    void createLogAlertRule();
+                  }
+                }}
+              >
+                <label>
+                  {editingRuleId ? "Edit rule" : "Rule name"}
+                  <input
+                    type="text"
+                    value={logAlertRuleDraft.name}
+                    onChange={(event) =>
+                      setLogAlertRuleDraft((previous) => ({
+                        ...previous,
+                        name: event.target.value,
+                      }))
+                    }
+                    placeholder="Blocked ads for kid devices"
+                    disabled={
+                      logAlertRuleSubmitting ||
+                      logAlertRulesLoading ||
+                      !logAlertRulesStorageStatus?.ready
+                    }
+                  />
+                </label>
+
+                <label>
+                  Domain pattern
+                  <input
+                    type="text"
+                    value={logAlertRuleDraft.domainPattern}
+                    onChange={(event) =>
+                      setLogAlertRuleDraft((previous) => ({
+                        ...previous,
+                        domainPattern: event.target.value,
+                      }))
+                    }
+                    placeholder="ads.example.com or *.ads.example.com"
+                    disabled={
+                      logAlertRuleSubmitting ||
+                      logAlertRulesLoading ||
+                      !logAlertRulesStorageStatus?.ready
+                    }
+                  />
+                </label>
+
+                <div className="logs-page__log-alert-rules-grid">
+                  <label>
+                    Pattern type
+                    <select
+                      value={logAlertRuleDraft.domainPatternType}
+                      onChange={(event) =>
+                        setLogAlertRuleDraft((previous) => ({
+                          ...previous,
+                          domainPatternType: event.target
+                            .value as LogAlertRuleDraft["domainPatternType"],
+                        }))
+                      }
+                      disabled={
+                        logAlertRuleSubmitting ||
+                        logAlertRulesLoading ||
+                        !logAlertRulesStorageStatus?.ready
+                      }
+                    >
+                      {(
+                        logAlertCapabilities?.domainPatternTypes ?? [
+                          "exact",
+                          "wildcard",
+                          "regex",
+                        ]
+                      ).map((patternType) => (
+                        <option key={patternType} value={patternType}>
+                          {patternType}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    Outcome mode
+                    <select
+                      value={logAlertRuleDraft.outcomeMode}
+                      onChange={(event) =>
+                        setLogAlertRuleDraft((previous) => ({
+                          ...previous,
+                          outcomeMode: event.target
+                            .value as LogAlertRuleDraft["outcomeMode"],
+                        }))
+                      }
+                      disabled={
+                        logAlertRuleSubmitting ||
+                        logAlertRulesLoading ||
+                        !logAlertRulesStorageStatus?.ready
+                      }
+                    >
+                      {(
+                        logAlertCapabilities?.outcomeModes ?? [
+                          "blocked-only",
+                          "all-outcomes",
+                        ]
+                      ).map((outcomeMode) => (
+                        <option key={outcomeMode} value={outcomeMode}>
+                          {outcomeMode}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    Debounce seconds
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={logAlertRuleDraft.debounceSeconds}
+                      onChange={(event) =>
+                        setLogAlertRuleDraft((previous) => ({
+                          ...previous,
+                          debounceSeconds: Number(event.target.value),
+                        }))
+                      }
+                      disabled={
+                        logAlertRuleSubmitting ||
+                        logAlertRulesLoading ||
+                        !logAlertRulesStorageStatus?.ready
+                      }
+                    />
+                  </label>
+
+                  <label>
+                    Enabled
+                    <select
+                      value={logAlertRuleDraft.enabled ? "true" : "false"}
+                      onChange={(event) =>
+                        setLogAlertRuleDraft((previous) => ({
+                          ...previous,
+                          enabled: event.target.value === "true",
+                        }))
+                      }
+                      disabled={
+                        logAlertRuleSubmitting ||
+                        logAlertRulesLoading ||
+                        !logAlertRulesStorageStatus?.ready
+                      }
+                    >
+                      <option value="true">Yes</option>
+                      <option value="false">No</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="logs-page__log-alert-rules-grid">
+                  <p className="logs-page__selectors-hint">
+                    At least one selector (client or group) is required.
+                  </p>
+                  <label>
+                    Client identifier{" "}
+                    <span title="Optional if Advanced Blocking groups are selected">
+                      (optional)
+                    </span>
+                    <input
+                      type="text"
+                      list="log-alert-rule-client-datalist"
+                      value={logAlertRuleDraft.clientIdentifier ?? ""}
+                      onChange={(event) =>
+                        setLogAlertRuleDraft((previous) => ({
+                          ...previous,
+                          clientIdentifier: event.target.value,
+                        }))
+                      }
+                      placeholder="192.168.1.20 or kid-tablet"
+                      disabled={
+                        logAlertRuleSubmitting ||
+                        logAlertRulesLoading ||
+                        !logAlertRulesStorageStatus?.ready
+                      }
+                    />
+                    <datalist id="log-alert-rule-client-datalist">
+                      {knownClients.map(({ ip, hostname }) =>
+                        hostname ? (
+                          <>
+                            <option key={`${ip}-name`} value={hostname}>
+                              {hostname} ({ip})
+                            </option>
+                            <option key={`${ip}-ip`} value={ip}>
+                              {ip} ({hostname})
+                            </option>
+                          </>
+                        ) : (
+                          <option key={ip} value={ip} />
+                        ),
+                      )}
+                    </datalist>
+                  </label>
+
+                  {isAdvancedBlockingActive ? (
+                    <div>
+                      <span>
+                        Advanced Blocking groups{" "}
+                        <span title="Optional if a client identifier is entered">
+                          (optional)
+                        </span>
+                      </span>
+                      {availableAbGroups.length === 0 ? (
+                        <span className="logs-page__ab-groups-hint">
+                          No groups found
+                        </span>
+                      ) : (
+                        <div className="logs-page__ab-group-pills">
+                          {availableAbGroups.map((name) => {
+                            const checked = (
+                              logAlertRuleDraft.advancedBlockingGroupNames ?? []
+                            ).includes(name);
+                            return (
+                              <label
+                                key={name}
+                                className={`logs-page__ab-group-pill${checked ? " logs-page__ab-group-pill--selected" : ""}`}
+                              >
+                                <input
+                                  className="logs-page__ab-group-pill__checkbox"
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={
+                                    logAlertRuleSubmitting ||
+                                    logAlertRulesLoading ||
+                                    !logAlertRulesStorageStatus?.ready
+                                  }
+                                  onChange={() => {
+                                    setLogAlertRuleDraft((previous) => {
+                                      const current =
+                                        previous.advancedBlockingGroupNames ??
+                                        [];
+                                      return {
+                                        ...previous,
+                                        advancedBlockingGroupNames: checked
+                                          ? current.filter((g) => g !== name)
+                                          : [...current, name],
+                                      };
+                                    });
+                                  }}
+                                />
+                                <span className="logs-page__ab-group-pill__label">
+                                  {name}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <span className="logs-page__ab-groups-hint">
+                        Click to toggle. Alerts fire if client matches any
+                        selected group.
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+
+                <label>
+                  Email recipients (comma-separated)
+                  <input
+                    type="text"
+                    value={logAlertRuleRecipientsInput}
+                    onChange={(event) =>
+                      setLogAlertRuleRecipientsInput(event.target.value)
+                    }
+                    placeholder="admin@example.com, security@example.com"
+                    disabled={
+                      logAlertRuleSubmitting ||
+                      logAlertRulesLoading ||
+                      !logAlertRulesStorageStatus?.ready
+                    }
+                  />
+                </label>
+
+                <div className="logs-page__smtp-actions">
+                  {editingRuleId && (
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      onClick={() => {
+                        setEditingRuleId(null);
+                        resetLogAlertRuleDraft();
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="btn btn--primary"
+                    disabled={
+                      logAlertRuleSubmitting ||
+                      logAlertRulesLoading ||
+                      !logAlertRulesStorageStatus?.ready
+                    }
+                  >
+                    {logAlertRuleSubmitting
+                      ? "Saving…"
+                      : editingRuleId
+                        ? "Save changes"
+                        : "Create rule"}
+                  </button>
+                </div>
+              </form>
+
+              <div className="logs-page__log-alert-rule-list">
+                {logAlertRules.length === 0 ? (
+                  <p className="logs-page__smtp-missing">
+                    No log alert rules configured.
+                  </p>
+                ) : (
+                  logAlertRules.map((rule) => (
+                    <article
+                      key={rule.id}
+                      className="logs-page__log-alert-rule-item"
+                    >
+                      <div className="logs-page__log-alert-rule-item-header">
+                        <div>
+                          <h3>{rule.name}</h3>
+                          <p className="logs-page__log-alert-rule-pattern">
+                            <span className="logs-page__pattern-type-badge">
+                              {rule.domainPatternType}
+                            </span>
+                            <code>{rule.domainPattern}</code>
+                            <span className="logs-page__pattern-sep">·</span>
+                            <span className="logs-page__outcome-badge">
+                              {rule.outcomeMode === "blocked-only" ? "blocked only" : "all outcomes"}
+                            </span>
+                          </p>
+                        </div>
+                        <div className="logs-page__rule-item-actions">
                           <span
-                            className="logs-page__more-results-warning"
-                            title="Fetch limit reached. Use more specific filters to see additional results."
+                            className={`logs-page__log-alert-rule-state ${rule.enabled ? "logs-page__log-alert-rule-state--enabled" : "logs-page__log-alert-rule-state--disabled"}`}
                           >
-                            ⚠️ More results may exist
+                            {rule.enabled ? "Enabled" : "Disabled"}
+                          </span>
+                          <div className="logs-page__smtp-actions">
+                            <button
+                              type="button"
+                              className="btn btn--ghost"
+                              onClick={() => startEditRule(rule)}
+                              disabled={logAlertRuleActionId === rule.id}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--ghost"
+                              onClick={() => startCloneRule(rule)}
+                              disabled={logAlertRuleActionId === rule.id}
+                            >
+                              Clone
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--ghost"
+                              onClick={() => {
+                                void toggleLogAlertRuleEnabled(
+                                  rule.id,
+                                  !rule.enabled,
+                                );
+                              }}
+                              disabled={logAlertRuleActionId === rule.id}
+                            >
+                              {rule.enabled ? "Disable" : "Enable"}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--danger"
+                              onClick={() => {
+                                void deleteLogAlertRule(rule.id);
+                              }}
+                              disabled={logAlertRuleActionId === rule.id}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="logs-page__log-alert-rule-meta">
+                        <span className="logs-page__meta-label">Recipients:</span>{" "}
+                        {rule.emailRecipients.join(", ")}
+                        <span className="logs-page__pattern-sep">·</span>
+                        <span className="logs-page__meta-label">Debounce:</span>{" "}
+                        {formatDuration(rule.debounceSeconds)}
+                      </p>
+                      <div className="logs-page__log-alert-rule-meta logs-page__selectors-row">
+                        <span>
+                          <span className="logs-page__meta-label">Client:</span>{" "}
+                          {rule.clientIdentifier ? (
+                            <span className="logs-page__client-pill">{rule.clientIdentifier}</span>
+                          ) : (
+                            <span className="logs-page__client-pill logs-page__client-pill--any">any</span>
+                          )}
+                        </span>
+                        <span className="logs-page__pattern-sep">·</span>
+                        <span>
+                          <span className="logs-page__meta-label">Groups:</span>{" "}
+                          {rule.advancedBlockingGroupNames?.length ? (
+                            <span className="logs-page__group-pills">
+                              {rule.advancedBlockingGroupNames.map((g) => (
+                                <span key={g} className="logs-page__group-pill">
+                                  {g}
+                                </span>
+                              ))}
+                            </span>
+                          ) : (
+                            <span className="logs-page__client-pill logs-page__client-pill--any">any</span>
+                          )}
+                        </span>
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+            </section>
+          </>
+        )}
+
+        {activeTab === "logs" && (
+          <>
+            {loadingState === "error" && errorMessage && (
+              <div className="logs-page__error">
+                {getAuthRedirectReason() === "session-expired" &&
+                /\(401\)/.test(errorMessage) ? (
+                  <>Companion session expired — redirecting to sign in…</>
+                ) : (
+                  <>Failed to load logs: {errorMessage}</>
+                )}
+              </div>
+            )}
+
+            {loadingState === "loading" ? (
+              <SkeletonLogsStats />
+            ) : (
+              <div
+                className={`logs-page__statistics ${loadingState === "refreshing" ? "refreshing" : ""} ${statisticsExpanded ? "expanded" : "collapsed"}`}
+              >
+                <div className="logs-page__statistics-header">
+                  <button
+                    type="button"
+                    className="logs-page__statistics-toggle"
+                    onClick={() => setStatisticsExpanded(!statisticsExpanded)}
+                    aria-expanded={statisticsExpanded}
+                  >
+                    <span className="logs-page__statistics-toggle-icon">
+                      {statisticsExpanded ? "▼" : "▶"}
+                    </span>
+                    {!statisticsExpanded && (
+                      <span className="logs-page__statistics-summary">
+                        <strong>{statistics.total}</strong> queries ·
+                        <span className="stat-blocked">
+                          {" "}
+                          {statistics.blocked} blocked (
+                          {statistics.blockedPercent}
+                          %)
+                        </span>{" "}
+                        ·
+                        <span className="stat-allowed">
+                          {" "}
+                          {statistics.allowed} allowed (
+                          {statistics.allowedPercent}
+                          %)
+                        </span>
+                      </span>
+                    )}
+                    {statisticsExpanded && <span>Statistics</span>}
+                  </button>
+                </div>
+
+                {statisticsExpanded && (
+                  <div className="logs-page__statistics-content">
+                    <div className="logs-page__stat logs-page__stat--total">
+                      <span className="logs-page__stat-icon" aria-hidden="true">
+                        📊
+                      </span>
+                      <span className="logs-page__stat-value">
+                        {statistics.total.toLocaleString()}
+                      </span>
+                      <span className="logs-page__stat-label">queries</span>
+                    </div>
+                    <div className="logs-page__stat logs-page__stat--allowed">
+                      <span className="logs-page__stat-icon" aria-hidden="true">
+                        ✓
+                      </span>
+                      <span className="logs-page__stat-value">
+                        {statistics.allowed.toLocaleString()}
+                      </span>
+                      <span className="logs-page__stat-label">
+                        Allowed ({statistics.allowedPercent}%)
+                      </span>
+                    </div>
+                    <div className="logs-page__stat logs-page__stat--blocked">
+                      <span className="logs-page__stat-icon" aria-hidden="true">
+                        ✕
+                      </span>
+                      <span className="logs-page__stat-value">
+                        {statistics.blocked.toLocaleString()}
+                      </span>
+                      <span className="logs-page__stat-label">
+                        Blocked ({statistics.blockedPercent}%)
+                      </span>
+                    </div>
+                    <div className="logs-page__stat logs-page__stat--cached">
+                      <span className="logs-page__stat-icon" aria-hidden="true">
+                        ⚡
+                      </span>
+                      <span className="logs-page__stat-value">
+                        {statistics.cached.toLocaleString()}
+                      </span>
+                      <span className="logs-page__stat-label">
+                        Cached ({statistics.cachedPercent}%)
+                      </span>
+                    </div>
+                    <div className="logs-page__stat logs-page__stat--clients">
+                      <span className="logs-page__stat-icon" aria-hidden="true">
+                        👥
+                      </span>
+                      <span className="logs-page__stat-value">
+                        {statistics.uniqueClients}
+                      </span>
+                      <span className="logs-page__stat-label">
+                        unique clients
+                      </span>
+                    </div>
+                    <div className="logs-page__stat logs-page__stat--domains">
+                      <span className="logs-page__stat-icon" aria-hidden="true">
+                        🌐
+                      </span>
+                      <span className="logs-page__stat-value">
+                        {statistics.uniqueDomains}
+                      </span>
+                      <span className="logs-page__stat-label">
+                        unique domains
+                      </span>
+                    </div>
+                    {statistics.avgResponseTime !== null && (
+                      <div className="logs-page__stat logs-page__stat--response-time">
+                        <span
+                          className="logs-page__stat-icon"
+                          aria-hidden="true"
+                        >
+                          ⏱️
+                        </span>
+                        <span className="logs-page__stat-value">
+                          {statistics.avgResponseTime}ms
+                        </span>
+                        <span className="logs-page__stat-label">
+                          avg response
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {loadingState === "loading" ? (
+              <SkeletonLogsSummary />
+            ) : (
+              <div
+                className={`logs-page__summary ${loadingState === "refreshing" ? "refreshing" : ""}`}
+              >
+                {displayMode === "tail" ? (
+                  <>
+                    <div>
+                      <strong>Buffer size:</strong> {tailBuffer.length} /{" "}
+                      {tailBufferSize}
+                    </div>
+                    <div className="logs-page__summary-line">
+                      <strong>Mode:</strong> Live Tail
+                      <span className="logs-page__summary-pills">
+                        <span
+                          className={`logs-page__meta-pill logs-page__meta-pill--${logsSourceKind}`}
+                          title={logsSourceTitle}
+                        >
+                          {logsSourceLabel}
+                        </span>
+                        {duplicatesRemoved > 0 && (
+                          <span
+                            className="logs-page__meta-pill logs-page__meta-pill--dedupe"
+                            title="Duplicates removed by domain deduplication"
+                          >
+                            Deduped {duplicatesRemoved.toLocaleString()}
                           </span>
                         )}
                       </span>
-                      <button
-                        type="button"
-                        onClick={handleNextPage}
-                        disabled={
-                          pageNumber >= totalPages || loadingState === "loading"
-                        }
-                      >
-                        Next
-                      </button>
                     </div>
-                  </label>
+                    <div>
+                      <strong>Last update:</strong>{" "}
+                      {tailNewestTimestamp
+                        ? new Date(tailNewestTimestamp).toLocaleString()
+                        : "—"}
+                    </div>
+                    {isFilteringActive && (
+                      <div>
+                        <strong>Matching entries:</strong>{" "}
+                        {totalMatchingEntries.toLocaleString()}
+                      </div>
+                    )}
+                    {duplicatesRemoved > 0 && (
+                      <div className="logs-page__duplicate-info">
+                        <strong>
+                          <FontAwesomeIcon icon={faRotate} /> Duplicates
+                          removed:
+                        </strong>{" "}
+                        <span className="logs-page__duplicate-count">
+                          {duplicatesRemoved.toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <strong>Total entries:</strong>{" "}
+                      {totalEntries.toLocaleString()}
+                    </div>
+                    <div>
+                      <strong>Rows per page:</strong> {paginatedRowsPerPage}
+                    </div>
+                    <div className="logs-page__summary-line">
+                      <strong>Fetched:</strong>{" "}
+                      {mode === "combined"
+                        ? combinedPage?.fetchedAt
+                          ? new Date(combinedPage.fetchedAt).toLocaleString()
+                          : "—"
+                        : nodeSnapshot?.fetchedAt
+                          ? new Date(nodeSnapshot.fetchedAt).toLocaleString()
+                          : "—"}
+                      <span className="logs-page__summary-pills">
+                        <span
+                          className={`logs-page__meta-pill logs-page__meta-pill--${logsSourceKind}`}
+                          title={logsSourceTitle}
+                        >
+                          {logsSourceLabel}
+                        </span>
+                        {storedLogsReady && storedResponseCache?.enabled && (
+                          <span
+                            className="logs-page__meta-pill logs-page__meta-pill--cache"
+                            title={`SQLite stored-log response cache (server-side). TTL=${Math.round(storedResponseCache.ttlMs / 1000)}s, Size=${storedResponseCache.size}/${storedResponseCache.maxEntries}, Hits=${storedResponseCache.hits}, Misses=${storedResponseCache.misses}, Evictions=${storedResponseCache.evictions}`}
+                          >
+                            DB Cache
+                            {storedResponseCacheHitRatePercent !== null
+                              ? ` ${storedResponseCacheHitRatePercent}%`
+                              : ""}
+                          </span>
+                        )}
+                        {duplicatesRemoved > 0 && (
+                          <span
+                            className="logs-page__meta-pill logs-page__meta-pill--dedupe"
+                            title="Duplicates removed by domain deduplication"
+                          >
+                            Deduped {duplicatesRemoved.toLocaleString()}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    {isFilteringActive && (
+                      <div>
+                        <strong>Matching entries:</strong>{" "}
+                        {totalMatchingEntries.toLocaleString()}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
-              <div className="logs-page__refresh-controls">
-                <button
-                  type="button"
-                  className={
-                    refreshSeconds === 0 ?
-                      "logs-page__live-toggle paused"
-                    : "logs-page__live-toggle live"
+            )}
+
+            {/* Mobile filter toggle button */}
+            <button
+              type="button"
+              className={`logs-page__filters-toggle ${filtersVisible ? "active" : ""}`}
+              onClick={() => setFiltersVisible(!filtersVisible)}
+              title={filtersVisible ? "Hide filters" : "Show filters"}
+            >
+              🔍 {filtersVisible ? "Hide" : "Show"} Filters
+              {isFilteringActive && !filtersVisible && (
+                <span className="logs-page__filters-badge">●</span>
+              )}
+            </button>
+
+            <div
+              className={`logs-page__quick-filters ${loadingState === "refreshing" ? "refreshing" : ""} ${!filtersVisible ? "logs-page__quick-filters--mobile-hidden" : ""}`}
+            >
+              {!filterTipDismissed && (
+                <div className="logs-page__filter-hint">
+                  <span className="logs-page__filter-hint-text">
+                    💡 <strong>Tip:</strong> Click any client or domain in the
+                    table to filter. Hold Shift to combine filters.
+                  </span>
+                  <button
+                    type="button"
+                    className="logs-page__filter-hint-dismiss"
+                    onClick={dismissFilterTip}
+                    aria-label="Dismiss tip"
+                    title="Don't show this again"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+              <label className="logs-page__quick-filter">
+                <span>Start Date/Time</span>
+                <input
+                  id="start-date-filter"
+                  name="start-date-filter"
+                  type="datetime-local"
+                  value={startDate}
+                  min={formatDateForInput(
+                    new Date(
+                      Date.now() - queryLogRetentionHours * 60 * 60 * 1000,
+                    ),
+                  )}
+                  max={endDate || formatDateForInput(new Date())}
+                  onChange={(event) =>
+                    clampDateRange(event.target.value, endDate)
                   }
-                  onClick={(event) => {
-                    // Prevent any default behavior that could cause page jump
-                    event.preventDefault();
-                    event.stopPropagation();
-
-                    // Save scroll position before state update
-                    const scrollY = window.scrollY;
-
-                    if (refreshSeconds === 0) {
-                      // Resume: set to default refresh rate and clear selections
-                      setRefreshSeconds(TAIL_MODE_DEFAULT_REFRESH);
-                      // Clear selections when resuming (they'll become stale)
-                      if (selectedDomains.size > 0) {
-                        setSelectedDomains(new Set());
-                      }
-                      if (bulkAction !== null) {
-                        setBulkAction(null);
-                      }
-                    } else {
-                      // Pause: just set to 0, don't touch selections
-                      setRefreshSeconds(0);
-                    }
-
-                    // Restore scroll position after React renders
-                    // Double RAF to ensure scroll restoration happens after all DOM updates
-                    requestAnimationFrame(() => {
-                      requestAnimationFrame(() => {
-                        window.scrollTo(0, scrollY);
-                      });
-                    });
-                  }}
-                  title={
-                    refreshSeconds === 0 ?
-                      endDate.trim().length > 0 ?
-                        "Auto-refresh paused because End Date/Time is set. Clear it to resume."
-                      : logsTableContextMenu ?
-                        "Auto-refresh paused while the context menu is open."
-                      : "Click to resume auto-refresh"
-                    : "Click to pause auto-refresh"
+                  placeholder="Start date/time"
+                />
+              </label>
+              <label className="logs-page__quick-filter">
+                <span>End Date/Time</span>
+                <input
+                  id="end-date-filter"
+                  name="end-date-filter"
+                  type="datetime-local"
+                  value={endDate}
+                  min={
+                    startDate ||
+                    formatDateForInput(
+                      new Date(
+                        Date.now() - queryLogRetentionHours * 60 * 60 * 1000,
+                      ),
+                    )
+                  }
+                  max={formatDateForInput(new Date())}
+                  onChange={(event) =>
+                    clampDateRange(startDate, event.target.value)
+                  }
+                  placeholder="End date/time"
+                />
+              </label>
+              <label className="logs-page__quick-filter">
+                <span>Client</span>
+                <input
+                  id="client-filter"
+                  name="client-filter"
+                  type="text"
+                  placeholder={
+                    displayMode === "paginated"
+                      ? "Hostname/IP contains… (or click client)"
+                      : "Contains… (or click client)"
+                  }
+                  value={clientFilter}
+                  onChange={(event) => setClientFilter(event.target.value)}
+                />
+              </label>
+              <label className="logs-page__quick-filter">
+                <span>Response</span>
+                <select
+                  id="response-filter"
+                  name="response-filter"
+                  value={responseFilter}
+                  onChange={(event) => setResponseFilter(event.target.value)}
+                >
+                  <option value="all">All</option>
+                  {responseFilterOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option === EMPTY_RESPONSE_FILTER_VALUE
+                        ? "No response value"
+                        : option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="logs-page__quick-filter">
+                <span>Status</span>
+                <select
+                  id="status-filter"
+                  name="status-filter"
+                  value={statusFilter}
+                  onChange={(event) =>
+                    setStatusFilter(event.target.value as StatusFilter)
                   }
                 >
-                  {
-                    displayMode === "tail" ?
-                      // Tail mode: Show entry count in buffer
-                      refreshSeconds === 0 ?
-                        <>⏸️ Paused ({tailBuffer.length} entries)</>
-                      : <>🟢 Live ({tailBuffer.length} entries)</>
-                      // Paginated mode: No entry count, simpler labels
-                    : refreshSeconds === 0 ?
-                      <>⏸️ Paused</>
-                    : <>
-                        <FontAwesomeIcon icon={faRotate} /> Auto-refresh
-                      </>
-
-                  }
-                </button>
-                <label className="logs-page__filter">
-                  Refresh interval
+                  <option value="all">All</option>
+                  <option value="blocked">Blocked</option>
+                  <option value="allowed">Allowed</option>
+                </select>
+              </label>
+              {!deduplicateDomains && (
+                <label className="logs-page__quick-filter">
+                  <span>Query Type</span>
                   <select
-                    id="refresh-interval"
-                    name="refresh-interval"
-                    value={
-                      refreshSeconds === 0 ?
-                        TAIL_MODE_DEFAULT_REFRESH
-                      : refreshSeconds
-                    }
-                    onChange={(event) => {
-                      setIsAutoRefresh(false);
-                      const value = Number(event.target.value);
-                      setRefreshSeconds(value);
-
-                      // Clear selections when changing refresh rate
-                      setSelectedDomains(new Set());
-                      setBulkAction(null);
-                    }}
-                    disabled={refreshSeconds === 0}
+                    id="qtype-filter"
+                    name="qtype-filter"
+                    value={qtypeFilter}
+                    onChange={(event) => setQtypeFilter(event.target.value)}
                   >
-                    {REFRESH_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
+                    <option value="all">All</option>
+                    {qtypeFilterOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
                       </option>
                     ))}
                   </select>
                 </label>
-              </div>
-              <div className="logs-page__settings-container">
-                <button
-                  ref={settingsButtonRef}
-                  type="button"
-                  className={
-                    settingsOpen ?
-                      "logs-page__settings-toggle active"
-                    : "logs-page__settings-toggle"
+              )}
+              <label className="logs-page__quick-filter">
+                <span>Domain</span>
+                <input
+                  id="domain-filter"
+                  name="domain-filter"
+                  type="text"
+                  placeholder="Contains… (or click domain)"
+                  value={domainFilter}
+                  onChange={(event) => setDomainFilter(event.target.value)}
+                />
+              </label>
+              <label className="logs-page__quick-filter">
+                <span>Exclude Domains</span>
+                <input
+                  id="domain-exclusion-filter"
+                  name="domain-exclusion-filter"
+                  type="text"
+                  placeholder="*.trackingdomain.com, ads.example.net"
+                  value={domainExclusionList}
+                  onChange={(event) =>
+                    setDomainExclusionList(event.target.value)
                   }
-                  onClick={() => setSettingsOpen((prev) => !prev)}
-                >
-                  Table settings
-                </button>
-
-                {settingsOpen && (
-                  <>
-                    <div
-                      className="logs-page__settings-backdrop"
-                      onClick={() => setSettingsOpen(false)}
-                    />
-                    <section
-                      className={`logs-page__settings logs-page__settings--${settingsPopupHorizontalAlign}`}
+                />
+              </label>
+              <button
+                type="button"
+                className="logs-page__filters-reset"
+                onClick={resetFilters}
+                disabled={!isFilteringActive}
+              >
+                Clear filters
+              </button>
+              <div
+                className={`logs-page__date-presets ${storedLogsReady ? "" : "logs-page__date-presets--disabled"}`}
+                aria-disabled={!storedLogsReady}
+              >
+                {storedLogsReady ? (
+                  <button
+                    type="button"
+                    className="logs-page__date-preset"
+                    onClick={() => applyDatePreset("last-24h")}
+                    title="Show logs from the last 24 hours"
+                  >
+                    Last 24h
+                  </button>
+                ) : (
+                  <span
+                    className="logs-page__date-preset-disabled"
+                    title="Requires stored logs (SQLite)"
+                  >
+                    <button
+                      type="button"
+                      className="logs-page__date-preset"
+                      disabled
+                      aria-disabled="true"
                     >
-                      <header>
-                        <h2>Table settings</h2>
-                        <p>
-                          Adjust which optional columns appear in the logs
-                          table.
-                        </p>
-                      </header>
-                      <div className="logs-page__settings-options">
-                        {OPTIONAL_COLUMN_OPTIONS.map((option) => {
-                          const key = option.key;
-                          return (
-                            <label
-                              key={key}
-                              className="logs-page__settings-option"
-                            >
+                      Last 24h
+                    </button>
+                  </span>
+                )}
+
+                {storedLogsReady ? (
+                  <button
+                    type="button"
+                    className="logs-page__date-preset"
+                    onClick={() => applyDatePreset("last-hour")}
+                    title="Show logs from the last hour"
+                  >
+                    Last Hour
+                  </button>
+                ) : (
+                  <span
+                    className="logs-page__date-preset-disabled"
+                    title="Requires stored logs (SQLite)"
+                  >
+                    <button
+                      type="button"
+                      className="logs-page__date-preset"
+                      disabled
+                      aria-disabled="true"
+                    >
+                      Last Hour
+                    </button>
+                  </span>
+                )}
+
+                {storedLogsReady ? (
+                  <button
+                    type="button"
+                    className="logs-page__date-preset"
+                    onClick={() => applyDatePreset("yesterday")}
+                    title="Show logs from yesterday"
+                  >
+                    Yesterday
+                  </button>
+                ) : (
+                  <span
+                    className="logs-page__date-preset-disabled"
+                    title="Requires stored logs (SQLite)"
+                  >
+                    <button
+                      type="button"
+                      className="logs-page__date-preset"
+                      disabled
+                      aria-disabled="true"
+                    >
+                      Yesterday
+                    </button>
+                  </span>
+                )}
+
+                {storedLogsReady ? (
+                  <button
+                    type="button"
+                    className="logs-page__date-preset"
+                    onClick={() => applyDatePreset("today")}
+                    title="Show logs from today"
+                  >
+                    Today
+                  </button>
+                ) : (
+                  <span
+                    className="logs-page__date-preset-disabled"
+                    title="Requires stored logs (SQLite)"
+                  >
+                    <button
+                      type="button"
+                      className="logs-page__date-preset"
+                      disabled
+                      aria-disabled="true"
+                    >
+                      Today
+                    </button>
+                  </span>
+                )}
+
+                {(startDate || endDate) && (
+                  <button
+                    type="button"
+                    className="logs-page__date-preset logs-page__date-preset--clear"
+                    onClick={() => applyDatePreset("clear")}
+                    title="Clear date filters"
+                  >
+                    Clear Dates
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {!selectionTipDismissed && (
+              <div className="logs-page__selection-tip">
+                <div className="logs-page__selection-tip-content">
+                  <span className="logs-page__selection-tip-icon">💡</span>
+                  <span className="logs-page__selection-tip-text">
+                    <strong>Selection tip:</strong> Selecting a domain affects
+                    all query types (A, AAAA, HTTPS, etc.) for that domain. Rows
+                    are grouped by domain for easier identification.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="logs-page__selection-tip-dismiss"
+                  onClick={dismissSelectionTip}
+                  aria-label="Dismiss selection tip"
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
+            <div
+              className={`logs-page__bulk-actions ${selectedDomains.size > 0 ? "visible" : "hidden"}`}
+            >
+              <div className="logs-page__bulk-actions-info">
+                <strong>{selectedDomains.size}</strong> domain
+                {selectedDomains.size !== 1 ? "s" : ""} selected
+              </div>
+              <div className="logs-page__bulk-actions-buttons">
+                <button
+                  type="button"
+                  className="logs-page__bulk-action-btn logs-page__bulk-action-btn--block"
+                  onClick={() => initiateBulkAction("block")}
+                >
+                  <FontAwesomeIcon icon={faBan} /> Block Selected
+                </button>
+                <button
+                  type="button"
+                  className="logs-page__bulk-action-btn logs-page__bulk-action-btn--allow"
+                  onClick={() => initiateBulkAction("allow")}
+                >
+                  ✓ Allow Selected
+                </button>
+                <button
+                  type="button"
+                  className="logs-page__bulk-action-btn logs-page__bulk-action-btn--clear"
+                  onClick={clearSelection}
+                >
+                  Clear Selection
+                </button>
+              </div>
+            </div>
+
+            {/* Mobile-optimized: Collapsible controls section */}
+            <div
+              className={`logs-page__mobile-controls ${mobileControlsExpanded ? "expanded" : "collapsed"}`}
+            >
+              <button
+                type="button"
+                className="logs-page__mobile-controls-toggle"
+                onClick={() =>
+                  setMobileControlsExpanded(!mobileControlsExpanded)
+                }
+                aria-expanded={mobileControlsExpanded}
+              >
+                <span className="logs-page__mobile-controls-icon">
+                  {mobileControlsExpanded ? "▼" : "▶"}
+                </span>
+                <span className="logs-page__mobile-controls-label">
+                  {mobileControlsExpanded ? "Hide Controls" : "Show Controls"}
+                </span>
+                {!mobileControlsExpanded && (
+                  <span className="logs-page__mobile-controls-summary">
+                    <FontAwesomeIcon
+                      icon={
+                        displayMode === "paginated" ? faFile : faTowerBroadcast
+                      }
+                    />{" "}
+                    ·
+                    {mode === "combined"
+                      ? " Combined"
+                      : ` ${nodes.find((n) => n.id === selectedNodeId)?.name || "Node"}`}{" "}
+                    · Page {pageNumber}/{totalPages}
+                  </span>
+                )}
+              </button>
+
+              <div
+                className={`logs-page__controls-content ${mobileControlsExpanded ? "visible" : "hidden"}`}
+              >
+                <div className="logs-page__controls">
+                  <div className="logs-page__mode-toggle">
+                    <button
+                      type="button"
+                      className={
+                        displayMode === "tail"
+                          ? "toggle-button active"
+                          : "toggle-button"
+                      }
+                      onClick={() => handleDisplayModeChange("tail")}
+                    >
+                      📡 Live Tail
+                    </button>
+                    <button
+                      type="button"
+                      className={
+                        displayMode === "paginated"
+                          ? "toggle-button active"
+                          : "toggle-button"
+                      }
+                      onClick={() => handleDisplayModeChange("paginated")}
+                    >
+                      <FontAwesomeIcon icon={faFile} /> Paginated
+                    </button>
+                  </div>
+                  <div className="logs-page__mode-toggle">
+                    <button
+                      type="button"
+                      className={
+                        mode === "combined"
+                          ? "toggle-button active"
+                          : "toggle-button"
+                      }
+                      onClick={() => handleModeChange("combined")}
+                    >
+                      Combined View
+                    </button>
+                    <button
+                      type="button"
+                      className={
+                        mode === "node"
+                          ? "toggle-button active"
+                          : "toggle-button"
+                      }
+                      onClick={() => handleModeChange("node")}
+                    >
+                      Per Node
+                    </button>
+                  </div>
+
+                  <div className="logs-page__filters">
+                    <label className="logs-page__filter">
+                      Node
+                      <select
+                        id="logs-node-selector"
+                        name="node"
+                        value={selectedNodeId}
+                        onChange={(event) => {
+                          setIsAutoRefresh(false);
+                          setSelectedNodeId(event.target.value);
+                        }}
+                        disabled={mode === "combined"}
+                      >
+                        {nodes.map((node) => (
+                          <option key={node.id} value={node.id}>
+                            {node.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {displayMode === "paginated" && (
+                      <label className="logs-page__filter">
+                        Page
+                        <div className="logs-page__pager">
+                          <button
+                            type="button"
+                            onClick={handlePrevPage}
+                            disabled={
+                              pageNumber <= 1 || loadingState === "loading"
+                            }
+                          >
+                            Prev
+                          </button>
+                          <span>
+                            {pageJumpOpen ? (
+                              <span className="logs-page__pager-page-jump">
+                                <input
+                                  ref={pageJumpInputRef}
+                                  className="logs-page__pager-page-input"
+                                  type="number"
+                                  inputMode="numeric"
+                                  min={1}
+                                  max={totalPages}
+                                  value={pageJumpValue}
+                                  onChange={(event) =>
+                                    setPageJumpValue(event.target.value)
+                                  }
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault();
+                                      commitPageJump();
+                                      return;
+                                    }
+
+                                    if (event.key === "Escape") {
+                                      event.preventDefault();
+                                      closePageJump();
+                                    }
+                                  }}
+                                  onBlur={() => commitPageJump()}
+                                  aria-label={`Jump to page (1 to ${totalPages})`}
+                                />
+                                <span className="logs-page__pager-page-total">
+                                  / {totalPages}
+                                </span>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="logs-page__pager-page-button"
+                                onClick={openPageJump}
+                                title="Jump to page"
+                              >
+                                {pageNumber} / {totalPages}
+                              </button>
+                            )}
+                            {hasMorePages && (
+                              <span
+                                className="logs-page__more-results-warning"
+                                title="Fetch limit reached. Use more specific filters to see additional results."
+                              >
+                                ⚠️ More results may exist
+                              </span>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleNextPage}
+                            disabled={
+                              pageNumber >= totalPages ||
+                              loadingState === "loading"
+                            }
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </label>
+                    )}
+                  </div>
+                  <div className="logs-page__refresh-controls">
+                    <button
+                      type="button"
+                      className={
+                        refreshSeconds === 0
+                          ? "logs-page__live-toggle paused"
+                          : "logs-page__live-toggle live"
+                      }
+                      onClick={(event) => {
+                        // Prevent any default behavior that could cause page jump
+                        event.preventDefault();
+                        event.stopPropagation();
+
+                        // Save scroll position before state update
+                        const scrollY = window.scrollY;
+
+                        if (refreshSeconds === 0) {
+                          // Resume: set to default refresh rate and clear selections
+                          setRefreshSeconds(TAIL_MODE_DEFAULT_REFRESH);
+                          // Clear selections when resuming (they'll become stale)
+                          if (selectedDomains.size > 0) {
+                            setSelectedDomains(new Set());
+                          }
+                          if (bulkAction !== null) {
+                            setBulkAction(null);
+                          }
+                        } else {
+                          // Pause: just set to 0, don't touch selections
+                          setRefreshSeconds(0);
+                        }
+
+                        // Restore scroll position after React renders
+                        // Double RAF to ensure scroll restoration happens after all DOM updates
+                        requestAnimationFrame(() => {
+                          requestAnimationFrame(() => {
+                            window.scrollTo(0, scrollY);
+                          });
+                        });
+                      }}
+                      title={
+                        refreshSeconds === 0
+                          ? endDate.trim().length > 0
+                            ? "Auto-refresh paused because End Date/Time is set. Clear it to resume."
+                            : logsTableContextMenu
+                              ? "Auto-refresh paused while the context menu is open."
+                              : "Click to resume auto-refresh"
+                          : "Click to pause auto-refresh"
+                      }
+                    >
+                      {displayMode === "tail" ? (
+                        // Tail mode: Show entry count in buffer
+                        refreshSeconds === 0 ? (
+                          <>⏸️ Paused ({tailBuffer.length} entries)</>
+                        ) : (
+                          <>🟢 Live ({tailBuffer.length} entries)</>
+                        )
+                      ) : // Paginated mode: No entry count, simpler labels
+                      refreshSeconds === 0 ? (
+                        <>⏸️ Paused</>
+                      ) : (
+                        <>
+                          <FontAwesomeIcon icon={faRotate} /> Auto-refresh
+                        </>
+                      )}
+                    </button>
+                    <label className="logs-page__filter">
+                      Refresh interval
+                      <select
+                        id="refresh-interval"
+                        name="refresh-interval"
+                        value={
+                          refreshSeconds === 0
+                            ? TAIL_MODE_DEFAULT_REFRESH
+                            : refreshSeconds
+                        }
+                        onChange={(event) => {
+                          setIsAutoRefresh(false);
+                          const value = Number(event.target.value);
+                          setRefreshSeconds(value);
+
+                          // Clear selections when changing refresh rate
+                          setSelectedDomains(new Set());
+                          setBulkAction(null);
+                        }}
+                        disabled={refreshSeconds === 0}
+                      >
+                        {REFRESH_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="logs-page__settings-container">
+                    <button
+                      ref={settingsButtonRef}
+                      type="button"
+                      className={
+                        settingsOpen
+                          ? "logs-page__settings-toggle active"
+                          : "logs-page__settings-toggle"
+                      }
+                      onClick={() => setSettingsOpen((prev) => !prev)}
+                    >
+                      Table settings
+                    </button>
+
+                    {settingsOpen && (
+                      <>
+                        <div
+                          className="logs-page__settings-backdrop"
+                          onClick={() => setSettingsOpen(false)}
+                        />
+                        <section
+                          className={`logs-page__settings logs-page__settings--${settingsPopupHorizontalAlign}`}
+                        >
+                          <header>
+                            <h2>Table settings</h2>
+                            <p>
+                              Adjust which optional columns appear in the logs
+                              table.
+                            </p>
+                          </header>
+                          <div className="logs-page__settings-options">
+                            {OPTIONAL_COLUMN_OPTIONS.map((option) => {
+                              const key = option.key;
+                              return (
+                                <label
+                                  key={key}
+                                  className="logs-page__settings-option"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={columnVisibility[key]}
+                                    onChange={() => toggleColumnVisibility(key)}
+                                  />
+                                  <div>
+                                    <span className="logs-page__settings-option-label">
+                                      {option.label}
+                                    </span>
+                                    <span className="logs-page__settings-option-description">
+                                      {option.description}
+                                    </span>
+                                  </div>
+                                </label>
+                              );
+                            })}
+                          </div>
+
+                          {/* Additional Settings */}
+                          <div className="logs-page__settings-options">
+                            <label className="logs-page__settings-option">
                               <input
                                 type="checkbox"
-                                checked={columnVisibility[key]}
-                                onChange={() => toggleColumnVisibility(key)}
+                                checked={deduplicateDomains}
+                                onChange={toggleDeduplicateDomains}
+                                className="logs-page__settings-checkbox"
                               />
                               <div>
                                 <span className="logs-page__settings-option-label">
-                                  {option.label}
+                                  Deduplicate Domains
                                 </span>
                                 <span className="logs-page__settings-option-description">
-                                  {option.description}
+                                  Show only the latest query for each unique
+                                  domain. Useful for quickly scanning recent
+                                  activity without duplicate entries.
                                 </span>
                               </div>
                             </label>
-                          );
-                        })}
-                      </div>
-
-                      {/* Additional Settings */}
-                      <div className="logs-page__settings-options">
-                        <label className="logs-page__settings-option">
-                          <input
-                            type="checkbox"
-                            checked={deduplicateDomains}
-                            onChange={toggleDeduplicateDomains}
-                            className="logs-page__settings-checkbox"
-                          />
-                          <div>
-                            <span className="logs-page__settings-option-label">
-                              Deduplicate Domains
-                            </span>
-                            <span className="logs-page__settings-option-description">
-                              Show only the latest query for each unique domain.
-                              Useful for quickly scanning recent activity
-                              without duplicate entries.
-                            </span>
                           </div>
-                        </label>
-                      </div>
 
-                      {/* Mobile Layout Mode Selection */}
-                      <header
-                        className="logs-page__mobile-layout-header"
-                        style={{ marginTop: "2rem" }}
-                      >
-                        <h3>Mobile Layout</h3>
-                        <p>
-                          Choose how logs are displayed on mobile devices
-                          (screens under 768px wide).
-                        </p>
-                      </header>
-                      <div className="logs-page__settings-options logs-page__mobile-layout-options">
-                        <label className="logs-page__settings-option logs-page__settings-option--radio">
-                          <input
-                            type="radio"
-                            name="mobileLayoutMode"
-                            value="compact-table"
-                            checked={mobileLayoutMode === "compact-table"}
-                            onChange={(e) => {
-                              const mode = e.target.value as MobileLayoutMode;
-                              setMobileLayoutMode(mode);
-                              if (typeof window !== "undefined") {
-                                try {
-                                  window.localStorage.setItem(
-                                    MOBILE_LAYOUT_MODE_KEY,
-                                    mode,
-                                  );
-                                } catch (error) {
-                                  console.warn(
-                                    "Failed to save mobile layout mode",
-                                    error,
-                                  );
-                                }
-                              }
-                            }}
-                          />
-                          <div>
-                            <span className="logs-page__settings-option-label">
-                              Compact Table
-                            </span>
-                            <span className="logs-page__settings-option-description">
-                              Table with fewer columns (Status, Domain, Client,
-                              Time). Best for quick scanning on smaller screens.
-                            </span>
-                          </div>
-                        </label>
-                        <label className="logs-page__settings-option logs-page__settings-option--radio">
-                          <input
-                            type="radio"
-                            name="mobileLayoutMode"
-                            value="card-view"
-                            checked={mobileLayoutMode === "card-view"}
-                            onChange={(e) => {
-                              const mode = e.target.value as MobileLayoutMode;
-                              setMobileLayoutMode(mode);
-                              if (typeof window !== "undefined") {
-                                try {
-                                  window.localStorage.setItem(
-                                    MOBILE_LAYOUT_MODE_KEY,
-                                    mode,
-                                  );
-                                } catch (error) {
-                                  console.warn(
-                                    "Failed to save mobile layout mode",
-                                    error,
-                                  );
-                                }
-                              }
-                            }}
-                          />
-                          <div>
-                            <span className="logs-page__settings-option-label">
-                              Card View
-                            </span>
-                            <span className="logs-page__settings-option-description">
-                              Touch-friendly cards with swipe gestures
-                              (swipe-left: Block/Allow, swipe-right: Select).
-                              Best for detailed viewing.
-                            </span>
-                          </div>
-                        </label>
-                      </div>
-
-                      <header style={{ marginTop: "2rem" }}>
-                        <h3>Paginated Settings</h3>
-                        <p>Configure page size for paginated browsing.</p>
-                      </header>
-                      <div className="logs-page__settings-options">
-                        <label className="logs-page__settings-option">
-                          <div style={{ width: "100%" }}>
-                            <span className="logs-page__settings-option-label">
-                              Rows per page
-                            </span>
-                            <select
-                              value={paginatedRowsPerPage}
-                              onChange={(e) =>
-                                handlePaginatedRowsPerPageChange(
-                                  Number(e.target.value),
-                                )
-                              }
-                              style={{
-                                marginTop: "0.5rem",
-                                padding: "0.5rem",
-                                borderRadius: "0.5rem",
-                                border: "1px solid #dce3ee",
-                                width: "100%",
-                              }}
-                            >
-                              {PAGINATED_ROWS_PER_PAGE_OPTIONS.map((value) => (
-                                <option key={value} value={value}>
-                                  {value}
-                                </option>
-                              ))}
-                            </select>
-                            <span className="logs-page__settings-option-description">
-                              Applies to Paginated mode only. Changing this will
-                              reset to page 1.
-                            </span>
-                          </div>
-                        </label>
-                      </div>
-
-                      <header style={{ marginTop: "2rem" }}>
-                        <h3>Live Tail Settings</h3>
-                        <p>Configure the buffer size for live tail mode.</p>
-                      </header>
-                      <div className="logs-page__settings-options">
-                        <label className="logs-page__settings-option">
-                          <div style={{ width: "100%" }}>
-                            <span className="logs-page__settings-option-label">
-                              Buffer Size
-                            </span>
-                            <select
-                              value={tailBufferSize}
-                              onChange={(e) =>
-                                handleTailBufferSizeChange(
-                                  Number(e.target.value),
-                                )
-                              }
-                              style={{
-                                marginTop: "0.5rem",
-                                padding: "0.5rem",
-                                borderRadius: "0.5rem",
-                                border: "1px solid #dce3ee",
-                                width: "100%",
-                              }}
-                            >
-                              {TAIL_BUFFER_SIZE_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                            <span className="logs-page__settings-option-description">
-                              Maximum number of entries to keep in memory during
-                              live tail mode.
-                            </span>
-                          </div>
-                        </label>
-                      </div>
-                    </section>
-                  </>
-                )}
-              </div>
-              <div
-                className={`logs-page__refresh-indicator ${loadingState === "refreshing" ? "visible" : "hidden"}`}
-              >
-                Refreshing…
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Conditionally render table or cards based on mobile layout mode */}
-        {
-          mobileLayoutMode === "card-view" && window.innerWidth < 768 ?
-            // Card view for mobile
-            <div
-              className={`logs-page__cards-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
-            >
-              {renderCardsView(
-                filteredEntries,
-                selectedDomains,
-                domainToGroupMap,
-                domainGroupDetailsMap,
-                toggleDomainSelection,
-                handleStatusClick,
-                handleClientClick,
-                handleDomainClick,
-                loadingState === "error" ? "idle" : loadingState,
-                isFilteringActive,
-                deduplicateDomains,
-                columnVisibility,
-                () => {
-                  // Pause auto-refresh when user starts swiping on a card
-                  setIsAutoRefresh(false);
-                  setRefreshSeconds(0);
-                },
-              )}
-            </div>
-            // Table view (desktop or compact-table mode on mobile)
-          : <div
-              className={`logs-page__table-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
-              onContextMenu={handleLogsTableContextMenu}
-            >
-              <table className="logs-page__table">
-                <colgroup>
-                  {activeColumns.map((column) => (
-                    <col key={column.id} className={column.className} />
-                  ))}
-                </colgroup>
-                <thead>
-                  <tr>
-                    {activeColumns.map((column) => {
-                      if (column.id === "group-badge") {
-                        return (
-                          <th
-                            key={column.id}
-                            className="logs-page__header--group-badge"
-                          ></th>
-                        );
-                      }
-                      if (column.id === "select") {
-                        const allSelected =
-                          filteredEntries.length > 0 &&
-                          selectedDomains.size === filteredEntries.length;
-                        const someSelected =
-                          selectedDomains.size > 0 &&
-                          selectedDomains.size < filteredEntries.length;
-                        return (
-                          <th
-                            key={column.id}
-                            className="logs-page__header--select"
+                          {/* Mobile Layout Mode Selection */}
+                          <header
+                            className="logs-page__mobile-layout-header"
+                            style={{ marginTop: "2rem" }}
                           >
-                            <input
-                              id="logs-select-all"
-                              name="selectAll"
-                              type="checkbox"
-                              checked={allSelected}
-                              ref={(input) => {
-                                if (input) {
-                                  input.indeterminate = someSelected;
-                                }
-                              }}
-                              onChange={toggleSelectAll}
-                              aria-label="Select all domains"
-                              title={
-                                allSelected ? "Deselect all"
-                                : someSelected ?
-                                  "Select all"
-                                : "Select all"
-                              }
-                            />
-                          </th>
-                        );
-                      }
-                      return <th key={column.id}>{column.label}</th>;
-                    })}
-                  </tr>
-                </thead>
-                <tbody>
-                  {loadingState === "loading" ?
-                    <tr>
-                      <td
-                        colSpan={activeColumns.length || 1}
-                        className="logs-page__loading"
-                      >
-                        Loading query logs…
-                      </td>
-                    </tr>
-                  : filteredEntries.length === 0 ?
-                    <tr>
-                      <td
-                        colSpan={activeColumns.length || 1}
-                        className="logs-page__empty"
-                      >
-                        {isFilteringActive ?
-                          "No log entries match the current filters."
-                        : "No log entries found for the selected view."}
-                      </td>
-                    </tr>
-                    // Render only first 50 visible rows instead of all (virtualization will come later)
-                    // This is a quick fix until we refactor to use div-based virtualized table
-                  : filteredEntries
-                      .slice(0, 50)
-                      .map((entry) => (
-                        <LogTableRow
-                          key={`${entry.nodeId}-${entry.rowNumber}-${entry.timestamp}`}
-                          entry={entry}
-                          activeColumns={activeColumns}
-                          selectedDomains={selectedDomains}
-                          domainToGroupMap={domainToGroupMap}
-                          newEntryTimestamps={newEntryTimestamps}
-                          isEntryBlocked={isEntryBlocked}
-                        />
-                      ))
-                  }
-                </tbody>
-              </table>
+                            <h3>Mobile Layout</h3>
+                            <p>
+                              Choose how logs are displayed on mobile devices
+                              (screens under 768px wide).
+                            </p>
+                          </header>
+                          <div className="logs-page__settings-options logs-page__mobile-layout-options">
+                            <label className="logs-page__settings-option logs-page__settings-option--radio">
+                              <input
+                                type="radio"
+                                name="mobileLayoutMode"
+                                value="compact-table"
+                                checked={mobileLayoutMode === "compact-table"}
+                                onChange={(e) => {
+                                  const mode = e.target
+                                    .value as MobileLayoutMode;
+                                  setMobileLayoutMode(mode);
+                                  if (typeof window !== "undefined") {
+                                    try {
+                                      window.localStorage.setItem(
+                                        MOBILE_LAYOUT_MODE_KEY,
+                                        mode,
+                                      );
+                                    } catch (error) {
+                                      console.warn(
+                                        "Failed to save mobile layout mode",
+                                        error,
+                                      );
+                                    }
+                                  }
+                                }}
+                              />
+                              <div>
+                                <span className="logs-page__settings-option-label">
+                                  Compact Table
+                                </span>
+                                <span className="logs-page__settings-option-description">
+                                  Table with fewer columns (Status, Domain,
+                                  Client, Time). Best for quick scanning on
+                                  smaller screens.
+                                </span>
+                              </div>
+                            </label>
+                            <label className="logs-page__settings-option logs-page__settings-option--radio">
+                              <input
+                                type="radio"
+                                name="mobileLayoutMode"
+                                value="card-view"
+                                checked={mobileLayoutMode === "card-view"}
+                                onChange={(e) => {
+                                  const mode = e.target
+                                    .value as MobileLayoutMode;
+                                  setMobileLayoutMode(mode);
+                                  if (typeof window !== "undefined") {
+                                    try {
+                                      window.localStorage.setItem(
+                                        MOBILE_LAYOUT_MODE_KEY,
+                                        mode,
+                                      );
+                                    } catch (error) {
+                                      console.warn(
+                                        "Failed to save mobile layout mode",
+                                        error,
+                                      );
+                                    }
+                                  }
+                                }}
+                              />
+                              <div>
+                                <span className="logs-page__settings-option-label">
+                                  Card View
+                                </span>
+                                <span className="logs-page__settings-option-description">
+                                  Touch-friendly cards with swipe gestures
+                                  (swipe-left: Block/Allow, swipe-right:
+                                  Select). Best for detailed viewing.
+                                </span>
+                              </div>
+                            </label>
+                          </div>
 
-              {logsTableContextMenu ?
-                <div
-                  className="logs-page__context-menu-overlay"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    closeLogsTableContextMenu();
-                  }}
-                  onContextMenu={(event) => {
-                    event.preventDefault();
-                    closeLogsTableContextMenu();
-                  }}
-                >
+                          <header style={{ marginTop: "2rem" }}>
+                            <h3>Paginated Settings</h3>
+                            <p>Configure page size for paginated browsing.</p>
+                          </header>
+                          <div className="logs-page__settings-options">
+                            <label className="logs-page__settings-option">
+                              <div style={{ width: "100%" }}>
+                                <span className="logs-page__settings-option-label">
+                                  Rows per page
+                                </span>
+                                <select
+                                  value={paginatedRowsPerPage}
+                                  onChange={(e) =>
+                                    handlePaginatedRowsPerPageChange(
+                                      Number(e.target.value),
+                                    )
+                                  }
+                                  style={{
+                                    marginTop: "0.5rem",
+                                    padding: "0.5rem",
+                                    borderRadius: "0.5rem",
+                                    border: "1px solid #dce3ee",
+                                    width: "100%",
+                                  }}
+                                >
+                                  {PAGINATED_ROWS_PER_PAGE_OPTIONS.map(
+                                    (value) => (
+                                      <option key={value} value={value}>
+                                        {value}
+                                      </option>
+                                    ),
+                                  )}
+                                </select>
+                                <span className="logs-page__settings-option-description">
+                                  Applies to Paginated mode only. Changing this
+                                  will reset to page 1.
+                                </span>
+                              </div>
+                            </label>
+                          </div>
+
+                          <header style={{ marginTop: "2rem" }}>
+                            <h3>Live Tail Settings</h3>
+                            <p>Configure the buffer size for live tail mode.</p>
+                          </header>
+                          <div className="logs-page__settings-options">
+                            <label className="logs-page__settings-option">
+                              <div style={{ width: "100%" }}>
+                                <span className="logs-page__settings-option-label">
+                                  Buffer Size
+                                </span>
+                                <select
+                                  value={tailBufferSize}
+                                  onChange={(e) =>
+                                    handleTailBufferSizeChange(
+                                      Number(e.target.value),
+                                    )
+                                  }
+                                  style={{
+                                    marginTop: "0.5rem",
+                                    padding: "0.5rem",
+                                    borderRadius: "0.5rem",
+                                    border: "1px solid #dce3ee",
+                                    width: "100%",
+                                  }}
+                                >
+                                  {TAIL_BUFFER_SIZE_OPTIONS.map((option) => (
+                                    <option
+                                      key={option.value}
+                                      value={option.value}
+                                    >
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <span className="logs-page__settings-option-description">
+                                  Maximum number of entries to keep in memory
+                                  during live tail mode.
+                                </span>
+                              </div>
+                            </label>
+                          </div>
+                        </section>
+                      </>
+                    )}
+                  </div>
                   <div
-                    ref={logsTableContextMenuRef}
-                    className="logs-page__context-menu"
-                    style={{
-                      left: logsTableContextMenu.x,
-                      top: logsTableContextMenu.y,
-                    }}
-                    role="menu"
-                    onMouseDown={(event) => {
-                      event.stopPropagation();
-                    }}
+                    className={`logs-page__refresh-indicator ${loadingState === "refreshing" ? "visible" : "hidden"}`}
                   >
-                    {logsTableContextMenu.items.map((item, index) => {
-                      if (item.action === "separator") {
-                        return (
-                          <div
-                            key={`separator-${index}`}
-                            className="logs-page__context-menu-separator"
-                            role="separator"
-                          />
-                        );
-                      }
-
-                      return (
-                        <button
-                          key={
-                            item.action === "copy" ?
-                              `${item.label}-copy-${item.value}`
-                            : `${item.label}-open-${item.href}`
-                          }
-                          type="button"
-                          className="logs-page__context-menu-item"
-                          onClick={() => handleContextMenuAction(item)}
-                        >
-                          {item.label}
-                        </button>
-                      );
-                    })}
+                    Refreshing…
                   </div>
                 </div>
-              : null}
+              </div>
             </div>
 
-        }
-
-        {mode === "combined" && combinedNodeSnapshots.length > 0 ?
-          <section className="logs-page__nodes">
-            <h2>Node snapshots</h2>
-            <ul>
-              {combinedNodeSnapshots.map(
-                (snapshot: TechnitiumCombinedNodeLogSnapshot) => (
-                  <li key={snapshot.nodeId}>
-                    <strong>{snapshot.nodeId}</strong> —{" "}
-                    {snapshot.error ?
-                      `error: ${snapshot.error}`
-                    : `${snapshot.totalEntries?.toLocaleString() ?? "0"} entries across ${snapshot.totalPages ?? 0} pages`
-                    }{" "}
-                    (fetched {new Date(snapshot.fetchedAt).toLocaleString()})
-                  </li>
-                ),
-              )}
-            </ul>
-          </section>
-        : null}
-
-        {blockDialog || bulkAction ?
-          <div
-            className="logs-page__modal"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => {
-              if (event.target === event.currentTarget) {
-                closeBlockDialog("dismiss");
-              }
-            }}
-          >
-            <div className="logs-page__modal-content">
-              <header className="logs-page__modal-header">
-                <h2>
-                  {bulkAction ?
-                    `Bulk ${bulkAction === "block" ? "Block" : "Allow"} Domains`
-                  : modalTitle}
-                </h2>
-                <button
-                  type="button"
-                  className="logs-page__modal-close"
-                  onClick={() => closeBlockDialog("dismiss")}
-                >
-                  Close
-                </button>
-              </header>
-              <div className="logs-page__modal-body">
-                {bulkAction ?
-                  <>
-                    <p>
-                      {bulkAction === "block" ? "Block" : "Allow"}{" "}
-                      <strong>
-                        {selectedDomains.size} domain
-                        {selectedDomains.size !== 1 ? "s" : ""}
-                      </strong>{" "}
-                      in Advanced Blocking groups across all nodes.
-                    </p>
-                    <section className="logs-page__modal-summary">
-                      <h3 className="logs-page__modal-summary-title">
-                        Selected domains
-                      </h3>
-                      <ul className="logs-page__modal-summary-list logs-page__bulk-domain-list">
-                        {Array.from(selectedDomains).map((domain) => {
-                          const groupNumber = domainToGroupMap.get(domain);
-                          const colorIndex =
-                            groupNumber ? (groupNumber - 1) % 10 : 0;
+            {/* Conditionally render table or cards based on mobile layout mode */}
+            {mobileLayoutMode === "card-view" && window.innerWidth < 768 ? (
+              // Card view for mobile
+              <div
+                className={`logs-page__cards-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
+              >
+                {renderCardsView(
+                  filteredEntries,
+                  selectedDomains,
+                  domainToGroupMap,
+                  domainGroupDetailsMap,
+                  toggleDomainSelection,
+                  handleStatusClick,
+                  handleClientClick,
+                  handleDomainClick,
+                  loadingState === "error" ? "idle" : loadingState,
+                  isFilteringActive,
+                  deduplicateDomains,
+                  columnVisibility,
+                  () => {
+                    // Pause auto-refresh when user starts swiping on a card
+                    setIsAutoRefresh(false);
+                    setRefreshSeconds(0);
+                  },
+                )}
+              </div>
+            ) : (
+              // Table view (desktop or compact-table mode on mobile)
+              <div
+                className={`logs-page__table-wrapper ${loadingState === "refreshing" ? "refreshing" : ""}`}
+                onContextMenu={handleLogsTableContextMenu}
+              >
+                <table className="logs-page__table">
+                  <colgroup>
+                    {activeColumns.map((column) => (
+                      <col key={column.id} className={column.className} />
+                    ))}
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      {activeColumns.map((column) => {
+                        if (column.id === "group-badge") {
                           return (
-                            <li
-                              key={domain}
-                              className="logs-page__bulk-domain-item"
-                            >
-                              {groupNumber && (
-                                <span
-                                  className={`logs-page__modal-badge logs-page__modal-badge--color-${colorIndex}`}
-                                >
-                                  {groupNumber}
-                                </span>
-                              )}
-                              <span className="logs-page__bulk-domain-text">
-                                {domain}
-                              </span>
-                            </li>
+                            <th
+                              key={column.id}
+                              className="logs-page__header--group-badge"
+                            ></th>
                           );
-                        })}
-                      </ul>
-                    </section>
-                  </>
-                : <>
-                    <p>
-                      {(() => {
-                        const nodeStatus = blockingStatus?.nodes?.find(
-                          (n) => n.nodeId === blockDialog?.entry.nodeId,
-                        );
-                        const hasConflict = Boolean(
-                          nodeStatus?.builtInEnabled === true &&
-                          nodeStatus?.advancedBlockingInstalled === true &&
-                          nodeStatus?.advancedBlockingEnabled === true,
-                        );
-
-                        if (hasConflict) {
+                        }
+                        if (column.id === "select") {
+                          const allSelected =
+                            filteredEntries.length > 0 &&
+                            selectedDomains.size === filteredEntries.length;
+                          const someSelected =
+                            selectedDomains.size > 0 &&
+                            selectedDomains.size < filteredEntries.length;
                           return (
-                            <>
-                              Choose which blocking system to update for{" "}
-                              <strong>
-                                {blockDomainValue || "Unknown domain"}
-                              </strong>{" "}
-                              on node <strong>{blockNodeLabel}</strong>.
-                            </>
+                            <th
+                              key={column.id}
+                              className="logs-page__header--select"
+                            >
+                              <input
+                                id="logs-select-all"
+                                name="selectAll"
+                                type="checkbox"
+                                checked={allSelected}
+                                ref={(input) => {
+                                  if (input) {
+                                    input.indeterminate = someSelected;
+                                  }
+                                }}
+                                onChange={toggleSelectAll}
+                                aria-label="Select all domains"
+                                title={
+                                  allSelected
+                                    ? "Deselect all"
+                                    : someSelected
+                                      ? "Select all"
+                                      : "Select all"
+                                }
+                              />
+                            </th>
+                          );
+                        }
+                        return <th key={column.id}>{column.label}</th>;
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loadingState === "loading" ? (
+                      <tr>
+                        <td
+                          colSpan={activeColumns.length || 1}
+                          className="logs-page__loading"
+                        >
+                          Loading query logs…
+                        </td>
+                      </tr>
+                    ) : filteredEntries.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={activeColumns.length || 1}
+                          className="logs-page__empty"
+                        >
+                          {isFilteringActive
+                            ? "No log entries match the current filters."
+                            : "No log entries found for the selected view."}
+                        </td>
+                      </tr>
+                    ) : (
+                      // Render only first 50 visible rows instead of all (virtualization will come later)
+                      // This is a quick fix until we refactor to use div-based virtualized table
+                      filteredEntries
+                        .slice(0, 50)
+                        .map((entry) => (
+                          <LogTableRow
+                            key={`${entry.nodeId}-${entry.rowNumber}-${entry.timestamp}`}
+                            entry={entry}
+                            activeColumns={activeColumns}
+                            selectedDomains={selectedDomains}
+                            domainToGroupMap={domainToGroupMap}
+                            newEntryTimestamps={newEntryTimestamps}
+                            isEntryBlocked={isEntryBlocked}
+                          />
+                        ))
+                    )}
+                  </tbody>
+                </table>
+
+                {logsTableContextMenu ? (
+                  <div
+                    className="logs-page__context-menu-overlay"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      closeLogsTableContextMenu();
+                    }}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      closeLogsTableContextMenu();
+                    }}
+                  >
+                    <div
+                      ref={logsTableContextMenuRef}
+                      className="logs-page__context-menu"
+                      style={{
+                        left: logsTableContextMenu.x,
+                        top: logsTableContextMenu.y,
+                      }}
+                      role="menu"
+                      onMouseDown={(event) => {
+                        event.stopPropagation();
+                      }}
+                    >
+                      {logsTableContextMenu.items.map((item, index) => {
+                        if (item.action === "separator") {
+                          return (
+                            <div
+                              key={`separator-${index}`}
+                              className="logs-page__context-menu-separator"
+                              role="separator"
+                            />
                           );
                         }
 
                         return (
-                          <>
-                            {blockDialogBlockingMethod === "built-in" ?
-                              `${blockingAction === "allow" ? "Allow" : "Block"}`
-                            : isBlockedEntry ?
-                              "Adjust Advanced Blocking groups for"
-                            : "Add"}{" "}
-                            <strong>
-                              {blockDomainValue || "Unknown domain"}
-                            </strong>{" "}
-                            {blockDialogBlockingMethod === "built-in" ?
-                              <>
-                                in Built-in Blocking on node{" "}
-                                <strong>{blockNodeLabel}</strong>.
-                              </>
-                            : <>
-                                {isBlockedEntry ?
-                                  "on"
-                                : "to Advanced Blocking on"}{" "}
-                                node <strong>{blockNodeLabel}</strong>.
-                              </>
+                          <button
+                            key={
+                              item.action === "copy"
+                                ? `${item.label}-copy-${item.value}`
+                                : `${item.label}-open-${item.href}`
                             }
-                          </>
+                            type="button"
+                            className="logs-page__context-menu-item"
+                            onClick={() => handleContextMenuAction(item)}
+                          >
+                            {item.label}
+                          </button>
                         );
-                      })()}
-                    </p>
+                      })}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
 
-                    {(() => {
-                      const nodeStatus = blockingStatus?.nodes?.find(
-                        (n) => n.nodeId === blockDialog?.entry.nodeId,
-                      );
-                      const hasConflict = Boolean(
-                        nodeStatus?.builtInEnabled === true &&
-                        nodeStatus?.advancedBlockingInstalled === true &&
-                        nodeStatus?.advancedBlockingEnabled === true,
-                      );
+            {mode === "combined" && combinedNodeSnapshots.length > 0 ? (
+              <section className="logs-page__nodes">
+                <h2>Node snapshots</h2>
+                <ul>
+                  {combinedNodeSnapshots.map(
+                    (snapshot: TechnitiumCombinedNodeLogSnapshot) => (
+                      <li key={snapshot.nodeId}>
+                        <strong>{snapshot.nodeId}</strong> —{" "}
+                        {snapshot.error
+                          ? `error: ${snapshot.error}`
+                          : `${snapshot.totalEntries?.toLocaleString() ?? "0"} entries across ${snapshot.totalPages ?? 0} pages`}{" "}
+                        (fetched {new Date(snapshot.fetchedAt).toLocaleString()}
+                        )
+                      </li>
+                    ),
+                  )}
+                </ul>
+              </section>
+            ) : null}
 
-                      if (hasConflict) {
-                        return (
-                          <div className="logs-page__modal-notice">
-                            <strong>Both blocking systems are enabled</strong>
-                            <p>
-                              Technitium DNS strongly recommends not running
-                              Built-in Blocking and Advanced Blocking at the
-                              same time. For this action, choose which system
-                              you want to update. (The DNS Filtering page should
-                              guide you to disable one.)
-                            </p>
+            {blockDialog || bulkAction ? (
+              <div
+                className="logs-page__modal"
+                role="dialog"
+                aria-modal="true"
+                onClick={(event) => {
+                  if (event.target === event.currentTarget) {
+                    closeBlockDialog("dismiss");
+                  }
+                }}
+              >
+                <div className="logs-page__modal-content">
+                  <header className="logs-page__modal-header">
+                    <h2>
+                      {bulkAction
+                        ? `Bulk ${bulkAction === "block" ? "Block" : "Allow"} Domains`
+                        : modalTitle}
+                    </h2>
+                    <button
+                      type="button"
+                      className="logs-page__modal-close"
+                      onClick={() => closeBlockDialog("dismiss")}
+                    >
+                      Close
+                    </button>
+                  </header>
+                  <div className="logs-page__modal-body">
+                    {bulkAction ? (
+                      <>
+                        <p>
+                          {bulkAction === "block" ? "Block" : "Allow"}{" "}
+                          <strong>
+                            {selectedDomains.size} domain
+                            {selectedDomains.size !== 1 ? "s" : ""}
+                          </strong>{" "}
+                          in Advanced Blocking groups across all nodes.
+                        </p>
+                        <section className="logs-page__modal-summary">
+                          <h3 className="logs-page__modal-summary-title">
+                            Selected domains
+                          </h3>
+                          <ul className="logs-page__modal-summary-list logs-page__bulk-domain-list">
+                            {Array.from(selectedDomains).map((domain) => {
+                              const groupNumber = domainToGroupMap.get(domain);
+                              const colorIndex = groupNumber
+                                ? (groupNumber - 1) % 10
+                                : 0;
+                              return (
+                                <li
+                                  key={domain}
+                                  className="logs-page__bulk-domain-item"
+                                >
+                                  {groupNumber && (
+                                    <span
+                                      className={`logs-page__modal-badge logs-page__modal-badge--color-${colorIndex}`}
+                                    >
+                                      {groupNumber}
+                                    </span>
+                                  )}
+                                  <span className="logs-page__bulk-domain-text">
+                                    {domain}
+                                  </span>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </section>
+                      </>
+                    ) : (
+                      <>
+                        <p>
+                          {(() => {
+                            const nodeStatus = blockingStatus?.nodes?.find(
+                              (n) => n.nodeId === blockDialog?.entry.nodeId,
+                            );
+                            const hasConflict = Boolean(
+                              nodeStatus?.builtInEnabled === true &&
+                              nodeStatus?.advancedBlockingInstalled === true &&
+                              nodeStatus?.advancedBlockingEnabled === true,
+                            );
+
+                            if (hasConflict) {
+                              return (
+                                <>
+                                  Choose which blocking system to update for{" "}
+                                  <strong>
+                                    {blockDomainValue || "Unknown domain"}
+                                  </strong>{" "}
+                                  on node <strong>{blockNodeLabel}</strong>.
+                                </>
+                              );
+                            }
+
+                            return (
+                              <>
+                                {blockDialogBlockingMethod === "built-in"
+                                  ? `${blockingAction === "allow" ? "Allow" : "Block"}`
+                                  : isBlockedEntry
+                                    ? "Adjust Advanced Blocking groups for"
+                                    : "Add"}{" "}
+                                <strong>
+                                  {blockDomainValue || "Unknown domain"}
+                                </strong>{" "}
+                                {blockDialogBlockingMethod === "built-in" ? (
+                                  <>
+                                    in Built-in Blocking on node{" "}
+                                    <strong>{blockNodeLabel}</strong>.
+                                  </>
+                                ) : (
+                                  <>
+                                    {isBlockedEntry
+                                      ? "on"
+                                      : "to Advanced Blocking on"}{" "}
+                                    node <strong>{blockNodeLabel}</strong>.
+                                  </>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </p>
+
+                        {(() => {
+                          const nodeStatus = blockingStatus?.nodes?.find(
+                            (n) => n.nodeId === blockDialog?.entry.nodeId,
+                          );
+                          const hasConflict = Boolean(
+                            nodeStatus?.builtInEnabled === true &&
+                            nodeStatus?.advancedBlockingInstalled === true &&
+                            nodeStatus?.advancedBlockingEnabled === true,
+                          );
+
+                          if (hasConflict) {
+                            return (
+                              <div className="logs-page__modal-notice">
+                                <strong>
+                                  Both blocking systems are enabled
+                                </strong>
+                                <p>
+                                  Technitium DNS strongly recommends not running
+                                  Built-in Blocking and Advanced Blocking at the
+                                  same time. For this action, choose which
+                                  system you want to update. (The DNS Filtering
+                                  page should guide you to disable one.)
+                                </p>
+                                <div className="logs-page__modal-action-toggle">
+                                  <span className="logs-page__modal-action-label">
+                                    Blocking system
+                                  </span>
+                                  <div className="logs-page__modal-action-buttons">
+                                    <button
+                                      type="button"
+                                      className={
+                                        blockDialog?.selectedBlockingSystem ===
+                                        "built-in"
+                                          ? "toggle-button active"
+                                          : "toggle-button"
+                                      }
+                                      onClick={() => {
+                                        setBlockDialog((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                selectedBlockingSystem:
+                                                  "built-in",
+                                              }
+                                            : prev,
+                                        );
+                                        // Built-in mode is exact-only.
+                                        setBlockMode("exact");
+                                        setBlockRegexValue("");
+                                        setBlockSelectedGroups(
+                                          new Set<string>(),
+                                        );
+                                        setBlockError(undefined);
+                                      }}
+                                      disabled={isBlocking}
+                                      aria-pressed={
+                                        blockDialog?.selectedBlockingSystem ===
+                                        "built-in"
+                                      }
+                                    >
+                                      Built-in Blocking (exact)
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={
+                                        blockDialog?.selectedBlockingSystem ===
+                                        "advanced"
+                                          ? "toggle-button active"
+                                          : "toggle-button"
+                                      }
+                                      onClick={() => {
+                                        setBlockDialog((prev) =>
+                                          prev
+                                            ? {
+                                                ...prev,
+                                                selectedBlockingSystem:
+                                                  "advanced",
+                                              }
+                                            : prev,
+                                        );
+                                        setBlockError(undefined);
+                                      }}
+                                      disabled={isBlocking}
+                                      aria-pressed={
+                                        blockDialog?.selectedBlockingSystem ===
+                                        "advanced"
+                                      }
+                                    >
+                                      Advanced Blocking (groups)
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          if (blockDialogBlockingMethod !== "built-in") {
+                            return (
+                              <>
+                                {isBlockedEntry && blockCoverage.length > 0 ? (
+                                  <section className="logs-page__modal-summary">
+                                    <h3 className="logs-page__modal-summary-title">
+                                      Current coverage
+                                    </h3>
+                                    <ul className="logs-page__modal-summary-list">
+                                      {blockCoverage.map((entry) => (
+                                        <li
+                                          key={`${entry.name}-${entry.description}`}
+                                        >
+                                          <span className="logs-page__modal-summary-group">
+                                            {entry.name}
+                                          </span>
+                                          <span className="logs-page__modal-summary-detail">
+                                            {entry.description}
+                                          </span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </section>
+                                ) : null}
+                                {isBlockedEntry &&
+                                blockCoverage.length === 0 ? (
+                                  <div className="logs-page__modal-notice">
+                                    <strong>Blocked via downloaded list</strong>
+                                    <p>
+                                      Technitium DNS marked this query as
+                                      blocked, but none of your manual overrides
+                                      include the domain. It is likely coming
+                                      from an external block list feed or an
+                                      upstream integration. Select a group and
+                                      save to add an explicit override.
+                                    </p>
+                                  </div>
+                                ) : null}
+                              </>
+                            );
+                          }
+
+                          return (
+                            <div className="logs-page__modal-notice">
+                              <strong>Built-in Blocking</strong>
+                              <p>
+                                Built-in Blocking supports exact domain
+                                allow/block entries only (no groups and no
+                                regex). Saving will apply the change
+                                immediately.
+                              </p>
+                            </div>
+                          );
+                        })()}
+
+                        {blockDomainValue ? (
+                          <>
                             <div className="logs-page__modal-action-toggle">
                               <span className="logs-page__modal-action-label">
-                                Blocking system
+                                Action
                               </span>
                               <div className="logs-page__modal-action-buttons">
                                 <button
                                   type="button"
                                   className={
-                                    (
-                                      blockDialog?.selectedBlockingSystem ===
-                                      "built-in"
-                                    ) ?
-                                      "toggle-button active"
-                                    : "toggle-button"
+                                    blockingAction === "block"
+                                      ? "toggle-button active"
+                                      : "toggle-button"
                                   }
-                                  onClick={() => {
-                                    setBlockDialog((prev) =>
-                                      prev ?
-                                        {
-                                          ...prev,
-                                          selectedBlockingSystem: "built-in",
-                                        }
-                                      : prev,
-                                    );
-                                    // Built-in mode is exact-only.
-                                    setBlockMode("exact");
-                                    setBlockRegexValue("");
-                                    setBlockSelectedGroups(new Set<string>());
-                                    setBlockError(undefined);
-                                  }}
+                                  onClick={() => handleActionChange("block")}
                                   disabled={isBlocking}
-                                  aria-pressed={
-                                    blockDialog?.selectedBlockingSystem ===
-                                    "built-in"
-                                  }
+                                  aria-pressed={blockingAction === "block"}
                                 >
-                                  Built-in Blocking (exact)
+                                  Block
                                 </button>
                                 <button
                                   type="button"
                                   className={
-                                    (
-                                      blockDialog?.selectedBlockingSystem ===
-                                      "advanced"
-                                    ) ?
-                                      "toggle-button active"
-                                    : "toggle-button"
+                                    blockingAction === "allow"
+                                      ? "toggle-button active"
+                                      : "toggle-button"
                                   }
-                                  onClick={() => {
-                                    setBlockDialog((prev) =>
-                                      prev ?
-                                        {
-                                          ...prev,
-                                          selectedBlockingSystem: "advanced",
-                                        }
-                                      : prev,
-                                    );
-                                    setBlockError(undefined);
-                                  }}
+                                  onClick={() => handleActionChange("allow")}
                                   disabled={isBlocking}
-                                  aria-pressed={
-                                    blockDialog?.selectedBlockingSystem ===
-                                    "advanced"
-                                  }
+                                  aria-pressed={blockingAction === "allow"}
                                 >
-                                  Advanced Blocking (groups)
+                                  Allow
                                 </button>
                               </div>
                             </div>
-                          </div>
-                        );
-                      }
 
-                      if (blockDialogBlockingMethod !== "built-in") {
-                        return (
-                          <>
-                            {isBlockedEntry && blockCoverage.length > 0 ?
-                              <section className="logs-page__modal-summary">
-                                <h3 className="logs-page__modal-summary-title">
-                                  Current coverage
-                                </h3>
-                                <ul className="logs-page__modal-summary-list">
-                                  {blockCoverage.map((entry) => (
-                                    <li
-                                      key={`${entry.name}-${entry.description}`}
-                                    >
-                                      <span className="logs-page__modal-summary-group">
-                                        {entry.name}
-                                      </span>
-                                      <span className="logs-page__modal-summary-detail">
-                                        {entry.description}
-                                      </span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </section>
-                            : null}
-                            {isBlockedEntry && blockCoverage.length === 0 ?
-                              <div className="logs-page__modal-notice">
-                                <strong>Blocked via downloaded list</strong>
-                                <p>
-                                  Technitium DNS marked this query as blocked,
-                                  but none of your manual overrides include the
-                                  domain. It is likely coming from an external
-                                  block list feed or an upstream integration.
-                                  Select a group and save to add an explicit
-                                  override.
-                                </p>
-                              </div>
-                            : null}
+                            {blockDialogBlockingMethod !== "built-in" ? (
+                              <fieldset className="logs-page__modal-mode">
+                                <legend>
+                                  {blockingAction === "allow"
+                                    ? "Allow method"
+                                    : "Block method"}
+                                </legend>
+                                <label className="logs-page__modal-mode-option">
+                                  <input
+                                    type="radio"
+                                    name="block-mode"
+                                    value="exact"
+                                    checked={blockMode === "exact"}
+                                    onChange={() => setBlockMode("exact")}
+                                  />
+                                  <div>
+                                    <span className="logs-page__modal-mode-title">
+                                      Exact domain
+                                    </span>
+                                    <span className="logs-page__modal-mode-detail">
+                                      {blockDomainValue}
+                                    </span>
+                                  </div>
+                                </label>
+                                <label className="logs-page__modal-mode-option">
+                                  <input
+                                    type="radio"
+                                    name="block-mode"
+                                    value="regex"
+                                    checked={blockMode === "regex"}
+                                    onChange={() => {
+                                      setBlockMode("regex");
+                                      if (blockRegexValue.trim().length === 0) {
+                                        setBlockRegexValue(
+                                          buildDefaultRegexPattern(
+                                            blockDomainValue,
+                                          ),
+                                        );
+                                      }
+                                    }}
+                                  />
+                                  <div>
+                                    <span className="logs-page__modal-mode-title">
+                                      Regex pattern
+                                    </span>
+                                    <span className="logs-page__modal-mode-description">
+                                      Prefills a regex pattern to match this
+                                      domain and its subdomains.
+                                    </span>
+                                    <input
+                                      type="text"
+                                      className="logs-page__modal-mode-input"
+                                      value={blockRegexValue}
+                                      onChange={(event) =>
+                                        setBlockRegexValue(event.target.value)
+                                      }
+                                      disabled={blockMode !== "regex"}
+                                    />
+                                  </div>
+                                </label>
+                              </fieldset>
+                            ) : null}
                           </>
-                        );
-                      }
-
-                      return (
-                        <div className="logs-page__modal-notice">
-                          <strong>Built-in Blocking</strong>
-                          <p>
-                            Built-in Blocking supports exact domain allow/block
-                            entries only (no groups and no regex). Saving will
-                            apply the change immediately.
-                          </p>
-                        </div>
-                      );
-                    })()}
-
-                    {blockDomainValue ?
-                      <>
-                        <div className="logs-page__modal-action-toggle">
-                          <span className="logs-page__modal-action-label">
-                            Action
-                          </span>
-                          <div className="logs-page__modal-action-buttons">
-                            <button
-                              type="button"
-                              className={
-                                blockingAction === "block" ?
-                                  "toggle-button active"
-                                : "toggle-button"
-                              }
-                              onClick={() => handleActionChange("block")}
-                              disabled={isBlocking}
-                              aria-pressed={blockingAction === "block"}
-                            >
-                              Block
-                            </button>
-                            <button
-                              type="button"
-                              className={
-                                blockingAction === "allow" ?
-                                  "toggle-button active"
-                                : "toggle-button"
-                              }
-                              onClick={() => handleActionChange("allow")}
-                              disabled={isBlocking}
-                              aria-pressed={blockingAction === "allow"}
-                            >
-                              Allow
-                            </button>
-                          </div>
-                        </div>
-
-                        {blockDialogBlockingMethod !== "built-in" ?
-                          <fieldset className="logs-page__modal-mode">
-                            <legend>
-                              {blockingAction === "allow" ?
-                                "Allow method"
-                              : "Block method"}
-                            </legend>
-                            <label className="logs-page__modal-mode-option">
-                              <input
-                                type="radio"
-                                name="block-mode"
-                                value="exact"
-                                checked={blockMode === "exact"}
-                                onChange={() => setBlockMode("exact")}
-                              />
-                              <div>
-                                <span className="logs-page__modal-mode-title">
-                                  Exact domain
-                                </span>
-                                <span className="logs-page__modal-mode-detail">
-                                  {blockDomainValue}
-                                </span>
-                              </div>
-                            </label>
-                            <label className="logs-page__modal-mode-option">
-                              <input
-                                type="radio"
-                                name="block-mode"
-                                value="regex"
-                                checked={blockMode === "regex"}
-                                onChange={() => {
-                                  setBlockMode("regex");
-                                  if (blockRegexValue.trim().length === 0) {
-                                    setBlockRegexValue(
-                                      buildDefaultRegexPattern(
-                                        blockDomainValue,
-                                      ),
-                                    );
-                                  }
-                                }}
-                              />
-                              <div>
-                                <span className="logs-page__modal-mode-title">
-                                  Regex pattern
-                                </span>
-                                <span className="logs-page__modal-mode-description">
-                                  Prefills a regex pattern to match this domain
-                                  and its subdomains.
-                                </span>
-                                <input
-                                  type="text"
-                                  className="logs-page__modal-mode-input"
-                                  value={blockRegexValue}
-                                  onChange={(event) =>
-                                    setBlockRegexValue(event.target.value)
-                                  }
-                                  disabled={blockMode !== "regex"}
-                                />
-                              </div>
-                            </label>
-                          </fieldset>
-                        : null}
+                        ) : null}
                       </>
-                    : null}
-                  </>
-                }
+                    )}
 
-                {blockDialogBlockingMethod !== "built-in" ?
-                  <>
-                    {(() => {
-                      // Spinner UX: when Advanced Blocking is selected (or assumed) but the overview
-                      // hasn't landed in state yet, show an in-modal loading state.
-                      if (!bulkAction && !advancedBlocking) {
-                        return (
-                          <div className="logs-page__modal-notice">
-                            <strong>Loading Advanced Blocking…</strong>
-                            <p>
-                              Fetching groups for this node. This should only
-                              take a moment.
-                            </p>
-                            <div
-                              className="logs-page__modal-loading"
-                              aria-busy="true"
-                              aria-label="Loading Advanced Blocking"
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 10,
-                                marginTop: 10,
-                              }}
-                            >
-                              <div
-                                className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"
-                                aria-hidden="true"
-                              ></div>
-                              <span className="logs-page__modal-empty">
-                                Loading…
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      // If Advanced Blocking load failed, surface the error in the modal body.
-                      if (
-                        !bulkAction &&
-                        !advancedBlocking &&
-                        advancedBlockingError
-                      ) {
-                        return (
-                          <div className="logs-page__modal-notice">
-                            <strong>Failed to load Advanced Blocking</strong>
-                            <p>{advancedBlockingError}</p>
-                          </div>
-                        );
-                      }
-
-                      if (availableGroupsForSelection.length === 0) {
-                        return (
-                          <p className="logs-page__modal-empty">
-                            No Advanced Blocking groups are available
-                            {bulkAction ? "" : " for this node"}.
-                          </p>
-                        );
-                      }
-
-                      return (
-                        <fieldset className="logs-page__modal-groups">
-                          <legend>
-                            Select groups
-                            {bulkAction ? " (will apply to all nodes)" : ""}
-                          </legend>
-                          <div className="logs-page__modal-group-actions">
-                            <button
-                              type="button"
-                              onClick={handleSelectAllGroups}
-                              className="logs-page__modal-link"
-                            >
-                              All
-                            </button>
-                            <span aria-hidden="true">·</span>
-                            <button
-                              type="button"
-                              onClick={handleSelectNoGroups}
-                              className="logs-page__modal-link"
-                            >
-                              None
-                            </button>
-                          </div>
-                          {availableGroupsForSelection.map((group) => {
-                            const isSelected = blockSelectedGroups.has(
-                              group.name,
-                            );
-                            const overrides =
-                              blockDomainValue ?
-                                extractGroupOverrides(group, blockDomainValue)
-                              : undefined;
-                            const trimmedRegex = blockRegexValue.trim();
-                            const pendingRegex =
-                              trimmedRegex || defaultRegexSuggestion;
-                            const hasBlockOverride = Boolean(
-                              overrides?.blockedExact ||
-                              (overrides &&
-                                overrides.blockedRegexMatches.length > 0),
-                            );
-                            const hasAllowOverride = Boolean(
-                              overrides?.allowedExact ||
-                              (overrides &&
-                                overrides.allowedRegexMatches.length > 0),
-                            );
-                            const firstBlockRegex =
-                              overrides?.blockedRegexMatches[0];
-                            const firstAllowRegex =
-                              overrides?.allowedRegexMatches[0];
-
-                            let detailMessage: string;
-
-                            if (blockingAction === "block") {
-                              if (hasBlockOverride) {
-                                detailMessage =
-                                  overrides?.blockedExact ?
-                                    "Currently blocked via exact match"
-                                  : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
-                              } else if (hasAllowOverride) {
-                                detailMessage =
-                                  overrides?.allowedExact ?
-                                    "Currently allowed via exact override"
-                                  : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
-                              } else {
-                                detailMessage =
-                                  isBlockedEntry ?
-                                    "No local override; blocked via list"
-                                  : "No local override yet";
-                              }
-
-                              if (!isSelected && hasBlockOverride) {
-                                detailMessage = `${detailMessage} — will remove on save`;
-                              } else if (isSelected && !hasBlockOverride) {
-                                detailMessage =
-                                  blockMode === "regex" ?
-                                    pendingRegex ?
-                                      `Will add regex ${pendingRegex}`
-                                    : "Will add regex pattern"
-                                  : "Will add exact match";
-                              }
-                            } else {
-                              if (hasAllowOverride) {
-                                detailMessage =
-                                  overrides?.allowedExact ?
-                                    "Currently allowed via exact override"
-                                  : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
-                              } else if (hasBlockOverride) {
-                                detailMessage =
-                                  overrides?.blockedExact ?
-                                    "Currently blocked via exact match"
-                                  : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
-                              } else {
-                                detailMessage = "No local override yet";
-                              }
-
-                              if (!isSelected && hasAllowOverride) {
-                                detailMessage = `${detailMessage} — will remove on save`;
-                              } else if (isSelected && !hasAllowOverride) {
-                                detailMessage =
-                                  blockMode === "regex" ?
-                                    pendingRegex ?
-                                      `Will add allow regex ${pendingRegex}`
-                                    : "Will add regex allow override"
-                                  : "Will add exact allow override";
-                              }
-                            }
-
+                    {blockDialogBlockingMethod !== "built-in" ? (
+                      <>
+                        {(() => {
+                          // Spinner UX: when Advanced Blocking is selected (or assumed) but the overview
+                          // hasn't landed in state yet, show an in-modal loading state.
+                          if (!bulkAction && !advancedBlocking) {
                             return (
-                              <label
-                                key={group.name}
-                                className="logs-page__modal-group"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() =>
-                                    handleToggleBlockGroup(group.name)
-                                  }
-                                />
-                                <div className="logs-page__modal-group-label">
-                                  <span className="logs-page__modal-group-name">
-                                    {group.name}
-                                  </span>
-                                  <span className="logs-page__modal-group-detail">
-                                    {detailMessage}
+                              <div className="logs-page__modal-notice">
+                                <strong>Loading Advanced Blocking…</strong>
+                                <p>
+                                  Fetching groups for this node. This should
+                                  only take a moment.
+                                </p>
+                                <div
+                                  className="logs-page__modal-loading"
+                                  aria-busy="true"
+                                  aria-label="Loading Advanced Blocking"
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 10,
+                                    marginTop: 10,
+                                  }}
+                                >
+                                  <div
+                                    className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"
+                                    aria-hidden="true"
+                                  ></div>
+                                  <span className="logs-page__modal-empty">
+                                    Loading…
                                   </span>
                                 </div>
-                              </label>
+                              </div>
                             );
-                          })}
-                        </fieldset>
-                      );
-                    })()}
-                  </>
-                : null}
+                          }
 
-                {blockError ?
-                  <div className="logs-page__modal-error">{blockError}</div>
-                : null}
+                          // If Advanced Blocking load failed, surface the error in the modal body.
+                          if (
+                            !bulkAction &&
+                            !advancedBlocking &&
+                            advancedBlockingError
+                          ) {
+                            return (
+                              <div className="logs-page__modal-notice">
+                                <strong>
+                                  Failed to load Advanced Blocking
+                                </strong>
+                                <p>{advancedBlockingError}</p>
+                              </div>
+                            );
+                          }
+
+                          if (availableGroupsForSelection.length === 0) {
+                            return (
+                              <p className="logs-page__modal-empty">
+                                No Advanced Blocking groups are available
+                                {bulkAction ? "" : " for this node"}.
+                              </p>
+                            );
+                          }
+
+                          return (
+                            <fieldset className="logs-page__modal-groups">
+                              <legend>
+                                Select groups
+                                {bulkAction ? " (will apply to all nodes)" : ""}
+                              </legend>
+                              <div className="logs-page__modal-group-actions">
+                                <button
+                                  type="button"
+                                  onClick={handleSelectAllGroups}
+                                  className="logs-page__modal-link"
+                                >
+                                  All
+                                </button>
+                                <span aria-hidden="true">·</span>
+                                <button
+                                  type="button"
+                                  onClick={handleSelectNoGroups}
+                                  className="logs-page__modal-link"
+                                >
+                                  None
+                                </button>
+                              </div>
+                              {availableGroupsForSelection.map((group) => {
+                                const isSelected = blockSelectedGroups.has(
+                                  group.name,
+                                );
+                                const overrides = blockDomainValue
+                                  ? extractGroupOverrides(
+                                      group,
+                                      blockDomainValue,
+                                    )
+                                  : undefined;
+                                const trimmedRegex = blockRegexValue.trim();
+                                const pendingRegex =
+                                  trimmedRegex || defaultRegexSuggestion;
+                                const hasBlockOverride = Boolean(
+                                  overrides?.blockedExact ||
+                                  (overrides &&
+                                    overrides.blockedRegexMatches.length > 0),
+                                );
+                                const hasAllowOverride = Boolean(
+                                  overrides?.allowedExact ||
+                                  (overrides &&
+                                    overrides.allowedRegexMatches.length > 0),
+                                );
+                                const firstBlockRegex =
+                                  overrides?.blockedRegexMatches[0];
+                                const firstAllowRegex =
+                                  overrides?.allowedRegexMatches[0];
+
+                                let detailMessage: string;
+
+                                if (blockingAction === "block") {
+                                  if (hasBlockOverride) {
+                                    detailMessage = overrides?.blockedExact
+                                      ? "Currently blocked via exact match"
+                                      : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
+                                  } else if (hasAllowOverride) {
+                                    detailMessage = overrides?.allowedExact
+                                      ? "Currently allowed via exact override"
+                                      : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
+                                  } else {
+                                    detailMessage = isBlockedEntry
+                                      ? "No local override; blocked via list"
+                                      : "No local override yet";
+                                  }
+
+                                  if (!isSelected && hasBlockOverride) {
+                                    detailMessage = `${detailMessage} — will remove on save`;
+                                  } else if (isSelected && !hasBlockOverride) {
+                                    detailMessage =
+                                      blockMode === "regex"
+                                        ? pendingRegex
+                                          ? `Will add regex ${pendingRegex}`
+                                          : "Will add regex pattern"
+                                        : "Will add exact match";
+                                  }
+                                } else {
+                                  if (hasAllowOverride) {
+                                    detailMessage = overrides?.allowedExact
+                                      ? "Currently allowed via exact override"
+                                      : `Currently allowed via regex ${firstAllowRegex ?? "(regex)"}`;
+                                  } else if (hasBlockOverride) {
+                                    detailMessage = overrides?.blockedExact
+                                      ? "Currently blocked via exact match"
+                                      : `Currently blocked via regex ${firstBlockRegex ?? "(regex)"}`;
+                                  } else {
+                                    detailMessage = "No local override yet";
+                                  }
+
+                                  if (!isSelected && hasAllowOverride) {
+                                    detailMessage = `${detailMessage} — will remove on save`;
+                                  } else if (isSelected && !hasAllowOverride) {
+                                    detailMessage =
+                                      blockMode === "regex"
+                                        ? pendingRegex
+                                          ? `Will add allow regex ${pendingRegex}`
+                                          : "Will add regex allow override"
+                                        : "Will add exact allow override";
+                                  }
+                                }
+
+                                return (
+                                  <label
+                                    key={group.name}
+                                    className="logs-page__modal-group"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() =>
+                                        handleToggleBlockGroup(group.name)
+                                      }
+                                    />
+                                    <div className="logs-page__modal-group-label">
+                                      <span className="logs-page__modal-group-name">
+                                        {group.name}
+                                      </span>
+                                      <span className="logs-page__modal-group-detail">
+                                        {detailMessage}
+                                      </span>
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                            </fieldset>
+                          );
+                        })()}
+                      </>
+                    ) : null}
+
+                    {blockError ? (
+                      <div className="logs-page__modal-error">{blockError}</div>
+                    ) : null}
+                  </div>
+                  <footer className="logs-page__modal-actions">
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => closeBlockDialog("cancel")}
+                      disabled={isBlocking}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={
+                        bulkAction
+                          ? handleConfirmBulkAction
+                          : handleConfirmBlock
+                      }
+                      disabled={
+                        isBlocking ||
+                        (bulkAction
+                          ? false
+                          : blockDialogBlockingMethod === "built-in"
+                            ? false
+                            : !advancedBlocking ||
+                              loadingAdvancedBlocking ||
+                              blockAvailableGroups.length === 0)
+                      }
+                    >
+                      {bulkAction
+                        ? isBlocking
+                          ? "Applying..."
+                          : `${bulkAction === "block" ? "Block" : "Allow"} ${selectedDomains.size} Domains`
+                        : confirmButtonLabel}
+                    </button>
+                  </footer>
+                </div>
               </div>
-              <footer className="logs-page__modal-actions">
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() => closeBlockDialog("cancel")}
-                  disabled={isBlocking}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={
-                    bulkAction ? handleConfirmBulkAction : handleConfirmBlock
+            ) : null}
+
+            {/* Floating Live Toggle - Only show in tail mode */}
+            {displayMode === "tail" && (
+              <FloatingLiveToggle
+                // Tail mode "live" is derived solely from refreshSeconds (single source of truth).
+                isLive={refreshSeconds > 0}
+                refreshSeconds={refreshSeconds}
+                pausedTitle={
+                  endDate.trim().length > 0
+                    ? "Paused because End Date/Time is set. Clear it to resume."
+                    : logsTableContextMenu
+                      ? "Paused while the context menu is open."
+                      : undefined
+                }
+                onToggle={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+
+                  const savedScrollY = window.scrollY;
+
+                  if (event.currentTarget instanceof HTMLElement) {
+                    event.currentTarget.blur();
                   }
-                  disabled={
-                    isBlocking ||
-                    (bulkAction ? false
-                    : blockDialogBlockingMethod === "built-in" ? false
-                    : !advancedBlocking ||
-                      loadingAdvancedBlocking ||
-                      blockAvailableGroups.length === 0)
+
+                  // Tail mode pause semantics (single source of truth):
+                  // - Pause: refreshSeconds = 0 (must stop ALL fetching)
+                  // - Resume: refreshSeconds = default (restart polling) + immediate refresh tick
+                  const currentlyLive = refreshSeconds > 0;
+
+                  if (currentlyLive) {
+                    setRefreshSeconds(0);
+                  } else {
+                    setIsAutoRefresh(true);
+                    setRefreshTick((prev) => prev + 1);
+                    setRefreshSeconds(TAIL_MODE_DEFAULT_REFRESH);
                   }
-                >
-                  {bulkAction ?
-                    isBlocking ?
-                      "Applying..."
-                    : `${bulkAction === "block" ? "Block" : "Allow"} ${selectedDomains.size} Domains`
 
-                  : confirmButtonLabel}
-                </button>
-              </footer>
-            </div>
-          </div>
-        : null}
-
-        {/* Floating Live Toggle - Only show in tail mode */}
-        {displayMode === "tail" && (
-          <FloatingLiveToggle
-            // Tail mode "live" is derived solely from refreshSeconds (single source of truth).
-            isLive={refreshSeconds > 0}
-            refreshSeconds={refreshSeconds}
-            pausedTitle={
-              endDate.trim().length > 0 ?
-                "Paused because End Date/Time is set. Clear it to resume."
-              : logsTableContextMenu ?
-                "Paused while the context menu is open."
-              : undefined
-            }
-            onToggle={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-
-              const savedScrollY = window.scrollY;
-
-              if (event.currentTarget instanceof HTMLElement) {
-                event.currentTarget.blur();
-              }
-
-              // Tail mode pause semantics (single source of truth):
-              // - Pause: refreshSeconds = 0 (must stop ALL fetching)
-              // - Resume: refreshSeconds = default (restart polling) + immediate refresh tick
-              const currentlyLive = refreshSeconds > 0;
-
-              if (currentlyLive) {
-                setRefreshSeconds(0);
-              } else {
-                setIsAutoRefresh(true);
-                setRefreshTick((prev) => prev + 1);
-                setRefreshSeconds(TAIL_MODE_DEFAULT_REFRESH);
-              }
-
-              requestAnimationFrame(() => {
-                window.scrollTo(0, savedScrollY);
-              });
-            }}
-          />
+                  requestAnimationFrame(() => {
+                    window.scrollTo(0, savedScrollY);
+                  });
+                }}
+              />
+            )}
+          </>
         )}
       </section>
     </>
