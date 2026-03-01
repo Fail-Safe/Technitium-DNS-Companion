@@ -1,68 +1,78 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  apiFetch,
-  isApiFetchNetworkError,
-  triggerAuthRedirect,
-  triggerNodesConfigLoadFailed,
+    apiFetch,
+    isApiFetchNetworkError,
+    triggerAuthRedirect,
+    triggerNodesConfigLoadFailed,
 } from "../config";
 import type {
-  AdvancedBlockingConfig,
-  AdvancedBlockingOverview,
-  AdvancedBlockingSnapshot,
+    AdvancedBlockingConfig,
+    AdvancedBlockingOverview,
+    AdvancedBlockingSnapshot,
 } from "../types/advancedBlocking";
 import type {
-  BlockingMethod,
-  BlockingSettings,
-  BlockingStatusOverview,
-  BlockingZoneListResponse,
-  BlockingZoneOperationResult,
-  BuiltInBlockingOverview,
+    BlockingMethod,
+    BlockingSettings,
+    BlockingStatusOverview,
+    BlockingZoneListResponse,
+    BlockingZoneOperationResult,
+    BuiltInBlockingOverview,
 } from "../types/builtInBlocking";
 import type {
-  ConfigSnapshot,
-  ConfigSnapshotMetadata,
-  ConfigSnapshotMethod,
-  ConfigSnapshotOrigin,
-  ConfigSnapshotRestoreResult,
+    ConfigSnapshot,
+    ConfigSnapshotMetadata,
+    ConfigSnapshotMethod,
+    ConfigSnapshotOrigin,
+    ConfigSnapshotRestoreResult,
 } from "../types/configSnapshots";
 import type {
-  DhcpBulkSyncRequest,
-  DhcpBulkSyncResult,
-  DhcpSnapshot,
-  DhcpSnapshotMetadata,
-  DhcpSnapshotOrigin,
-  DhcpSnapshotRestoreOptions,
-  DhcpSnapshotRestoreResult,
-  TechnitiumCloneDhcpScopeRequest,
-  TechnitiumCloneDhcpScopeResult,
-  TechnitiumCreateDhcpScopeEnvelope,
-  TechnitiumCreateDhcpScopeRequest,
-  TechnitiumDhcpScope,
-  TechnitiumDhcpScopeEnvelope,
-  TechnitiumDhcpScopeListEnvelope,
-  TechnitiumRenameDhcpScopeRequest,
-  TechnitiumRenameDhcpScopeResult,
-  TechnitiumUpdateDhcpScopeEnvelope,
-  TechnitiumUpdateDhcpScopeRequest,
+    DhcpBulkSyncRequest,
+    DhcpBulkSyncResult,
+    DhcpSnapshot,
+    DhcpSnapshotMetadata,
+    DhcpSnapshotOrigin,
+    DhcpSnapshotRestoreOptions,
+    DhcpSnapshotRestoreResult,
+    TechnitiumCloneDhcpScopeRequest,
+    TechnitiumCloneDhcpScopeResult,
+    TechnitiumCreateDhcpScopeEnvelope,
+    TechnitiumCreateDhcpScopeRequest,
+    TechnitiumDhcpScope,
+    TechnitiumDhcpScopeEnvelope,
+    TechnitiumDhcpScopeListEnvelope,
+    TechnitiumRenameDhcpScopeRequest,
+    TechnitiumRenameDhcpScopeResult,
+    TechnitiumUpdateDhcpScopeEnvelope,
+    TechnitiumUpdateDhcpScopeRequest,
 } from "../types/dhcp";
 import type {
-  TechnitiumCombinedQueryLogPage,
-  TechnitiumNodeQueryLogEnvelope,
-  TechnitiumQueryLogFilters,
-  TechnitiumQueryLogStorageStatus,
+    DomainGroup,
+    DomainGroupBinding,
+    DomainGroupDetails,
+    DomainGroupEntry,
+    DomainGroupMaterializationPreview,
+    DomainGroupsApplyRequest,
+    DomainGroupsApplyResult,
+    DomainGroupsStatus,
+} from "../types/domainGroups";
+import type {
+    TechnitiumCombinedQueryLogPage,
+    TechnitiumNodeQueryLogEnvelope,
+    TechnitiumQueryLogFilters,
+    TechnitiumQueryLogStorageStatus,
 } from "../types/technitiumLogs";
 import type {
-  TechnitiumCombinedZoneOverview,
-  TechnitiumCombinedZoneRecordsOverview,
-  TechnitiumZoneListEnvelope,
+    TechnitiumCombinedZoneOverview,
+    TechnitiumCombinedZoneRecordsOverview,
+    TechnitiumZoneListEnvelope,
 } from "../types/zones";
 import type {
-  ZoneSnapshot,
-  ZoneSnapshotCreateRequest,
-  ZoneSnapshotMetadata,
-  ZoneSnapshotRestoreOptions,
-  ZoneSnapshotRestoreResult,
+    ZoneSnapshot,
+    ZoneSnapshotCreateRequest,
+    ZoneSnapshotMetadata,
+    ZoneSnapshotRestoreOptions,
+    ZoneSnapshotRestoreResult,
 } from "../types/zoneSnapshots";
 import type { AuthStatus } from "./AuthContext";
 import { TechnitiumContext } from "./technitiumContextInstance";
@@ -338,6 +348,40 @@ export interface TechnitiumState {
   loadCombinedZoneRecords: (
     zoneName: string,
   ) => Promise<TechnitiumCombinedZoneRecordsOverview>;
+  loadDomainGroupsStatus: () => Promise<DomainGroupsStatus>;
+  listDomainGroups: () => Promise<DomainGroup[]>;
+  getDomainGroup: (groupId: string) => Promise<DomainGroupDetails>;
+  createDomainGroup: (request: {
+    name: string;
+    description?: string;
+  }) => Promise<DomainGroupDetails>;
+  updateDomainGroup: (
+    groupId: string,
+    request: { name?: string; description?: string },
+  ) => Promise<DomainGroup>;
+  deleteDomainGroup: (groupId: string) => Promise<void>;
+  addDomainGroupEntry: (
+    groupId: string,
+    request: { matchType: "exact" | "regex"; value: string; note?: string },
+  ) => Promise<DomainGroupEntry>;
+  updateDomainGroupEntry: (
+    groupId: string,
+    entryId: string,
+    request: { matchType?: "exact" | "regex"; value?: string; note?: string },
+  ) => Promise<DomainGroupEntry>;
+  deleteDomainGroupEntry: (groupId: string, entryId: string) => Promise<void>;
+  addDomainGroupBinding: (
+    groupId: string,
+    request: { advancedBlockingGroupName: string; action: "allow" | "block" },
+  ) => Promise<DomainGroupBinding>;
+  deleteDomainGroupBinding: (
+    groupId: string,
+    bindingId: string,
+  ) => Promise<void>;
+  getDomainGroupMaterializationPreview: () => Promise<DomainGroupMaterializationPreview>;
+  applyDomainGroupMaterialization: (
+    request: DomainGroupsApplyRequest,
+  ) => Promise<DomainGroupsApplyResult>;
 }
 
 // Load nodes from backend API (configured on server side via environment variables)
@@ -530,19 +574,72 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   // Track in-flight overview fetch to prevent duplicate requests
   const overviewFetchInProgress = useRef<Promise<void> | null>(null);
   const nodeAppsFetchInProgress = useRef<Promise<void> | null>(null);
+  const loadNodesInFlightRef = useRef<Promise<void> | null>(null);
 
   // Keep ref in sync with latest nodes array
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
 
+  const loadConfiguredNodesWithSync = useCallback(async () => {
+    if (loadNodesInFlightRef.current) {
+      return loadNodesInFlightRef.current;
+    }
+
+    const promise = (async () => {
+      const loadedNodes = await fetchConfiguredNodes();
+      nodesRef.current = loadedNodes;
+      setNodes((previousNodes) => {
+        const previousById = new Map(
+          previousNodes.map((node) => [node.id, node]),
+        );
+
+        return loadedNodes.map((loadedNode) => {
+          const previous = previousById.get(loadedNode.id);
+          if (!previous) {
+            return loadedNode;
+          }
+
+          return {
+            ...loadedNode,
+            status: previous.status,
+            lastSync: previous.lastSync,
+            hasAdvancedBlocking: previous.hasAdvancedBlocking,
+            overview: previous.overview,
+          };
+        });
+      });
+    })();
+
+    loadNodesInFlightRef.current = promise;
+
+    try {
+      await promise;
+    } finally {
+      loadNodesInFlightRef.current = null;
+    }
+  }, []);
+
   // Load nodes configuration on mount
   useEffect(() => {
-    fetchConfiguredNodes().then((loadedNodes) => {
-      nodesRef.current = loadedNodes;
-      setNodes(loadedNodes);
-    });
-  }, []);
+    void loadConfiguredNodesWithSync();
+  }, [loadConfiguredNodesWithSync]);
+
+  // In session-auth mode, initial pre-auth fetches can return an empty node list.
+  // Re-sync node configuration when auth context becomes usable (or node scope changes)
+  // so Overview and feature gates hydrate without requiring a manual page refresh.
+  useEffect(() => {
+    if (authSessionEnabled && !authAuthenticated) {
+      return;
+    }
+
+    void loadConfiguredNodesWithSync();
+  }, [
+    authSessionEnabled,
+    authAuthenticated,
+    authNodeIdsKey,
+    loadConfiguredNodesWithSync,
+  ]);
 
   // Fetch Advanced Blocking app status for all nodes
   const checkNodeApps = useCallback(async () => {
@@ -1572,6 +1669,316 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
 
     return (await response.json()) as TechnitiumCombinedZoneRecordsOverview;
   }, []);
+
+  const readApiErrorMessage = useCallback(
+    async (response: Response, fallback: string): Promise<string> => {
+      try {
+        const payload = (await response.json()) as {
+          message?: string | string[];
+          error?: string;
+        };
+
+        if (Array.isArray(payload.message) && payload.message.length > 0) {
+          return payload.message.join(", ");
+        }
+
+        if (typeof payload.message === "string" && payload.message.trim()) {
+          return payload.message;
+        }
+
+        if (typeof payload.error === "string" && payload.error.trim()) {
+          return payload.error;
+        }
+      } catch {
+        // Fall back to default status-based message when body is unavailable.
+      }
+
+      return `${fallback} (${response.status})`;
+    },
+    [],
+  );
+
+  const loadDomainGroupsStatus = useCallback(async () => {
+    const response = await apiFetch("/domain-groups/status");
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to load Domain Groups status (${response.status})`,
+      );
+    }
+
+    return (await response.json()) as DomainGroupsStatus;
+  }, []);
+
+  const listDomainGroups = useCallback(async () => {
+    const response = await apiFetch("/domain-groups");
+
+    if (!response.ok) {
+      throw new Error(`Failed to list Domain Groups (${response.status})`);
+    }
+
+    return (await response.json()) as DomainGroup[];
+  }, []);
+
+  const getDomainGroup = useCallback(async (groupId: string) => {
+    const trimmedGroupId = groupId?.trim();
+    if (!trimmedGroupId) {
+      throw new Error("Domain Group id is required.");
+    }
+
+    const response = await apiFetch(
+      `/domain-groups/${encodeURIComponent(trimmedGroupId)}`,
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to load Domain Group ${trimmedGroupId} (${response.status})`,
+      );
+    }
+
+    return (await response.json()) as DomainGroupDetails;
+  }, []);
+
+  const createDomainGroup = useCallback(
+    async (request: { name: string; description?: string }) => {
+      const response = await apiFetch("/domain-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to create Domain Group (${response.status})`);
+      }
+
+      return (await response.json()) as DomainGroupDetails;
+    },
+    [],
+  );
+
+  const updateDomainGroup = useCallback(
+    async (
+      groupId: string,
+      request: { name?: string; description?: string },
+    ) => {
+      const trimmedGroupId = groupId?.trim();
+      if (!trimmedGroupId) {
+        throw new Error("Domain Group id is required.");
+      }
+
+      const response = await apiFetch(
+        `/domain-groups/${encodeURIComponent(trimmedGroupId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to update Domain Group ${trimmedGroupId} (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as DomainGroup;
+    },
+    [],
+  );
+
+  const deleteDomainGroup = useCallback(async (groupId: string) => {
+    const trimmedGroupId = groupId?.trim();
+    if (!trimmedGroupId) {
+      throw new Error("Domain Group id is required.");
+    }
+
+    const response = await apiFetch(
+      `/domain-groups/${encodeURIComponent(trimmedGroupId)}`,
+      { method: "DELETE" },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to delete Domain Group ${trimmedGroupId} (${response.status})`,
+      );
+    }
+  }, []);
+
+  const addDomainGroupEntry = useCallback(
+    async (
+      groupId: string,
+      request: { matchType: "exact" | "regex"; value: string; note?: string },
+    ) => {
+      const trimmedGroupId = groupId?.trim();
+      if (!trimmedGroupId) {
+        throw new Error("Domain Group id is required.");
+      }
+
+      const response = await apiFetch(
+        `/domain-groups/${encodeURIComponent(trimmedGroupId)}/entries`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readApiErrorMessage(
+            response,
+            "Failed to add Domain Group entry",
+          ),
+        );
+      }
+
+      return (await response.json()) as DomainGroupEntry;
+    },
+    [readApiErrorMessage],
+  );
+
+  const updateDomainGroupEntry = useCallback(
+    async (
+      groupId: string,
+      entryId: string,
+      request: { matchType?: "exact" | "regex"; value?: string; note?: string },
+    ) => {
+      const trimmedGroupId = groupId?.trim();
+      const trimmedEntryId = entryId?.trim();
+      if (!trimmedGroupId || !trimmedEntryId) {
+        throw new Error("Domain Group id and entry id are required.");
+      }
+
+      const response = await apiFetch(
+        `/domain-groups/${encodeURIComponent(trimmedGroupId)}/entries/${encodeURIComponent(trimmedEntryId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readApiErrorMessage(
+            response,
+            "Failed to update Domain Group entry",
+          ),
+        );
+      }
+
+      return (await response.json()) as DomainGroupEntry;
+    },
+    [readApiErrorMessage],
+  );
+
+  const deleteDomainGroupEntry = useCallback(
+    async (groupId: string, entryId: string) => {
+      const trimmedGroupId = groupId?.trim();
+      const trimmedEntryId = entryId?.trim();
+      if (!trimmedGroupId || !trimmedEntryId) {
+        throw new Error("Domain Group id and entry id are required.");
+      }
+
+      const response = await apiFetch(
+        `/domain-groups/${encodeURIComponent(trimmedGroupId)}/entries/${encodeURIComponent(trimmedEntryId)}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to delete Domain Group entry (${response.status})`,
+        );
+      }
+    },
+    [],
+  );
+
+  const addDomainGroupBinding = useCallback(
+    async (
+      groupId: string,
+      request: { advancedBlockingGroupName: string; action: "allow" | "block" },
+    ) => {
+      const trimmedGroupId = groupId?.trim();
+      if (!trimmedGroupId) {
+        throw new Error("Domain Group id is required.");
+      }
+
+      const response = await apiFetch(
+        `/domain-groups/${encodeURIComponent(trimmedGroupId)}/bindings`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readApiErrorMessage(
+            response,
+            "Failed to add Domain Group binding",
+          ),
+        );
+      }
+
+      return (await response.json()) as DomainGroupBinding;
+    },
+    [readApiErrorMessage],
+  );
+
+  const deleteDomainGroupBinding = useCallback(
+    async (groupId: string, bindingId: string) => {
+      const trimmedGroupId = groupId?.trim();
+      const trimmedBindingId = bindingId?.trim();
+      if (!trimmedGroupId || !trimmedBindingId) {
+        throw new Error("Domain Group id and binding id are required.");
+      }
+
+      const response = await apiFetch(
+        `/domain-groups/${encodeURIComponent(trimmedGroupId)}/bindings/${encodeURIComponent(trimmedBindingId)}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to delete Domain Group binding (${response.status})`,
+        );
+      }
+    },
+    [],
+  );
+
+  const getDomainGroupMaterializationPreview = useCallback(async () => {
+    const response = await apiFetch("/domain-groups/materialization/preview");
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to load Domain Groups materialization preview (${response.status})`,
+      );
+    }
+
+    return (await response.json()) as DomainGroupMaterializationPreview;
+  }, []);
+
+  const applyDomainGroupMaterialization = useCallback(
+    async (request: DomainGroupsApplyRequest) => {
+      const response = await apiFetch("/domain-groups/materialization/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request ?? {}),
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to apply Domain Groups materialization (${response.status})`,
+        );
+      }
+
+      return (await response.json()) as DomainGroupsApplyResult;
+    },
+    [],
+  );
 
   const cloneDhcpScope = useCallback(
     async (
@@ -2614,6 +3021,19 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       loadZones,
       loadCombinedZones,
       loadCombinedZoneRecords,
+      loadDomainGroupsStatus,
+      listDomainGroups,
+      getDomainGroup,
+      createDomainGroup,
+      updateDomainGroup,
+      deleteDomainGroup,
+      addDomainGroupEntry,
+      updateDomainGroupEntry,
+      deleteDomainGroupEntry,
+      addDomainGroupBinding,
+      deleteDomainGroupBinding,
+      getDomainGroupMaterializationPreview,
+      applyDomainGroupMaterialization,
     }),
     [
       nodes,
@@ -2681,6 +3101,19 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       loadZones,
       loadCombinedZones,
       loadCombinedZoneRecords,
+      loadDomainGroupsStatus,
+      listDomainGroups,
+      getDomainGroup,
+      createDomainGroup,
+      updateDomainGroup,
+      deleteDomainGroup,
+      addDomainGroupEntry,
+      updateDomainGroupEntry,
+      deleteDomainGroupEntry,
+      addDomainGroupBinding,
+      deleteDomainGroupBinding,
+      getDomainGroupMaterializationPreview,
+      applyDomainGroupMaterialization,
     ],
   );
 

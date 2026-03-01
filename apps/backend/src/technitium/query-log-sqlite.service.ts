@@ -803,6 +803,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
 
   async getStoredCombinedLogs(
     filters: TechnitiumQueryLogFilters = {},
+    options?: { authMode?: "session" | "background" },
   ): Promise<TechnitiumCombinedQueryLogPage> {
     if (!this.db) {
       throw new Error("SQLite query log storage is not enabled.");
@@ -932,7 +933,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
 
     const entries = this.parseRowsToEntries(rows);
     const enriched =
-      await this.technitiumService.enrichQueryLogEntriesWithHostnames(entries);
+      await this.technitiumService.enrichQueryLogEntriesWithHostnames(entries, options);
 
     const nodeSnapshots = this.nodeConfigs.map((node) => {
       const nodeWindowWhere = this.buildWhereClause({}, window, node.id);

@@ -19,6 +19,7 @@ import type { Response } from "express";
 import { AdvancedBlockingService } from "./advanced-blocking.service";
 import type { AdvancedBlockingUpdateRequest } from "./advanced-blocking.types";
 import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
+import { NodeOverviewCacheInterceptor } from "./node-overview-cache.interceptor";
 import { QueryLogSqliteService } from "./query-log-sqlite.service";
 import { TechnitiumService } from "./technitium.service";
 import type {
@@ -74,6 +75,13 @@ export class TechnitiumController {
   @CacheTTL(30000) // Cache for 30 seconds - cluster state doesn't change frequently
   listNodes() {
     return this.technitiumService.listNodes();
+  }
+
+  @Get("known-clients")
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(30000) // Cache for 30 seconds
+  getKnownClients() {
+    return this.technitiumService.getKnownClients();
   }
 
   @Get("advanced-blocking")
@@ -157,6 +165,8 @@ export class TechnitiumController {
   }
 
   @Get(":nodeId/overview")
+  @UseInterceptors(NodeOverviewCacheInterceptor)
+  @CacheTTL(10000) // Cache for 10 seconds to smooth frequent dashboard refreshes
   getNodeOverview(@Param("nodeId") nodeId: string) {
     return this.technitiumService.getNodeOverview(nodeId);
   }

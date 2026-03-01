@@ -1,4 +1,4 @@
-import { Logger } from "@nestjs/common";
+import { LogLevel, Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import "dotenv/config";
@@ -13,6 +13,24 @@ import { getOrCreateSelfSignedCert } from "./utils/self-signed-cert";
 resolveEnvFileVariables();
 
 const ONE_YEAR_IN_SECONDS = 60 * 60 * 24 * 365;
+
+const LOG_LEVEL_HIERARCHY: LogLevel[] = [
+  "error",
+  "warn",
+  "log",
+  "debug",
+  "verbose",
+];
+
+function resolveLogLevels(): LogLevel[] {
+  const envLevel = (process.env.LOG_LEVEL ?? "").toLowerCase() as LogLevel;
+  const isProduction = process.env.NODE_ENV === "production";
+  const defaultLevel: LogLevel = isProduction ? "warn" : "log";
+  const level = LOG_LEVEL_HIERARCHY.includes(envLevel)
+    ? envLevel
+    : defaultLevel;
+  return LOG_LEVEL_HIERARCHY.slice(0, LOG_LEVEL_HIERARCHY.indexOf(level) + 1);
+}
 
 function resolveConfigFilePath(inputPath: string): string {
   const absolutePath = resolve(inputPath);
@@ -149,7 +167,7 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     httpsOptions,
-    logger: ["error", "warn", "log", "debug", "verbose"],
+    logger: resolveLogLevels(),
   });
 
   if (trustProxyEnabled) {
