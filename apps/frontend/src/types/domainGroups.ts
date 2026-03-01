@@ -34,6 +34,12 @@ export interface DomainGroupDetails extends DomainGroup {
   bindings: DomainGroupBinding[];
 }
 
+export interface DomainGroupsStatus {
+  enabled: boolean;
+  ready: boolean;
+  dbPath?: string;
+}
+
 export interface DomainGroupConflict {
   advancedBlockingGroupName: string;
   matchType: DomainGroupEntryMatchType;
@@ -56,12 +62,6 @@ export interface DomainGroupMaterializationPreview {
   hasConflicts: boolean;
   conflicts: DomainGroupConflict[];
   groups: DomainGroupMaterializedGroup[];
-}
-
-export interface DomainGroupsStatus {
-  enabled: boolean;
-  ready: boolean;
-  dbPath?: string;
 }
 
 export interface DomainGroupsApplyRequest {

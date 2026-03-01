@@ -28,7 +28,8 @@ Domain Groups are stored in SQLite (not JSON/YAML) for:
 Environment variable:
 
 ```bash
-DOMAIN_GROUPS_ENABLED=true
+# Optional kill switch (default is enabled):
+DOMAIN_GROUPS_ENABLED=false
 DOMAIN_GROUPS_SQLITE_PATH=/data/domain-groups.sqlite
 ```
 
@@ -36,8 +37,8 @@ Default path if unset: `/data/domain-groups.sqlite`.
 
 Notes:
 
-- Domain Groups are **opt-in** and disabled by default.
-- Existing deployments continue to run unchanged unless `DOMAIN_GROUPS_ENABLED=true` is set.
+- Domain Groups are enabled by default.
+- Set `DOMAIN_GROUPS_ENABLED=false` to disable the feature.
 - This SQLite DB is separate from the optional Query Logs SQLite store.
 
 ## API Endpoints
@@ -109,11 +110,7 @@ Binding payload:
 Payload:
 
 ```json
-{
-  "nodeIds": ["node1", "node2"],
-  "dryRun": false,
-  "allowSecondaryWrites": false
-}
+{ "nodeIds": ["node1", "node2"], "dryRun": false }
 ```
 
 Behavior:
@@ -123,7 +120,7 @@ Behavior:
   - non-cluster mode defaults to all configured nodes
 - If same-specificity conflicts exist, apply is blocked and returns a conflict error.
 - `dryRun=true` computes per-node changes without writing node configs.
-- Secondary node writes are blocked by default in cluster mode; set `allowSecondaryWrites=true` to override.
+- Secondary node writes are blocked in cluster mode (Primary-only writes).
 
 Returns:
 

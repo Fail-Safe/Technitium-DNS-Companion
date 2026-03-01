@@ -1,35 +1,33 @@
 import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  Logger,
-  NotFoundException,
-  OnModuleDestroy,
-  OnModuleInit,
-  ServiceUnavailableException,
+    BadRequestException,
+    ConflictException,
+    Injectable,
+    Logger,
+    NotFoundException,
+    OnModuleInit,
+    ServiceUnavailableException,
 } from "@nestjs/common";
 import { randomUUID } from "crypto";
-import { mkdirSync } from "fs";
 import { DatabaseSync } from "node:sqlite";
-import { dirname } from "path";
 import { AdvancedBlockingService } from "./advanced-blocking.service";
 import type {
-  AdvancedBlockingConfig,
-  AdvancedBlockingGroup,
+    AdvancedBlockingConfig,
+    AdvancedBlockingGroup,
 } from "./advanced-blocking.types";
+import { CompanionDbService } from "./companion-db.service";
 import type {
-  DomainGroup,
-  DomainGroupBinding,
-  DomainGroupBindingAction,
-  DomainGroupConflict,
-  DomainGroupDetails,
-  DomainGroupEntry,
-  DomainGroupEntryMatchType,
-  DomainGroupMaterializationPreview,
-  DomainGroupMaterializedGroup,
-  DomainGroupsApplyRequest,
-  DomainGroupsApplyResult,
-  DomainGroupsStatus,
+    DomainGroup,
+    DomainGroupBinding,
+    DomainGroupBindingAction,
+    DomainGroupConflict,
+    DomainGroupDetails,
+    DomainGroupEntry,
+    DomainGroupEntryMatchType,
+    DomainGroupMaterializationPreview,
+    DomainGroupMaterializedGroup,
+    DomainGroupsApplyRequest,
+    DomainGroupsApplyResult,
+    DomainGroupsStatus,
 } from "./domain-groups.types";
 import { TechnitiumService } from "./technitium.service";
 
@@ -71,16 +69,14 @@ type MaterializationRow = {
 };
 
 @Injectable()
-export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
+export class DomainGroupsService implements OnModuleInit {
   private readonly logger = new Logger(DomainGroupsService.name);
-  private db: DatabaseSync | null = null;
-  private readonly enabled = process.env.DOMAIN_GROUPS_ENABLED === "true";
-
-  private readonly dbPath =
-    (process.env.DOMAIN_GROUPS_SQLITE_PATH ?? "").trim() ||
-    "/data/domain-groups.sqlite";
+  private readonly enabled =
+    (process.env.DOMAIN_GROUPS_ENABLED ?? "true").trim().toLowerCase() !==
+    "false";
 
   constructor(
+    private readonly companionDb: CompanionDbService,
     private readonly advancedBlockingService: AdvancedBlockingService,
     private readonly technitiumService: TechnitiumService,
   ) {}
@@ -88,66 +84,50 @@ export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
   getStatus(): DomainGroupsStatus {
     return {
       enabled: this.enabled,
-      ready: this.enabled && this.db !== null,
-      dbPath: this.enabled ? this.dbPath : undefined,
+      ready: this.enabled && this.companionDb.db !== null,
+      dbPath: this.enabled ? this.companionDb.dbPath : undefined,
     };
   }
 
   onModuleInit(): void {
+    this.logger.log(
+      `Domain Groups config: enabled=${this.enabled}, dbPath=${this.companionDb.dbPath}`,
+    );
+
     if (!this.enabled) {
       this.logger.log(
-        "Domain Groups are disabled (DOMAIN_GROUPS_ENABLED!=true).",
+        "Domain Groups are disabled (DOMAIN_GROUPS_ENABLED=false).",
       );
       return;
     }
 
     try {
-      mkdirSync(dirname(this.dbPath), { recursive: true });
-      this.db = new DatabaseSync(this.dbPath);
-      this.db.exec("PRAGMA foreign_keys=ON;");
-      this.db.exec("PRAGMA journal_mode=WAL;");
-      this.db.exec("PRAGMA synchronous=NORMAL;");
       this.initializeSchema();
-      this.logger.log(`Domain Groups SQLite initialized at ${this.dbPath}`);
+      this.logger.log(
+        `Domain Groups schema initialized in Companion SQLite at ${this.companionDb.dbPath}`,
+      );
     } catch (error) {
-      this.db = null;
       this.logger.error(
-        `Failed to initialize Domain Groups SQLite at ${this.dbPath}`,
+        `Failed to initialize Domain Groups schema`,
         error as Error,
       );
-    }
-  }
-
-  onModuleDestroy(): void {
-    if (!this.db) {
-      return;
-    }
-
-    try {
-      this.db.close();
-    } catch (error) {
-      this.logger.warn(
-        "Failed to close Domain Groups SQLite DB",
-        error as Error,
-      );
-    } finally {
-      this.db = null;
     }
   }
 
   private getDb(): DatabaseSync {
     if (!this.enabled) {
       throw new ServiceUnavailableException(
-        "Domain Groups are disabled. Set DOMAIN_GROUPS_ENABLED=true to enable this feature.",
+        "Domain Groups are disabled. Set DOMAIN_GROUPS_ENABLED=true or unset it to enable this feature.",
       );
     }
 
-    if (!this.db) {
+    const db = this.companionDb.db;
+    if (!db) {
       throw new ServiceUnavailableException(
         "Domain Groups storage is unavailable.",
       );
     }
-    return this.db;
+    return db;
   }
 
   private initializeSchema(): void {
@@ -217,6 +197,47 @@ export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
     return trimmed.length > 0 ? trimmed : undefined;
   }
 
+  private isValidExactDomain(value: string): boolean {
+    return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(
+      value,
+    );
+  }
+
+  private getExactDomainValidationError(value: string): string | null {
+    if (value.startsWith(".")) {
+      return 'Exact domain cannot start with ".".';
+    }
+
+    if (value.includes("*")) {
+      return 'Exact domain cannot include wildcard "*". Use regex match type for wildcard-style patterns.';
+    }
+
+    if (value.includes("..")) {
+      return "Exact domain cannot contain consecutive dots.";
+    }
+
+    if (!/^[a-z0-9.-]+$/i.test(value)) {
+      return "Exact domain can only contain letters, numbers, dots, and hyphens.";
+    }
+
+    const labels = value.split(".");
+    for (const label of labels) {
+      if (!label) {
+        return "Exact domain cannot contain empty labels.";
+      }
+
+      if (label.startsWith("-") || label.endsWith("-")) {
+        return "Exact domain labels cannot start or end with a hyphen.";
+      }
+    }
+
+    if (!this.isValidExactDomain(value)) {
+      return "Exact domain value is invalid. Example valid values: example.com, sub.example.com, local-host.";
+    }
+
+    return null;
+  }
+
   private normalizeEntryValue(
     matchType: DomainGroupEntryMatchType,
     value: string,
@@ -231,6 +252,12 @@ export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
       const normalized = trimmed.toLowerCase().replace(/\.+$/, "");
       if (normalized.length === 0) {
         throw new BadRequestException("Exact domain value is invalid.");
+      }
+
+      const exactDomainValidationError =
+        this.getExactDomainValidationError(normalized);
+      if (exactDomainValidationError) {
+        throw new BadRequestException(exactDomainValidationError);
       }
 
       return { value: normalized, normalizedValue: normalized };
@@ -268,6 +295,31 @@ export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
         `${label} cannot exceed ${max} characters.`,
       );
     }
+  }
+
+  private isSqliteUniqueConstraintError(error: unknown): boolean {
+    const sqliteError = error as {
+      code?: string;
+      errcode?: number;
+      errstr?: string;
+      message?: string;
+    };
+
+    if (sqliteError.code === "ERR_SQLITE_CONSTRAINT_UNIQUE") {
+      return true;
+    }
+
+    if (sqliteError.errcode === 2067) {
+      return true;
+    }
+
+    const message = (sqliteError.message ?? "").toLowerCase();
+    if (message.includes("unique constraint failed")) {
+      return true;
+    }
+
+    const errstr = (sqliteError.errstr ?? "").toLowerCase();
+    return errstr.includes("constraint failed");
   }
 
   private mapDomainGroup(row: DomainGroupRow): DomainGroup {
@@ -373,9 +425,7 @@ export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
         "INSERT INTO domain_groups (id, name, name_lc, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
       ).run(id, name, name.toLowerCase(), description ?? null, now, now);
     } catch (error) {
-      if (
-        (error as { code?: string }).code === "ERR_SQLITE_CONSTRAINT_UNIQUE"
-      ) {
+      if (this.isSqliteUniqueConstraintError(error)) {
         throw new ConflictException(
           `Domain Group name "${name}" already exists.`,
         );
@@ -423,9 +473,7 @@ export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
         groupId,
       );
     } catch (error) {
-      if (
-        (error as { code?: string }).code === "ERR_SQLITE_CONSTRAINT_UNIQUE"
-      ) {
+      if (this.isSqliteUniqueConstraintError(error)) {
         throw new ConflictException(
           `Domain Group name "${nextName}" already exists.`,
         );
@@ -487,9 +535,7 @@ export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
         now,
       );
     } catch (error) {
-      if (
-        (error as { code?: string }).code === "ERR_SQLITE_CONSTRAINT_UNIQUE"
-      ) {
+      if (this.isSqliteUniqueConstraintError(error)) {
         throw new ConflictException(
           `Entry "${value}" (${matchType}) already exists in this Domain Group.`,
         );
@@ -562,9 +608,7 @@ export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
         groupId,
       );
     } catch (error) {
-      if (
-        (error as { code?: string }).code === "ERR_SQLITE_CONSTRAINT_UNIQUE"
-      ) {
+      if (this.isSqliteUniqueConstraintError(error)) {
         throw new ConflictException(
           `Entry "${value}" (${nextMatchType}) already exists in this Domain Group.`,
         );
@@ -640,9 +684,7 @@ export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
         now,
       );
     } catch (error) {
-      if (
-        (error as { code?: string }).code === "ERR_SQLITE_CONSTRAINT_UNIQUE"
-      ) {
+      if (this.isSqliteUniqueConstraintError(error)) {
         throw new ConflictException(
           `Binding already exists for group "${advancedBlockingGroupName}" with action "${action}".`,
         );
@@ -949,7 +991,16 @@ export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
     const summaries = await this.technitiumService.listNodes();
     const requestedNodeIds = this.normalizeNodeIds(input.nodeIds);
     const dryRun = input.dryRun === true;
-    const allowSecondaryWrites = input.allowSecondaryWrites === true;
+
+    if (
+      Object.prototype.hasOwnProperty.call(input, "allowSecondaryWrites") &&
+      (input as { allowSecondaryWrites?: boolean }).allowSecondaryWrites ===
+        true
+    ) {
+      throw new BadRequestException(
+        "allowSecondaryWrites is not supported. In cluster mode, Domain Groups apply is restricted to Primary nodes only.",
+      );
+    }
 
     const primaryNodeIds = summaries
       .filter((summary) => summary.isPrimary === true)
@@ -976,14 +1027,14 @@ export class DomainGroupsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    if (clusterPrimaryGuardActive && !allowSecondaryWrites) {
+    if (clusterPrimaryGuardActive) {
       const nonPrimaryTargets = selectedNodeIds.filter(
         (nodeId) => !primaryNodeIdSetLc.has(nodeId.toLowerCase()),
       );
 
       if (nonPrimaryTargets.length > 0) {
         throw new BadRequestException(
-          `Cluster write guard: apply is restricted to Primary nodes by default. Non-primary targets: ${nonPrimaryTargets.join(", ")}. Set allowSecondaryWrites=true to override.`,
+          `Cluster write guard: apply is restricted to Primary nodes. Non-primary targets: ${nonPrimaryTargets.join(", ")}.`,
         );
       }
     }

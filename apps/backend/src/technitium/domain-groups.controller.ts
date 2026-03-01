@@ -34,13 +34,11 @@ export class DomainGroupsController {
     body?: {
       nodeIds?: unknown;
       dryRun?: unknown;
-      allowSecondaryWrites?: unknown;
     },
   ) {
     return this.domainGroupsService.applyMaterialization({
       nodeIds: body?.nodeIds as string[] | undefined,
       dryRun: body?.dryRun === true,
-      allowSecondaryWrites: body?.allowSecondaryWrites === true,
     });
   }
 
