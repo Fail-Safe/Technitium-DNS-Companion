@@ -19,6 +19,7 @@ import {
     faCheck,
     faTimes,
 } from '@fortawesome/free-solid-svg-icons';
+import { AppInput } from '../common/AppInput';
 
 export interface DomainTreeNode {
     label: string;
@@ -303,7 +304,7 @@ const TreeNodeComponent: React.FC<TreeNodeProps> = ({
                     <div style={contentStyle}>
                         {isEditing && node.isLeaf ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%' }}>
-                                <input
+                                <AppInput
                                     type="text"
                                     value={editDomainValue ?? ''}
                                     onChange={(e) => onChangeEditValue?.(e.target.value)}

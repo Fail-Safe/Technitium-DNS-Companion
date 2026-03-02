@@ -31,6 +31,7 @@ import type {
 import { validateDomain } from "../../utils/domainValidation";
 import "./BuiltInBlockingEditor.css";
 import DomainTreeView, { type DomainTreeNode } from "./DomainTreeView";
+import { AppInput, AppTextarea } from "../common/AppInput";
 
 /** Link to the Technitium DNS developer's explanation about blocking conflicts */
 const TECHNITIUM_DEV_ADV_BLOCK_POST_URL =
@@ -1535,7 +1536,7 @@ export function BuiltInBlockingEditor({
             <div
               className={`built-in-blocking-editor__search-add ${domainValidationError ? "built-in-blocking-editor__search-add--error" : ""}`}
             >
-              <input
+              <AppInput
                 type="text"
                 placeholder={`Search or add domain to ${activeTab} list...`}
                 value={searchQuery}
@@ -1778,7 +1779,7 @@ export function BuiltInBlockingEditor({
                             <td className="built-in-blocking-editor__domain-cell">
                               {isEditing ?
                                 <div className="built-in-blocking-editor__edit-inline">
-                                  <input
+                                  <AppInput
                                     type="text"
                                     value={editDomainValue}
                                     onChange={(e) => {
@@ -2053,7 +2054,7 @@ export function BuiltInBlockingEditor({
                       (one per line)
                     </p>
                   </div>
-                  <textarea
+                  <AppTextarea
                     id="custom-blocking-addresses"
                     className="built-in-blocking-editor__textarea"
                     placeholder={"192.168.1.1\n::1\n(one IP per line)"}
@@ -2449,7 +2450,7 @@ export function BuiltInBlockingEditor({
 
                 {/* Add URL input - supports bulk adding */}
                 <div className="built-in-blocking-editor__url-add built-in-blocking-editor__url-add--bulk">
-                  <textarea
+                  <AppTextarea
                     placeholder="https://example.com/blocklist.txt&#10;https://another.com/list.txt&#10;(one URL per line)"
                     value={newBlockListUrl}
                     onChange={(e) => setNewBlockListUrl(e.target.value)}

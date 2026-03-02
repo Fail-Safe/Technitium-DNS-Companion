@@ -21,6 +21,7 @@ import {
     useSnapshotDrawerLifecycle,
 } from "../common/snapshotDrawerShared";
 import "../dhcp/DhcpSnapshotDrawer.css";
+import { AppTextarea } from "../common/AppInput";
 
 interface ConfigSnapshotDrawerProps {
   isOpen: boolean;
@@ -1042,7 +1043,7 @@ export const ConfigSnapshotDrawer: React.FC<ConfigSnapshotDrawerProps> = ({
 
                             {isNoteEditing ?
                               <div className="snapshot-drawer__section-gap">
-                                <textarea
+                                <AppTextarea
                                   value={noteDraft}
                                   onChange={(event) =>
                                     setNoteDraft(event.target.value)

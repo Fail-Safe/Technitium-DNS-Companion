@@ -12,6 +12,7 @@ import type {
   AdvancedBlockingConfig,
   AdvancedBlockingUrlEntry,
 } from "../../types/advancedBlocking";
+import { AppInput, AppTextarea } from "../common/AppInput";
 
 interface ListSourceEditorProps {
   config?: AdvancedBlockingConfig;
@@ -888,7 +889,7 @@ export function ListSourceEditor({
           : <>
               {/* Search Filter */}
               <div className="multi-group-editor__search">
-                <input
+                <AppInput
                   name="searchFilter"
                   type="text"
                   placeholder={`Search ${activeListConfig.label.toLowerCase()}...`}
@@ -982,7 +983,7 @@ export function ListSourceEditor({
                           {isEditing ?
                             <>
                               <div className="multi-group-editor__edit-form">
-                                <input
+                                <AppInput
                                   type="text"
                                   value={editDraft}
                                   onChange={(e) => {
@@ -1105,7 +1106,7 @@ export function ListSourceEditor({
                                 {isEditing ?
                                   <>
                                     <div className="multi-group-editor__edit-form">
-                                      <input
+                                      <AppInput
                                         type="text"
                                         value={editDraft}
                                         onChange={(e) => {
@@ -1223,14 +1224,14 @@ export function ListSourceEditor({
                 >
                   <div className="multi-group-editor__add-input-group">
                     {bulkMode ?
-                      <textarea
+                      <AppTextarea
                         name="urls"
                         rows={6}
                         placeholder={`Paste multiple URLs, one per line:\n${activeListConfig.placeholder}\n${activeListConfig.placeholder}\n...`}
                         className="multi-group-editor__bulk-input"
                         disabled={disabled || saving}
                       />
-                    : <input
+                    : <AppInput
                         type="text"
                         name="url"
                         placeholder={activeListConfig.placeholder}

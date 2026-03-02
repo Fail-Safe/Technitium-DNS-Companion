@@ -55,6 +55,7 @@ import {
   buildDomainExclusionMatchers,
   isDomainExcluded,
 } from "../utils/domainExclusion";
+import { AppInput, AppTextarea } from "../components/common/AppInput";
 
 type ViewMode = "combined" | "node";
 
@@ -6599,7 +6600,7 @@ export function LogsPage() {
                   >
                     <label>
                       Recipients (comma-separated)
-                      <input
+                      <AppInput
                         type="text"
                         value={smtpTestRecipient}
                         onChange={(event) =>
@@ -6612,7 +6613,7 @@ export function LogsPage() {
 
                     <label>
                       Subject
-                      <input
+                      <AppInput
                         type="text"
                         value={smtpTestSubject}
                         onChange={(event) =>
@@ -6624,7 +6625,7 @@ export function LogsPage() {
 
                     <label>
                       Message
-                      <textarea
+                      <AppTextarea
                         value={smtpTestBody}
                         onChange={(event) =>
                           setSmtpTestBody(event.target.value)
@@ -6848,7 +6849,7 @@ export function LogsPage() {
               >
                 <label>
                   {editingRuleId ? "Edit rule" : "Rule name"}
-                  <input
+                  <AppInput
                     type="text"
                     value={logAlertRuleDraft.name}
                     onChange={(event) =>
@@ -6868,7 +6869,7 @@ export function LogsPage() {
 
                 <label>
                   Domain pattern
-                  <input
+                  <AppInput
                     type="text"
                     value={logAlertRuleDraft.domainPattern}
                     onChange={(event) =>
@@ -7000,7 +7001,7 @@ export function LogsPage() {
                     <span title="Optional if Advanced Blocking groups are selected">
                       (optional)
                     </span>
-                    <input
+                    <AppInput
                       type="text"
                       list="log-alert-rule-client-datalist"
                       value={logAlertRuleDraft.clientIdentifier ?? ""}
@@ -7099,7 +7100,7 @@ export function LogsPage() {
 
                 <label>
                   Email recipients (comma-separated)
-                  <input
+                  <AppInput
                     type="text"
                     value={logAlertRuleRecipientsInput}
                     onChange={(event) =>
@@ -7586,7 +7587,7 @@ export function LogsPage() {
               </label>
               <label className="logs-page__quick-filter">
                 <span>Client</span>
-                <input
+                <AppInput
                   id="client-filter"
                   name="client-filter"
                   type="text"
@@ -7652,7 +7653,7 @@ export function LogsPage() {
               )}
               <label className="logs-page__quick-filter">
                 <span>Domain</span>
-                <input
+                <AppInput
                   id="domain-filter"
                   name="domain-filter"
                   type="text"
@@ -7663,7 +7664,7 @@ export function LogsPage() {
               </label>
               <label className="logs-page__quick-filter">
                 <span>Exclude Domains</span>
-                <input
+                <AppInput
                   id="domain-exclusion-filter"
                   name="domain-exclusion-filter"
                   type="text"
@@ -8953,7 +8954,7 @@ export function LogsPage() {
                                       Prefills a regex pattern to match this
                                       domain and its subdomains.
                                     </span>
-                                    <input
+                                    <AppInput
                                       type="text"
                                       className="logs-page__modal-mode-input"
                                       value={blockRegexValue}

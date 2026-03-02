@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { MigrationDhcpReservation } from '../../types/migrationPreview';
+import { AppInput, AppTextarea } from '../common/AppInput';
 
 interface DhcpReservationsEditorProps {
     reservations: MigrationDhcpReservation[];
@@ -155,7 +156,7 @@ export function DhcpReservationsEditor({ reservations, onSave }: DhcpReservation
                         >
                             <div className="field-group">
                                 <label htmlFor="dhcp-mac">MAC Address</label>
-                                <input
+                                <AppInput
                                     id="dhcp-mac"
                                     value={activeReservation.mac}
                                     onChange={(event) =>
@@ -169,7 +170,7 @@ export function DhcpReservationsEditor({ reservations, onSave }: DhcpReservation
                             </div>
                             <div className="field-group">
                                 <label htmlFor="dhcp-ips">IP Addresses</label>
-                                <textarea
+                                <AppTextarea
                                     id="dhcp-ips"
                                     value={formatList(activeReservation.ips)}
                                     onChange={(event) =>
@@ -184,7 +185,7 @@ export function DhcpReservationsEditor({ reservations, onSave }: DhcpReservation
                             </div>
                             <div className="field-group">
                                 <label htmlFor="dhcp-hostnames">Hostnames</label>
-                                <textarea
+                                <AppTextarea
                                     id="dhcp-hostnames"
                                     value={formatList(activeReservation.hostnames)}
                                     onChange={(event) =>
@@ -213,7 +214,7 @@ export function DhcpReservationsEditor({ reservations, onSave }: DhcpReservation
                                 </label>
                                 <label htmlFor="dhcp-scope">
                                     Scope
-                                    <input
+                                    <AppInput
                                         id="dhcp-scope"
                                         value={activeReservation.scope ?? ''}
                                         onChange={(event) =>
@@ -228,7 +229,7 @@ export function DhcpReservationsEditor({ reservations, onSave }: DhcpReservation
                             </div>
                             <div className="field-group">
                                 <label htmlFor="dhcp-lease-times">Preferred Lease Durations</label>
-                                <textarea
+                                <AppTextarea
                                     id="dhcp-lease-times"
                                     value={formatList(activeReservation.leaseTimes)}
                                     onChange={(event) =>

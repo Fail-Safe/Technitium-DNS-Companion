@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { MigrationDnsOverride } from '../../types/migrationPreview';
+import { AppInput, AppTextarea } from '../common/AppInput';
 
 interface DnsOverridesEditorProps {
     overrides: MigrationDnsOverride[];
@@ -181,7 +182,7 @@ export function DnsOverridesEditor({ overrides, onSave }: DnsOverridesEditorProp
                         >
                             <div className="field-group">
                                 <label htmlFor="dns-host">Host</label>
-                                <input
+                                <AppInput
                                     id="dns-host"
                                     value={activeOverride.host}
                                     className={activeErrors.host ? 'field-error' : ''}
@@ -200,7 +201,7 @@ export function DnsOverridesEditor({ overrides, onSave }: DnsOverridesEditorProp
                             </div>
                             <div className="field-group">
                                 <label htmlFor="dns-ipv4">IPv4 Addresses</label>
-                                <textarea
+                                <AppTextarea
                                     id="dns-ipv4"
                                     value={formatList(activeOverride.ipv4)}
                                     className={activeErrors.ipv4 ? 'field-error' : ''}
@@ -220,7 +221,7 @@ export function DnsOverridesEditor({ overrides, onSave }: DnsOverridesEditorProp
                             </div>
                             <div className="field-group">
                                 <label htmlFor="dns-ipv6">IPv6 Addresses</label>
-                                <textarea
+                                <AppTextarea
                                     id="dns-ipv6"
                                     value={formatList(activeOverride.ipv6)}
                                     className={activeErrors.ipv6 ? 'field-error' : ''}
