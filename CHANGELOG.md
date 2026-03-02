@@ -12,12 +12,16 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Query Logs: added a client-side Domain Exclusion List (`Exclude Domains`) with wildcard support (`*`), persisted to localStorage for per-browser noise reduction.
-- Domain Groups (backend MVP): added opt-in global SQLite-backed Domain Group CRUD (`DOMAIN_GROUPS_ENABLED=true`) with optional group descriptions, per-entry notes, bindings to Advanced Blocking groups, materialization preview, and apply/dry-run endpoints with conflict blocking and cluster primary-write guard (override via `allowSecondaryWrites=true`).
+- Domain Groups (backend MVP): added global SQLite-backed Domain Group CRUD (enabled by default; disable with `DOMAIN_GROUPS_ENABLED=false`) with optional group descriptions, per-entry notes, bindings to Advanced Blocking groups, materialization preview, and apply/dry-run endpoints with conflict blocking and cluster primary-write guard (override via `allowSecondaryWrites=true`).
+- Log Alerts Rules (MVP): added SQLite-backed rule storage and CRUD/enable-toggle endpoints, plus Logs page rule management UI (create/list/delete/enable-disable) alongside existing SMTP test workflow.
+- Log Alerts Evaluator (MVP): added rule-evaluation status/manual-run endpoints and backend evaluator logic to scan recent stored logs, apply selector/pattern/debounce checks, and send SMTP rule alert summaries.
 
 ### Changed
 
 - DNS Filtering and Rule Optimizer: improved Advanced Blocking capability detection by preferring `blockingStatus` node install state, with fallback to node app discovery.
 - Docker Compose: replaced `wget`-based healthcheck probe with a Node.js HTTP/HTTPS probe (with protocol fallback) so checks work in minimal images without extra OS utilities.
+- Persistence: consolidated Domain Groups and Log Alert Rules from two separate SQLite databases into a single `companion.sqlite` (controlled by `COMPANION_DB_PATH`, default `/app/config/companion.sqlite`). Query log cache remains its own file. Removes the `DOMAIN_GROUPS_SQLITE_PATH` and `LOG_ALERT_RULES_SQLITE_PATH` env vars (neither had shipped in a release).
+- Docker Compose (production): `./data` is now bind-mounted to `/app/config` by default, so `companion.sqlite` and `query-logs.sqlite` survive `docker compose up --force-recreate` and image rebuilds without any extra setup.
 
 ### Fixed
 

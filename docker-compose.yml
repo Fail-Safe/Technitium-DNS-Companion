@@ -76,14 +76,13 @@ services:
       # IMPORTANT: Use a low-privilege Technitium DNS token.
       # TECHNITIUM_BACKGROUND_TOKEN: ${TECHNITIUM_BACKGROUND_TOKEN:-}
 
-    # Optional bind mounts (uncomment as needed)
-    # volumes:
-    #   # Mount SSL certificates (if using HTTPS)
-    #   - ./certs:/app/certs:ro
-    #
-    #   # Optional: Mount config directory
-    #   - ./config:/app/config
-    volumes: []
+    # Persistent data directory: SQLite databases and DNS filtering snapshots survive
+    # container recreates/rebuilds. Create the host directory before first run:
+    #   mkdir -p ./data
+    volumes:
+      - ./data:/app/config
+      # Optional: mount SSL certificates (if using HTTPS)
+      # - ./certs:/app/certs:ro
 
     healthcheck:
       test:

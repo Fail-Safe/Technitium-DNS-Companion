@@ -60,6 +60,7 @@ ehthumbs.db
 # Local development files
 .dev-data/
 scripts/remote-dev.sh
+scripts/reset-dev-node-modules.sh
 NEXT_STEPS.md
 docker-compose.dev.yml
 docker-compose.prod.test.yml

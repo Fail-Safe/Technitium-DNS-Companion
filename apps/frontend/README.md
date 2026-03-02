@@ -1,6 +1,6 @@
 # Technitium-DNS-Companion Frontend
 
-React 18 + TypeScript + Vite SPA for managing multiple Technitium DNS servers.
+React 19 + TypeScript + Vite SPA for managing multiple Technitium DNS servers.
 
 ## Development
 

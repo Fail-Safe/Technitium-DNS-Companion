@@ -154,6 +154,12 @@ These features write data to disk and are disabled unless explicitly enabled/con
   - Key env vars: `DNS_FILTERING_SNAPSHOT_DIR`, `DNS_FILTERING_SNAPSHOT_RETENTION`.
   - See `.env.example` for defaults and persistence notes.
 
+- **Domain Groups (SQLite-backed metadata store)**
+  - Domain Groups are enabled by default and stored in a separate local SQLite DB.
+  - Optional kill switch: `DOMAIN_GROUPS_ENABLED=false`.
+  - Optional DB path override: `DOMAIN_GROUPS_SQLITE_PATH`.
+  - See `.env.example` and [docs/features/DOMAIN_GROUPS_MVP.md](docs/features/DOMAIN_GROUPS_MVP.md).
+
 ## Features
 
 ### Core Functionality
