@@ -194,6 +194,39 @@ html {
   transform: none !important;
 }
 
+/* BEM-modifier aliases so button--primary / button--secondary
+   work the same as the older space-class variants */
+.button--primary {
+  background: linear-gradient(
+    135deg,
+    var(--color-primary) 0%,
+    var(--color-primary-hover) 100%
+  );
+  color: var(--color-white);
+  box-shadow: 0 4px 12px rgba(54, 93, 243, 0.3);
+}
+
+.button--primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(54, 93, 243, 0.4);
+}
+
+.button--primary:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.button--secondary {
+  background: var(--color-bg-secondary);
+  color: var(--color-primary);
+  border: 2px solid var(--color-border);
+}
+
+.button--secondary:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+  transform: translateY(-2px);
+}
+
 /* Rule Optimizer button spacing (scoped to page) */
 .rule-optimizer-page .button {
   margin: 0.15rem;

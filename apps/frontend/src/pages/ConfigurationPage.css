@@ -786,7 +786,9 @@ mark {
 }
 
 .domain-groups-group-button--active {
-  border-color: var(--color-primary);
+  border: 2px solid var(--color-primary);
+  background: var(--color-primary-light);
+  color: var(--color-primary);
 }
 
 .domain-groups-group-description {
@@ -841,6 +843,14 @@ mark {
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.02em;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+}
+
+.domain-groups-binding-toggle-button:hover:not(:disabled) {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 .domain-groups-binding-toggle-button--allow.domain-groups-binding-toggle-button--active {
@@ -924,6 +934,145 @@ mark {
   color: var(--color-text-secondary);
 }
 
+/* === Entry match type badge === */
+.domain-groups-match-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.domain-groups-match-badge--exact {
+  background: var(--color-info-bg);
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+}
+
+.domain-groups-match-badge--regex {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-dark);
+  border: 1px solid var(--color-warning);
+}
+
+/* === Entry value monospace display === */
+.domain-groups-entry-value {
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 0.9rem;
+  word-break: break-all;
+  flex: 1;
+}
+
+/* === Inline entry edit form === */
+.domain-groups-item--editing {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.domain-groups-entry-edit-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+/* === Preview groups list === */
+.domain-groups-preview-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--color-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  text-decoration: none;
+}
+
+.domain-groups-preview-toggle:hover {
+  text-decoration: underline;
+}
+
+.domain-groups-preview-chevron {
+  transition: transform 0.2s ease;
+}
+
+.domain-groups-preview-chevron--collapsed {
+  transform: rotate(180deg);
+}
+
+.domain-groups-preview-list {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.domain-groups-preview-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: 0.375rem;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+}
+
+.domain-groups-preview-name {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.domain-groups-preview-counts {
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.domain-groups-preview-count {
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.domain-groups-preview-count--allow {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.domain-groups-preview-count--block {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
+/* === Error dismiss button === */
+.domain-groups-error-dismiss {
+  float: right;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.7;
+  padding: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.domain-groups-error-dismiss:hover {
+  opacity: 1;
+}
+
 .domain-groups-result {
   border: 1px solid var(--color-border);
   border-radius: 0.5rem;
@@ -980,6 +1129,19 @@ mark {
   .domain-groups-item-actions .button {
     flex: 1;
     min-height: 40px;
+  }
+
+  .domain-groups-entry-edit-form {
+    grid-template-columns: 1fr;
+  }
+
+  .domain-groups-item--editing {
+    flex-wrap: wrap;
+  }
+
+  .domain-groups-preview-row {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .domain-management-grid {
