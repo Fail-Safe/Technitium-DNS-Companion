@@ -64,6 +64,12 @@ interface RuleOptimizationSuggestion {
    * Example of a "safe" rewrite explanation.
    */
   confidence: "safe" | "likely" | "warning";
+  /**
+   * When the regex is a simple host alternation (e.g. ^(a|b|c)\.example\.com$),
+   * the full FQDNs for each alternation host, e.g. ["a.example.com", "b.example.com", "c.example.com"].
+   * Allows the frontend to offer "add as explicit hosts" instead of a zone entry.
+   */
+  alternationHosts?: string[];
 }
 
 interface ValidateSuggestionRequest {
@@ -87,7 +93,8 @@ interface ValidateSuggestionResult {
 interface ApplySuggestionRequest {
   suggestionId?: string;
   regexPattern?: string;
-  proposedDomainEntry: string;
+  proposedDomainEntry?: string;
+  proposedDomainEntries?: string[];
   targetList: RuleOptimizationSuggestionTargetList;
   /**
    * When true, the backend will take a DNS filtering snapshot prior to applying changes.
@@ -112,7 +119,7 @@ interface ApplySuggestionResult {
     groupName: string;
     targetList: RuleOptimizationSuggestionTargetList;
     removedRegexPattern: string;
-    addedDomainEntry: string;
+    addedDomainEntries: string[];
   };
 }
 
@@ -505,11 +512,20 @@ export class AdvancedBlockingService {
     const payload = (body ?? {}) as ApplySuggestionRequest;
 
     const proposedDomainEntryRaw = payload.proposedDomainEntry;
-    if (
-      typeof proposedDomainEntryRaw !== "string" ||
-      !proposedDomainEntryRaw.trim()
-    ) {
-      throw new Error("Apply requires proposedDomainEntry.");
+    const proposedDomainEntriesRaw = payload.proposedDomainEntries;
+    const proposedDomainEntries: string[] =
+      Array.isArray(proposedDomainEntriesRaw) &&
+      proposedDomainEntriesRaw.length > 0 ?
+        proposedDomainEntriesRaw
+          .map((d) => this.normalizeDomain(String(d)))
+          .filter(Boolean)
+      : typeof proposedDomainEntryRaw === "string" &&
+          proposedDomainEntryRaw.trim() ?
+        [this.normalizeDomain(proposedDomainEntryRaw)]
+      : [];
+
+    if (proposedDomainEntries.length === 0) {
+      throw new Error("Apply requires proposedDomainEntry or proposedDomainEntries.");
     }
 
     const targetList = payload.targetList;
@@ -524,7 +540,6 @@ export class AdvancedBlockingService {
       throw new Error("Apply requires regexPattern.");
     }
 
-    const proposedDomainEntry = this.normalizeDomain(proposedDomainEntryRaw);
     const regexPattern = regexPatternRaw;
 
     const takeSnapshot =
@@ -540,13 +555,18 @@ export class AdvancedBlockingService {
       | undefined;
 
     if (takeSnapshot) {
+      const defaultNote =
+        proposedDomainEntries.length === 1 ?
+          `Rule optimization apply: ${targetList} "${regexPattern}" -> domain "${proposedDomainEntries[0]}"`
+        : `Rule optimization apply: ${targetList} "${regexPattern}" -> ${proposedDomainEntries.length} explicit entries`;
+
       const note =
         (
           typeof payload.snapshotNote === "string" &&
           payload.snapshotNote.trim()
         ) ?
           payload.snapshotNote.trim()
-        : `Rule optimization apply: ${targetList} "${regexPattern}" -> domain "${proposedDomainEntry}"`;
+        : defaultNote;
 
       const metadata = await this.dnsFilteringSnapshotService.saveSnapshot(
         nodeId,
@@ -609,13 +629,15 @@ export class AdvancedBlockingService {
     removeFrom.splice(removedIndex, 1);
 
     if (targetList === "allowedRegex") {
-      // Convert to allow zone rule.
-      allowed.add(proposedDomainEntry);
+      for (const entry of proposedDomainEntries) {
+        allowed.add(entry);
+      }
       group.allowed = [...allowed].sort((a, b) => a.localeCompare(b));
       group.allowedRegex = allowedRegex;
     } else {
-      // Convert to block zone rule.
-      blocked.add(proposedDomainEntry);
+      for (const entry of proposedDomainEntries) {
+        blocked.add(entry);
+      }
       group.blocked = [...blocked].sort((a, b) => a.localeCompare(b));
       group.blockedRegex = blockedRegex;
     }
@@ -633,7 +655,7 @@ export class AdvancedBlockingService {
         groupName: group.name ?? groupName,
         targetList,
         removedRegexPattern: regexPattern,
-        addedDomainEntry: proposedDomainEntry,
+        addedDomainEntries: proposedDomainEntries,
       },
     };
   }
@@ -728,16 +750,19 @@ export class AdvancedBlockingService {
             kind: "MANUAL_REVIEW_ZONE_CANDIDATE",
             title: "Manual review: host alternation may be collapsible",
             summary:
-              `This regex matches ${hostCount} explicit host` +
+              `This regex matches ${hostCount} explicit domain` +
               `${hostCount === 1 ? "" : "s"} under "${alternation.apex}" ` +
               `(${hostsPreview}${hostCount > 6 ? ", ..." : ""}). ` +
               `A zone entry "${alternation.apex}" may simplify rules, but will expand scope to additional subdomains.`,
             regexPattern: pattern,
             proposedDomainEntry: alternation.apex,
+            alternationHosts: alternation.hosts.map(
+              (h) => `${h}.${alternation.apex}`,
+            ),
             scopeExpansionRisk: true,
             details: [
               "This is a manual-review candidate, not an auto-apply recommendation.",
-              `Current regex appears limited to explicit hosts: ${alternation.hosts.join(", ")}.`,
+              `Current regex appears limited to explicit domains: ${alternation.hosts.join(", ")}.`,
               `Replacing with "${alternation.apex}" will also match other subdomains not currently matched.`,
               "Use Validate to estimate additional impacted subdomains from recent query logs before any manual change.",
             ],

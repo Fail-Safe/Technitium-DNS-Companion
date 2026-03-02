@@ -28,6 +28,7 @@ type GroupRuleOptimizationSuggestionsResponse = {
     details: string[];
     perfScore?: number;
     confidence: "safe" | "likely" | "warning";
+    alternationHosts?: string[];
   }>;
 };
 
@@ -54,7 +55,7 @@ type ApplyGroupRuleOptimizationResponse = {
     groupName: string;
     targetList: "allowedRegex" | "blockedRegex";
     removedRegexPattern: string;
-    addedDomainEntry: string;
+    addedDomainEntries: string[];
   };
 };
 

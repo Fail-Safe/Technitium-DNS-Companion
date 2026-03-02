@@ -29,6 +29,7 @@ type Suggestion = {
   summary: string;
   regexPattern: string;
   proposedDomainEntry?: string;
+  alternationHosts?: string[];
   scopeExpansionRisk: boolean;
   details: string[];
   perfScore?: number;
@@ -45,6 +46,7 @@ type RegexEntryCardModel = {
   summary: string;
   regexPattern: string;
   proposedDomainEntry?: string;
+  alternationHosts?: string[];
   scopeExpansionRisk: boolean;
   details: string[];
   perfScore?: number;
@@ -82,7 +84,7 @@ type ApplyResponse = {
     groupName: string;
     targetList: TargetList;
     removedRegexPattern: string;
-    addedDomainEntry: string;
+    addedDomainEntries: string[];
   };
 };
 
@@ -93,10 +95,13 @@ type RedundancySummary = {
   exampleCoveringEntry?: string;
 };
 
+type ApplyMode = "zone" | "explicit";
+
 type PendingApply = {
   card: RegexEntryCardModel;
   selectedGroups: string[];
   redundancy?: RedundancySummary;
+  applyMode: ApplyMode;
 };
 
 type ApplyVerification = {
@@ -186,10 +191,16 @@ const getPerfBadgeStyle = (score: number): React.CSSProperties => {
   };
 };
 
-const canAutoApplyCard = (card: RegexEntryCardModel): boolean =>
-  card.kind !== "MANUAL_REVIEW_ZONE_CANDIDATE" &&
-  card.kind !== "PERF_WARNING" &&
-  Boolean(card.proposedDomainEntry);
+const canAutoApplyCard = (
+  card: RegexEntryCardModel,
+  applyMode: ApplyMode = "zone",
+): boolean => {
+  if (card.kind === "PERF_WARNING") return false;
+  if (card.kind === "MANUAL_REVIEW_ZONE_CANDIDATE") {
+    return applyMode === "explicit" && (card.alternationHosts?.length ?? 0) > 0;
+  }
+  return Boolean(card.proposedDomainEntry);
+};
 
 const sortSuggestions = (a: Suggestion, b: Suggestion): number => {
   const ra = confidenceRank(a.confidence);
@@ -227,6 +238,7 @@ const toRegexEntryCards = (
         summary: suggestion.summary,
         regexPattern: suggestion.regexPattern,
         proposedDomainEntry: suggestion.proposedDomainEntry,
+        alternationHosts: suggestion.alternationHosts,
         scopeExpansionRisk: suggestion.scopeExpansionRisk,
         details: suggestion.details,
         perfScore: suggestion.perfScore,
@@ -333,15 +345,21 @@ function RegexEntryCard({
   card,
   selectedGroups,
   redundancy,
+  applyMode,
   onToggleGroup,
+  onApplyModeChange,
   onValidate,
+  onOpenApplyModal,
   validating,
 }: {
   card: RegexEntryCardModel;
   selectedGroups: string[];
   redundancy?: RedundancySummary;
+  applyMode: ApplyMode;
   onToggleGroup: (cardKey: string, groupName: string) => void;
+  onApplyModeChange: (cardKey: string, mode: ApplyMode) => void;
   onValidate: (card: RegexEntryCardModel) => void;
+  onOpenApplyModal: (card: RegexEntryCardModel) => void;
   validating: boolean;
 }) {
   const confidenceLabel =
@@ -393,7 +411,9 @@ function RegexEntryCard({
   };
 
   const hasSelectedGroups = selectedGroups.length > 0;
-  const canAutoApply = canAutoApplyCard(card);
+  const canAutoApply = canAutoApplyCard(card, applyMode);
+  const isExplicitMode =
+    applyMode === "explicit" && (card.alternationHosts?.length ?? 0) > 0;
   const isRedundantCleanup = Boolean(redundancy?.allCovered);
 
   return (
@@ -423,7 +443,7 @@ function RegexEntryCard({
           <p className="app-card__text">{card.summary}</p>
         </div>
 
-        <div className="rule-optimizer-card__preview-actions flex flex-col gap-2">
+        <div className="rule-optimizer-card__preview-actions">
           <button
             type="button"
             className={classNames(
@@ -432,10 +452,15 @@ function RegexEntryCard({
             )}
             onClick={() => onValidate(card)}
             disabled={
-              validating || !card.proposedDomainEntry || !hasSelectedGroups
+              validating ||
+              !card.proposedDomainEntry ||
+              !hasSelectedGroups ||
+              isExplicitMode
             }
             title={
-              !hasSelectedGroups ?
+              isExplicitMode ?
+                "Preview impact shows zone entry scope expansion — not applicable in explicit domains mode"
+              : !hasSelectedGroups ?
                 "Select at least one group on this regex entry"
               : card.proposedDomainEntry ?
                 "Preview impact using stored query logs (SQLite), if enabled"
@@ -445,7 +470,21 @@ function RegexEntryCard({
             {validating ? "Previewing..." : "Preview impact"}
           </button>
 
-          {canAutoApply ?
+          {isExplicitMode ?
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => onOpenApplyModal(card)}
+              disabled={!hasSelectedGroups}
+              title={
+                !hasSelectedGroups ?
+                  "Select at least one group on this regex entry"
+                : `Add ${card.alternationHosts!.length} explicit domain entries and remove the regex (snapshot created first)`
+              }
+            >
+              Apply explicit domains
+            </button>
+          : canAutoApply ?
             <span className="rule-optimizer-card__preview-note text-xs text-gray-500 dark:text-gray-400">
               {isRedundantCleanup ?
                 <>
@@ -469,16 +508,67 @@ function RegexEntryCard({
         </div>
 
         <div style={detailPanelStyle}>
-          <div className="app-card__label">Proposed inline domain entry</div>
-          <div className="app-card__code">
-            {card.proposedDomainEntry ?? "—"}
-          </div>
-          {card.scopeExpansionRisk ?
-            <div className="app-callout app-callout--warning">
-              <strong>Note:</strong> Advanced Blocking inline domains are zone
-              rules (match subdomains). This change may expand scope.
+          <div className="app-card__label">Replace regex with</div>
+          {card.alternationHosts?.length ?
+            <div className="rule-optimizer-replace-options">
+              <label className="rule-optimizer-replace-option">
+                <input
+                  type="radio"
+                  name={`apply-mode-${card.key}`}
+                  value="zone"
+                  checked={applyMode === "zone"}
+                  onChange={() => onApplyModeChange(card.key, "zone")}
+                />
+                <span className="rule-optimizer-replace-option__content">
+                  <span className="rule-optimizer-replace-option__title">
+                    Zone entry
+                  </span>
+                  <code className="app-code-inline">
+                    {card.proposedDomainEntry}
+                  </code>
+                  <span className="rule-optimizer-replace-option__note">
+                    zone match — also covers subdomains of{" "}
+                    {card.proposedDomainEntry}
+                  </span>
+                </span>
+              </label>
+              <label className="rule-optimizer-replace-option">
+                <input
+                  type="radio"
+                  name={`apply-mode-${card.key}`}
+                  value="explicit"
+                  checked={applyMode === "explicit"}
+                  onChange={() => onApplyModeChange(card.key, "explicit")}
+                />
+                <span className="rule-optimizer-replace-option__content">
+                  <span className="rule-optimizer-replace-option__title">
+                    Explicit domains ({card.alternationHosts.length})
+                  </span>
+                  <span className="rule-optimizer-explicit-hosts">
+                    {card.alternationHosts.map((h) => (
+                      <code key={h} className="app-code-inline">
+                        {h}
+                      </code>
+                    ))}
+                  </span>
+                  <span className="rule-optimizer-replace-option__note">
+                    precise — matches only the domains in the original regex
+                  </span>
+                </span>
+              </label>
             </div>
-          : null}
+          : <>
+              <div className="app-card__code">
+                {card.proposedDomainEntry ?? "—"}
+              </div>
+              {card.scopeExpansionRisk ?
+                <div className="app-callout app-callout--warning">
+                  <strong>Note:</strong> Advanced Blocking inline domains are
+                  zone rules (match subdomains). This change may expand scope.
+                </div>
+              : null}
+            </>
+          }
           {redundancy && redundancy.coveredCount > 0 ?
             <div className="app-callout app-callout--warning mt-3">
               <strong>Coverage notice:</strong>{" "}
@@ -684,6 +774,10 @@ export default function AdvancedBlockingRuleOptimizerPage() {
     null,
   );
 
+  const [applyModeByCard, setApplyModeByCard] = useState<
+    Record<string, ApplyMode>
+  >({});
+
   const [applyingCardKey, setApplyingCardKey] = useState<string | null>(null);
   const [pendingApply, setPendingApply] = useState<PendingApply | null>(null);
   const [applyVerification, setApplyVerification] =
@@ -733,12 +827,25 @@ export default function AdvancedBlockingRuleOptimizerPage() {
     validation,
   ]);
 
-  const validationCardSelectedGroups = useMemo(() => {
-    if (!validationCard) return [] as string[];
-    return (
-      selectedGroupsByCard[validationCard.key] ?? validationCard.groupNames
-    ).filter((groupName) => validationCard.groupNames.includes(groupName));
-  }, [validationCard, selectedGroupsByCard]);
+  const getSelectedGroupsForCard = useCallback(
+    (card: RegexEntryCardModel | null | undefined): string[] => {
+      if (!card) return [];
+      return (
+        selectedGroupsByCard[card.key] ?? card.groupNames
+      ).filter((groupName) => card.groupNames.includes(groupName));
+    },
+    [selectedGroupsByCard],
+  );
+
+  const validationCardSelectedGroups = useMemo(
+    () => getSelectedGroupsForCard(validationCard),
+    [validationCard, getSelectedGroupsForCard],
+  );
+
+  const confirmModalSelectedGroups = useMemo(
+    () => getSelectedGroupsForCard(pendingApply?.card),
+    [pendingApply, getSelectedGroupsForCard],
+  );
 
   const allNodes = useMemo(() => nodes ?? [], [nodes]);
   const primaryNode = usePrimaryNode(allNodes);
@@ -1193,10 +1300,20 @@ export default function AdvancedBlockingRuleOptimizerPage() {
     }
   };
 
+  const toggleApplyMode = useCallback(
+    (cardKey: string, mode: ApplyMode) => {
+      setApplyModeByCard((prev) => ({ ...prev, [cardKey]: mode }));
+    },
+    [],
+  );
+
   const openApplyConfirmModal = useCallback(
     (card: RegexEntryCardModel) => {
       if (!effectiveNodeId) return;
-      if (!card.proposedDomainEntry) return;
+      const applyMode = applyModeByCard[card.key] ?? "zone";
+      const isExplicitMode =
+        applyMode === "explicit" && (card.alternationHosts?.length ?? 0) > 0;
+      if (!isExplicitMode && !card.proposedDomainEntry) return;
 
       const selectedGroups = (
         selectedGroupsByCard[card.key] ?? card.groupNames
@@ -1214,9 +1331,10 @@ export default function AdvancedBlockingRuleOptimizerPage() {
       const redundancy = getCardRedundancySummary(card, selectedGroups);
 
       setApplyVerification(null);
-      setPendingApply({ card, selectedGroups, redundancy });
+      setPendingApply({ card, selectedGroups, redundancy, applyMode });
     },
     [
+      applyModeByCard,
       effectiveNodeId,
       getCardRedundancySummary,
       pushToast,
@@ -1229,9 +1347,12 @@ export default function AdvancedBlockingRuleOptimizerPage() {
       card: RegexEntryCardModel,
       selectedGroups: string[],
       redundancy?: RedundancySummary,
+      applyMode: ApplyMode = "zone",
     ): Promise<ApplyVerification | null> => {
       if (!effectiveNodeId) return null;
-      if (!card.proposedDomainEntry) return null;
+      const isExplicitMode =
+        applyMode === "explicit" && (card.alternationHosts?.length ?? 0) > 0;
+      if (!isExplicitMode && !card.proposedDomainEntry) return null;
 
       setApplyingCardKey(card.key);
 
@@ -1242,6 +1363,25 @@ export default function AdvancedBlockingRuleOptimizerPage() {
 
         for (let index = 0; index < selectedGroups.length; index += 1) {
           const groupName = selectedGroups[index];
+          const applyBody =
+            isExplicitMode ?
+              {
+                suggestionId: card.primarySuggestionId,
+                targetList: card.targetList,
+                regexPattern: card.regexPattern,
+                proposedDomainEntries: card.alternationHosts,
+                takeSnapshot: index === 0,
+                snapshotNote: `Rule optimizer: ${card.targetList} "${card.regexPattern}" → ${card.alternationHosts!.length} explicit entries (${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)})`,
+              }
+            : {
+                suggestionId: card.primarySuggestionId,
+                targetList: card.targetList,
+                regexPattern: card.regexPattern,
+                proposedDomainEntry: card.proposedDomainEntry,
+                takeSnapshot: index === 0,
+                snapshotNote: `Rule optimizer: ${card.targetList} "${card.regexPattern}" → "${card.proposedDomainEntry}" (${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)})`,
+              };
+
           const response = await apiFetch(
             `/advanced-blocking/${encodePathParam(
               effectiveNodeId,
@@ -1249,14 +1389,7 @@ export default function AdvancedBlockingRuleOptimizerPage() {
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                suggestionId: card.primarySuggestionId,
-                targetList: card.targetList,
-                regexPattern: card.regexPattern,
-                proposedDomainEntry: card.proposedDomainEntry,
-                takeSnapshot: index === 0,
-                snapshotNote: `Rule optimizer: ${card.targetList} "${card.regexPattern}" → "${card.proposedDomainEntry}" (${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)})`,
-              }),
+              body: JSON.stringify(applyBody),
             },
           );
 
@@ -1283,10 +1416,10 @@ export default function AdvancedBlockingRuleOptimizerPage() {
           message:
             isRedundantCleanup ?
               snapshotId ?
-                `Removed redundant regex in ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}. Snapshot created: ${snapshotId}`
+                `Removed redundant regex in ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}. Snapshot saved — view in DNS Rule Optimizer History.`
               : `Removed redundant regex in ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}.`
             : snapshotId ?
-              `Applied to ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}. Snapshot created: ${snapshotId}`
+              `Applied to ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}. Snapshot saved — view in DNS Rule Optimizer History.`
             : `Applied to ${appliedCount}/${selectedGroups.length} ${selectedGroupsLabel(selectedGroups.length)}.`,
         });
 
@@ -1334,12 +1467,17 @@ export default function AdvancedBlockingRuleOptimizerPage() {
 
   const handleConfirmApplyFromModal = useCallback(() => {
     if (!pendingApply) return;
-    const { card, selectedGroups, redundancy } = pendingApply;
-    void executeApply(card, selectedGroups, redundancy).then((verification) => {
-      if (!verification) return;
-      setApplyVerification(verification);
-    });
-  }, [executeApply, pendingApply]);
+    const { card, redundancy, applyMode } = pendingApply;
+    const selectedGroups = (
+      selectedGroupsByCard[card.key] ?? card.groupNames
+    ).filter((g) => card.groupNames.includes(g));
+    void executeApply(card, selectedGroups, redundancy, applyMode).then(
+      (verification) => {
+        if (!verification) return;
+        setApplyVerification(verification);
+      },
+    );
+  }, [executeApply, pendingApply, selectedGroupsByCard]);
 
   const handleApplyFromImpactModal = useCallback(() => {
     if (!validationCard) return;
@@ -1355,9 +1493,12 @@ export default function AdvancedBlockingRuleOptimizerPage() {
     applyVerification &&
     applyVerification.cardKey === pendingApply.card.key,
   );
+  const validationCardApplyMode = validationCard ?
+    (applyModeByCard[validationCard.key] ?? "zone")
+  : "zone";
   const canApplyFromModal =
     validationCard ?
-      canAutoApplyCard(validationCard) &&
+      canAutoApplyCard(validationCard, validationCardApplyMode) &&
       validationCardSelectedGroups.length > 0 &&
       applyingCardKey !== validationCard.key
     : false;
@@ -1604,8 +1745,11 @@ export default function AdvancedBlockingRuleOptimizerPage() {
                   selectedGroups={
                     selectedGroupsByCard[card.key] ?? card.groupNames
                   }
+                  applyMode={applyModeByCard[card.key] ?? "zone"}
                   onToggleGroup={toggleCardGroup}
+                  onApplyModeChange={toggleApplyMode}
                   onValidate={handleValidate}
+                  onOpenApplyModal={openApplyConfirmModal}
                   validating={validatingCardKey === card.key}
                 />
               ))}
@@ -1745,9 +1889,11 @@ export default function AdvancedBlockingRuleOptimizerPage() {
                   : "Apply change"}
                 </button>
 
-                {validationCard && !canAutoApplyCard(validationCard) ?
+                {validationCard &&
+                !canAutoApplyCard(validationCard, validationCardApplyMode) ?
                   <p className="rule-optimizer-impact-modal__apply-note">
                     This suggestion is preview-only and cannot be auto-applied.
+                    Select "Explicit domains" on the card to enable direct apply.
                   </p>
                 : null}
               </div>
@@ -1777,26 +1923,46 @@ export default function AdvancedBlockingRuleOptimizerPage() {
                   "Redundant regex removed"
                 : "Change applied successfully"
               : pendingApply.redundancy?.allCovered ?
-                `Remove redundant regex in ${pendingApply.selectedGroups.length} ${selectedGroupsLabel(pendingApply.selectedGroups.length)}?`
-              : `Apply this change to ${pendingApply.selectedGroups.length} ${selectedGroupsLabel(pendingApply.selectedGroups.length)}?`
+                `Remove redundant regex in ${confirmModalSelectedGroups.length} ${selectedGroupsLabel(confirmModalSelectedGroups.length)}?`
+              : `Apply this change to ${confirmModalSelectedGroups.length} ${selectedGroupsLabel(confirmModalSelectedGroups.length)}?`
               }
             </h2>
 
-            <p className="rule-optimizer-confirm-modal__text">
-              {hasVerificationResult ?
-                pendingApply.redundancy?.allCovered ?
+            {hasVerificationResult ?
+              <p className="rule-optimizer-confirm-modal__text">
+                {pendingApply.redundancy?.allCovered ?
                   `Removed the redundant regex. Effective coverage for "${pendingApply.card.proposedDomainEntry}" was already present in the selected groups.`
+                : pendingApply.applyMode === "explicit" && pendingApply.card.alternationHosts?.length ?
+                  `Removed the regex and added ${pendingApply.card.alternationHosts.length} explicit domain entries in the selected groups.`
                 : `Removed the regex and added "${pendingApply.card.proposedDomainEntry}" as an inline domain entry in the selected groups.`
-
-              : pendingApply.redundancy?.allCovered ?
-                `"${pendingApply.card.proposedDomainEntry}" is already covered by an existing ${pendingApply.card.targetList === "allowedRegex" ? "allow" : "block"} domain entry${pendingApply.redundancy.exampleCoveringEntry ? ` (for example "${pendingApply.redundancy.exampleCoveringEntry}")` : ""} in the selected groups. This action removes only the redundant regex.`
-              : `This will remove the regex and add "${pendingApply.card.proposedDomainEntry}" as an inline domain entry in each selected group.`
-              }
-            </p>
+                }
+              </p>
+            : pendingApply.redundancy?.allCovered ?
+              <p className="rule-optimizer-confirm-modal__text">
+                {`"${pendingApply.card.proposedDomainEntry}" is already covered by an existing ${pendingApply.card.targetList === "allowedRegex" ? "allow" : "block"} domain entry${pendingApply.redundancy.exampleCoveringEntry ? ` (for example "${pendingApply.redundancy.exampleCoveringEntry}")` : ""} in the selected groups. This action removes only the redundant regex.`}
+              </p>
+            : pendingApply.applyMode === "explicit" && pendingApply.card.alternationHosts?.length ?
+              <>
+                <p className="rule-optimizer-confirm-modal__text">
+                  {`This will remove the regex and add ${pendingApply.card.alternationHosts.length} explicit domain entries in each selected group:`}
+                </p>
+                <ul className="rule-optimizer-confirm-modal__domain-list">
+                  {pendingApply.card.alternationHosts.map((h) => (
+                    <li key={h}>
+                      <code className="app-code-inline">{h}</code>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            : <p className="rule-optimizer-confirm-modal__text">
+                {`This will remove the regex and add "${pendingApply.card.proposedDomainEntry}" as an inline domain entry in each selected group.`}
+              </p>
+            }
 
             {(
               pendingApply.card.kind ===
                 "LIKELY_TO_ZONE_DOMAIN_ENTRY_EXPANDS_SCOPE" &&
+              pendingApply.applyMode !== "explicit" &&
               !hasVerificationResult
             ) ?
               <p className="rule-optimizer-confirm-modal__warning">
@@ -1823,14 +1989,22 @@ export default function AdvancedBlockingRuleOptimizerPage() {
                   >
                     {`Updated ${applyVerification.appliedCount}/${applyVerification.selectedCount}`}
                   </Badge>
+                  <span className="rule-optimizer-confirm-modal__result-arrow" aria-hidden="true">→</span>
                   <Badge variant="info">Regex removed</Badge>
+                  <span className="rule-optimizer-confirm-modal__result-arrow" aria-hidden="true">→</span>
                   <Badge variant="info">
                     {pendingApply.redundancy?.allCovered ?
                       "Coverage already present"
+                    : pendingApply.applyMode === "explicit" &&
+                        pendingApply.card.alternationHosts?.length ?
+                      `Domains added (${pendingApply.card.alternationHosts.length})`
                     : "Domain added"}
                   </Badge>
                   {applyVerification.snapshotId ?
-                    <Badge variant="muted">Snapshot created</Badge>
+                    <>
+                      <span className="rule-optimizer-confirm-modal__result-arrow" aria-hidden="true">→</span>
+                      <Badge variant="muted">Snapshot created</Badge>
+                    </>
                   : null}
                 </div>
 
@@ -1844,6 +2018,40 @@ export default function AdvancedBlockingRuleOptimizerPage() {
                     Verification complete for selected groups.
                   </p>
                 }
+              </div>
+            : null}
+
+            {!hasVerificationResult ?
+              <div className="rule-optimizer-confirm-modal__groups">
+                <div className="app-card__label">Affected groups</div>
+                <div className="rule-optimizer-group-pills">
+                  {pendingApply.card.groupNames.map((groupName) => {
+                    const checked =
+                      confirmModalSelectedGroups.includes(groupName);
+                    return (
+                      <label
+                        key={`confirm-modal-${pendingApply.card.key}-${groupName}`}
+                        className={classNames(
+                          "rule-optimizer-group-pill",
+                          checked && "rule-optimizer-group-pill--selected",
+                        )}
+                      >
+                        <input
+                          className="rule-optimizer-group-pill__checkbox"
+                          type="checkbox"
+                          checked={checked}
+                          disabled={isApplyingPending}
+                          onChange={() =>
+                            toggleCardGroup(pendingApply.card.key, groupName)
+                          }
+                        />
+                        <span className="rule-optimizer-group-pill__label">
+                          {groupName}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
             : null}
 

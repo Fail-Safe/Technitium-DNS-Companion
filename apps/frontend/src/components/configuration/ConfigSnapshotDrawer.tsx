@@ -586,9 +586,11 @@ export const ConfigSnapshotDrawer: React.FC<ConfigSnapshotDrawerProps> = ({
       nodeId={nodeId}
       nodeName={nodeName}
       titleExtras={
-        <span className="snapshot-drawer__pill-quiet">
-          {methodPillLabel(method)}
-        </span>
+        method !== "rule-optimizer" ?
+          <span className="snapshot-drawer__pill-quiet">
+            {methodPillLabel(method)}
+          </span>
+        : undefined
       }
       updatedAtLabel={
         refreshedAt ?
