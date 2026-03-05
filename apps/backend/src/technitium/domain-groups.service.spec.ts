@@ -15,6 +15,7 @@ import type {
 } from "./advanced-blocking.types";
 import { CompanionDbService } from "./companion-db.service";
 import { DomainGroupsService } from "./domain-groups.service";
+import type { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
 import type { TechnitiumService } from "./technitium.service";
 
 // --- Test helpers ---
@@ -39,7 +40,9 @@ function makeAbGroup(
   };
 }
 
-function makeConfig(groups: AdvancedBlockingGroup[] = []): AdvancedBlockingConfig {
+function makeConfig(
+  groups: AdvancedBlockingGroup[] = [],
+): AdvancedBlockingConfig {
   return { localEndPointGroupMap: {}, networkGroupMap: {}, groups };
 }
 
@@ -97,7 +100,9 @@ describe("DomainGroupsService", () => {
     companionDb.onModuleInit();
 
     mockAdvancedBlocking = {
-      getSnapshot: jest.fn().mockResolvedValue(makeSnapshot("eq14", makeConfig())),
+      getSnapshot: jest
+        .fn()
+        .mockResolvedValue(makeSnapshot("node-a", makeConfig())),
       setConfig: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -109,6 +114,9 @@ describe("DomainGroupsService", () => {
       companionDb,
       mockAdvancedBlocking as unknown as AdvancedBlockingService,
       mockTechnitium as unknown as TechnitiumService,
+      {
+        saveSnapshot: jest.fn().mockResolvedValue(undefined),
+      } as unknown as DnsFilteringSnapshotService,
     );
     service.onModuleInit();
   });
@@ -153,7 +161,9 @@ describe("DomainGroupsService", () => {
     });
 
     it("throws NotFoundException for an unknown group id", () => {
-      expect(() => service.getDomainGroup("no-such-id")).toThrow(NotFoundException);
+      expect(() => service.getDomainGroup("no-such-id")).toThrow(
+        NotFoundException,
+      );
     });
 
     it("rejects duplicate group names case-insensitively", () => {
@@ -233,7 +243,10 @@ describe("DomainGroupsService", () => {
 
     it("rejects an exact entry containing a wildcard character", () => {
       expect(() =>
-        service.addEntry(groupId, { matchType: "exact", value: "*.example.com" }),
+        service.addEntry(groupId, {
+          matchType: "exact",
+          value: "*.example.com",
+        }),
       ).toThrow(BadRequestException);
     });
 
@@ -282,7 +295,9 @@ describe("DomainGroupsService", () => {
 
       expect(service.removeEntry(groupId, entry.id)).toEqual({ deleted: true });
       expect(service.getDomainGroup(groupId).entries).toHaveLength(0);
-      expect(() => service.removeEntry(groupId, entry.id)).toThrow(NotFoundException);
+      expect(() => service.removeEntry(groupId, entry.id)).toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -371,11 +386,16 @@ describe("DomainGroupsService", () => {
       expect(preview.hasConflicts).toBe(false);
       expect(preview.conflicts).toEqual([]);
       expect(preview.groups).toEqual([]);
+      expect(preview.ownedPairs).toEqual([]);
+      expect(preview.allBindings).toEqual([]);
     });
 
     it("routes entries to allowed or blocked lists based on the binding action", () => {
       const allowGroup = service.createDomainGroup({ name: "Allow List" });
-      service.addEntry(allowGroup.id, { matchType: "exact", value: "safe.com" });
+      service.addEntry(allowGroup.id, {
+        matchType: "exact",
+        value: "safe.com",
+      });
       service.addBinding(allowGroup.id, {
         advancedBlockingGroupName: "Default",
         action: "allow",
@@ -395,7 +415,7 @@ describe("DomainGroupsService", () => {
       const preview = service.getMaterializationPreview();
       expect(preview.groups).toHaveLength(1);
 
-      const compiled = preview.groups[0]!;
+      const compiled = preview.groups[0];
       expect(compiled.allowed).toEqual(["safe.com"]);
       expect(compiled.blocked).toEqual(["bad.com"]);
       expect(compiled.blockedRegex).toEqual([".*\\.ads\\.com$"]);
@@ -423,14 +443,20 @@ describe("DomainGroupsService", () => {
 
     it("detects a same-specificity allow/block conflict and excludes it from materialized output", () => {
       const allowGroup = service.createDomainGroup({ name: "Allow Group" });
-      service.addEntry(allowGroup.id, { matchType: "exact", value: "contested.com" });
+      service.addEntry(allowGroup.id, {
+        matchType: "exact",
+        value: "contested.com",
+      });
       service.addBinding(allowGroup.id, {
         advancedBlockingGroupName: "Default",
         action: "allow",
       });
 
       const blockGroup = service.createDomainGroup({ name: "Block Group" });
-      service.addEntry(blockGroup.id, { matchType: "exact", value: "contested.com" });
+      service.addEntry(blockGroup.id, {
+        matchType: "exact",
+        value: "contested.com",
+      });
       service.addBinding(blockGroup.id, {
         advancedBlockingGroupName: "Default",
         action: "block",
@@ -451,8 +477,16 @@ describe("DomainGroupsService", () => {
   // ---------------------------------------------------------------------------
 
   describe("applyMaterialization", () => {
-    const primaryNode = { id: "eq14", isPrimary: true };
-    const secondaryNode = { id: "eq12", isPrimary: false };
+    const primaryNode = {
+      id: "node-a",
+      baseUrl: "http://node-a",
+      isPrimary: true,
+    };
+    const secondaryNode = {
+      id: "node-b",
+      baseUrl: "http://node-b",
+      isPrimary: false,
+    };
 
     beforeEach(() => {
       // Seed one domain group with a binding so there is work to apply
@@ -467,7 +501,7 @@ describe("DomainGroupsService", () => {
     it("dry run computes the result but does not call setConfig", async () => {
       mockTechnitium.listNodes.mockResolvedValue([primaryNode]);
       mockAdvancedBlocking.getSnapshot.mockResolvedValue(
-        makeSnapshot("eq14", makeConfig()),
+        makeSnapshot("node-a", makeConfig()),
       );
 
       const result = await service.applyMaterialization({ dryRun: true });
@@ -480,24 +514,26 @@ describe("DomainGroupsService", () => {
     it("live apply calls setConfig and returns the node in appliedNodeIds", async () => {
       mockTechnitium.listNodes.mockResolvedValue([primaryNode]);
       mockAdvancedBlocking.getSnapshot.mockResolvedValue(
-        makeSnapshot("eq14", makeConfig()),
+        makeSnapshot("node-a", makeConfig()),
       );
 
       const result = await service.applyMaterialization({ dryRun: false });
 
       expect(result.dryRun).toBe(false);
-      expect(result.appliedNodeIds).toContain("eq14");
+      expect(result.appliedNodeIds).toContain("node-a");
       expect(mockAdvancedBlocking.setConfig).toHaveBeenCalledTimes(1);
 
-      const [, writtenConfig] =
-        mockAdvancedBlocking.setConfig.mock.calls[0] as [string, AdvancedBlockingConfig];
+      const [, writtenConfig] = mockAdvancedBlocking.setConfig.mock
+        .calls[0] as [string, AdvancedBlockingConfig];
       const adultsGroup = writtenConfig.groups.find((g) => g.name === "Adults");
       expect(adultsGroup?.allowed).toContain("youtube.com");
     });
 
     it("throws ConflictException when materialization has allow/block conflicts", async () => {
       // Create a conflict against the domain group seeded in beforeEach
-      const conflictGroup = service.createDomainGroup({ name: "Block YouTube" });
+      const conflictGroup = service.createDomainGroup({
+        name: "Block YouTube",
+      });
       service.addEntry(conflictGroup.id, {
         matchType: "exact",
         value: "youtube.com",
@@ -518,22 +554,30 @@ describe("DomainGroupsService", () => {
     it("defaults to primary nodes only in cluster mode", async () => {
       mockTechnitium.listNodes.mockResolvedValue([primaryNode, secondaryNode]);
       mockAdvancedBlocking.getSnapshot.mockResolvedValue(
-        makeSnapshot("eq14", makeConfig()),
+        makeSnapshot("node-a", makeConfig()),
       );
 
       const result = await service.applyMaterialization({ dryRun: false });
 
-      expect(result.appliedNodeIds).toEqual(["eq14"]);
-      expect(result.skippedNodeIds).toContain("eq12");
+      expect(result.appliedNodeIds).toEqual(["node-a"]);
+      expect(result.skippedNodeIds).toContain("node-b");
       expect(mockAdvancedBlocking.setConfig).toHaveBeenCalledTimes(1);
     });
 
     it("applies to all nodes when no primary is designated", async () => {
-      const plain1 = { id: "eq14", isPrimary: false };
-      const plain2 = { id: "eq12", isPrimary: false };
+      const plain1 = {
+        id: "node-a",
+        baseUrl: "http://node-a",
+        isPrimary: false,
+      };
+      const plain2 = {
+        id: "node-b",
+        baseUrl: "http://node-b",
+        isPrimary: false,
+      };
       mockTechnitium.listNodes.mockResolvedValue([plain1, plain2]);
       mockAdvancedBlocking.getSnapshot.mockResolvedValue(
-        makeSnapshot("eq14", makeConfig()),
+        makeSnapshot("node-a", makeConfig()),
       );
 
       const result = await service.applyMaterialization({ dryRun: false });
@@ -554,36 +598,200 @@ describe("DomainGroupsService", () => {
       expect(mockAdvancedBlocking.setConfig).not.toHaveBeenCalled();
     });
 
-    it("replaces allowed/blocked/regex lists but preserves structural settings on an existing AB group", async () => {
+    it("preserves pre-existing entries on first apply while adding DG entries (tracking model)", async () => {
+      // On the first apply the tracking table is empty, so all existing entries
+      // are treated as "manual" and are preserved alongside the DG-contributed ones.
       const existingGroup = makeAbGroup("Adults", {
         blockingAddresses: ["0.0.0.0"],
+        allowed: ["pre-existing-allowed.com"],
         blocked: ["pre-existing-blocked.com"],
         allowListUrls: ["https://example.com/list.txt"],
       });
       mockTechnitium.listNodes.mockResolvedValue([primaryNode]);
       mockAdvancedBlocking.getSnapshot.mockResolvedValue(
-        makeSnapshot("eq14", makeConfig([existingGroup])),
+        makeSnapshot("node-a", makeConfig([existingGroup])),
       );
 
       await service.applyMaterialization({ dryRun: false });
 
-      const [, writtenConfig] =
-        mockAdvancedBlocking.setConfig.mock.calls[0] as [string, AdvancedBlockingConfig];
+      const [, writtenConfig] = mockAdvancedBlocking.setConfig.mock
+        .calls[0] as [string, AdvancedBlockingConfig];
       const adultsGroup = writtenConfig.groups.find((g) => g.name === "Adults");
 
-      // Domain Groups' materialized entries replace the allow/block lists
+      // Pre-existing allowed entry treated as manual on first apply → preserved
+      expect(adultsGroup?.allowed).toContain("pre-existing-allowed.com");
+      // DG entry added alongside manual
       expect(adultsGroup?.allowed).toContain("youtube.com");
-      expect(adultsGroup?.blocked).toEqual([]); // old blocked list replaced
 
-      // Structural settings are preserved
+      // Blocked not owned → pre-existing entry preserved unchanged
+      expect(adultsGroup?.blocked).toContain("pre-existing-blocked.com");
+
+      // Structural settings preserved
       expect(adultsGroup?.blockingAddresses).toEqual(["0.0.0.0"]);
-      expect(adultsGroup?.allowListUrls).toEqual(["https://example.com/list.txt"]);
+      expect(adultsGroup?.allowListUrls).toEqual([
+        "https://example.com/list.txt",
+      ]);
+    });
+
+    it("removes DG-tracked entries when removed from a DG after prior apply, preserving manual entries", async () => {
+      mockTechnitium.listNodes.mockResolvedValue([primaryNode]);
+
+      // First apply: live config already has a manual entry.
+      const initialConfig = makeConfig([
+        makeAbGroup("Adults", { allowed: ["manual.com"] }),
+      ]);
+      mockAdvancedBlocking.getSnapshot.mockResolvedValue(
+        makeSnapshot("node-a", initialConfig),
+      );
+      await service.applyMaterialization({ dryRun: false });
+
+      const [, firstConfig] = mockAdvancedBlocking.setConfig.mock.calls[0] as [
+        string,
+        AdvancedBlockingConfig,
+      ];
+      // After first apply both the manual entry and the DG entry are present.
+      expect(
+        firstConfig.groups.find((g) => g.name === "Adults")?.allowed,
+      ).toContain("youtube.com");
+      expect(
+        firstConfig.groups.find((g) => g.name === "Adults")?.allowed,
+      ).toContain("manual.com");
+
+      // Remove youtube.com from the DG (binding still exists).
+      const group = service
+        .listDomainGroups()
+        .find((g) => g.name === "YouTube")!;
+      const detail = service.getDomainGroup(group.id);
+      service.removeEntry(group.id, detail.entries[0].id);
+
+      // Second apply: live config is the result of the first apply.
+      mockAdvancedBlocking.setConfig.mockClear();
+      mockAdvancedBlocking.getSnapshot.mockResolvedValue(
+        makeSnapshot("node-a", firstConfig),
+      );
+      await service.applyMaterialization({ dryRun: false });
+
+      const [, secondConfig] = mockAdvancedBlocking.setConfig.mock.calls[0] as [
+        string,
+        AdvancedBlockingConfig,
+      ];
+      const adultsGroup = secondConfig.groups.find((g) => g.name === "Adults");
+
+      // youtube.com was tracked as DG-contributed → removed when DG entry deleted
+      expect(adultsGroup?.allowed).not.toContain("youtube.com");
+      // manual.com was never in the tracking table → preserved
+      expect(adultsGroup?.allowed).toContain("manual.com");
+    });
+
+    it("dry run does not update the tracking table", async () => {
+      mockTechnitium.listNodes.mockResolvedValue([primaryNode]);
+      mockAdvancedBlocking.getSnapshot.mockResolvedValue(
+        makeSnapshot("node-a", makeConfig()),
+      );
+
+      await service.applyMaterialization({ dryRun: true });
+
+      // Tracking table must remain empty after a dry run.
+      const db = companionDb.db!;
+      const rowsAfterDryRun = db
+        .prepare("SELECT * FROM domain_group_applied_entries")
+        .all();
+      expect(rowsAfterDryRun).toHaveLength(0);
+
+      // A live apply populates the tracking table.
+      await service.applyMaterialization({ dryRun: false });
+      const rowsAfterLive = db
+        .prepare("SELECT * FROM domain_group_applied_entries")
+        .all();
+      expect(rowsAfterLive.length).toBeGreaterThan(0);
+    });
+
+    it("removes only DG-contributed entries when binding is removed and apply runs again", async () => {
+      mockTechnitium.listNodes.mockResolvedValue([primaryNode]);
+
+      // First apply: establish tracking with a manual entry also present.
+      const initialConfig = makeConfig([
+        makeAbGroup("Adults", { allowed: ["manual.com"] }),
+      ]);
+      mockAdvancedBlocking.getSnapshot.mockResolvedValue(
+        makeSnapshot("node-a", initialConfig),
+      );
+      await service.applyMaterialization({ dryRun: false });
+
+      const [, firstConfig] = mockAdvancedBlocking.setConfig.mock.calls[0] as [
+        string,
+        AdvancedBlockingConfig,
+      ];
+
+      // Remove the binding (DG still has its entries, but is no longer bound).
+      const group = service
+        .listDomainGroups()
+        .find((g) => g.name === "YouTube")!;
+      const detail = service.getDomainGroup(group.id);
+      service.removeBinding(group.id, detail.bindings[0].id);
+
+      // Second apply: live config = result of first apply.
+      mockAdvancedBlocking.setConfig.mockClear();
+      mockAdvancedBlocking.getSnapshot.mockResolvedValue(
+        makeSnapshot("node-a", firstConfig),
+      );
+      await service.applyMaterialization({ dryRun: false });
+
+      const [, secondConfig] = mockAdvancedBlocking.setConfig.mock.calls[0] as [
+        string,
+        AdvancedBlockingConfig,
+      ];
+      const adultsGroup = secondConfig.groups.find((g) => g.name === "Adults");
+
+      // youtube.com was DG-tracked → removed when binding deleted
+      expect(adultsGroup?.allowed).not.toContain("youtube.com");
+      // manual.com was never tracked → preserved
+      expect(adultsGroup?.allowed).toContain("manual.com");
+    });
+
+    it("deduplicates ownedPairs when multiple DGs share the same (group, action)", () => {
+      const groupB = service.createDomainGroup({ name: "Social" });
+      service.addEntry(groupB.id, {
+        matchType: "exact",
+        value: "facebook.com",
+      });
+      service.addBinding(groupB.id, {
+        advancedBlockingGroupName: "Adults",
+        action: "allow",
+      });
+
+      const preview = service.getMaterializationPreview();
+      const adultsAllowPairs = preview.ownedPairs.filter(
+        (p) => p.advancedBlockingGroupName === "Adults" && p.action === "allow",
+      );
+      // Two DGs (YouTube + Social) both bound to Adults/allow → still one ownedPair entry
+      expect(adultsAllowPairs).toHaveLength(1);
+    });
+
+    it("allBindings includes entries from all DGs joined with DG names", () => {
+      const groupB = service.createDomainGroup({ name: "Social" });
+      service.addBinding(groupB.id, {
+        advancedBlockingGroupName: "Kids",
+        action: "block",
+      });
+
+      const preview = service.getMaterializationPreview();
+      const names = preview.allBindings.map((b) => b.domainGroupName).sort();
+      expect(names).toContain("YouTube");
+      expect(names).toContain("Social");
+
+      const socialBinding = preview.allBindings.find(
+        (b) => b.domainGroupName === "Social",
+      );
+      expect(socialBinding?.advancedBlockingGroupName).toBe("Kids");
+      expect(socialBinding?.action).toBe("block");
+      expect(socialBinding?.bindingId).toBeTruthy();
     });
 
     it("skips apply and reports an error when a node's snapshot config is unavailable", async () => {
       mockTechnitium.listNodes.mockResolvedValue([primaryNode]);
       mockAdvancedBlocking.getSnapshot.mockResolvedValue(
-        makeSnapshot("eq14", undefined, "Connection refused"),
+        makeSnapshot("node-a", undefined, "Connection refused"),
       );
 
       const result = await service.applyMaterialization({ dryRun: false });
@@ -600,7 +808,7 @@ describe("DomainGroupsService", () => {
       });
       mockTechnitium.listNodes.mockResolvedValue([primaryNode]);
       mockAdvancedBlocking.getSnapshot.mockResolvedValue(
-        makeSnapshot("eq14", makeConfig([alreadyAppliedGroup])),
+        makeSnapshot("node-a", makeConfig([alreadyAppliedGroup])),
       );
 
       const result = await service.applyMaterialization({ dryRun: false });
