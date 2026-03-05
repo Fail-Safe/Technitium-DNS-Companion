@@ -365,3 +365,32 @@ a {
 button {
   font-family: inherit;
 }
+
+/* ── Skeleton loader (shared across all page skeletons) ─────────────────── */
+.skeleton {
+    background: linear-gradient(90deg,
+            rgba(200, 200, 200, 0.2) 25%,
+            rgba(200, 200, 200, 0.3) 50%,
+            rgba(200, 200, 200, 0.2) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s ease-in-out infinite;
+    border-radius: 4px;
+}
+
+[data-theme="dark"] .skeleton {
+    background: linear-gradient(90deg,
+            rgba(55, 65, 81, 0.4) 25%,
+            rgba(75, 85, 99, 0.5) 50%,
+            rgba(55, 65, 81, 0.4) 75%);
+    background-size: 200% 100%;
+}
+
+@keyframes skeleton-loading {
+    0% {
+        background-position: 200% 0;
+    }
+
+    100% {
+        background-position: -200% 0;
+    }
+}

@@ -227,6 +227,12 @@ html {
   transform: translateY(-2px);
 }
 
+.button--sm {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  min-height: unset;
+}
+
 /* Rule Optimizer button spacing (scoped to page) */
 .rule-optimizer-page .button {
   margin: 0.15rem;
@@ -6515,6 +6521,16 @@ button.danger:disabled {
   background: var(--color-primary);
 }
 
+.configuration__tab-badge--pending {
+  background: var(--color-warning, #e6a800);
+  color: var(--color-warning-text, #7a5800);
+}
+
+.configuration__tab--active .configuration__tab-badge--pending {
+  background: var(--color-warning, #e6a800);
+  color: var(--color-warning-text, #7a5800);
+}
+
 .configuration__tab:hover {
   background: color-mix(
     in srgb,
@@ -10655,6 +10671,23 @@ button.danger:disabled {
   gap: 0.75rem;
   padding: 0 1.5rem 1.5rem 1.5rem;
   justify-content: flex-end;
+}
+
+.button--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.button--ghost:hover:not(:disabled) {
+  background: var(--color-bg-secondary);
+}
+
+.button--danger-text {
+  color: var(--color-danger-text);
+}
+
+.button--danger-text:hover:not(:disabled) {
+  color: var(--color-danger-dark);
 }
 
 .button--danger {
