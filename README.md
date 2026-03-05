@@ -4,6 +4,8 @@ A multi-node companion tool for aiding in day-to-day management of [Technitium D
 
 - DNS Query Logs (DNS Logs)
 - Advanced Blocking App upkeep (DNS Filtering)
+- Domain Groups (named domain sets that bind to Advanced Blocking groups)
+- Log Alerts (rule-based SMTP notifications on query log events)
 - DNS Zone Insight (DNS Zones)
 - DHCP Scopes
 
@@ -154,11 +156,11 @@ These features write data to disk and are disabled unless explicitly enabled/con
   - Key env vars: `DNS_FILTERING_SNAPSHOT_DIR`, `DNS_FILTERING_SNAPSHOT_RETENTION`.
   - See `.env.example` for defaults and persistence notes.
 
-- **Domain Groups (SQLite-backed metadata store)**
-  - Domain Groups are enabled by default and stored in a separate local SQLite DB.
-  - Optional kill switch: `DOMAIN_GROUPS_ENABLED=false`.
-  - Optional DB path override: `DOMAIN_GROUPS_SQLITE_PATH`.
-  - See `.env.example` and [docs/features/DOMAIN_GROUPS_MVP.md](docs/features/DOMAIN_GROUPS_MVP.md).
+- **Domain Groups and Log Alert Rules (SQLite-backed, shared `companion.sqlite`)**
+  - Domain Groups are enabled by default. Log Alert Rules are always-on when the companion DB is available.
+  - Both features share a single SQLite file (`companion.sqlite`). Override the path with `COMPANION_DB_PATH`.
+  - Domain Groups optional kill switch: `DOMAIN_GROUPS_ENABLED=false`.
+  - See `.env.example` for defaults and persistence notes.
 
 ## Features
 
@@ -167,6 +169,8 @@ These features write data to disk and are disabled unless explicitly enabled/con
 - **Multi-Node Management** - Monitor and manage multiple servers from one interface
 - **Query Logs** - View combined query logs from all configured nodes (optional SQLite stored logs for accurate time-window browsing; see [docs/features/query-logs/SQLITE_ROLLING_QUERY_LOG_STORE.md](docs/features/query-logs/SQLITE_ROLLING_QUERY_LOG_STORE.md))
 - **Advanced Blocking** - Manage domain allow/block lists (requires Advanced Blocking App), with optional DNS Filtering History (snapshots) for quick rollback
+- **Domain Groups** - SQLite-backed named domain sets that bind to Advanced Blocking groups; drag-and-drop bindings, apply tracking with zero-data-loss semantics, and unified export/import
+- **Log Alerts** - Rule-based SMTP notifications triggered by query log events; configurable domain patterns, debounce, client filters, and outcome modes
 
 ### Analysis & Comparison
 
