@@ -6,9 +6,11 @@ import {
     faCircle,
     faClockRotateLeft,
     faCode,
+    faDownload,
     faExclamationTriangle,
     faGripVertical,
     faInfoCircle,
+    faLayerGroup,
     faList,
     faMinus,
     faPencil,
@@ -18,11 +20,23 @@ import {
     faSquareCheck,
     faSquareMinus,
     faTrash,
+    faUpload,
     faUsers,
+    faArrowsRotate,
     faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  parseDocument,
+  isMap,
+  isSeq,
+  isScalar,
+  Document,
+  YAMLMap,
+  YAMLSeq,
+  Scalar,
+} from "yaml";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ClusterInfoBanner } from "../components/common/ClusterInfoBanner.tsx";
 import { ConfirmModal } from "../components/common/ConfirmModal";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
@@ -45,11 +59,18 @@ import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type { AdvancedBlockingConfig } from "../types/advancedBlocking";
 import type {
     DomainGroup,
+    DomainGroupBindingSummary,
     DomainGroupDetails,
     DomainGroupEntryMatchType,
     DomainGroupMaterializationPreview,
     DomainGroupsApplyResult,
     DomainGroupsStatus,
+    UnifiedExportData,
+    UnifiedImportData,
+    UnifiedImportDomainsMode,
+    UnifiedImportDomainGroupsMode,
+    UnifiedImportRequest,
+    UnifiedImportResult,
 } from "../types/domainGroups";
 import {
     compareStringArrays,
@@ -77,6 +98,153 @@ interface ManualDomainMatchDetail {
 }
 
 type DomainEntrySortMode = "alpha" | "source";
+
+// ─── Unified export/import YAML utilities ────────────────────────────────────
+
+const OLD_FORMAT_ERROR =
+  "This looks like the old Domain Groups-only format. Not supported here.";
+
+function buildUnifiedYaml(data: UnifiedExportData): string {
+  const doc = new Document();
+  const root = new YAMLMap();
+  doc.contents = root;
+
+  // groups section
+  const abNode = new YAMLMap();
+  const groupsNode = new YAMLMap();
+  for (const [groupName, group] of Object.entries(data.groups)) {
+    const gNode = new YAMLMap();
+    for (const [key, values] of [
+      ["blockDomains", group.blockDomains],
+      ["allowDomains", group.allowDomains],
+      ["blockRegex", group.blockRegex],
+      ["allowRegex", group.allowRegex],
+      ["blockDomainGroups", group.blockDomainGroups],
+      ["allowDomainGroups", group.allowDomainGroups],
+    ] as [string, string[]][]) {
+      const seq = new YAMLSeq();
+      for (const v of values) seq.add(v);
+      gNode.add({ key, value: seq });
+    }
+    groupsNode.add({ key: groupName, value: gNode });
+  }
+  abNode.add({ key: "groups", value: groupsNode });
+
+  // domainGroups section
+  const dgRoot = new YAMLMap();
+  for (const [dgName, dg] of Object.entries(data.domainGroups)) {
+    const dgNode = new YAMLMap();
+    if (dg.description) {
+      dgNode.add({ key: "description", value: dg.description });
+    }
+    const exactEntries = dg.entries.filter((e) => e.type === "exact");
+    const regexEntries = dg.entries.filter((e) => e.type === "regex");
+    if (exactEntries.length > 0) {
+      const seq = new YAMLSeq();
+      for (const e of exactEntries) {
+        const s = new Scalar(e.value);
+        if (e.note) s.comment = ` ${e.note}`;
+        seq.add(s);
+      }
+      dgNode.add({ key: "entries", value: seq });
+    }
+    if (regexEntries.length > 0) {
+      const seq = new YAMLSeq();
+      for (const e of regexEntries) {
+        const s = new Scalar(e.value);
+        if (e.note) s.comment = ` ${e.note}`;
+        seq.add(s);
+      }
+      dgNode.add({ key: "regexEntries", value: seq });
+    }
+    dgRoot.add({ key: dgName, value: dgNode });
+  }
+  abNode.add({ key: "domainGroups", value: dgRoot });
+  root.add({ key: "AdvancedBlocking", value: abNode });
+
+  const header = `# technitium-dns-companion export\n# Generated: ${new Date().toISOString()}\n`;
+  return header + doc.toString();
+}
+
+function parseUnifiedYaml(text: string, filename: string): UnifiedImportData {
+  if (filename.endsWith(".json")) {
+    const raw = JSON.parse(text) as unknown;
+    if (Array.isArray(raw)) throw new Error(OLD_FORMAT_ERROR);
+    return raw as UnifiedImportData;
+  }
+  const doc = parseDocument(text);
+  if (isSeq(doc.contents)) throw new Error(OLD_FORMAT_ERROR);
+  if (!isMap(doc.contents))
+    throw new Error("Expected a YAML mapping at top level.");
+  const ab = doc.contents.get("AdvancedBlocking", true);
+  if (!isMap(ab)) throw new Error("Expected AdvancedBlocking section.");
+
+  const groupsNode = ab.get("groups", true);
+  const groups = isMap(groupsNode)
+    ? (groupsNode.toJSON() as UnifiedImportData["AdvancedBlocking"]["groups"])
+    : undefined;
+
+  const dgNode = ab.get("domainGroups", true);
+  let domainGroups: UnifiedImportData["AdvancedBlocking"]["domainGroups"] | undefined;
+  if (isMap(dgNode)) {
+    domainGroups = {};
+    for (const pair of dgNode.items) {
+      const dgName = String((pair.key as Scalar).value);
+      const dgMap = pair.value;
+      if (!isMap(dgMap)) continue;
+      const description = dgMap.get("description") as string | undefined;
+      const parseSeq = (key: string) => {
+        const seq = dgMap.get(key, true);
+        if (!isSeq(seq)) return undefined;
+        return seq.items
+          .filter(isScalar)
+          .map((s: Scalar) => ({
+            value: String(s.value),
+            ...(s.comment?.trim() ? { note: s.comment.trim() } : {}),
+          }));
+      };
+      domainGroups![dgName] = {
+        ...(description ? { description } : {}),
+        entries: parseSeq("entries"),
+        regexEntries: parseSeq("regexEntries"),
+      };
+    }
+  }
+  return {
+    AdvancedBlocking: {
+      ...(groups ? { groups } : {}),
+      ...(domainGroups ? { domainGroups } : {}),
+    },
+  };
+}
+
+function normalizeImportData(
+  parsed: UnifiedImportData,
+): UnifiedImportRequest["data"] {
+  const domainGroups: NonNullable<UnifiedImportRequest["data"]["domainGroups"]> = {};
+  for (const [name, dg] of Object.entries(
+    parsed.AdvancedBlocking.domainGroups ?? {},
+  )) {
+    domainGroups[name] = {
+      ...(dg.description ? { description: dg.description } : {}),
+      entries: [
+        ...(dg.entries ?? []).map((e) => ({ ...e, type: "exact" as const })),
+        ...(dg.regexEntries ?? []).map((e) => ({
+          ...e,
+          type: "regex" as const,
+        })),
+      ],
+    };
+  }
+  return {
+    groups: parsed.AdvancedBlocking.groups,
+    ...(Object.keys(domainGroups).length > 0 ? { domainGroups } : {}),
+  };
+}
+
+/** Canonical key for an (AB group name, action) pair used across all lookup maps. */
+const pairKey = (name: string, action: string) =>
+  `${name.toLowerCase()}||${action}`;
 
 export function ConfigurationPage() {
   const { pushToast } = useToast();
@@ -115,6 +283,8 @@ export function ConfigurationPage() {
     deleteDomainGroupBinding,
     getDomainGroupMaterializationPreview,
     applyDomainGroupMaterialization,
+    exportUnifiedConfig,
+    importUnifiedConfig,
   } = useTechnitiumState();
 
   // Cluster information
@@ -138,6 +308,18 @@ export function ConfigurationPage() {
   >(null);
   const [selectedDomainGroup, setSelectedDomainGroup] =
     useState<DomainGroupDetails | null>(null);
+
+  // DG chip popover
+  const [dgPopoverDgId, setDgPopoverDgId] = useState<string | null>(null);
+  const [dgPopoverDetails, setDgPopoverDetails] =
+    useState<DomainGroupDetails | null>(null);
+  const [dgPopoverLoading, setDgPopoverLoading] = useState(false);
+  const [dgPopoverPos, setDgPopoverPos] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const dgPopoverRef = useRef<HTMLDivElement>(null);
+
   const [domainGroupPreview, setDomainGroupPreview] =
     useState<DomainGroupMaterializationPreview | null>(null);
   const [domainGroupsLoading, setDomainGroupsLoading] = useState(false);
@@ -156,14 +338,34 @@ export function ConfigurationPage() {
     useState<DomainGroupEntryMatchType>("exact");
   const [newEntryValue, setNewEntryValue] = useState("");
   const [newEntryNote, setNewEntryNote] = useState("");
-  const [applyDryRun, setApplyDryRun] = useState(true);
   const [applySelectedNodeOnly, setApplySelectedNodeOnly] = useState(true);
   const [domainGroupsApplyResult, setDomainGroupsApplyResult] =
     useState<DomainGroupsApplyResult | null>(null);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editingEntryValue, setEditingEntryValue] = useState("");
   const [editingEntryNote, setEditingEntryNote] = useState("");
-  const [showPreviewDetails, setShowPreviewDetails] = useState(false);
+  const [importPending, setImportPending] = useState<{
+    filename: string;
+    parsed: UnifiedImportData;
+    groupCount: number;
+    dgCount: number;
+  } | null>(null);
+  const [importDomainsMode, setImportDomainsMode] =
+    useState<UnifiedImportDomainsMode>("skip");
+  const [importDgMode, setImportDgMode] =
+    useState<UnifiedImportDomainGroupsMode>("merge");
+  const [importResult, setImportResult] = useState<UnifiedImportResult | null>(
+    null,
+  );
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [exportNodeId, setExportNodeId] = useState<string>("");
+
+  // Node resolution for export/import (depends on exportNodeId state above)
+  const canAutoDetectNode = nodes.length === 1 || !!primary;
+  const effectiveNodeId =
+    nodes.length === 1
+      ? nodes[0].id
+      : primary?.id ?? (exportNodeId || null);
 
   // Combined unsaved changes check
   const hasAnyUnsavedChanges =
@@ -280,10 +482,78 @@ export function ConfigurationPage() {
     );
   }, [selectedDomainGroup, editDomainGroupName, editDomainGroupDescription]);
 
-  const advancedBlockingGroupOptions = useMemo(() => {
-    const names = (selectedNodeConfig?.groups ?? []).map((group) => group.name);
-    return names.sort((a, b) => a.localeCompare(b));
-  }, [selectedNodeConfig]);
+  // Map: "abGroupNameLc||action" → DomainGroupBindingSummary[] for quick lookup in group slots
+  const bindingsByGroupAction = useMemo(() => {
+    const map = new Map<string, DomainGroupBindingSummary[]>();
+    for (const b of domainGroupPreview?.allBindings ?? []) {
+      const key = pairKey(b.advancedBlockingGroupName, b.action);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(b);
+    }
+    return map;
+  }, [domainGroupPreview]);
+
+  // Map: "abGroupNameLc||action" → Set of values DGs last wrote (for DG-managed count)
+  const trackedSetByGroupAction = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const t of domainGroupPreview?.trackedGroups ?? []) {
+      map.set(pairKey(t.advancedBlockingGroupName, t.action), new Set(t.values));
+    }
+    return map;
+  }, [domainGroupPreview]);
+
+  // Set of "abGroupNameLc||action" pairs that have un-applied DG changes
+  const pendingPairKeys = useMemo(
+    () =>
+      new Set(
+        (domainGroupPreview?.pendingPairs ?? []).map((p) =>
+          pairKey(p.advancedBlockingGroupName, p.action),
+        ),
+      ),
+    [domainGroupPreview],
+  );
+
+  // Diff between materialized group entries and last-applied (tracked) entries
+  const domainGroupDiff = useMemo(() => {
+    if (!domainGroupPreview) return [];
+    return domainGroupPreview.ownedPairs.map((pair) => {
+      const nameLc = pair.advancedBlockingGroupName.toLowerCase();
+      const matGroup = domainGroupPreview.groups.find(
+        (g) => g.advancedBlockingGroupName.toLowerCase() === nameLc,
+      );
+      const matRegex = new Set(
+        pair.action === "allow"
+          ? (matGroup?.allowedRegex ?? [])
+          : (matGroup?.blockedRegex ?? []),
+      );
+      const matValues = new Set([
+        ...(pair.action === "allow"
+          ? (matGroup?.allowed ?? [])
+          : (matGroup?.blocked ?? [])),
+        ...(pair.action === "allow"
+          ? (matGroup?.allowedRegex ?? [])
+          : (matGroup?.blockedRegex ?? [])),
+      ]);
+      const tracked = domainGroupPreview.trackedGroups?.find(
+        (t) =>
+          t.advancedBlockingGroupName.toLowerCase() === nameLc &&
+          t.action === pair.action,
+      );
+      const trackedSet = new Set(tracked?.values ?? []);
+
+      return {
+        advancedBlockingGroupName: pair.advancedBlockingGroupName,
+        action: pair.action,
+        isPending: pendingPairKeys.has(pairKey(pair.advancedBlockingGroupName, pair.action)),
+        added: [...matValues]
+          .filter((v) => !trackedSet.has(v))
+          .map((v) => ({ value: v, isRegex: matRegex.has(v) })),
+        removed: [...trackedSet]
+          .filter((v) => !matValues.has(v))
+          .map((v) => ({ value: v, isRegex: false })),
+      };
+    });
+  }, [domainGroupPreview, pendingPairKeys]);
 
   // Domain Management tab: drag & drop state
   const [searchInput, setSearchInput] = useState("");
@@ -308,6 +578,15 @@ export function ConfigurationPage() {
     "blocked" | "allowed" | "blockedRegex" | "allowedRegex"
   >("blocked");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  // The binding action that corresponds to the current activeDomainType tab
+  const activeDomainTypeAction = useMemo<"allow" | "block">(
+    () =>
+      activeDomainType === "blocked" || activeDomainType === "blockedRegex" ?
+        "block"
+      : "allow",
+    [activeDomainType],
+  );
 
   // Domain Management tab: Group entry sorting (display-only)
   const [domainEntrySortMode, setDomainEntrySortMode] =
@@ -398,6 +677,10 @@ export function ConfigurationPage() {
   // Dragging state - track what's being dragged
   const [draggedDomain, setDraggedDomain] = useState<string | null>(null);
   const [dragSourceGroup, setDragSourceGroup] = useState<string | null>(null);
+
+  // Domain Group drag-and-drop state
+  const [draggedDomainGroupId, setDraggedDomainGroupId] = useState<string | null>(null);
+  const [isDraggingDomainGroup, setIsDraggingDomainGroup] = useState(false);
 
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -614,63 +897,278 @@ export function ConfigurationPage() {
     }
   }, [getDomainGroupMaterializationPreview, getErrorMessage]);
 
-  const handleBindingButtonToggle = useCallback(
-    async (advancedBlockingGroupName: string, action: "allow" | "block") => {
-      if (!selectedDomainGroup) {
-        return;
-      }
-
-      const normalizedGroupName = advancedBlockingGroupName.trim();
-      if (!normalizedGroupName) {
-        return;
-      }
-
-      const currentBindings = selectedDomainGroup.bindings;
-      const sameBinding = currentBindings.find(
-        (binding) =>
-          binding.advancedBlockingGroupName.toLowerCase() ===
-            normalizedGroupName.toLowerCase() && binding.action === action,
-      );
-      const oppositeBinding = currentBindings.find(
-        (binding) =>
-          binding.advancedBlockingGroupName.toLowerCase() ===
-            normalizedGroupName.toLowerCase() && binding.action !== action,
-      );
-
+  const handleExport = useCallback(async () => {
+    const nodeId = effectiveNodeId;
+    if (!nodeId) {
+      setDomainGroupsError("Select a node to export from.");
+      return;
+    }
+    try {
       setDomainGroupsActionLoading(true);
-      setDomainGroupsError(null);
+      const data = await exportUnifiedConfig(nodeId);
+      const yamlStr = buildUnifiedYaml(data);
+      const blob = new Blob([yamlStr], { type: "text/yaml" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `dns-config-${new Date().toISOString().slice(0, 10)}.yaml`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setDomainGroupsError(getErrorMessage(error));
+    } finally {
+      setDomainGroupsActionLoading(false);
+    }
+  }, [effectiveNodeId, exportUnifiedConfig, getErrorMessage]);
+
+  const handleImportFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const text = evt.target?.result as string;
+          const parsed = parseUnifiedYaml(text, file.name);
+          const groupCount = Object.keys(
+            parsed.AdvancedBlocking.groups ?? {},
+          ).length;
+          const dgCount = Object.keys(
+            parsed.AdvancedBlocking.domainGroups ?? {},
+          ).length;
+          setImportPending({ filename: file.name, parsed, groupCount, dgCount });
+          setImportResult(null);
+        } catch (err) {
+          setDomainGroupsError(`Could not parse file: ${getErrorMessage(err)}`);
+        }
+      };
+      reader.readAsText(file);
+      e.target.value = "";
+    },
+    [getErrorMessage],
+  );
+
+  const handleImportConfirm = useCallback(async () => {
+    if (!importPending) return;
+    const nodeId =
+      importDomainsMode !== "skip" ? effectiveNodeId : undefined;
+    if (importDomainsMode !== "skip" && !nodeId) {
+      setDomainGroupsError("Select a node for the Domains import.");
+      return;
+    }
+    try {
+      setDomainGroupsActionLoading(true);
+      const result = await importUnifiedConfig({
+        nodeId: nodeId ?? undefined,
+        domainsMode: importDomainsMode,
+        domainGroupsMode: importDgMode,
+        data: normalizeImportData(importPending.parsed),
+      });
+      setImportResult(result);
+      setImportPending(null);
+      await loadDomainGroupsData();
+      await refreshDomainGroupsPreview();
+      const totalDg =
+        result.domainGroups.created.length +
+        result.domainGroups.updated.length +
+        result.domainGroups.replaced.length;
+      const hasErrors =
+        result.domains.errors.length + result.domainGroups.errors.length > 0;
+      pushToast({
+        message: hasErrors
+          ? `Import complete with errors.`
+          : `Imported: ${result.domains.groupsUpdated.length} AB groups, ${totalDg} DGs.`,
+        tone: hasErrors ? "error" : "success",
+      });
+    } catch (error) {
+      setDomainGroupsError(getErrorMessage(error));
+    } finally {
+      setDomainGroupsActionLoading(false);
+    }
+  }, [
+    importPending,
+    importDomainsMode,
+    importDgMode,
+    effectiveNodeId,
+    importUnifiedConfig,
+    loadDomainGroupsData,
+    refreshDomainGroupsPreview,
+    getErrorMessage,
+    pushToast,
+  ]);
+
+  const handleDomainGroupPillDragStart = useCallback(
+    (e: React.DragEvent, dgId: string) => {
+      setIsDraggingDomainGroup(true);
+      setDraggedDomainGroupId(dgId);
+      e.dataTransfer.setData("text/domain-group-id", dgId);
+      e.dataTransfer.effectAllowed = "move";
+    },
+    [],
+  );
+
+  const handleDomainGroupChipDragStart = useCallback(
+    (e: React.DragEvent, dgId: string, bindingId: string) => {
+      setIsDraggingDomainGroup(true);
+      setDraggedDomainGroupId(dgId);
+      e.dataTransfer.setData("text/domain-group-binding-id", bindingId);
+      e.dataTransfer.effectAllowed = "move";
+    },
+    [],
+  );
+
+  const handleDomainGroupPillDragEnd = useCallback(() => {
+    setIsDraggingDomainGroup(false);
+    setDraggedDomainGroupId(null);
+  }, []);
+
+  const closeDgPopover = useCallback(() => {
+    setDgPopoverDgId(null);
+    setDgPopoverDetails(null);
+    setDgPopoverPos(null);
+  }, []);
+
+  const handleDgChipClick = useCallback(
+    async (dgId: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (dgPopoverDgId === dgId) {
+        closeDgPopover();
+        return;
+      }
+
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const POPOVER_W = 288;
+      const POPOVER_H = 320;
+      const MARGIN = 8;
+
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const top =
+        spaceBelow >= POPOVER_H + MARGIN ?
+          rect.bottom + MARGIN
+        : Math.max(MARGIN, rect.top - POPOVER_H - MARGIN);
+      const left = Math.min(
+        Math.max(MARGIN, rect.left),
+        window.innerWidth - POPOVER_W - MARGIN,
+      );
+
+      setDgPopoverDgId(dgId);
+      setDgPopoverPos({ top, left });
+      setDgPopoverDetails(null);
+      setDgPopoverLoading(true);
 
       try {
-        if (sameBinding) {
-          await deleteDomainGroupBinding(
-            selectedDomainGroup.id,
-            sameBinding.id,
-          );
+        const details = await getDomainGroup(dgId);
+        setDgPopoverDetails(details);
+      } catch {
+        closeDgPopover();
+      } finally {
+        setDgPopoverLoading(false);
+      }
+    },
+    [closeDgPopover, dgPopoverDgId, getDomainGroup],
+  );
+
+  // Close popover on click-outside or Escape
+  useEffect(() => {
+    if (!dgPopoverDgId) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (
+        dgPopoverRef.current &&
+        !dgPopoverRef.current.contains(e.target as Node)
+      ) {
+        closeDgPopover();
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeDgPopover();
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [closeDgPopover, dgPopoverDgId]);
+
+  const handleBindDomainGroupToGroup = useCallback(
+    async (dgId: string, abGroupName: string, action: "allow" | "block") => {
+      // If the opposite binding exists, delete it first
+      const existingOpp = domainGroupPreview?.allBindings.find(
+        (b) =>
+          b.domainGroupId === dgId &&
+          b.advancedBlockingGroupName.toLowerCase() ===
+            abGroupName.toLowerCase() &&
+          b.action !== action,
+      );
+      if (existingOpp) {
+        await deleteDomainGroupBinding(dgId, existingOpp.bindingId);
+      }
+
+      // If the same binding already exists, no-op
+      const existingSame = domainGroupPreview?.allBindings.find(
+        (b) =>
+          b.domainGroupId === dgId &&
+          b.advancedBlockingGroupName.toLowerCase() ===
+            abGroupName.toLowerCase() &&
+          b.action === action,
+      );
+      if (existingSame) {
+        await refreshDomainGroupsPreview();
+        return;
+      }
+
+      await addDomainGroupBinding(dgId, {
+        advancedBlockingGroupName: abGroupName,
+        action,
+      });
+      await refreshDomainGroupsPreview();
+      if (selectedDomainGroup?.id === dgId) {
+        await loadSelectedDomainGroup(dgId);
+      }
+
+      const dgName =
+        domainGroupsList.find((g) => g.id === dgId)?.name ?? "Domain Group";
+      pushToast({
+        message: `"${dgName}" bound to ${abGroupName} — Apply in Domain Groups to sync DNS.`,
+        tone: "success",
+        timeout: 7000,
+      });
+    },
+    [
+      addDomainGroupBinding,
+      deleteDomainGroupBinding,
+      domainGroupPreview,
+      domainGroupsList,
+      loadSelectedDomainGroup,
+      pushToast,
+      refreshDomainGroupsPreview,
+      selectedDomainGroup,
+    ],
+  );
+
+  const handleDomainGroupSourceDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      const bindingId = e.dataTransfer.getData("text/domain-group-binding-id");
+      const dgId = draggedDomainGroupId;
+      if (!bindingId || !dgId) return;
+      const binding = domainGroupPreview?.allBindings.find(
+        (b) => b.bindingId === bindingId,
+      );
+      setDomainGroupsActionLoading(true);
+      try {
+        await deleteDomainGroupBinding(dgId, bindingId);
+        await refreshDomainGroupsPreview();
+        if (selectedDomainGroup?.id === dgId) {
+          await loadSelectedDomainGroup(dgId);
+        }
+        if (binding) {
           pushToast({
-            message: `Binding removed for ${normalizedGroupName}.`,
+            message: `"${binding.domainGroupName}" unbound — Apply in Domain Groups to sync DNS.`,
             tone: "info",
-          });
-        } else {
-          if (oppositeBinding) {
-            await deleteDomainGroupBinding(
-              selectedDomainGroup.id,
-              oppositeBinding.id,
-            );
-          }
-
-          await addDomainGroupBinding(selectedDomainGroup.id, {
-            advancedBlockingGroupName: normalizedGroupName,
-            action,
-          });
-
-          pushToast({
-            message: `Binding set: ${normalizedGroupName} (${action}).`,
-            tone: "success",
+            timeout: 7000,
           });
         }
-
-        await loadSelectedDomainGroup(selectedDomainGroup.id);
-        await refreshDomainGroupsPreview();
       } catch (error) {
         setDomainGroupsError(getErrorMessage(error));
       } finally {
@@ -678,8 +1176,9 @@ export function ConfigurationPage() {
       }
     },
     [
-      addDomainGroupBinding,
       deleteDomainGroupBinding,
+      domainGroupPreview,
+      draggedDomainGroupId,
       getErrorMessage,
       loadSelectedDomainGroup,
       pushToast,
@@ -712,7 +1211,7 @@ export function ConfigurationPage() {
   useEffect(() => {
     if (
       selectedBlockingMethod === "advanced" &&
-      activeTab === "domain-groups"
+      (activeTab === "domain-groups" || activeTab === "domain-management")
     ) {
       void loadDomainGroupsData();
     }
@@ -1265,6 +1764,15 @@ export function ConfigurationPage() {
     (domain: string, groupName: string) => {
       if (!testStagedConfig) return;
 
+      // Block removal of DG-managed domains — they'll be re-added on next apply
+      if (trackedSetByGroupAction.get(pairKey(groupName, activeDomainTypeAction))?.has(domain)) {
+        pushToast({
+          message: `"${domain}" is managed by a Domain Group. Remove it from the Domain Group to stop it appearing here.`,
+          tone: "info",
+        });
+        return;
+      }
+
       const updatedConfig = { ...testStagedConfig };
       const group = updatedConfig.groups.find((g) => g.name === groupName);
       if (!group) return;
@@ -1296,12 +1804,13 @@ export function ConfigurationPage() {
         },
       ]);
     },
-    [testStagedConfig, activeDomainType],
+    [testStagedConfig, activeDomainType, activeDomainTypeAction, trackedSetByGroupAction, pushToast],
   );
 
   const handleDragOver = (e: React.DragEvent, groupName: string) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
+    // DG pills use effectAllowed="move"; domain pills use "copy". Must match.
+    e.dataTransfer.dropEffect = isDraggingDomainGroup ? "move" : "copy";
     setDragOverGroup(groupName);
   };
 
@@ -1315,6 +1824,15 @@ export function ConfigurationPage() {
     dropTarget: "header" | "list" | "other" = "other",
   ) => {
     e.preventDefault();
+
+    // Handle Domain Group pill drop (bind DG to AB group)
+    const dgId = e.dataTransfer.getData("text/domain-group-id");
+    if (dgId && groupName !== "ALL_GROUPS") {
+      setDragOverGroup(null);
+      void handleBindDomainGroupToGroup(dgId, groupName, activeDomainTypeAction);
+      return;
+    }
+
     const domain = e.dataTransfer.getData("text/plain");
     setDragOverGroup(null);
     setIsDragging(false);
@@ -1391,6 +1909,11 @@ export function ConfigurationPage() {
         ...prev,
         { type: "added", category: activeDomainType, description: changeDesc },
       ]);
+    } else if (groupName !== "ALL_GROUPS") {
+      pushToast({
+        message: `"${domain}" is already in "${groupName}".`,
+        tone: "info",
+      });
     }
 
     // Clear search if it was a new domain
@@ -1480,9 +2003,6 @@ export function ConfigurationPage() {
         setDomainInGroups(allGroups);
       }
     }
-  // domainMatchDetails intentionally omitted from deps — including it causes an infinite loop
-  // (effect sets domainMatchDetails → dep changes → effect re-runs)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testStagedConfig, activeTab, searchedDomain]);
 
   // Get all unique domains across all groups for the active domain type
@@ -2041,6 +2561,14 @@ export function ConfigurationPage() {
                     onClick={() => handleTabChange("domain-groups")}
                   >
                     <span>Domain Groups</span>
+                    {(domainGroupPreview?.pendingPairs?.length ?? 0) > 0 && (
+                      <span
+                        className="configuration__tab-badge configuration__tab-badge--pending"
+                        title={`${domainGroupPreview!.pendingPairs.length} pair${domainGroupPreview!.pendingPairs.length === 1 ? "" : "s"} pending apply`}
+                      >
+                        {domainGroupPreview!.pendingPairs.length}
+                      </span>
+                    )}
                   </button>
                 )}
                 <button
@@ -2132,6 +2660,18 @@ export function ConfigurationPage() {
                             <div className="domain-list-card">
                               <div className="domain-list-card__header">
                                 Status
+                                <button
+                                  type="button"
+                                  className="domain-groups-refresh-icon"
+                                  onClick={() => void loadDomainGroupsData()}
+                                  disabled={
+                                    domainGroupsLoading ||
+                                    domainGroupsActionLoading
+                                  }
+                                  title="Refresh"
+                                >
+                                  <FontAwesomeIcon icon={faArrowsRotate} />
+                                </button>
                               </div>
                               <div className="domain-list-card__body domain-groups-card-body">
                                 <p className="domain-groups-metric domain-groups-metric--first">
@@ -2144,17 +2684,6 @@ export function ConfigurationPage() {
                                     {domainGroupPreview?.conflicts.length ?? 0}
                                   </strong>
                                 </p>
-                                <button
-                                  type="button"
-                                  className="button button--secondary"
-                                  onClick={() => void loadDomainGroupsData()}
-                                  disabled={
-                                    domainGroupsLoading ||
-                                    domainGroupsActionLoading
-                                  }
-                                >
-                                  Refresh
-                                </button>
                               </div>
                             </div>
 
@@ -2226,13 +2755,304 @@ export function ConfigurationPage() {
 
                           <div className="domain-groups-grid domain-groups-grid--main">
                             <div className="domain-list-card">
-                              <div className="domain-list-card__header">
+                              <div className="domain-list-card__header dg-groups-header">
                                 Groups
+                                <div className="dg-import-export-actions">
+                                  {!canAutoDetectNode && (
+                                    <select
+                                      className="dg-node-picker"
+                                      value={exportNodeId}
+                                      onChange={(e) =>
+                                        setExportNodeId(e.target.value)
+                                      }
+                                    >
+                                      <option value="">Select node…</option>
+                                      {nodes.map((n) => (
+                                        <option key={n.id} value={n.id}>
+                                          {n.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                  <input
+                                    ref={importFileInputRef}
+                                    type="file"
+                                    accept=".yaml,.yml,.json"
+                                    style={{ display: "none" }}
+                                    onChange={handleImportFileChange}
+                                  />
+                                  <button
+                                    type="button"
+                                    className="button button--secondary button--sm"
+                                    disabled={domainGroupsActionLoading}
+                                    onClick={() => void handleExport()}
+                                  >
+                                    <FontAwesomeIcon icon={faDownload} />{" "}
+                                    Export
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button button--secondary button--sm"
+                                    disabled={domainGroupsActionLoading}
+                                    onClick={() =>
+                                      importFileInputRef.current?.click()
+                                    }
+                                  >
+                                    <FontAwesomeIcon icon={faUpload} /> Import
+                                  </button>
+                                </div>
                               </div>
                               <div className="domain-list-card__body domain-groups-card-body">
+                                {importPending && (
+                                  <div className="dg-import-panel">
+                                    <div className="dg-import-panel__title">
+                                      <FontAwesomeIcon icon={faUpload} />{" "}
+                                      {importPending.filename} —{" "}
+                                      {importPending.groupCount} AB group
+                                      {importPending.groupCount !== 1
+                                        ? "s"
+                                        : ""}
+                                      ,{" "}
+                                      {importPending.dgCount} domain group
+                                      {importPending.dgCount !== 1 ? "s" : ""}
+                                    </div>
+
+                                    <div className="dg-import-mode-section">
+                                      <div className="dg-import-mode-section__label">
+                                        Domains (Technitium)
+                                      </div>
+                                      <div className="dg-import-panel__mode">
+                                        {(
+                                          [
+                                            "skip",
+                                            "merge",
+                                            "replace",
+                                          ] as const
+                                        ).map((m) => (
+                                          <label
+                                            key={m}
+                                            className="dg-import-mode-option"
+                                          >
+                                            <input
+                                              type="radio"
+                                              name="importDomainsMode"
+                                              value={m}
+                                              checked={
+                                                importDomainsMode === m
+                                              }
+                                              onChange={() =>
+                                                setImportDomainsMode(m)
+                                              }
+                                            />
+                                            <span>
+                                              <strong>
+                                                {m.charAt(0).toUpperCase() +
+                                                  m.slice(1)}
+                                              </strong>
+                                              {m === "skip" &&
+                                                " — don't update Technitium config"}
+                                              {m === "merge" &&
+                                                " — add new entries to existing groups"}
+                                              {m === "replace" &&
+                                                " — overwrite group entries (preserves DG-managed)"}
+                                            </span>
+                                          </label>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    <div className="dg-import-mode-section">
+                                      <div className="dg-import-mode-section__label">
+                                        Domain Groups (companion DB)
+                                      </div>
+                                      <div className="dg-import-panel__mode">
+                                        {(
+                                          ["merge", "replace"] as const
+                                        ).map((m) => (
+                                          <label
+                                            key={m}
+                                            className="dg-import-mode-option"
+                                          >
+                                            <input
+                                              type="radio"
+                                              name="importDgMode"
+                                              value={m}
+                                              checked={importDgMode === m}
+                                              onChange={() =>
+                                                setImportDgMode(m)
+                                              }
+                                            />
+                                            <span>
+                                              <strong>
+                                                {m.charAt(0).toUpperCase() +
+                                                  m.slice(1)}
+                                              </strong>
+                                              {m === "merge" &&
+                                                " — add new entries/bindings, skip existing"}
+                                              {m === "replace" &&
+                                                " — overwrite existing entries/bindings"}
+                                            </span>
+                                          </label>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    {importDomainsMode !== "skip" &&
+                                      !canAutoDetectNode && (
+                                        <select
+                                          className="dg-node-picker"
+                                          value={exportNodeId}
+                                          onChange={(e) =>
+                                            setExportNodeId(e.target.value)
+                                          }
+                                        >
+                                          <option value="">
+                                            Select node for Domains import…
+                                          </option>
+                                          {nodes.map((n) => (
+                                            <option key={n.id} value={n.id}>
+                                              {n.name}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      )}
+
+                                    <div className="dg-import-panel__actions">
+                                      <button
+                                        type="button"
+                                        className="button button--secondary button--sm"
+                                        disabled={domainGroupsActionLoading}
+                                        onClick={() => setImportPending(null)}
+                                      >
+                                        Cancel
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="button button--primary button--sm"
+                                        disabled={domainGroupsActionLoading}
+                                        onClick={() =>
+                                          void handleImportConfirm()
+                                        }
+                                      >
+                                        Import
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                                {importResult && (
+                                  <div className="dg-import-result">
+                                    <div className="dg-import-result__header">
+                                      Import result
+                                      <button
+                                        className="dg-import-result__dismiss"
+                                        onClick={() => setImportResult(null)}
+                                      >
+                                        <FontAwesomeIcon icon={faXmark} />
+                                      </button>
+                                    </div>
+                                    {importResult.domains.mode !== "skip" && (
+                                      <div className="dg-import-result__section">
+                                        <div className="dg-import-result__section-label">
+                                          Domains ({importResult.domains.mode})
+                                        </div>
+                                        {importResult.domains.groupsUpdated
+                                          .length > 0 && (
+                                          <p className="dg-import-result__row dg-import-result__row--updated">
+                                            Updated:{" "}
+                                            {importResult.domains.groupsUpdated.join(
+                                              ", ",
+                                            )}
+                                          </p>
+                                        )}
+                                        {importResult.domains.errors.map(
+                                          (e) => (
+                                            <p
+                                              key={e.group}
+                                              className="dg-import-result__row dg-import-result__row--error"
+                                            >
+                                              Error — {e.group}: {e.error}
+                                            </p>
+                                          ),
+                                        )}
+                                      </div>
+                                    )}
+                                    <div className="dg-import-result__section">
+                                      <div className="dg-import-result__section-label">
+                                        Domain Groups (
+                                        {importResult.domainGroups.mode})
+                                      </div>
+                                      {importResult.domainGroups.created
+                                        .length > 0 && (
+                                        <p className="dg-import-result__row dg-import-result__row--created">
+                                          Created (
+                                          {
+                                            importResult.domainGroups.created
+                                              .length
+                                          }
+                                          ):{" "}
+                                          {importResult.domainGroups.created.join(
+                                            ", ",
+                                          )}
+                                        </p>
+                                      )}
+                                      {importResult.domainGroups.updated
+                                        .length > 0 && (
+                                        <p className="dg-import-result__row dg-import-result__row--updated">
+                                          Updated (
+                                          {
+                                            importResult.domainGroups.updated
+                                              .length
+                                          }
+                                          ):{" "}
+                                          {importResult.domainGroups.updated.join(
+                                            ", ",
+                                          )}
+                                        </p>
+                                      )}
+                                      {importResult.domainGroups.replaced
+                                        .length > 0 && (
+                                        <p className="dg-import-result__row dg-import-result__row--replaced">
+                                          Replaced (
+                                          {
+                                            importResult.domainGroups.replaced
+                                              .length
+                                          }
+                                          ):{" "}
+                                          {importResult.domainGroups.replaced.join(
+                                            ", ",
+                                          )}
+                                        </p>
+                                      )}
+                                      {importResult.domainGroups.skipped
+                                        .length > 0 && (
+                                        <p className="dg-import-result__row dg-import-result__row--skipped">
+                                          Skipped (
+                                          {
+                                            importResult.domainGroups.skipped
+                                              .length
+                                          }
+                                          ):{" "}
+                                          {importResult.domainGroups.skipped.join(
+                                            ", ",
+                                          )}
+                                        </p>
+                                      )}
+                                      {importResult.domainGroups.errors.map(
+                                        (e) => (
+                                          <p
+                                            key={e.name}
+                                            className="dg-import-result__row dg-import-result__row--error"
+                                          >
+                                            Error — {e.name}: {e.error}
+                                          </p>
+                                        ),
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
                                 {domainGroupsList.length === 0 && (
                                   <p className="domain-groups-empty">
-                                    No Domain Groups created yet.
+                                    No groups yet — create one above to get started.
                                   </p>
                                 )}
                                 <div className="domain-groups-stack">
@@ -2356,7 +3176,7 @@ export function ConfigurationPage() {
                                         </button>
                                         <button
                                           type="button"
-                                          className="button button--danger"
+                                          className="button button--ghost button--danger-text"
                                           disabled={domainGroupsActionLoading}
                                           onClick={() => {
                                             setConfirmModal({
@@ -2668,36 +3488,47 @@ export function ConfigurationPage() {
                                                   </button>
                                                   <button
                                                     type="button"
-                                                    className="button button--danger"
+                                                    className="button button--ghost button--danger-text"
                                                     disabled={
                                                       domainGroupsActionLoading
                                                     }
                                                     onClick={() => {
-                                                      void (async () => {
-                                                        try {
-                                                          setDomainGroupsActionLoading(
-                                                            true,
-                                                          );
-                                                          await deleteDomainGroupEntry(
-                                                            selectedDomainGroup.id,
-                                                            entry.id,
-                                                          );
-                                                          await loadSelectedDomainGroup(
-                                                            selectedDomainGroup.id,
-                                                          );
-                                                          await refreshDomainGroupsPreview();
-                                                        } catch (error) {
-                                                          setDomainGroupsError(
-                                                            getErrorMessage(
-                                                              error,
-                                                            ),
-                                                          );
-                                                        } finally {
-                                                          setDomainGroupsActionLoading(
-                                                            false,
-                                                          );
-                                                        }
-                                                      })();
+                                                      setConfirmModal({
+                                                        isOpen: true,
+                                                        title: "Delete Entry",
+                                                        message:
+                                                          "Delete this entry? This cannot be undone.",
+                                                        variant: "danger",
+                                                        confirmLabel: "Delete",
+                                                        onConfirm: () => {
+                                                          closeConfirmModal();
+                                                          void (async () => {
+                                                            try {
+                                                              setDomainGroupsActionLoading(
+                                                                true,
+                                                              );
+                                                              await deleteDomainGroupEntry(
+                                                                selectedDomainGroup.id,
+                                                                entry.id,
+                                                              );
+                                                              await loadSelectedDomainGroup(
+                                                                selectedDomainGroup.id,
+                                                              );
+                                                              await refreshDomainGroupsPreview();
+                                                            } catch (error) {
+                                                              setDomainGroupsError(
+                                                                getErrorMessage(
+                                                                  error,
+                                                                ),
+                                                              );
+                                                            } finally {
+                                                              setDomainGroupsActionLoading(
+                                                                false,
+                                                              );
+                                                            }
+                                                          })();
+                                                        },
+                                                      });
                                                     }}
                                                   >
                                                     Delete
@@ -2709,75 +3540,33 @@ export function ConfigurationPage() {
                                       </div>
                                     </div>
 
-                                    <div className="domain-groups-stack">
-                                      <h3 className="domain-groups-section-title">
-                                        Bindings
-                                      </h3>
-                                      {(
-                                        advancedBlockingGroupOptions.length ===
-                                        0
-                                      ) ?
-                                        <p className="domain-groups-empty">
-                                          No Advanced Blocking groups available
-                                          on the selected node.
+                                    {selectedDomainGroup.bindings.length > 0 && (
+                                      <div className="domain-groups-stack">
+                                        <h3 className="domain-groups-section-title">
+                                          Bound to
+                                        </h3>
+                                        <p className="domain-groups-bindings-hint">
+                                          Manage bindings by dragging Domain
+                                          Group pills onto groups in the Domains
+                                          tab.
                                         </p>
-                                      : <div className="domain-groups-binding-toggle-list">
-                                          {advancedBlockingGroupOptions.map(
-                                            (groupName) => {
-                                              const existingBinding =
-                                                selectedDomainGroup.bindings.find(
-                                                  (binding) =>
-                                                    binding.advancedBlockingGroupName.toLowerCase() ===
-                                                    groupName.toLowerCase(),
-                                                );
-
-                                              return (
-                                                <div
-                                                  key={`binding-${groupName}`}
-                                                  className="domain-groups-binding-toggle-row"
-                                                >
-                                                  <span className="domain-groups-binding-toggle-name">
-                                                    {groupName}
-                                                  </span>
-                                                  <div className="domain-groups-binding-toggle-actions">
-                                                    <button
-                                                      type="button"
-                                                      className={`button domain-groups-binding-toggle-button domain-groups-binding-toggle-button--allow ${existingBinding?.action === "allow" ? "domain-groups-binding-toggle-button--active" : ""}`}
-                                                      disabled={
-                                                        domainGroupsActionLoading
-                                                      }
-                                                      onClick={() =>
-                                                        void handleBindingButtonToggle(
-                                                          groupName,
-                                                          "allow",
-                                                        )
-                                                      }
-                                                    >
-                                                      ALLOW
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      className={`button domain-groups-binding-toggle-button domain-groups-binding-toggle-button--block ${existingBinding?.action === "block" ? "domain-groups-binding-toggle-button--active" : ""}`}
-                                                      disabled={
-                                                        domainGroupsActionLoading
-                                                      }
-                                                      onClick={() =>
-                                                        void handleBindingButtonToggle(
-                                                          groupName,
-                                                          "block",
-                                                        )
-                                                      }
-                                                    >
-                                                      BLOCK
-                                                    </button>
-                                                  </div>
-                                                </div>
-                                              );
-                                            },
+                                        <div className="domain-groups-bindings-summary">
+                                          {selectedDomainGroup.bindings.map(
+                                            (b) => (
+                                              <span
+                                                key={b.id}
+                                                className={`domain-groups-binding-chip domain-groups-binding-chip--${b.action}`}
+                                              >
+                                                {b.advancedBlockingGroupName}
+                                                <span className="domain-groups-binding-chip__action">
+                                                  {b.action}
+                                                </span>
+                                              </span>
+                                            ),
                                           )}
                                         </div>
-                                      }
-                                    </div>
+                                      </div>
+                                    )}
                                   </>
                                 )}
                               </div>
@@ -2789,143 +3578,145 @@ export function ConfigurationPage() {
                               Preview & Apply
                             </div>
                             <div className="domain-list-card__body domain-groups-card-body domain-groups-stack">
-                              <p className="domain-groups-metric">
-                                Materialized groups:{" "}
-                                <strong>
-                                  {domainGroupPreview?.groups.length ?? 0}
-                                </strong>
-                              </p>
-                              <p className="domain-groups-metric">
-                                Conflicts:{" "}
-                                <strong>
-                                  {domainGroupPreview?.conflicts.length ?? 0}
-                                </strong>
-                              </p>
+                              {domainGroupPreview?.conflicts.length ?
+                                <div className="alert-box alert-box--warning">
+                                  Resolve conflicts before applying. Same
+                                  specificity allow/block conflicts are blocked.
+                                </div>
+                              : null}
+
                               {isClusterEnabled && (
                                 <p className="domain-groups-policy-note">
                                   Cluster mode: writes go to Primary only.
                                 </p>
                               )}
 
-                              {(domainGroupPreview?.groups.length ?? 0) > 0 && (
-                                <div className="domain-groups-stack">
-                                  <button
-                                    type="button"
-                                    className="domain-groups-preview-toggle"
-                                    onClick={() =>
-                                      setShowPreviewDetails((v) => !v)
-                                    }
-                                  >
-                                    <FontAwesomeIcon
-                                      icon={faChevronUp}
-                                      className={`domain-groups-preview-chevron${showPreviewDetails ? "" : " domain-groups-preview-chevron--collapsed"}`}
-                                    />
-                                    {showPreviewDetails ?
-                                      "Hide materialized groups"
-                                    : "Show materialized groups"}
-                                  </button>
-                                  {showPreviewDetails && (
-                                    <div className="domain-groups-preview-list">
-                                      {domainGroupPreview!.groups.map(
-                                        (group) => (
-                                          <div
-                                            key={group.advancedBlockingGroupName}
-                                            className="domain-groups-preview-row"
-                                          >
-                                            <span className="domain-groups-preview-name">
-                                              {group.advancedBlockingGroupName}
-                                            </span>
-                                            <div className="domain-groups-preview-counts">
-                                              {group.allowed.length > 0 && (
-                                                <span className="domain-groups-preview-count domain-groups-preview-count--allow">
-                                                  {group.allowed.length} allow
-                                                </span>
-                                              )}
-                                              {group.blocked.length > 0 && (
-                                                <span className="domain-groups-preview-count domain-groups-preview-count--block">
-                                                  {group.blocked.length} block
-                                                </span>
-                                              )}
-                                              {group.allowedRegex.length >
-                                                0 && (
-                                                <span className="domain-groups-preview-count domain-groups-preview-count--allow">
-                                                  {group.allowedRegex.length}{" "}
-                                                  allow regex
-                                                </span>
-                                              )}
-                                              {group.blockedRegex.length >
-                                                0 && (
-                                                <span className="domain-groups-preview-count domain-groups-preview-count--block">
-                                                  {group.blockedRegex.length}{" "}
-                                                  block regex
-                                                </span>
-                                              )}
-                                            </div>
-                                          </div>
-                                        ),
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {domainGroupPreview?.conflicts.length ?
-                                <div className="alert-box alert-box--warning">
-                                  Resolve conflicts before apply. Same
-                                  specificity allow/block conflicts are blocked.
-                                </div>
-                              : null}
-
-                              <label className="domain-groups-checkbox">
-                                <input
-                                  type="checkbox"
-                                  checked={applyDryRun}
-                                  onChange={(e) =>
-                                    setApplyDryRun(e.target.checked)
-                                  }
-                                />
-                                Dry run (preview only)
-                              </label>
-                              <label className="domain-groups-checkbox">
-                                <input
-                                  type="checkbox"
-                                  checked={applySelectedNodeOnly}
-                                  onChange={(e) =>
-                                    setApplySelectedNodeOnly(e.target.checked)
-                                  }
-                                />
-                                Apply to selected node only
-                              </label>
-
-                              <div className="domain-groups-actions">
+                              <div className="dg-diff-header">
+                                <span className="dg-diff-header__title">
+                                  Changes to sync
+                                </span>
                                 <button
                                   type="button"
-                                  className="button button--secondary"
+                                  className="button button--secondary button--sm"
                                   disabled={domainGroupsActionLoading}
                                   onClick={() =>
                                     void refreshDomainGroupsPreview()
                                   }
                                 >
-                                  Refresh Preview
+                                  <FontAwesomeIcon icon={faArrowsRotate} />{" "}
+                                  Refresh
                                 </button>
+                              </div>
+
+                              {domainGroupDiff.length === 0 ?
+                                <p className="dg-diff-empty">
+                                  No Domain Groups are bound yet. Drag pills
+                                  from the Domain Groups panel in the Domains
+                                  tab onto groups.
+                                </p>
+                              : <div className="dg-diff-list">
+                                  {domainGroupDiff.map((pair) => (
+                                    <div
+                                      key={`${pair.advancedBlockingGroupName}||${pair.action}`}
+                                      className={`dg-diff-pair${pair.isPending ? " dg-diff-pair--pending" : ""}`}
+                                    >
+                                      <div className="dg-diff-pair__header">
+                                        <span className="dg-diff-pair__name">
+                                          {pair.advancedBlockingGroupName}
+                                        </span>
+                                        <span
+                                          className={`dg-diff-pair__action-badge dg-diff-pair__action-badge--${pair.action}`}
+                                        >
+                                          {pair.action}
+                                        </span>
+                                        {pair.isPending ?
+                                          <span className="dg-diff-pair__status dg-diff-pair__status--pending">
+                                            pending
+                                          </span>
+                                        : <span className="dg-diff-pair__status dg-diff-pair__status--ok">
+                                            ✓ up to date
+                                          </span>
+                                        }
+                                      </div>
+                                      {pair.isPending &&
+                                        (pair.added.length > 0 ||
+                                          pair.removed.length > 0) && (
+                                          <ul className="dg-diff-pair__entries">
+                                            {pair.added.map((e) => (
+                                              <li
+                                                key={e.value}
+                                                className="dg-diff-entry dg-diff-entry--added"
+                                              >
+                                                + {e.value}
+                                                {e.isRegex && (
+                                                  <span className="dg-diff-entry__badge">
+                                                    regex
+                                                  </span>
+                                                )}
+                                              </li>
+                                            ))}
+                                            {pair.removed.map((e) => (
+                                              <li
+                                                key={e.value}
+                                                className="dg-diff-entry dg-diff-entry--removed"
+                                              >
+                                                − {e.value}
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        )}
+                                      {pair.isPending &&
+                                        pair.added.length === 0 &&
+                                        pair.removed.length === 0 && (
+                                          <p className="dg-diff-pair__first-apply">
+                                            No entries to sync.
+                                          </p>
+                                        )}
+                                    </div>
+                                  ))}
+                                </div>
+                              }
+
+                              {!isClusterEnabled && nodes.length > 1 && (
+                                <label className="domain-groups-checkbox">
+                                  <input
+                                    type="checkbox"
+                                    checked={applySelectedNodeOnly}
+                                    onChange={(e) =>
+                                      setApplySelectedNodeOnly(e.target.checked)
+                                    }
+                                  />
+                                  Apply to selected node only
+                                </label>
+                              )}
+
+                              <div className="domain-groups-actions">
                                 <button
                                   type="button"
                                   className="button button--primary"
                                   disabled={
                                     domainGroupsActionLoading ||
-                                    (applySelectedNodeOnly && !selectedNodeId)
+                                    !!domainGroupPreview?.hasConflicts ||
+                                    (!isClusterEnabled &&
+                                      nodes.length > 1 &&
+                                      applySelectedNodeOnly &&
+                                      !selectedNodeId)
                                   }
                                   onClick={() => {
                                     void (async () => {
                                       try {
                                         setDomainGroupsActionLoading(true);
+                                        const effectiveNodeOnly =
+                                          !isClusterEnabled &&
+                                          nodes.length > 1 &&
+                                          applySelectedNodeOnly;
                                         const result =
                                           await applyDomainGroupMaterialization(
                                             {
-                                              dryRun: applyDryRun,
+                                              dryRun: false,
                                               nodeIds:
                                                 (
-                                                  applySelectedNodeOnly &&
+                                                  effectiveNodeOnly &&
                                                   selectedNodeId
                                                 ) ?
                                                   [selectedNodeId]
@@ -2934,12 +3725,17 @@ export function ConfigurationPage() {
                                           );
                                         setDomainGroupsApplyResult(result);
                                         await refreshDomainGroupsPreview();
+                                        if (
+                                          result.nodes.some(
+                                            (r) => r.updatedGroups.length > 0,
+                                          )
+                                        ) {
+                                          await reloadAdvancedBlocking();
+                                        }
                                         pushToast({
                                           message:
                                             result.conflicts.length > 0 ?
                                               "Apply blocked due to conflicts."
-                                            : result.dryRun ?
-                                              "Dry run completed."
                                             : "Domain Groups applied.",
                                           tone:
                                             result.conflicts.length > 0 ?
@@ -2956,34 +3752,128 @@ export function ConfigurationPage() {
                                     })();
                                   }}
                                 >
-                                  {applyDryRun ? "Run Dry Apply" : "Apply Now"}
+                                  Apply to DNS
                                 </button>
                               </div>
 
                               {domainGroupsApplyResult && (
                                 <div className="domain-groups-result">
-                                  <p className="domain-groups-result-line">
-                                    Result:{" "}
-                                    {domainGroupsApplyResult.dryRun ?
-                                      "Dry Run"
-                                    : "Apply"}
-                                  </p>
-                                  <p className="domain-groups-result-line">
-                                    Applied nodes:{" "}
-                                    {
-                                      domainGroupsApplyResult.appliedNodeIds
-                                        .length
+                                  <div className="domain-groups-result-header">
+                                    <span className="domain-groups-result-title">
+                                      Last apply result
+                                    </span>
+                                    {domainGroupsApplyResult.conflicts
+                                      .length === 0 ?
+                                      <span className="domain-groups-result-badge domain-groups-result-badge--ok">
+                                        No conflicts
+                                      </span>
+                                    : <span className="domain-groups-result-badge domain-groups-result-badge--warn">
+                                        {
+                                          domainGroupsApplyResult.conflicts
+                                            .length
+                                        }{" "}
+                                        conflict
+                                        {domainGroupsApplyResult.conflicts
+                                          .length !== 1 ?
+                                          "s"
+                                        : ""}
+                                      </span>
                                     }
-                                    , skipped:{" "}
-                                    {
-                                      domainGroupsApplyResult.skippedNodeIds
-                                        .length
-                                    }
-                                  </p>
-                                  <p className="domain-groups-result-line domain-groups-result-line--last">
-                                    Conflicts:{" "}
-                                    {domainGroupsApplyResult.conflicts.length}
-                                  </p>
+                                  </div>
+
+                                  {domainGroupsApplyResult.nodes.map(
+                                    (nodeResult) => {
+                                      const nodeMeta = nodes.find(
+                                        (n) => n.id === nodeResult.nodeId,
+                                      );
+                                      const nodeName =
+                                        nodeMeta?.name ?? nodeResult.nodeId;
+                                      return (
+                                        <div
+                                          key={nodeResult.nodeId}
+                                          className="domain-groups-result-node"
+                                        >
+                                          <div className="domain-groups-result-node-header">
+                                            <span className="domain-groups-result-node-name">
+                                              {nodeName}
+                                            </span>
+                                            {nodeMeta?.isPrimary && (
+                                              <span className="domain-groups-result-badge domain-groups-result-badge--primary">
+                                                Primary
+                                              </span>
+                                            )}
+                                            {nodeResult.error ?
+                                              <span className="domain-groups-result-badge domain-groups-result-badge--error">
+                                                Error
+                                              </span>
+                                            : nodeResult.updatedGroups.length >
+                                                0 ?
+                                              <span className="domain-groups-result-badge domain-groups-result-badge--update">
+                                                {
+                                                  nodeResult.updatedGroups
+                                                    .length
+                                                }{" "}
+                                                updated
+                                              </span>
+                                            : <span className="domain-groups-result-badge domain-groups-result-badge--ok">
+                                                Up to date
+                                              </span>
+                                            }
+                                          </div>
+                                          {nodeResult.error ?
+                                            <p className="domain-groups-result-node-detail domain-groups-result-node-detail--error">
+                                              {nodeResult.error}
+                                            </p>
+                                          : <>
+                                              {nodeResult.updatedGroups.length >
+                                                0 && (
+                                                <p className="domain-groups-result-node-detail">
+                                                  Updated:{" "}
+                                                  <span className="domain-groups-result-node-groups">
+                                                    {nodeResult.updatedGroups.join(
+                                                      ", ",
+                                                    )}
+                                                  </span>
+                                                </p>
+                                              )}
+                                              {nodeResult.skippedGroups.length >
+                                                0 && (
+                                                <p className="domain-groups-result-node-detail domain-groups-result-node-detail--muted">
+                                                  Up to date:{" "}
+                                                  {nodeResult.skippedGroups.join(
+                                                    ", ",
+                                                  )}
+                                                </p>
+                                              )}
+                                            </>
+                                          }
+                                        </div>
+                                      );
+                                    },
+                                  )}
+
+                                  {domainGroupsApplyResult.skippedNodeIds.map(
+                                    (nodeId) => {
+                                      const nodeName =
+                                        nodes.find((n) => n.id === nodeId)
+                                          ?.name ?? nodeId;
+                                      return (
+                                        <div
+                                          key={nodeId}
+                                          className="domain-groups-result-node domain-groups-result-node--skipped"
+                                        >
+                                          <div className="domain-groups-result-node-header">
+                                            <span className="domain-groups-result-node-name">
+                                              {nodeName}
+                                            </span>
+                                            <span className="domain-groups-result-badge domain-groups-result-badge--muted">
+                                              Not targeted
+                                            </span>
+                                          </div>
+                                        </div>
+                                      );
+                                    },
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -3098,6 +3988,62 @@ export function ConfigurationPage() {
                   <div className="domain-management-grid">
                     {/* Left: Search and Domain List */}
                     <div className="domain-management-left">
+                      {/* Domain Groups Source Panel */}
+                      {isDomainGroupsTabVisible && domainGroupsList.length > 0 && (
+                        <div
+                          className={`domain-group-source-panel${isDraggingDomainGroup ? " domain-group-source-panel--is-drag-target" : ""}`}
+                          onDragOver={(e) => {
+                            if (isDraggingDomainGroup) {
+                              e.preventDefault();
+                              e.dataTransfer.dropEffect = "move";
+                            }
+                          }}
+                          onDrop={(e) => void handleDomainGroupSourceDrop(e)}
+                        >
+                          <span className="domain-group-source-panel__label">
+                            <FontAwesomeIcon icon={faLayerGroup} /> Domain
+                            Groups
+                          </span>
+                          {domainGroupsList.map((dg) => {
+                            const dgHasPending = (
+                              domainGroupPreview?.allBindings ?? []
+                            ).some(
+                              (b) =>
+                                b.domainGroupId === dg.id &&
+                                pendingPairKeys.has(
+                                  `${b.advancedBlockingGroupName.toLowerCase()}||${b.action}`,
+                                ),
+                            );
+                            return (
+                              <div
+                                key={dg.id}
+                                draggable="true"
+                                className={[
+                                  "domain-group-source-pill",
+                                  dgPopoverDgId === dg.id ? "domain-group-source-pill--active" : "",
+                                  dgHasPending ? "domain-group-source-pill--pending" : "",
+                                ].filter(Boolean).join(" ")}
+                                title={`Drag to bind · click to preview "${dg.name}"${dgHasPending ? " · pending apply" : ""}`}
+                                onClick={(e) => void handleDgChipClick(dg.id, e)}
+                                onDragStart={(e) =>
+                                  handleDomainGroupPillDragStart(e, dg.id)
+                                }
+                                onDragEnd={handleDomainGroupPillDragEnd}
+                              >
+                                <FontAwesomeIcon
+                                  icon={faLayerGroup}
+                                  className="domain-group-source-pill__icon"
+                                />
+                                {dg.name}
+                                {dgHasPending && (
+                                  <span className="domain-group-source-pill__pending-dot" aria-label="pending apply" />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
                       {/* Unified Search or Add Domain */}
                       <div>
                         <label className="form-label">
@@ -3253,7 +4199,6 @@ export function ConfigurationPage() {
                                         style={{
                                           padding: "0.75rem 1rem",
                                           textAlign: "right",
-                                          whiteSpace: "nowrap",
                                         }}
                                       >
                                         {domainBadgeEntries.map((entry) => {
@@ -3708,6 +4653,12 @@ export function ConfigurationPage() {
                             const isExpanded = expandedGroups.has(groupName);
                             const domains = getDomainsForGroupByType(groupName);
                             const domainCount = domains.length;
+                            const trackedKey = pairKey(groupName, activeDomainTypeAction);
+                            const trackedSet = trackedSetByGroupAction.get(trackedKey);
+                            const dgManagedCount = trackedSet ? domains.filter((d) => trackedSet.has(d)).length : 0;
+                            const manualCount = domainCount - dgManagedCount;
+
+                            const groupHasPending = pendingPairKeys.has(trackedKey);
 
                             return (
                               <div key={groupName}>
@@ -3746,10 +4697,25 @@ export function ConfigurationPage() {
                                           background: "var(--color-info)",
                                           padding: "2px 6px",
                                           borderRadius: "3px",
+                                          cursor: dgManagedCount > 0 ? "help" : undefined,
                                         }}
+                                        title={
+                                          dgManagedCount > 0
+                                            ? `${dgManagedCount} from Domain Groups · ${manualCount} manual`
+                                            : undefined
+                                        }
                                       >
                                         {domainCount}
                                       </span>
+                                      {groupHasPending && !isExpanded && (
+                                        <span
+                                          className="group-drop-zone__dg-pending-badge"
+                                          title="Domain Group changes pending — Apply in Domain Groups to sync DNS"
+                                        >
+                                          <FontAwesomeIcon icon={faLayerGroup} />
+                                          pending
+                                        </span>
+                                      )}
                                       <button
                                         type="button"
                                         style={{
@@ -3831,6 +4797,38 @@ export function ConfigurationPage() {
                                     pointerEvents: isExpanded ? "auto" : "none",
                                   }}
                                 >
+                                  {/* DG chips for this group + current action */}
+                                  {(
+                                    bindingsByGroupAction.get(
+                                      `${groupName.toLowerCase()}||${activeDomainTypeAction}`,
+                                    ) ?? []
+                                  ).map((binding) => (
+                                    <div
+                                      key={binding.bindingId}
+                                      draggable="true"
+                                      className={[
+                                        "domain-group-binding-chip",
+                                        dgPopoverDgId === binding.domainGroupId ? "domain-group-binding-chip--active" : "",
+                                        pendingPairKeys.has(`${binding.advancedBlockingGroupName.toLowerCase()}||${binding.action}`) ? "domain-group-binding-chip--pending" : "",
+                                      ].filter(Boolean).join(" ")}
+                                      title={`${binding.domainGroupName} (${binding.action})${pendingPairKeys.has(`${binding.advancedBlockingGroupName.toLowerCase()}||${binding.action}`) ? " — pending apply" : ""} — click to preview · drag to source panel to remove`}
+                                      onClick={(e) => void handleDgChipClick(binding.domainGroupId, e)}
+                                      onDragStart={(e) =>
+                                        handleDomainGroupChipDragStart(
+                                          e,
+                                          binding.domainGroupId,
+                                          binding.bindingId,
+                                        )
+                                      }
+                                      onDragEnd={handleDomainGroupPillDragEnd}
+                                    >
+                                      <FontAwesomeIcon
+                                        icon={faLayerGroup}
+                                        className="domain-group-binding-chip__icon"
+                                      />
+                                      {binding.domainGroupName}
+                                    </div>
+                                  ))}
                                   {domains.length === 0 ?
                                     <p
                                       style={{
@@ -3850,28 +4848,38 @@ export function ConfigurationPage() {
                                         listStyle: "none",
                                       }}
                                     >
-                                      {domains.map((domain) => (
-                                        <li
-                                          key={domain}
-                                          draggable="true"
-                                          onClick={() =>
-                                            handleDomainClick(domain)
-                                          }
-                                          onDragStart={(e) => {
-                                            e.currentTarget.style.boxShadow =
-                                              "none";
-                                            handleDragStart(e, domain);
-                                            setDragSourceGroup(groupName);
-                                          }}
-                                          onDragEnd={() => {
-                                            handleDragEnd();
-                                            setDragSourceGroup(null);
-                                          }}
-                                          className={`group-domain-list__item ${activeDomainType.includes("blocked") ? "group-domain-list__item--blocked" : "group-domain-list__item--allowed"} ${isDragging && draggedDomain === domain ? "group-domain-list__item--dragging" : ""}`}
-                                        >
-                                          {domain}
-                                        </li>
-                                      ))}
+                                      {domains.map((domain) => {
+                                        const isDgManaged = trackedSet?.has(domain) ?? false;
+                                        return (
+                                          <li
+                                            key={domain}
+                                            draggable="true"
+                                            onClick={() =>
+                                              handleDomainClick(domain)
+                                            }
+                                            onDragStart={(e) => {
+                                              e.currentTarget.style.boxShadow =
+                                                "none";
+                                              handleDragStart(e, domain);
+                                              setDragSourceGroup(groupName);
+                                            }}
+                                            onDragEnd={() => {
+                                              handleDragEnd();
+                                              setDragSourceGroup(null);
+                                            }}
+                                            className={`group-domain-list__item ${activeDomainType.includes("blocked") ? "group-domain-list__item--blocked" : "group-domain-list__item--allowed"} ${isDragging && draggedDomain === domain ? "group-domain-list__item--dragging" : ""}`}
+                                            title={isDgManaged ? "Managed by Domain Groups" : undefined}
+                                          >
+                                            {isDgManaged && (
+                                              <FontAwesomeIcon
+                                                icon={faLayerGroup}
+                                                className="group-domain-list__item__dg-icon"
+                                              />
+                                            )}
+                                            {domain}
+                                          </li>
+                                        );
+                                      })}
                                     </ul>
                                   }
                                 </div>
@@ -4099,6 +5107,56 @@ export function ConfigurationPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* DG chip popover */}
+      {dgPopoverDgId && dgPopoverPos && (
+        <div
+          ref={dgPopoverRef}
+          className="dg-popover"
+          style={{ top: dgPopoverPos.top, left: dgPopoverPos.left }}
+        >
+          <div className="dg-popover__header">
+            <FontAwesomeIcon icon={faLayerGroup} className="dg-popover__header-icon" />
+            <span className="dg-popover__header-name">
+              {dgPopoverDetails?.name ??
+                domainGroupsList.find((g) => g.id === dgPopoverDgId)?.name ??
+                "Domain Group"}
+            </span>
+            <button className="dg-popover__close" onClick={closeDgPopover} aria-label="Close">
+              ×
+            </button>
+          </div>
+          {dgPopoverLoading ?
+            <div className="dg-popover__loading">Loading entries…</div>
+          : dgPopoverDetails && dgPopoverDetails.entries.length === 0 ?
+            <div className="dg-popover__empty">No entries yet.</div>
+          : <ul className="dg-popover__list">
+              {(dgPopoverDetails?.entries ?? []).map((entry) => (
+                <li key={entry.id} className="dg-popover__entry">
+                  <span
+                    className={`dg-popover__entry-badge dg-popover__entry-badge--${entry.matchType}`}
+                  >
+                    {entry.matchType}
+                  </span>
+                  <span className="dg-popover__entry-value">{entry.value}</span>
+                </li>
+              ))}
+            </ul>
+          }
+          {dgPopoverDetails && dgPopoverDetails.bindings.length > 0 && (
+            <div className="dg-popover__bindings">
+              {dgPopoverDetails.bindings.map((b) => (
+                <span
+                  key={b.id}
+                  className={`dg-popover__binding-chip dg-popover__binding-chip--${b.action}`}
+                >
+                  {b.advancedBlockingGroupName}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
