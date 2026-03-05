@@ -1,33 +1,43 @@
 import {
-    BadRequestException,
-    ConflictException,
-    Injectable,
-    Logger,
-    NotFoundException,
-    OnModuleInit,
-    ServiceUnavailableException,
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { DatabaseSync } from "node:sqlite";
 import { AdvancedBlockingService } from "./advanced-blocking.service";
 import type {
-    AdvancedBlockingConfig,
-    AdvancedBlockingGroup,
+  AdvancedBlockingConfig,
+  AdvancedBlockingGroup,
 } from "./advanced-blocking.types";
 import { CompanionDbService } from "./companion-db.service";
+import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
 import type {
-    DomainGroup,
-    DomainGroupBinding,
-    DomainGroupBindingAction,
-    DomainGroupConflict,
-    DomainGroupDetails,
-    DomainGroupEntry,
-    DomainGroupEntryMatchType,
-    DomainGroupMaterializationPreview,
-    DomainGroupMaterializedGroup,
-    DomainGroupsApplyRequest,
-    DomainGroupsApplyResult,
-    DomainGroupsStatus,
+  DomainGroup,
+  DomainGroupBinding,
+  DomainGroupBindingAction,
+  DomainGroupBindingSummary,
+  DomainGroupConflict,
+  DomainGroupDetails,
+  DomainGroupEntry,
+  DomainGroupEntryMatchType,
+  DomainGroupMaterializationPreview,
+  DomainGroupMaterializedGroup,
+  DomainGroupOwnedPair,
+  DomainGroupTrackedPair,
+  DomainGroupsApplyRequest,
+  DomainGroupsApplyResult,
+  DomainGroupsStatus,
+  UnifiedExportAbGroup,
+  UnifiedExportDg,
+  UnifiedExportData,
+  UnifiedImportDomainsMode,
+  UnifiedImportRequest,
+  UnifiedImportResult,
 } from "./domain-groups.types";
 import { TechnitiumService } from "./technitium.service";
 
@@ -79,6 +89,7 @@ export class DomainGroupsService implements OnModuleInit {
     private readonly companionDb: CompanionDbService,
     private readonly advancedBlockingService: AdvancedBlockingService,
     private readonly technitiumService: TechnitiumService,
+    private readonly dnsFilteringSnapshotService: DnsFilteringSnapshotService,
   ) {}
 
   getStatus(): DomainGroupsStatus {
@@ -173,6 +184,13 @@ export class DomainGroupsService implements OnModuleInit {
 
       CREATE INDEX IF NOT EXISTS idx_domain_group_bindings_group_id
         ON domain_group_bindings(domain_group_id);
+
+      CREATE TABLE IF NOT EXISTS domain_group_applied_entries (
+        advanced_blocking_group_name_lc TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('allow', 'block')),
+        value TEXT NOT NULL,
+        PRIMARY KEY (advanced_blocking_group_name_lc, action, value)
+      );
     `);
   }
 
@@ -186,6 +204,13 @@ export class DomainGroupsService implements OnModuleInit {
     }
 
     return value;
+  }
+
+  private validateMatchType(input: unknown): DomainGroupEntryMatchType {
+    if (typeof input !== "string" || (input !== "exact" && input !== "regex")) {
+      throw new BadRequestException('matchType must be "exact" or "regex".');
+    }
+    return input;
   }
 
   private normalizeDescription(value: unknown): string | undefined {
@@ -444,20 +469,20 @@ export class DomainGroupsService implements OnModuleInit {
     const existing = this.ensureGroupExists(groupId);
 
     const nextName =
-      input.name === undefined ?
-        existing.name
-      : this.normalizeGroupName(
-          this.requireString(input.name, "Domain Group name"),
-        );
+      input.name === undefined
+        ? existing.name
+        : this.normalizeGroupName(
+            this.requireString(input.name, "Domain Group name"),
+          );
     if (!nextName) {
       throw new BadRequestException("Domain Group name is required.");
     }
     this.assertMaxLength("Domain Group name", nextName, 80);
 
     const nextDescription =
-      input.description === undefined ?
-        (existing.description ?? undefined)
-      : this.normalizeDescription(input.description);
+      input.description === undefined
+        ? (existing.description ?? undefined)
+        : this.normalizeDescription(input.description);
     this.assertMaxLength("Domain Group description", nextDescription, 1000);
 
     const now = new Date().toISOString();
@@ -501,14 +526,7 @@ export class DomainGroupsService implements OnModuleInit {
     const db = this.getDb();
     this.ensureGroupExists(groupId);
 
-    if (typeof input.matchType !== "string") {
-      throw new BadRequestException('matchType must be "exact" or "regex".');
-    }
-
-    const matchType = input.matchType as DomainGroupEntryMatchType;
-    if (matchType !== "exact" && matchType !== "regex") {
-      throw new BadRequestException('matchType must be "exact" or "regex".');
-    }
+    const matchType = this.validateMatchType(input.matchType);
 
     const { value, normalizedValue } = this.normalizeEntryValue(
       matchType,
@@ -570,27 +588,21 @@ export class DomainGroupsService implements OnModuleInit {
     }
 
     const nextMatchType =
-      input.matchType === undefined ?
-        existing.match_type
-      : (this.requireString(
-          input.matchType,
-          "matchType",
-        ) as DomainGroupEntryMatchType);
-    if (nextMatchType !== "exact" && nextMatchType !== "regex") {
-      throw new BadRequestException('matchType must be "exact" or "regex".');
-    }
+      input.matchType === undefined
+        ? existing.match_type
+        : this.validateMatchType(input.matchType);
 
     const { value, normalizedValue } = this.normalizeEntryValue(
       nextMatchType,
-      input.value === undefined ?
-        existing.value
-      : this.requireString(input.value, "Entry value"),
+      input.value === undefined
+        ? existing.value
+        : this.requireString(input.value, "Entry value"),
     );
 
     const nextNote =
-      input.note === undefined ?
-        (existing.note ?? undefined)
-      : this.normalizeNote(input.note);
+      input.note === undefined
+        ? (existing.note ?? undefined)
+        : this.normalizeNote(input.note);
     this.assertMaxLength("Entry note", nextNote, 1000);
 
     const now = new Date().toISOString();
@@ -826,6 +838,52 @@ export class DomainGroupsService implements OnModuleInit {
       groupsByName.set(nameKey, bucket);
     }
 
+    const ownedPairRows = db
+      .prepare(
+        `SELECT DISTINCT advanced_blocking_group_name, action
+         FROM domain_group_bindings
+         ORDER BY advanced_blocking_group_name_lc ASC, action ASC`,
+      )
+      .all() as {
+      advanced_blocking_group_name: string;
+      action: "allow" | "block";
+    }[];
+
+    const allBindingRows = db
+      .prepare(
+        `SELECT b.id as binding_id, b.domain_group_id, dg.name as domain_group_name,
+                b.advanced_blocking_group_name, b.action
+         FROM domain_group_bindings b
+         JOIN domain_groups dg ON dg.id = b.domain_group_id
+         ORDER BY dg.name_lc ASC`,
+      )
+      .all() as {
+      binding_id: string;
+      domain_group_id: string;
+      domain_group_name: string;
+      advanced_blocking_group_name: string;
+      action: "allow" | "block";
+    }[];
+
+    const allTrackedRows = db
+      .prepare(
+        `SELECT advanced_blocking_group_name_lc, action, value
+         FROM domain_group_applied_entries
+         ORDER BY advanced_blocking_group_name_lc ASC, action ASC, value ASC`,
+      )
+      .all() as {
+      advanced_blocking_group_name_lc: string;
+      action: "allow" | "block";
+      value: string;
+    }[];
+
+    const trackedMap = new Map<string, string[]>();
+    for (const row of allTrackedRows) {
+      const key = `${row.advanced_blocking_group_name_lc}||${row.action}`;
+      if (!trackedMap.has(key)) trackedMap.set(key, []);
+      trackedMap.get(key)!.push(row.value);
+    }
+
     return {
       generatedAt: new Date().toISOString(),
       hasConflicts: conflicts.length > 0,
@@ -861,6 +919,58 @@ export class DomainGroupsService implements OnModuleInit {
             b.advancedBlockingGroupName,
           ),
         ),
+      ownedPairs: ownedPairRows.map(
+        (row): DomainGroupOwnedPair => ({
+          advancedBlockingGroupName: row.advanced_blocking_group_name,
+          action: row.action,
+        }),
+      ),
+      pendingPairs: ownedPairRows
+        .filter((row): boolean => {
+          const nameLc = row.advanced_blocking_group_name.toLowerCase();
+          const matBucket = groupsByName.get(nameLc);
+          const matValues =
+            row.action === "allow"
+              ? [
+                  ...(matBucket?.allowed ?? []),
+                  ...(matBucket?.allowedRegex ?? []),
+                ]
+              : [
+                  ...(matBucket?.blocked ?? []),
+                  ...(matBucket?.blockedRegex ?? []),
+                ];
+
+          const tracked = trackedMap.get(`${nameLc}||${row.action}`) ?? [];
+
+          if (tracked.length !== matValues.length) return true;
+          const trackedSet = new Set(tracked);
+          return matValues.some((v) => !trackedSet.has(v));
+        })
+        .map(
+          (row): DomainGroupOwnedPair => ({
+            advancedBlockingGroupName: row.advanced_blocking_group_name,
+            action: row.action,
+          }),
+        ),
+      allBindings: allBindingRows.map(
+        (row): DomainGroupBindingSummary => ({
+          bindingId: row.binding_id,
+          domainGroupId: row.domain_group_id,
+          domainGroupName: row.domain_group_name,
+          advancedBlockingGroupName: row.advanced_blocking_group_name,
+          action: row.action,
+        }),
+      ),
+      trackedGroups: ownedPairRows.map(
+        (row): DomainGroupTrackedPair => ({
+          advancedBlockingGroupName: row.advanced_blocking_group_name,
+          action: row.action,
+          values:
+            trackedMap.get(
+              `${row.advanced_blocking_group_name.toLowerCase()}||${row.action}`,
+            ) ?? [],
+        }),
+      ),
     };
   }
 
@@ -905,11 +1015,14 @@ export class DomainGroupsService implements OnModuleInit {
   private applyMaterializedGroupsToConfig(
     config: AdvancedBlockingConfig,
     materializedGroups: DomainGroupMaterializedGroup[],
+    ownedPairs: DomainGroupOwnedPair[],
   ): {
     nextConfig: AdvancedBlockingConfig;
     updatedGroups: string[];
     skippedGroups: string[];
+    commitTracking: () => void;
   } {
+    const db = this.getDb();
     const groups = [...(config.groups ?? [])];
     const groupByNameLc = new Map(
       groups.map((group) => [group.name.toLowerCase(), group]),
@@ -918,23 +1031,80 @@ export class DomainGroupsService implements OnModuleInit {
     const updatedGroups: string[] = [];
     const skippedGroups: string[] = [];
 
+    // Pending tracking mutations — applied after a successful setConfig call.
+    const trackingWrites: Array<{
+      nameLc: string;
+      action: "allow" | "block";
+      values: string[];
+    }> = [];
+    const trackingDeletes: Array<{
+      nameLc: string;
+      action: "allow" | "block";
+    }> = [];
+
+    // Build a lookup Set of owned (AB group, action) pairs for O(1) checks.
+    const ownedKeys = new Set(
+      ownedPairs.map(
+        (p) => `${p.advancedBlockingGroupName.toLowerCase()}||${p.action}`,
+      ),
+    );
+
+    // Pre-load all tracked entries once to avoid per-call DB queries.
+    const allAppliedRows = db
+      .prepare(
+        `SELECT advanced_blocking_group_name_lc, action, value
+         FROM domain_group_applied_entries`,
+      )
+      .all() as {
+      advanced_blocking_group_name_lc: string;
+      action: string;
+      value: string;
+    }[];
+    const appliedMap = new Map<string, Set<string>>();
+    for (const row of allAppliedRows) {
+      const key = `${row.advanced_blocking_group_name_lc}||${row.action}`;
+      if (!appliedMap.has(key)) appliedMap.set(key, new Set());
+      appliedMap.get(key)!.add(row.value);
+    }
+    const getTracked = (nameLc: string, action: string): Set<string> =>
+      appliedMap.get(`${nameLc}||${action}`) ?? new Set();
+
+    // Track which AB group names were processed in the first pass.
+    const processedKeys = new Set<string>();
+
+    // --- First pass: process materialized groups ---
     for (const materialized of materializedGroups) {
       const key = materialized.advancedBlockingGroupName.toLowerCase();
       const existing = groupByNameLc.get(key);
+      const isAllowOwned = ownedKeys.has(`${key}||allow`);
+      const isBlockOwned = ownedKeys.has(`${key}||block`);
+
+      processedKeys.add(key);
 
       if (!existing) {
+        // New AB group — create it with DG entries directly.
         const nextGroup = this.createEmptyAdvancedBlockingGroup(
           materialized.advancedBlockingGroupName,
         );
-
         nextGroup.allowed = materialized.allowed;
         nextGroup.blocked = materialized.blocked;
         nextGroup.allowedRegex = materialized.allowedRegex;
         nextGroup.blockedRegex = materialized.blockedRegex;
-
         groups.push(nextGroup);
         groupByNameLc.set(key, nextGroup);
         updatedGroups.push(materialized.advancedBlockingGroupName);
+        if (isAllowOwned)
+          trackingWrites.push({
+            nameLc: key,
+            action: "allow",
+            values: [...materialized.allowed, ...materialized.allowedRegex],
+          });
+        if (isBlockOwned)
+          trackingWrites.push({
+            nameLc: key,
+            action: "block",
+            values: [...materialized.blocked, ...materialized.blockedRegex],
+          });
         continue;
       }
 
@@ -945,10 +1115,69 @@ export class DomainGroupsService implements OnModuleInit {
         blockedRegex: existing.blockedRegex,
       });
 
-      existing.allowed = materialized.allowed;
-      existing.blocked = materialized.blocked;
-      existing.allowedRegex = materialized.allowedRegex;
-      existing.blockedRegex = materialized.blockedRegex;
+      // Allow side: tracking-aware merge for owned pairs, plain merge otherwise.
+      if (isAllowOwned) {
+        const prevDg = getTracked(key, "allow");
+        const manualAllowed = (existing.allowed ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+        const manualAllowedRegex = (existing.allowedRegex ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+        existing.allowed = [
+          ...new Set([...manualAllowed, ...materialized.allowed]),
+        ];
+        existing.allowedRegex = [
+          ...new Set([...manualAllowedRegex, ...materialized.allowedRegex]),
+        ];
+        trackingWrites.push({
+          nameLc: key,
+          action: "allow",
+          values: [...materialized.allowed, ...materialized.allowedRegex],
+        });
+      } else {
+        existing.allowed = [
+          ...new Set([...(existing.allowed ?? []), ...materialized.allowed]),
+        ];
+        existing.allowedRegex = [
+          ...new Set([
+            ...(existing.allowedRegex ?? []),
+            ...materialized.allowedRegex,
+          ]),
+        ];
+      }
+
+      // Block side: tracking-aware merge for owned pairs, plain merge otherwise.
+      if (isBlockOwned) {
+        const prevDg = getTracked(key, "block");
+        const manualBlocked = (existing.blocked ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+        const manualBlockedRegex = (existing.blockedRegex ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+        existing.blocked = [
+          ...new Set([...manualBlocked, ...materialized.blocked]),
+        ];
+        existing.blockedRegex = [
+          ...new Set([...manualBlockedRegex, ...materialized.blockedRegex]),
+        ];
+        trackingWrites.push({
+          nameLc: key,
+          action: "block",
+          values: [...materialized.blocked, ...materialized.blockedRegex],
+        });
+      } else {
+        existing.blocked = [
+          ...new Set([...(existing.blocked ?? []), ...materialized.blocked]),
+        ];
+        existing.blockedRegex = [
+          ...new Set([
+            ...(existing.blockedRegex ?? []),
+            ...materialized.blockedRegex,
+          ]),
+        ];
+      }
 
       const afterSignature = JSON.stringify({
         allowed: existing.allowed,
@@ -964,6 +1193,138 @@ export class DomainGroupsService implements OnModuleInit {
       }
     }
 
+    // --- Second pass: owned pairs with no materialized entries ---
+    // A DG is still bound but all its entries were removed or conflicted.
+    // Remove any entries this pair previously contributed.
+    for (const pair of ownedPairs) {
+      const key = pair.advancedBlockingGroupName.toLowerCase();
+      if (processedKeys.has(key)) continue; // handled in first pass
+
+      const prevDg = getTracked(key, pair.action);
+      // Always write to tracking to mark this pair as known (even if now empty).
+      trackingWrites.push({ nameLc: key, action: pair.action, values: [] });
+
+      if (prevDg.size === 0) continue; // nothing was previously DG-applied
+
+      const existing = groupByNameLc.get(key);
+      if (!existing) continue;
+
+      const before = JSON.stringify([
+        existing.allowed,
+        existing.blocked,
+        existing.allowedRegex,
+        existing.blockedRegex,
+      ]);
+
+      if (pair.action === "allow") {
+        existing.allowed = (existing.allowed ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+        existing.allowedRegex = (existing.allowedRegex ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+      } else {
+        existing.blocked = (existing.blocked ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+        existing.blockedRegex = (existing.blockedRegex ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+      }
+
+      const after = JSON.stringify([
+        existing.allowed,
+        existing.blocked,
+        existing.allowedRegex,
+        existing.blockedRegex,
+      ]);
+
+      const origName =
+        groups.find((g) => g.name.toLowerCase() === key)?.name ??
+        pair.advancedBlockingGroupName;
+      (before !== after ? updatedGroups : skippedGroups).push(origName);
+    }
+
+    // --- Third pass: unbound pairs with tracking data ---
+    // A binding was removed — clean up only the DG-contributed entries.
+    const allTrackedPairRows = db
+      .prepare(
+        `SELECT DISTINCT advanced_blocking_group_name_lc, action
+         FROM domain_group_applied_entries`,
+      )
+      .all() as {
+      advanced_blocking_group_name_lc: string;
+      action: "allow" | "block";
+    }[];
+
+    for (const trackedPair of allTrackedPairRows) {
+      const key = trackedPair.advanced_blocking_group_name_lc;
+      if (ownedKeys.has(`${key}||${trackedPair.action}`)) continue; // still owned
+
+      const prevDg = getTracked(key, trackedPair.action);
+      trackingDeletes.push({ nameLc: key, action: trackedPair.action });
+
+      if (prevDg.size === 0) continue;
+
+      const existing = groupByNameLc.get(key);
+      if (!existing) continue;
+
+      const before = JSON.stringify([
+        existing.allowed,
+        existing.blocked,
+        existing.allowedRegex,
+        existing.blockedRegex,
+      ]);
+
+      if (trackedPair.action === "allow") {
+        existing.allowed = (existing.allowed ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+        existing.allowedRegex = (existing.allowedRegex ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+      } else {
+        existing.blocked = (existing.blocked ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+        existing.blockedRegex = (existing.blockedRegex ?? []).filter(
+          (v) => !prevDg.has(v),
+        );
+      }
+
+      const after = JSON.stringify([
+        existing.allowed,
+        existing.blocked,
+        existing.allowedRegex,
+        existing.blockedRegex,
+      ]);
+
+      const origName =
+        groups.find((g) => g.name.toLowerCase() === key)?.name ?? key;
+      (before !== after ? updatedGroups : skippedGroups).push(origName);
+    }
+
+    // commitTracking writes tracking mutations after a successful setConfig.
+    const commitTracking = (): void => {
+      const deleteStmt = db.prepare(
+        `DELETE FROM domain_group_applied_entries
+         WHERE advanced_blocking_group_name_lc = ? AND action = ?`,
+      );
+      const insertStmt = db.prepare(
+        `INSERT INTO domain_group_applied_entries
+         (advanced_blocking_group_name_lc, action, value) VALUES (?, ?, ?)`,
+      );
+      for (const write of trackingWrites) {
+        deleteStmt.run(write.nameLc, write.action);
+        for (const value of write.values) {
+          insertStmt.run(write.nameLc, write.action, value);
+        }
+      }
+      for (const del of trackingDeletes) {
+        deleteStmt.run(del.nameLc, del.action);
+      }
+    };
+
     return {
       nextConfig: { ...config, groups },
       updatedGroups: [...new Set(updatedGroups)].sort((a, b) =>
@@ -972,6 +1333,7 @@ export class DomainGroupsService implements OnModuleInit {
       skippedGroups: [...new Set(skippedGroups)].sort((a, b) =>
         a.localeCompare(b),
       ),
+      commitTracking,
     };
   }
 
@@ -1011,9 +1373,11 @@ export class DomainGroupsService implements OnModuleInit {
     const clusterPrimaryGuardActive = primaryNodeIds.length > 0;
 
     const selectedNodeIds =
-      requestedNodeIds.length > 0 ? requestedNodeIds
-      : clusterPrimaryGuardActive ? primaryNodeIds
-      : summaries.map((summary) => summary.id);
+      requestedNodeIds.length > 0
+        ? requestedNodeIds
+        : clusterPrimaryGuardActive
+          ? primaryNodeIds
+          : summaries.map((summary) => summary.id);
 
     const summaryByIdLc = new Map(
       summaries.map((summary) => [summary.id.toLowerCase(), summary]),
@@ -1064,11 +1428,33 @@ export class DomainGroupsService implements OnModuleInit {
           continue;
         }
 
-        const { nextConfig, updatedGroups, skippedGroups } =
-          this.applyMaterializedGroupsToConfig(snapshot.config, preview.groups);
+        const { nextConfig, updatedGroups, skippedGroups, commitTracking } =
+          this.applyMaterializedGroupsToConfig(
+            snapshot.config,
+            preview.groups,
+            preview.ownedPairs,
+          );
 
-        if (!dryRun && updatedGroups.length > 0) {
-          await this.advancedBlockingService.setConfig(summary.id, nextConfig);
+        if (!dryRun) {
+          if (updatedGroups.length > 0) {
+            try {
+              await this.dnsFilteringSnapshotService.saveSnapshot(
+                summary.id,
+                "advanced-blocking",
+                "domain-groups",
+              );
+            } catch (snapshotError) {
+              this.logger.warn(
+                `Failed to save pre-apply snapshot for node ${summary.id}: ${(snapshotError as Error).message}`,
+              );
+            }
+            await this.advancedBlockingService.setConfig(
+              summary.id,
+              nextConfig,
+            );
+          }
+          // Update tracking after successful setConfig (or immediately if no changes).
+          commitTracking();
         }
 
         nodeResults.push({ nodeId: summary.id, updatedGroups, skippedGroups });
@@ -1107,5 +1493,448 @@ export class DomainGroupsService implements OnModuleInit {
       conflicts: preview.conflicts,
       nodes: nodeResults,
     };
+  }
+
+  private findGroupByNameLc(
+    db: DatabaseSync,
+    nameLc: string,
+  ): { id: string } | null {
+    return (
+      (db
+        .prepare(`SELECT id FROM domain_groups WHERE name_lc = ?`)
+        .get(nameLc) as { id: string } | undefined) ?? null
+    );
+  }
+
+  async exportUnifiedConfig(nodeId: string): Promise<UnifiedExportData> {
+    const snapshot = await this.advancedBlockingService.getSnapshot(nodeId);
+    if (!snapshot.config) {
+      throw new BadRequestException(
+        "No Advanced Blocking config available for this node",
+      );
+    }
+    return this.buildUnifiedExportData(snapshot.config.groups);
+  }
+
+  private buildUnifiedExportData(
+    abGroups: AdvancedBlockingGroup[],
+  ): UnifiedExportData {
+    const db = this.getDb();
+
+    // 1. DG-tracked entries — exclude these from plain domain lists
+    const tracked = db
+      .prepare(
+        `SELECT advanced_blocking_group_name_lc, action, value FROM domain_group_applied_entries`,
+      )
+      .all() as {
+      advanced_blocking_group_name_lc: string;
+      action: "allow" | "block";
+      value: string;
+    }[];
+    const trackedBlocked = new Map<string, Set<string>>();
+    const trackedAllowed = new Map<string, Set<string>>();
+    for (const t of tracked) {
+      const map = t.action === "block" ? trackedBlocked : trackedAllowed;
+      if (!map.has(t.advanced_blocking_group_name_lc))
+        map.set(t.advanced_blocking_group_name_lc, new Set());
+      map.get(t.advanced_blocking_group_name_lc)!.add(t.value);
+    }
+
+    // 2. Bindings — derive blockDomainGroups / allowDomainGroups per AB group
+    const bindings = db
+      .prepare(
+        `SELECT b.advanced_blocking_group_name_lc, b.action, dg.name AS dg_name
+         FROM domain_group_bindings b JOIN domain_groups dg ON dg.id = b.domain_group_id
+         ORDER BY dg.name_lc ASC`,
+      )
+      .all() as {
+      advanced_blocking_group_name_lc: string;
+      action: "allow" | "block";
+      dg_name: string;
+    }[];
+    const blockDgsByGroup = new Map<string, string[]>();
+    const allowDgsByGroup = new Map<string, string[]>();
+    for (const b of bindings) {
+      const map = b.action === "block" ? blockDgsByGroup : allowDgsByGroup;
+      if (!map.has(b.advanced_blocking_group_name_lc))
+        map.set(b.advanced_blocking_group_name_lc, []);
+      map.get(b.advanced_blocking_group_name_lc)!.push(b.dg_name);
+    }
+
+    // 3. Build groups Record
+    const groups: Record<string, UnifiedExportAbGroup> = {};
+    for (const g of abGroups) {
+      const lc = g.name.toLowerCase();
+      groups[g.name] = {
+        blockDomains: g.blocked.filter((v) => !trackedBlocked.get(lc)?.has(v)),
+        allowDomains: g.allowed.filter((v) => !trackedAllowed.get(lc)?.has(v)),
+        blockRegex: g.blockedRegex,
+        allowRegex: g.allowedRegex,
+        blockDomainGroups: blockDgsByGroup.get(lc) ?? [],
+        allowDomainGroups: allowDgsByGroup.get(lc) ?? [],
+      };
+    }
+
+    // 4. Build domainGroups Record (bulk queries)
+    const dgs = db
+      .prepare(
+        `SELECT id, name, description FROM domain_groups ORDER BY name_lc ASC`,
+      )
+      .all() as { id: string; name: string; description: string | null }[];
+    const dgEntries = db
+      .prepare(
+        `SELECT domain_group_id, match_type, value, note FROM domain_group_entries ORDER BY value ASC`,
+      )
+      .all() as {
+      domain_group_id: string;
+      match_type: "exact" | "regex";
+      value: string;
+      note: string | null;
+    }[];
+
+    const entriesByGroup = new Map<string, typeof dgEntries>();
+    for (const e of dgEntries) {
+      if (!entriesByGroup.has(e.domain_group_id))
+        entriesByGroup.set(e.domain_group_id, []);
+      entriesByGroup.get(e.domain_group_id)!.push(e);
+    }
+
+    const domainGroups: Record<string, UnifiedExportDg> = {};
+    for (const dg of dgs) {
+      domainGroups[dg.name] = {
+        ...(dg.description ? { description: dg.description } : {}),
+        entries: (entriesByGroup.get(dg.id) ?? []).map((e) => ({
+          value: e.value,
+          type: e.match_type,
+          ...(e.note ? { note: e.note } : {}),
+        })),
+      };
+    }
+
+    return { groups, domainGroups };
+  }
+
+  private buildAbConfigForImport(
+    currentConfig: import("./advanced-blocking.types").AdvancedBlockingConfig,
+    importGroups: UnifiedImportRequest["data"]["groups"],
+    mode: UnifiedImportDomainsMode,
+  ): {
+    config: import("./advanced-blocking.types").AdvancedBlockingConfig;
+    updatedGroups: string[];
+    skippedGroups: string[];
+  } {
+    if (!importGroups || mode === "skip") {
+      return { config: currentConfig, updatedGroups: [], skippedGroups: [] };
+    }
+
+    const db = this.getDb();
+    const tracked = db
+      .prepare(
+        `SELECT advanced_blocking_group_name_lc, action, value FROM domain_group_applied_entries`,
+      )
+      .all() as {
+      advanced_blocking_group_name_lc: string;
+      action: "allow" | "block";
+      value: string;
+    }[];
+    const dgBlockedByGroup = new Map<string, string[]>();
+    const dgAllowedByGroup = new Map<string, string[]>();
+    for (const t of tracked) {
+      const map = t.action === "block" ? dgBlockedByGroup : dgAllowedByGroup;
+      if (!map.has(t.advanced_blocking_group_name_lc))
+        map.set(t.advanced_blocking_group_name_lc, []);
+      map.get(t.advanced_blocking_group_name_lc)!.push(t.value);
+    }
+
+    const updatedGroups: string[] = [];
+    const skippedGroups: string[] = [];
+
+    const newGroups = currentConfig.groups.map((g) => {
+      const importGroup = importGroups[g.name];
+      if (!importGroup) {
+        skippedGroups.push(g.name);
+        return g;
+      }
+      updatedGroups.push(g.name);
+      const lc = g.name.toLowerCase();
+
+      if (mode === "merge") {
+        return {
+          ...g,
+          blocked: [
+            ...new Set([...g.blocked, ...(importGroup.blockDomains ?? [])]),
+          ],
+          allowed: [
+            ...new Set([...g.allowed, ...(importGroup.allowDomains ?? [])]),
+          ],
+          blockedRegex: [
+            ...new Set([...g.blockedRegex, ...(importGroup.blockRegex ?? [])]),
+          ],
+          allowedRegex: [
+            ...new Set([...g.allowedRegex, ...(importGroup.allowRegex ?? [])]),
+          ],
+        };
+      } else {
+        // replace — keep DG-tracked entries
+        const dgBlocked = dgBlockedByGroup.get(lc) ?? [];
+        const dgAllowed = dgAllowedByGroup.get(lc) ?? [];
+        return {
+          ...g,
+          blocked: [
+            ...new Set([...(importGroup.blockDomains ?? []), ...dgBlocked]),
+          ],
+          allowed: [
+            ...new Set([...(importGroup.allowDomains ?? []), ...dgAllowed]),
+          ],
+          blockedRegex: importGroup.blockRegex ?? [],
+          allowedRegex: importGroup.allowRegex ?? [],
+        };
+      }
+    });
+
+    return {
+      config: { ...currentConfig, groups: newGroups },
+      updatedGroups,
+      skippedGroups,
+    };
+  }
+
+  async importUnifiedConfig(input: {
+    nodeId?: unknown;
+    domainsMode?: unknown;
+    domainGroupsMode?: unknown;
+    data?: unknown;
+  }): Promise<UnifiedImportResult> {
+    if (
+      input.domainsMode !== "skip" &&
+      input.domainsMode !== "merge" &&
+      input.domainsMode !== "replace"
+    ) {
+      throw new BadRequestException(
+        'domainsMode must be "skip", "merge", or "replace".',
+      );
+    }
+    if (
+      input.domainGroupsMode !== "merge" &&
+      input.domainGroupsMode !== "replace"
+    ) {
+      throw new BadRequestException(
+        'domainGroupsMode must be "merge" or "replace".',
+      );
+    }
+    if (input.domainsMode !== "skip") {
+      if (typeof input.nodeId !== "string" || !input.nodeId.trim()) {
+        throw new BadRequestException(
+          "nodeId is required when domainsMode is not skip.",
+        );
+      }
+    }
+
+    const domainsMode = input.domainsMode as UnifiedImportDomainsMode;
+    const domainGroupsMode = input.domainGroupsMode;
+    const data = (input.data ?? {}) as UnifiedImportRequest["data"];
+
+    const result: UnifiedImportResult = {
+      domains: {
+        mode: domainsMode,
+        groupsUpdated: [],
+        groupsSkipped: [],
+        errors: [],
+      },
+      domainGroups: {
+        mode: domainGroupsMode,
+        created: [],
+        updated: [],
+        replaced: [],
+        skipped: [],
+        errors: [],
+      },
+    };
+
+    // --- Domains import ---
+    if (domainsMode !== "skip") {
+      const nodeId = (input.nodeId as string).trim();
+      try {
+        const snapshot = await this.advancedBlockingService.getSnapshot(nodeId);
+        if (!snapshot.config) {
+          result.domains.errors.push({
+            group: nodeId,
+            error: "No Advanced Blocking config available for this node.",
+          });
+        } else {
+          const {
+            config: newConfig,
+            updatedGroups,
+            skippedGroups,
+          } = this.buildAbConfigForImport(
+            snapshot.config,
+            data.groups,
+            domainsMode,
+          );
+          await this.advancedBlockingService.setConfig(nodeId, newConfig);
+          result.domains.groupsUpdated = updatedGroups;
+          result.domains.groupsSkipped = skippedGroups;
+        }
+      } catch (err) {
+        result.domains.errors.push({
+          group: nodeId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // --- DomainGroups import ---
+    const db = this.getDb();
+    for (const [name, rawDg] of Object.entries(data.domainGroups ?? {})) {
+      const trimmedName = name.trim();
+      if (!trimmedName) {
+        result.domainGroups.errors.push({
+          name,
+          error: "Group name must be non-empty.",
+        });
+        continue;
+      }
+      if (trimmedName.length > 80) {
+        result.domainGroups.errors.push({
+          name: trimmedName,
+          error: "Group name cannot exceed 80 characters.",
+        });
+        continue;
+      }
+
+      const dg = rawDg as {
+        description?: string;
+        entries?: Array<{ value: string; type?: string; note?: string }>;
+      };
+      const description =
+        typeof dg.description === "string" && dg.description.trim()
+          ? dg.description.trim()
+          : undefined;
+      const rawEntries = Array.isArray(dg.entries) ? dg.entries : [];
+
+      const existing = this.findGroupByNameLc(db, trimmedName.toLowerCase());
+
+      if (!existing) {
+        // Create new group
+        let createdGroup: DomainGroupDetails;
+        try {
+          createdGroup = this.createDomainGroup({
+            name: trimmedName,
+            description,
+          });
+        } catch (err) {
+          result.domainGroups.errors.push({
+            name: trimmedName,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          continue;
+        }
+
+        for (const rawEntry of rawEntries) {
+          if (!rawEntry.value || typeof rawEntry.value !== "string") continue;
+          try {
+            this.addEntry(createdGroup.id, {
+              matchType: rawEntry.type === "regex" ? "regex" : "exact",
+              value: rawEntry.value,
+              note: rawEntry.note,
+            });
+          } catch (err) {
+            result.domainGroups.errors.push({
+              name: `${trimmedName} (entry: ${rawEntry.value})`,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
+        result.domainGroups.created.push(trimmedName);
+      } else if (domainGroupsMode === "merge") {
+        let addedCount = 0;
+
+        for (const rawEntry of rawEntries) {
+          if (!rawEntry.value || typeof rawEntry.value !== "string") continue;
+          try {
+            this.addEntry(existing.id, {
+              matchType: rawEntry.type === "regex" ? "regex" : "exact",
+              value: rawEntry.value,
+              note: rawEntry.note,
+            });
+            addedCount++;
+          } catch (err) {
+            if (err instanceof ConflictException) {
+              // duplicate — skip silently
+            } else {
+              result.domainGroups.errors.push({
+                name: `${trimmedName} (entry: ${rawEntry.value})`,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+        }
+
+        if (addedCount > 0) {
+          result.domainGroups.updated.push(trimmedName);
+        } else {
+          result.domainGroups.skipped.push(trimmedName);
+        }
+      } else {
+        // replace mode
+        db.prepare(
+          `DELETE FROM domain_group_entries WHERE domain_group_id = ?`,
+        ).run(existing.id);
+
+        for (const rawEntry of rawEntries) {
+          if (!rawEntry.value || typeof rawEntry.value !== "string") continue;
+          try {
+            this.addEntry(existing.id, {
+              matchType: rawEntry.type === "regex" ? "regex" : "exact",
+              value: rawEntry.value,
+              note: rawEntry.note,
+            });
+          } catch (err) {
+            result.domainGroups.errors.push({
+              name: `${trimmedName} (entry: ${rawEntry.value})`,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
+        result.domainGroups.replaced.push(trimmedName);
+      }
+    }
+
+    // --- Bindings (always merge) ---
+    for (const [groupName, importGroup] of Object.entries(data.groups ?? {})) {
+      const actions: Array<{ dgNames: string[]; action: "allow" | "block" }> = [
+        { dgNames: importGroup.blockDomainGroups ?? [], action: "block" },
+        { dgNames: importGroup.allowDomainGroups ?? [], action: "allow" },
+      ];
+      for (const { dgNames, action } of actions) {
+        for (const dgName of dgNames) {
+          const dgRow = this.findGroupByNameLc(db, dgName.toLowerCase());
+          if (!dgRow) {
+            result.domainGroups.errors.push({
+              name: `(binding) ${dgName}`,
+              error: `Domain group "${dgName}" not found; cannot bind to "${groupName}".`,
+            });
+            continue;
+          }
+          try {
+            this.addBinding(dgRow.id, {
+              advancedBlockingGroupName: groupName,
+              action,
+            });
+          } catch (err) {
+            if (!(err instanceof ConflictException)) {
+              result.domainGroups.errors.push({
+                name: `(binding) ${dgName} → ${groupName}`,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return result;
   }
 }

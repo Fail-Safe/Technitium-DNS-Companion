@@ -1,11 +1,13 @@
 import {
-    Body,
-    Controller,
-    Delete,
-    Get,
-    Param,
-    Patch,
-    Post,
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
 } from "@nestjs/common";
 import { DomainGroupsService } from "./domain-groups.service";
 
@@ -39,6 +41,30 @@ export class DomainGroupsController {
     return this.domainGroupsService.applyMaterialization({
       nodeIds: body?.nodeIds as string[] | undefined,
       dryRun: body?.dryRun === true,
+    });
+  }
+
+  @Get("export")
+  exportUnifiedConfig(@Query("nodeId") nodeId?: string) {
+    if (!nodeId) throw new BadRequestException("nodeId is required");
+    return this.domainGroupsService.exportUnifiedConfig(nodeId);
+  }
+
+  @Post("import")
+  importUnifiedConfig(
+    @Body()
+    body?: {
+      nodeId?: unknown;
+      domainsMode?: unknown;
+      domainGroupsMode?: unknown;
+      data?: unknown;
+    },
+  ) {
+    return this.domainGroupsService.importUnifiedConfig({
+      nodeId: body?.nodeId,
+      domainsMode: body?.domainsMode,
+      domainGroupsMode: body?.domainGroupsMode,
+      data: body?.data,
     });
   }
 
