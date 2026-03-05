@@ -23,7 +23,7 @@ type LogAlertRuleRow = {
   domain_pattern: string;
   domain_pattern_type: LogAlertRuleDraft["domainPatternType"];
   client_identifier: string | null;
-  advanced_blocking_group_name: string | null;
+  advanced_blocking_group_names: string | null;
   debounce_seconds: number;
   email_recipients_json: string;
   created_at: string;
@@ -62,6 +62,7 @@ export class LogAlertsRulesService implements OnModuleInit {
 
     try {
       this.initializeSchema();
+      this.migrateSchema();
       this.logger.log(
         `Log alert rules schema initialized in Companion SQLite at ${this.companionDb.dbPath}`,
       );
@@ -86,7 +87,7 @@ export class LogAlertsRulesService implements OnModuleInit {
           domain_pattern,
           domain_pattern_type,
           client_identifier,
-          advanced_blocking_group_name,
+          advanced_blocking_group_names,
           debounce_seconds,
           email_recipients_json,
           created_at,
@@ -119,7 +120,7 @@ export class LogAlertsRulesService implements OnModuleInit {
           domain_pattern,
           domain_pattern_type,
           client_identifier,
-          advanced_blocking_group_name,
+          advanced_blocking_group_names,
           debounce_seconds,
           email_recipients_json,
           created_at,
@@ -135,7 +136,8 @@ export class LogAlertsRulesService implements OnModuleInit {
         rule.domainPattern,
         rule.domainPatternType,
         rule.clientIdentifier ?? null,
-        rule.advancedBlockingGroupNames && rule.advancedBlockingGroupNames.length > 0
+        rule.advancedBlockingGroupNames &&
+          rule.advancedBlockingGroupNames.length > 0
           ? JSON.stringify(rule.advancedBlockingGroupNames)
           : null,
         rule.debounceSeconds,
@@ -173,7 +175,7 @@ export class LogAlertsRulesService implements OnModuleInit {
               domain_pattern = ?,
               domain_pattern_type = ?,
               client_identifier = ?,
-              advanced_blocking_group_name = ?,
+              advanced_blocking_group_names = ?,
               debounce_seconds = ?,
               email_recipients_json = ?,
               updated_at = ?
@@ -188,7 +190,8 @@ export class LogAlertsRulesService implements OnModuleInit {
           rule.domainPattern,
           rule.domainPatternType,
           rule.clientIdentifier ?? null,
-          rule.advancedBlockingGroupNames && rule.advancedBlockingGroupNames.length > 0
+          rule.advancedBlockingGroupNames &&
+            rule.advancedBlockingGroupNames.length > 0
             ? JSON.stringify(rule.advancedBlockingGroupNames)
             : null,
           rule.debounceSeconds,
@@ -263,6 +266,23 @@ export class LogAlertsRulesService implements OnModuleInit {
     return db;
   }
 
+  private migrateSchema(): void {
+    const db = this.getDb();
+    const cols = db.prepare(`PRAGMA table_info(log_alert_rules)`).all() as {
+      name: string;
+    }[];
+    const hasOld = cols.some((c) => c.name === "advanced_blocking_group_name");
+    const hasNew = cols.some((c) => c.name === "advanced_blocking_group_names");
+    if (hasOld && !hasNew) {
+      db.exec(
+        `ALTER TABLE log_alert_rules RENAME COLUMN advanced_blocking_group_name TO advanced_blocking_group_names`,
+      );
+      this.logger.log(
+        "Migrated log_alert_rules: renamed advanced_blocking_group_name → advanced_blocking_group_names",
+      );
+    }
+  }
+
   private initializeSchema(): void {
     const db = this.getDb();
     db.exec(`
@@ -275,7 +295,7 @@ export class LogAlertsRulesService implements OnModuleInit {
         domain_pattern TEXT NOT NULL,
         domain_pattern_type TEXT NOT NULL CHECK (domain_pattern_type IN ('exact', 'wildcard', 'regex')),
         client_identifier TEXT,
-        advanced_blocking_group_name TEXT,
+        advanced_blocking_group_names TEXT,
         debounce_seconds INTEGER NOT NULL,
         email_recipients_json TEXT NOT NULL,
         created_at TEXT NOT NULL,
@@ -298,7 +318,9 @@ export class LogAlertsRulesService implements OnModuleInit {
       return null;
     }
     const row = db
-      .prepare(`SELECT value FROM log_alert_settings WHERE key = 'evaluator_enabled'`)
+      .prepare(
+        `SELECT value FROM log_alert_settings WHERE key = 'evaluator_enabled'`,
+      )
       .get() as { value: string } | undefined;
     if (!row) {
       return null;
@@ -320,7 +342,9 @@ export class LogAlertsRulesService implements OnModuleInit {
       return null;
     }
     const row = db
-      .prepare(`SELECT value FROM log_alert_settings WHERE key = 'evaluator_interval_ms'`)
+      .prepare(
+        `SELECT value FROM log_alert_settings WHERE key = 'evaluator_interval_ms'`,
+      )
       .get() as { value: string } | undefined;
     if (!row) {
       return null;
@@ -343,7 +367,9 @@ export class LogAlertsRulesService implements OnModuleInit {
       return null;
     }
     const row = db
-      .prepare(`SELECT value FROM log_alert_settings WHERE key = 'evaluator_lookback_seconds'`)
+      .prepare(
+        `SELECT value FROM log_alert_settings WHERE key = 'evaluator_lookback_seconds'`,
+      )
       .get() as { value: string } | undefined;
     if (!row) {
       return null;
@@ -411,7 +437,7 @@ export class LogAlertsRulesService implements OnModuleInit {
       domainPatternType: row.domain_pattern_type,
       clientIdentifier: row.client_identifier ?? undefined,
       advancedBlockingGroupNames: this.parseGroupNames(
-        row.advanced_blocking_group_name,
+        row.advanced_blocking_group_names,
       ),
       debounceSeconds: row.debounce_seconds,
       emailRecipients,
@@ -433,7 +459,7 @@ export class LogAlertsRulesService implements OnModuleInit {
           domain_pattern,
           domain_pattern_type,
           client_identifier,
-          advanced_blocking_group_name,
+          advanced_blocking_group_names,
           debounce_seconds,
           email_recipients_json,
           created_at,
