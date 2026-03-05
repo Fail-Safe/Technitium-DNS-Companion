@@ -294,7 +294,8 @@ export type ZoneSnapshotOrigin = "manual" | "automatic";
 export type DnsFilteringSnapshotOrigin =
   | "manual"
   | "automatic"
-  | "rule-optimization";
+  | "rule-optimization"
+  | "domain-groups";
 export type DnsFilteringSnapshotMethod =
   | "built-in"
   | "advanced-blocking"

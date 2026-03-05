@@ -1,3 +1,44 @@
+// Node and cluster metadata
+export interface TechnitiumAppInfo {
+  name: string;
+  version?: string;
+  description?: string;
+}
+
+export interface TechnitiumNodeAppsResponse {
+  nodeId: string;
+  apps: TechnitiumAppInfo[];
+  hasAdvancedBlocking: boolean;
+  fetchedAt: string;
+}
+
+export interface TechnitiumNodeOverview {
+  nodeId: string;
+  version: string;
+  uptime: number;
+  totalZones: number;
+  totalQueries: number;
+  totalBlockedQueries: number;
+  totalApps: number;
+  hasAdvancedBlocking: boolean;
+  fetchedAt: string;
+}
+
+export interface TechnitiumClusterState {
+  initialized: boolean;
+  domain?: string;
+  dnsServerDomain?: string;
+  type?: "Primary" | "Secondary" | "Standalone";
+  health?: "Connected" | "Unreachable" | "Self";
+}
+
+export interface TechnitiumClusterSettings {
+  heartbeatRefreshIntervalSeconds: number;
+  heartbeatRetryIntervalSeconds: number;
+  configRefreshIntervalSeconds: number;
+  configRetryIntervalSeconds: number;
+}
+
 // Domain list cache and policy simulation types
 
 export interface PolicyReason {

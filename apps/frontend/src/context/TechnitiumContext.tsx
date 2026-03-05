@@ -49,13 +49,24 @@ import type {
 import type {
     DomainGroup,
     DomainGroupBinding,
+    DomainGroupBindingAction,
     DomainGroupDetails,
     DomainGroupEntry,
+    DomainGroupEntryMatchType,
     DomainGroupMaterializationPreview,
     DomainGroupsApplyRequest,
     DomainGroupsApplyResult,
     DomainGroupsStatus,
+    UnifiedExportData,
+    UnifiedImportRequest,
+    UnifiedImportResult,
 } from "../types/domainGroups";
+import type {
+    TechnitiumClusterSettings,
+    TechnitiumClusterState,
+    TechnitiumNodeAppsResponse,
+    TechnitiumNodeOverview,
+} from "../types/technitium";
 import type {
     TechnitiumCombinedQueryLogPage,
     TechnitiumNodeQueryLogEnvelope,
@@ -80,45 +91,6 @@ import { useOptionalAuth } from "./useAuth";
 
 type NodeStatus = "online" | "syncing" | "offline" | "unknown";
 
-export interface TechnitiumAppInfo {
-  name: string;
-  version?: string;
-  description?: string;
-}
-
-export interface TechnitiumNodeAppsResponse {
-  nodeId: string;
-  apps: TechnitiumAppInfo[];
-  hasAdvancedBlocking: boolean;
-  fetchedAt: string;
-}
-
-export interface TechnitiumNodeOverview {
-  nodeId: string;
-  version: string;
-  uptime: number;
-  totalZones: number;
-  totalQueries: number;
-  totalBlockedQueries: number;
-  totalApps: number;
-  hasAdvancedBlocking: boolean;
-  fetchedAt: string;
-}
-
-export interface TechnitiumClusterState {
-  initialized: boolean;
-  domain?: string;
-  dnsServerDomain?: string;
-  type?: "Primary" | "Secondary" | "Standalone";
-  health?: "Connected" | "Unreachable" | "Self";
-}
-
-export interface TechnitiumClusterSettings {
-  heartbeatRefreshIntervalSeconds: number;
-  heartbeatRetryIntervalSeconds: number;
-  configRefreshIntervalSeconds: number;
-  configRetryIntervalSeconds: number;
-}
 
 export interface TechnitiumNode {
   id: string;
@@ -362,17 +334,17 @@ export interface TechnitiumState {
   deleteDomainGroup: (groupId: string) => Promise<void>;
   addDomainGroupEntry: (
     groupId: string,
-    request: { matchType: "exact" | "regex"; value: string; note?: string },
+    request: { matchType: DomainGroupEntryMatchType; value: string; note?: string },
   ) => Promise<DomainGroupEntry>;
   updateDomainGroupEntry: (
     groupId: string,
     entryId: string,
-    request: { matchType?: "exact" | "regex"; value?: string; note?: string },
+    request: { matchType?: DomainGroupEntryMatchType; value?: string; note?: string },
   ) => Promise<DomainGroupEntry>;
   deleteDomainGroupEntry: (groupId: string, entryId: string) => Promise<void>;
   addDomainGroupBinding: (
     groupId: string,
-    request: { advancedBlockingGroupName: string; action: "allow" | "block" },
+    request: { advancedBlockingGroupName: string; action: DomainGroupBindingAction },
   ) => Promise<DomainGroupBinding>;
   deleteDomainGroupBinding: (
     groupId: string,
@@ -382,6 +354,10 @@ export interface TechnitiumState {
   applyDomainGroupMaterialization: (
     request: DomainGroupsApplyRequest,
   ) => Promise<DomainGroupsApplyResult>;
+  exportUnifiedConfig: (nodeId: string) => Promise<UnifiedExportData>;
+  importUnifiedConfig: (
+    request: UnifiedImportRequest,
+  ) => Promise<UnifiedImportResult>;
 }
 
 // Load nodes from backend API (configured on server side via environment variables)
@@ -1807,7 +1783,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   const addDomainGroupEntry = useCallback(
     async (
       groupId: string,
-      request: { matchType: "exact" | "regex"; value: string; note?: string },
+      request: { matchType: DomainGroupEntryMatchType; value: string; note?: string },
     ) => {
       const trimmedGroupId = groupId?.trim();
       if (!trimmedGroupId) {
@@ -1841,7 +1817,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     async (
       groupId: string,
       entryId: string,
-      request: { matchType?: "exact" | "regex"; value?: string; note?: string },
+      request: { matchType?: DomainGroupEntryMatchType; value?: string; note?: string },
     ) => {
       const trimmedGroupId = groupId?.trim();
       const trimmedEntryId = entryId?.trim();
@@ -1897,7 +1873,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   const addDomainGroupBinding = useCallback(
     async (
       groupId: string,
-      request: { advancedBlockingGroupName: string; action: "allow" | "block" },
+      request: { advancedBlockingGroupName: string; action: DomainGroupBindingAction },
     ) => {
       const trimmedGroupId = groupId?.trim();
       if (!trimmedGroupId) {
@@ -1976,6 +1952,30 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       }
 
       return (await response.json()) as DomainGroupsApplyResult;
+    },
+    [],
+  );
+
+  const exportUnifiedConfig = useCallback(async (nodeId: string) => {
+    const response = await apiFetch(
+      `/domain-groups/export?nodeId=${encodeURIComponent(nodeId)}`,
+    );
+    if (!response.ok) throw new Error(`Export failed (${response.status})`);
+    return (await response.json()) as UnifiedExportData;
+  }, []);
+
+  const importUnifiedConfig = useCallback(
+    async (request: UnifiedImportRequest) => {
+      const response = await apiFetch("/domain-groups/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      });
+      if (!response.ok) {
+        const msg = await response.text().catch(() => String(response.status));
+        throw new Error(`Import failed: ${msg}`);
+      }
+      return (await response.json()) as UnifiedImportResult;
     },
     [],
   );
@@ -3034,6 +3034,8 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       deleteDomainGroupBinding,
       getDomainGroupMaterializationPreview,
       applyDomainGroupMaterialization,
+      exportUnifiedConfig,
+      importUnifiedConfig,
     }),
     [
       nodes,
@@ -3114,6 +3116,8 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       deleteDomainGroupBinding,
       getDomainGroupMaterializationPreview,
       applyDomainGroupMaterialization,
+      exportUnifiedConfig,
+      importUnifiedConfig,
     ],
   );
 
