@@ -1,9 +1,9 @@
 import { CACHE_MANAGER, CacheInterceptor } from "@nestjs/cache-manager";
 import {
-    CallHandler,
-    ExecutionContext,
-    Inject,
-    Injectable,
+  CallHandler,
+  ExecutionContext,
+  Inject,
+  Injectable,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import type { Cache } from "cache-manager";

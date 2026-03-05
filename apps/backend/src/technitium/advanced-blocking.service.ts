@@ -393,9 +393,9 @@ export class AdvancedBlockingService {
     const payload = (input.payload ?? {}) as ValidateSuggestionRequest;
 
     const proposedDomainEntryRaw =
-      typeof payload.proposedDomainEntry === "string" ?
-        payload.proposedDomainEntry
-      : undefined;
+      typeof payload.proposedDomainEntry === "string"
+        ? payload.proposedDomainEntry
+        : undefined;
 
     if (!proposedDomainEntryRaw || !proposedDomainEntryRaw.trim()) {
       throw new Error("Validation requires proposedDomainEntry.");
@@ -423,17 +423,15 @@ export class AdvancedBlockingService {
     }
 
     const windowHours =
-      (
-        typeof input.windowHours === "number" &&
-        Number.isFinite(input.windowHours)
-      ) ?
-        Math.max(1, Math.trunc(input.windowHours))
-      : 24;
+      typeof input.windowHours === "number" &&
+      Number.isFinite(input.windowHours)
+        ? Math.max(1, Math.trunc(input.windowHours))
+        : 24;
 
     const limit =
-      typeof input.limit === "number" && Number.isFinite(input.limit) ?
-        Math.min(100_000, Math.max(100, Math.trunc(input.limit)))
-      : 10_000;
+      typeof input.limit === "number" && Number.isFinite(input.limit)
+        ? Math.min(100_000, Math.max(100, Math.trunc(input.limit)))
+        : 10_000;
 
     // Pull distinct domains from sqlite (aggregated across all nodes).
     // If sqlite is disabled, QueryLogSqliteService will throw; we convert to a user-friendly result.
@@ -515,17 +513,19 @@ export class AdvancedBlockingService {
     const proposedDomainEntriesRaw = payload.proposedDomainEntries;
     const proposedDomainEntries: string[] =
       Array.isArray(proposedDomainEntriesRaw) &&
-      proposedDomainEntriesRaw.length > 0 ?
-        proposedDomainEntriesRaw
-          .map((d) => this.normalizeDomain(String(d)))
-          .filter(Boolean)
-      : typeof proposedDomainEntryRaw === "string" &&
-          proposedDomainEntryRaw.trim() ?
-        [this.normalizeDomain(proposedDomainEntryRaw)]
-      : [];
+      proposedDomainEntriesRaw.length > 0
+        ? proposedDomainEntriesRaw
+            .map((d) => this.normalizeDomain(String(d)))
+            .filter(Boolean)
+        : typeof proposedDomainEntryRaw === "string" &&
+            proposedDomainEntryRaw.trim()
+          ? [this.normalizeDomain(proposedDomainEntryRaw)]
+          : [];
 
     if (proposedDomainEntries.length === 0) {
-      throw new Error("Apply requires proposedDomainEntry or proposedDomainEntries.");
+      throw new Error(
+        "Apply requires proposedDomainEntry or proposedDomainEntries.",
+      );
     }
 
     const targetList = payload.targetList;
@@ -556,17 +556,14 @@ export class AdvancedBlockingService {
 
     if (takeSnapshot) {
       const defaultNote =
-        proposedDomainEntries.length === 1 ?
-          `Rule optimization apply: ${targetList} "${regexPattern}" -> domain "${proposedDomainEntries[0]}"`
-        : `Rule optimization apply: ${targetList} "${regexPattern}" -> ${proposedDomainEntries.length} explicit entries`;
+        proposedDomainEntries.length === 1
+          ? `Rule optimization apply: ${targetList} "${regexPattern}" -> domain "${proposedDomainEntries[0]}"`
+          : `Rule optimization apply: ${targetList} "${regexPattern}" -> ${proposedDomainEntries.length} explicit entries`;
 
       const note =
-        (
-          typeof payload.snapshotNote === "string" &&
-          payload.snapshotNote.trim()
-        ) ?
-          payload.snapshotNote.trim()
-        : defaultNote;
+        typeof payload.snapshotNote === "string" && payload.snapshotNote.trim()
+          ? payload.snapshotNote.trim()
+          : defaultNote;
 
       const metadata = await this.dnsFilteringSnapshotService.saveSnapshot(
         nodeId,
@@ -1067,27 +1064,26 @@ export class AdvancedBlockingService {
     }
 
     const payload = parsed as Record<string, unknown>;
-    const groups =
-      Array.isArray(payload.groups) ?
-        payload.groups
+    const groups = Array.isArray(payload.groups)
+      ? payload.groups
           .map((group) => this.normalizeGroup(group))
           .filter((group): group is AdvancedBlockingGroup => Boolean(group))
       : [];
 
     return {
       enableBlocking:
-        typeof payload.enableBlocking === "boolean" ?
-          payload.enableBlocking
-        : undefined,
+        typeof payload.enableBlocking === "boolean"
+          ? payload.enableBlocking
+          : undefined,
       blockingAnswerTtl: this.normalizeInteger(payload.blockingAnswerTtl),
       blockListUrlUpdateIntervalHours:
-        typeof payload.blockListUrlUpdateIntervalHours === "number" ?
-          payload.blockListUrlUpdateIntervalHours
-        : undefined,
+        typeof payload.blockListUrlUpdateIntervalHours === "number"
+          ? payload.blockListUrlUpdateIntervalHours
+          : undefined,
       blockListUrlUpdateIntervalMinutes:
-        typeof payload.blockListUrlUpdateIntervalMinutes === "number" ?
-          payload.blockListUrlUpdateIntervalMinutes
-        : undefined,
+        typeof payload.blockListUrlUpdateIntervalMinutes === "number"
+          ? payload.blockListUrlUpdateIntervalMinutes
+          : undefined,
       localEndPointGroupMap: this.normalizeMapping(
         payload.localEndPointGroupMap,
       ),
@@ -1132,17 +1128,17 @@ export class AdvancedBlockingService {
     return {
       name,
       enableBlocking:
-        typeof data.enableBlocking === "boolean" ?
-          data.enableBlocking
-        : undefined,
+        typeof data.enableBlocking === "boolean"
+          ? data.enableBlocking
+          : undefined,
       allowTxtBlockingReport:
-        typeof data.allowTxtBlockingReport === "boolean" ?
-          data.allowTxtBlockingReport
-        : undefined,
+        typeof data.allowTxtBlockingReport === "boolean"
+          ? data.allowTxtBlockingReport
+          : undefined,
       blockAsNxDomain:
-        typeof data.blockAsNxDomain === "boolean" ?
-          data.blockAsNxDomain
-        : undefined,
+        typeof data.blockAsNxDomain === "boolean"
+          ? data.blockAsNxDomain
+          : undefined,
       blockingAddresses: this.normalizeStringArray(data.blockingAddresses),
       allowed: this.normalizeStringArray(data.allowed),
       blocked: this.normalizeStringArray(data.blocked),
@@ -1268,12 +1264,10 @@ export class AdvancedBlockingService {
         .length,
       networkMappingCount: Object.keys(config.networkGroupMap).length,
       scheduledNodeCount:
-        (
-          typeof config.blockListUrlUpdateIntervalHours === "number" ||
-          typeof config.blockListUrlUpdateIntervalMinutes === "number"
-        ) ?
-          1
-        : 0,
+        typeof config.blockListUrlUpdateIntervalHours === "number" ||
+        typeof config.blockListUrlUpdateIntervalMinutes === "number"
+          ? 1
+          : 0,
     };
   }
 

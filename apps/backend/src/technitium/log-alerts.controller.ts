@@ -195,7 +195,10 @@ export class LogAlertsController {
         errors: validation.errors ?? ["Validation failed."],
       });
     }
-    return this.logAlertsRulesService.updateRule(ruleId, validation.normalizedRule);
+    return this.logAlertsRulesService.updateRule(
+      ruleId,
+      validation.normalizedRule,
+    );
   }
 
   @Get("rules/status")
@@ -228,7 +231,9 @@ export class LogAlertsController {
   }
 
   @Patch("evaluator/config")
-  setEvaluatorConfig(@Body() body: { intervalMs?: unknown; lookbackSeconds?: unknown }): LogAlertEvaluatorStatus {
+  setEvaluatorConfig(
+    @Body() body: { intervalMs?: unknown; lookbackSeconds?: unknown },
+  ): LogAlertEvaluatorStatus {
     if (body.intervalMs !== undefined) {
       const ms = Number(body.intervalMs);
       if (!Number.isFinite(ms) || ms < 10_000) {
@@ -239,7 +244,9 @@ export class LogAlertsController {
     if (body.lookbackSeconds !== undefined) {
       const s = Number(body.lookbackSeconds);
       if (!Number.isFinite(s) || s < 60) {
-        throw new BadRequestException("lookbackSeconds must be a number >= 60.");
+        throw new BadRequestException(
+          "lookbackSeconds must be a number >= 60.",
+        );
       }
       this.logAlertsEvaluatorService.setLookbackSeconds(s);
     }
@@ -247,7 +254,9 @@ export class LogAlertsController {
   }
 
   @Patch("evaluator/enabled")
-  setEvaluatorEnabled(@Body() body: { enabled?: unknown }): LogAlertEvaluatorStatus {
+  setEvaluatorEnabled(
+    @Body() body: { enabled?: unknown },
+  ): LogAlertEvaluatorStatus {
     if (typeof body.enabled !== "boolean") {
       throw new BadRequestException("enabled must be provided as a boolean.");
     }

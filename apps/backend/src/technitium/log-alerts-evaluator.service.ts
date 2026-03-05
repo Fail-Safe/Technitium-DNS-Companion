@@ -54,7 +54,8 @@ export class LogAlertsEvaluatorService
   private running = false;
 
   private enabled =
-    (process.env.LOG_ALERTS_EVALUATOR_ENABLED ?? "true").toLowerCase() !== "false";
+    (process.env.LOG_ALERTS_EVALUATOR_ENABLED ?? "true").toLowerCase() !==
+    "false";
   private intervalMs = Math.max(
     10_000,
     Number.parseInt(
@@ -112,20 +113,20 @@ export class LogAlertsEvaluatorService
       this.enabled = persisted;
     }
 
-    const persistedInterval = this.logAlertsRulesService.getEvaluatorIntervalMs();
+    const persistedInterval =
+      this.logAlertsRulesService.getEvaluatorIntervalMs();
     if (persistedInterval !== null) {
       this.intervalMs = persistedInterval;
     }
 
-    const persistedLookback = this.logAlertsRulesService.getEvaluatorLookbackSeconds();
+    const persistedLookback =
+      this.logAlertsRulesService.getEvaluatorLookbackSeconds();
     if (persistedLookback !== null) {
       this.lookbackSeconds = persistedLookback;
     }
 
     if (!this.enabled) {
-      this.logger.log(
-        "Log alerts evaluator is disabled.",
-      );
+      this.logger.log("Log alerts evaluator is disabled.");
       return;
     }
 
@@ -385,8 +386,10 @@ export class LogAlertsEvaluatorService
         entriesPerPage: this.maxEntriesPerPage,
       };
 
-      const payload =
-        await this.queryLogSqliteService.getStoredCombinedLogs(filters, { authMode: "background" });
+      const payload = await this.queryLogSqliteService.getStoredCombinedLogs(
+        filters,
+        { authMode: "background" },
+      );
       entries.push(...payload.entries);
       if (page >= payload.totalPages || payload.entries.length === 0) {
         break;
