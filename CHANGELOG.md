@@ -9,6 +9,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-03-06
+
+### Fixed
+
+- Log Alerts: fixed boot crash (`no such table: log_alert_settings`) on fresh installations where `LogAlertsEvaluatorService.onModuleInit` queries evaluator settings before `LogAlertsRulesService.onModuleInit` has created the schema. Schema is now initialized lazily on first use via an idempotent `ensureSchema()` guard.
+
 ## [1.5.0] - 2026-03-06
 
 ### Added
@@ -321,7 +327,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.1...v1.4.0
