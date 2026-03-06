@@ -90,12 +90,11 @@ function RequireOptimizerRouteGate({
   children: React.ReactNode;
 }) {
   const location = useLocation();
-  const { blockingStatus } = useTechnitiumState();
+  const { blockingStatus, nodes } = useTechnitiumState();
 
   const optimizerEnabled = Boolean(
-    blockingStatus?.nodes?.some(
-      (n) => n.advancedBlockingInstalled && n.advancedBlockingEnabled,
-    ),
+    blockingStatus?.nodes?.some((n) => n.advancedBlockingInstalled) ||
+    nodes.some((node) => node.hasAdvancedBlocking === true),
   );
 
   if (

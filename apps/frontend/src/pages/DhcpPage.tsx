@@ -32,6 +32,7 @@ import type {
   TechnitiumDhcpVendorInfo,
   TechnitiumUpdateDhcpScopeEnvelope,
 } from "../types/dhcp";
+import { AppInput, AppTextarea } from "../components/common/AppInput";
 
 type LoadState = "idle" | "loading" | "success" | "error";
 
@@ -4476,7 +4477,7 @@ export function DhcpPage() {
                         <label htmlFor="dhcp-first-scope-name">
                           Scope name
                         </label>
-                        <input
+                        <AppInput
                           id="dhcp-first-scope-name"
                           name="firstScopeName"
                           type="text"
@@ -4496,7 +4497,7 @@ export function DhcpPage() {
                           <label htmlFor="dhcp-first-starting-address">
                             Starting address
                           </label>
-                          <input
+                          <AppInput
                             id="dhcp-first-starting-address"
                             name="firstScopeStartingAddress"
                             type="text"
@@ -4518,7 +4519,7 @@ export function DhcpPage() {
                           <label htmlFor="dhcp-first-ending-address">
                             Ending address
                           </label>
-                          <input
+                          <AppInput
                             id="dhcp-first-ending-address"
                             name="firstScopeEndingAddress"
                             type="text"
@@ -4540,7 +4541,7 @@ export function DhcpPage() {
                           <label htmlFor="dhcp-first-subnet-mask">
                             Subnet mask
                           </label>
-                          <input
+                          <AppInput
                             id="dhcp-first-subnet-mask"
                             name="firstScopeSubnetMask"
                             type="text"
@@ -4562,7 +4563,7 @@ export function DhcpPage() {
                           <label htmlFor="dhcp-first-router-address">
                             Router address
                           </label>
-                          <input
+                          <AppInput
                             id="dhcp-first-router-address"
                             name="firstScopeRouterAddress"
                             type="text"
@@ -4587,7 +4588,7 @@ export function DhcpPage() {
                           <label htmlFor="dhcp-first-domain-name">
                             Domain name
                           </label>
-                          <input
+                          <AppInput
                             id="dhcp-first-domain-name"
                             name="firstScopeDomainName"
                             type="text"
@@ -4602,7 +4603,7 @@ export function DhcpPage() {
                           <label htmlFor="dhcp-first-domain-search">
                             Domain search list (one per line)
                           </label>
-                          <textarea
+                          <AppTextarea
                             id="dhcp-first-domain-search"
                             name="firstScopeDomainSearchList"
                             rows={3}
@@ -4617,7 +4618,7 @@ export function DhcpPage() {
                           <label htmlFor="dhcp-first-dns-servers">
                             DNS servers (one per line)
                           </label>
-                          <textarea
+                          <AppTextarea
                             id="dhcp-first-dns-servers"
                             name="firstScopeDnsServers"
                             rows={3}
@@ -4794,7 +4795,7 @@ export function DhcpPage() {
                                       alignItems: "center",
                                     }}
                                   >
-                                    <input
+                                    <AppInput
                                       id="dhcp-rename-scope"
                                       name="renameScopeName"
                                       type="text"
@@ -4872,7 +4873,7 @@ export function DhcpPage() {
                                     <label htmlFor="dhcp-starting-address">
                                       Starting address
                                     </label>
-                                    <input
+                                    <AppInput
                                       id="dhcp-starting-address"
                                       name="startingAddress"
                                       type="text"
@@ -4898,7 +4899,7 @@ export function DhcpPage() {
                                     <label htmlFor="dhcp-ending-address">
                                       Ending address
                                     </label>
-                                    <input
+                                    <AppInput
                                       id="dhcp-ending-address"
                                       name="endingAddress"
                                       type="text"
@@ -4924,7 +4925,7 @@ export function DhcpPage() {
                                     <label htmlFor="dhcp-subnet-mask">
                                       Subnet mask
                                     </label>
-                                    <input
+                                    <AppInput
                                       id="dhcp-subnet-mask"
                                       name="subnetMask"
                                       type="text"
@@ -4946,7 +4947,7 @@ export function DhcpPage() {
                                     <label htmlFor="dhcp-router-address">
                                       Router address
                                     </label>
-                                    <input
+                                    <AppInput
                                       id="dhcp-router-address"
                                       name="routerAddress"
                                       type="text"
@@ -4974,7 +4975,7 @@ export function DhcpPage() {
                                     <label htmlFor="dhcp-dns-servers">
                                       DNS servers (one per line)
                                     </label>
-                                    <textarea
+                                    <AppTextarea
                                       id="dhcp-dns-servers"
                                       name="dnsServers"
                                       rows={3}
@@ -4991,7 +4992,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-domain-name">
                                         Domain name
                                       </label>
-                                      <input
+                                      <AppInput
                                         id="dhcp-domain-name"
                                         name="domainName"
                                         type="text"
@@ -5029,7 +5030,7 @@ export function DhcpPage() {
                                     <label htmlFor="dhcp-domain-search-list">
                                       Domain search list
                                     </label>
-                                    <textarea
+                                    <AppTextarea
                                       id="dhcp-domain-search-list"
                                       name="domainSearchList"
                                       rows={3}
@@ -5219,7 +5220,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-server-address">
                                         Server address override
                                       </label>
-                                      <input
+                                      <AppInput
                                         id="dhcp-server-address"
                                         name="serverAddress"
                                         type="text"
@@ -5236,7 +5237,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-server-host">
                                         Server hostname
                                       </label>
-                                      <input
+                                      <AppInput
                                         id="dhcp-server-host"
                                         name="serverHostName"
                                         type="text"
@@ -5253,7 +5254,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-boot-file">
                                         Boot file name
                                       </label>
-                                      <input
+                                      <AppInput
                                         id="dhcp-boot-file"
                                         name="bootFileName"
                                         type="text"
@@ -5297,7 +5298,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-wins-servers">
                                         WINS servers (one per line)
                                       </label>
-                                      <textarea
+                                      <AppTextarea
                                         id="dhcp-wins-servers"
                                         name="winsServers"
                                         value={draftWinsServers}
@@ -5312,7 +5313,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-ntp-servers">
                                         NTP servers (one per line)
                                       </label>
-                                      <textarea
+                                      <AppTextarea
                                         id="dhcp-ntp-servers"
                                         name="ntpServers"
                                         value={draftNtpServers}
@@ -5325,7 +5326,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-ntp-domains">
                                         NTP domains (one per line)
                                       </label>
-                                      <textarea
+                                      <AppTextarea
                                         id="dhcp-ntp-domains"
                                         name="ntpDomains"
                                         value={draftNtpDomains}
@@ -5338,7 +5339,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-capwap">
                                         CAPWAP controllers (one per line)
                                       </label>
-                                      <textarea
+                                      <AppTextarea
                                         id="dhcp-capwap"
                                         name="capwapControllers"
                                         value={draftCapwapControllers}
@@ -5353,7 +5354,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-tftp">
                                         TFTP servers (one per line)
                                       </label>
-                                      <textarea
+                                      <AppTextarea
                                         id="dhcp-tftp"
                                         name="tftpServers"
                                         value={draftTftpServers}
@@ -5394,7 +5395,7 @@ export function DhcpPage() {
                                             >
                                               Destination
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-static-destination-${route.id}`}
                                               name={`staticRouteDestination-${route.id}`}
                                               type="text"
@@ -5414,7 +5415,7 @@ export function DhcpPage() {
                                             >
                                               Subnet mask
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-static-mask-${route.id}`}
                                               name={`staticRouteSubnetMask-${route.id}`}
                                               type="text"
@@ -5434,7 +5435,7 @@ export function DhcpPage() {
                                             >
                                               Router
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-static-router-${route.id}`}
                                               name={`staticRouteRouter-${route.id}`}
                                               type="text"
@@ -5494,7 +5495,7 @@ export function DhcpPage() {
                                             >
                                               Identifier
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-vendor-identifier-${entry.id}`}
                                               name={`vendorIdentifier-${entry.id}`}
                                               type="text"
@@ -5514,7 +5515,7 @@ export function DhcpPage() {
                                             >
                                               Information
                                             </label>
-                                            <textarea
+                                            <AppTextarea
                                               id={`dhcp-vendor-info-${entry.id}`}
                                               name={`vendorInformation-${entry.id}`}
                                               value={entry.information}
@@ -5642,7 +5643,7 @@ export function DhcpPage() {
                                                   </div>
                                                 </div>
                                               </div>
-                                              <textarea
+                                              <AppTextarea
                                                 id={valueId}
                                                 value={entry.value}
                                                 onChange={(event) =>
@@ -5760,7 +5761,7 @@ export function DhcpPage() {
                                             >
                                               Start address
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-exclusion-start-${entry.id}`}
                                               name={`exclusionStartAddress-${entry.id}`}
                                               type="text"
@@ -5780,7 +5781,7 @@ export function DhcpPage() {
                                             >
                                               End address
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-exclusion-end-${entry.id}`}
                                               name={`exclusionEndAddress-${entry.id}`}
                                               type="text"
@@ -5840,7 +5841,7 @@ export function DhcpPage() {
                                             >
                                               Hostname
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-reserved-host-${entry.id}`}
                                               name={`reservedHostName-${entry.id}`}
                                               type="text"
@@ -5861,7 +5862,7 @@ export function DhcpPage() {
                                             >
                                               Hardware address
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-reserved-mac-${entry.id}`}
                                               name={`reservedHardwareAddress-${entry.id}`}
                                               type="text"
@@ -5881,7 +5882,7 @@ export function DhcpPage() {
                                             >
                                               IP address
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-reserved-ip-${entry.id}`}
                                               name={`reservedIpAddress-${entry.id}`}
                                               type="text"
@@ -5903,7 +5904,7 @@ export function DhcpPage() {
                                             >
                                               Comment
                                             </label>
-                                            <textarea
+                                            <AppTextarea
                                               id={`dhcp-reserved-comment-${entry.id}`}
                                               name={`reservedComment-${entry.id}`}
                                               value={entry.comments}
@@ -6232,7 +6233,7 @@ export function DhcpPage() {
                                       "(required)"
                                     : "(optional)"}
                                   </label>
-                                  <input
+                                  <AppInput
                                     id="dhcp-new-name"
                                     name="newScopeName"
                                     type="text"
@@ -6271,7 +6272,7 @@ export function DhcpPage() {
                                         <label htmlFor="dhcp-clone-start">
                                           Starting address
                                         </label>
-                                        <input
+                                        <AppInput
                                           id="dhcp-clone-start"
                                           name="cloneStartingAddress"
                                           type="text"
@@ -6287,7 +6288,7 @@ export function DhcpPage() {
                                         <label htmlFor="dhcp-clone-end">
                                           Ending address
                                         </label>
-                                        <input
+                                        <AppInput
                                           id="dhcp-clone-end"
                                           name="cloneEndingAddress"
                                           type="text"
@@ -6303,7 +6304,7 @@ export function DhcpPage() {
                                         <label htmlFor="dhcp-clone-subnet">
                                           Subnet mask
                                         </label>
-                                        <input
+                                        <AppInput
                                           id="dhcp-clone-subnet"
                                           name="cloneSubnetMask"
                                           type="text"
@@ -6319,7 +6320,7 @@ export function DhcpPage() {
                                         <label htmlFor="dhcp-clone-router">
                                           Router / gateway (optional)
                                         </label>
-                                        <input
+                                        <AppInput
                                           id="dhcp-clone-router"
                                           name="cloneRouterAddress"
                                           type="text"
@@ -6351,7 +6352,7 @@ export function DhcpPage() {
                                         <label htmlFor="dhcp-clone-dns">
                                           DNS servers (one per line)
                                         </label>
-                                        <textarea
+                                        <AppTextarea
                                           id="dhcp-clone-dns"
                                           name="cloneDnsServers"
                                           value={cloneDnsServers}
@@ -6367,7 +6368,7 @@ export function DhcpPage() {
                                         <label htmlFor="dhcp-clone-domain">
                                           Domain name
                                         </label>
-                                        <input
+                                        <AppInput
                                           id="dhcp-clone-domain"
                                           name="cloneDomainName"
                                           type="text"
@@ -6404,7 +6405,7 @@ export function DhcpPage() {
                                         <label htmlFor="dhcp-clone-search-list">
                                           Domain search list (one per line)
                                         </label>
-                                        <textarea
+                                        <AppTextarea
                                           id="dhcp-clone-search-list"
                                           name="cloneDomainSearchList"
                                           value={cloneDomainSearchList}
@@ -6609,7 +6610,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-server-address">
                                         Server address override
                                       </label>
-                                      <input
+                                      <AppInput
                                         id="dhcp-server-address"
                                         name="serverAddress"
                                         type="text"
@@ -6626,7 +6627,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-server-host">
                                         Server hostname
                                       </label>
-                                      <input
+                                      <AppInput
                                         id="dhcp-server-host"
                                         name="serverHostName"
                                         type="text"
@@ -6643,7 +6644,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-boot-file">
                                         Boot file name
                                       </label>
-                                      <input
+                                      <AppInput
                                         id="dhcp-boot-file"
                                         name="bootFileName"
                                         type="text"
@@ -6687,7 +6688,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-wins-servers">
                                         WINS servers (one per line)
                                       </label>
-                                      <textarea
+                                      <AppTextarea
                                         id="dhcp-wins-servers"
                                         name="winsServers"
                                         value={draftWinsServers}
@@ -6702,7 +6703,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-ntp-servers">
                                         NTP servers (one per line)
                                       </label>
-                                      <textarea
+                                      <AppTextarea
                                         id="dhcp-ntp-servers"
                                         name="ntpServers"
                                         value={draftNtpServers}
@@ -6715,7 +6716,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-ntp-domains">
                                         NTP domains (one per line)
                                       </label>
-                                      <textarea
+                                      <AppTextarea
                                         id="dhcp-ntp-domains"
                                         name="ntpDomains"
                                         value={draftNtpDomains}
@@ -6728,7 +6729,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-capwap">
                                         CAPWAP controllers (one per line)
                                       </label>
-                                      <textarea
+                                      <AppTextarea
                                         id="dhcp-capwap"
                                         name="capwapControllers"
                                         value={draftCapwapControllers}
@@ -6743,7 +6744,7 @@ export function DhcpPage() {
                                       <label htmlFor="dhcp-tftp">
                                         TFTP servers (one per line)
                                       </label>
-                                      <textarea
+                                      <AppTextarea
                                         id="dhcp-tftp"
                                         name="tftpServers"
                                         value={draftTftpServers}
@@ -6784,7 +6785,7 @@ export function DhcpPage() {
                                             >
                                               Destination
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-static-destination-${route.id}`}
                                               name={`staticRouteDestination-${route.id}`}
                                               type="text"
@@ -6804,7 +6805,7 @@ export function DhcpPage() {
                                             >
                                               Subnet mask
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-static-mask-${route.id}`}
                                               name={`staticRouteSubnetMask-${route.id}`}
                                               type="text"
@@ -6824,7 +6825,7 @@ export function DhcpPage() {
                                             >
                                               Router
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-static-router-${route.id}`}
                                               name={`staticRouteRouter-${route.id}`}
                                               type="text"
@@ -6884,7 +6885,7 @@ export function DhcpPage() {
                                             >
                                               Identifier
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-vendor-identifier-${entry.id}`}
                                               name={`vendorIdentifier-${entry.id}`}
                                               type="text"
@@ -6904,7 +6905,7 @@ export function DhcpPage() {
                                             >
                                               Information
                                             </label>
-                                            <textarea
+                                            <AppTextarea
                                               id={`dhcp-vendor-info-${entry.id}`}
                                               name={`vendorInformation-${entry.id}`}
                                               value={entry.information}
@@ -7032,7 +7033,7 @@ export function DhcpPage() {
                                                   </div>
                                                 </div>
                                               </div>
-                                              <textarea
+                                              <AppTextarea
                                                 id={valueId}
                                                 value={entry.value}
                                                 onChange={(event) =>
@@ -7150,7 +7151,7 @@ export function DhcpPage() {
                                             >
                                               Start address
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-exclusion-start-${entry.id}`}
                                               name={`exclusionStartAddress-${entry.id}`}
                                               type="text"
@@ -7170,7 +7171,7 @@ export function DhcpPage() {
                                             >
                                               End address
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-exclusion-end-${entry.id}`}
                                               name={`exclusionEndAddress-${entry.id}`}
                                               type="text"
@@ -7230,7 +7231,7 @@ export function DhcpPage() {
                                             >
                                               Hostname
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-reserved-host-${entry.id}`}
                                               name={`reservedHostName-${entry.id}`}
                                               type="text"
@@ -7251,7 +7252,7 @@ export function DhcpPage() {
                                             >
                                               Hardware address
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-reserved-mac-${entry.id}`}
                                               name={`reservedHardwareAddress-${entry.id}`}
                                               type="text"
@@ -7271,7 +7272,7 @@ export function DhcpPage() {
                                             >
                                               IP address
                                             </label>
-                                            <input
+                                            <AppInput
                                               id={`dhcp-reserved-ip-${entry.id}`}
                                               name={`reservedIpAddress-${entry.id}`}
                                               type="text"
@@ -7293,7 +7294,7 @@ export function DhcpPage() {
                                             >
                                               Comment
                                             </label>
-                                            <textarea
+                                            <AppTextarea
                                               id={`dhcp-reserved-comment-${entry.id}`}
                                               name={`reservedComment-${entry.id}`}
                                               value={entry.comments}

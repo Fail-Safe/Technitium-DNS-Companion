@@ -22,6 +22,7 @@ import type {
   GroupPolicyResult,
 } from "../types/technitium";
 import { consolidateDomainsByType } from "../utils/domainConsolidation";
+import { AppInput } from "../components/common/AppInput";
 import { extractDomainFromInput } from "../utils/urlParsing";
 import "./DnsLookupPage.css";
 
@@ -833,7 +834,7 @@ export const DnsLookupPage: React.FC = () => {
                   <label htmlFor="domain" className="dns-lookup__label">
                     Domain Name or URL
                   </label>
-                  <input
+                  <AppInput
                     id="domain"
                     type="text"
                     className="dns-lookup__input"
@@ -1168,7 +1169,7 @@ export const DnsLookupPage: React.FC = () => {
                   </label>
                   <div className="dns-lookup__search-container">
                     <div className="dns-lookup__search-input-wrapper">
-                      <input
+                      <AppInput
                         type="text"
                         className={`dns-lookup__input dns-lookup__search-input ${searchMode === "regex" && !regexValid ? "dns-lookup__input--error" : ""}`}
                         placeholder={

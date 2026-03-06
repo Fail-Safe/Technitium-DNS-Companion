@@ -145,6 +145,22 @@ docker compose up -d --build
 - Port bind error ("port is already allocated"): pick different host ports (e.g., `-p 1234:3000 -p 1235:3443`) or stop the other container/service using that port.
 - Cannot connect to Technitium DNS nodes: Check URLs and tokens in `.env`.
 
+### Health checks
+
+The container health check probes `http://127.0.0.1:<PORT>/api/health` or
+`https://127.0.0.1:<HTTPS_PORT>/api/health` from inside the container.
+
+- If `HTTPS_ENABLED=true`, the HTTPS probe is attempted first, then HTTP as fallback.
+- If `HTTPS_ENABLED=false`, the HTTP probe is attempted first, then HTTPS as fallback.
+- Compose uses a Node-based probe (no `wget/curl` dependency required).
+
+Quick verification:
+
+```bash
+docker compose ps
+docker inspect --format='{{json .State.Health}}' technitium-dns-companion | jq
+```
+
 ### Post-upgrade permissions check (v1.4+)
 
 Recent images run as a non-root user (`node`, uid/gid `1000`). If older bind mounts or volumes contain root-owned files, startup or background tasks may fail with permission errors such as:

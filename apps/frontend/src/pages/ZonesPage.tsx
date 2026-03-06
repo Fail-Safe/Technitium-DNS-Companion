@@ -30,6 +30,7 @@ import type {
 } from "../types/zones";
 import { parseKeyValueLine } from "../utils/zoneRecordDataParsing";
 import "./ZonesPage.css";
+import { AppInput, AppTextarea } from "../components/common/AppInput";
 
 const NODE_ACCENT_PALETTE_SIZE = 20;
 
@@ -1438,7 +1439,7 @@ export function ZonesPage() {
               </label>
 
               <div className="zones-page__ptr-sync-field zones-page__ptr-sync-field--grow">
-                <input
+                <AppInput
                   id="ptr-source-zone"
                   type="text"
                   list="ptr-source-zone-suggestions"
@@ -2118,7 +2119,7 @@ export function ZonesPage() {
                 >
                   Search
                 </label>
-                <input
+                <AppInput
                   id="zones-search"
                   type="search"
                   className="zones-page__search-input"
@@ -2376,7 +2377,7 @@ export function ZonesPage() {
                                 Search
                               </span>
                               <div className="zones-page__records-search-field">
-                                <input
+                                <AppInput
                                   type="search"
                                   className="zones-page__records-search"
                                   placeholder="Search records…"
@@ -2652,7 +2653,7 @@ export function ZonesPage() {
             >
               Note (optional)
             </label>
-            <textarea
+            <AppTextarea
               id="zones-page-quick-snapshot-note"
               className="snapshot-drawer__textarea"
               rows={3}

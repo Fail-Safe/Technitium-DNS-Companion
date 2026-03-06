@@ -1,9 +1,9 @@
 import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { AdvancedBlockingService } from "./advanced-blocking.service";
 import type {
-    AdvancedBlockingCombinedOverview,
-    AdvancedBlockingOverview,
-    AdvancedBlockingSnapshot,
+  AdvancedBlockingCombinedOverview,
+  AdvancedBlockingOverview,
+  AdvancedBlockingSnapshot,
 } from "./advanced-blocking.types";
 
 type GroupRuleOptimizationSuggestionsResponse = {
@@ -28,6 +28,7 @@ type GroupRuleOptimizationSuggestionsResponse = {
     details: string[];
     perfScore?: number;
     confidence: "safe" | "likely" | "warning";
+    alternationHosts?: string[];
   }>;
 };
 
@@ -54,7 +55,7 @@ type ApplyGroupRuleOptimizationResponse = {
     groupName: string;
     targetList: "allowedRegex" | "blockedRegex";
     removedRegexPattern: string;
-    addedDomainEntry: string;
+    addedDomainEntries: string[];
   };
 };
 
@@ -125,14 +126,14 @@ export class AdvancedBlockingController {
     @Body() body?: unknown,
   ): Promise<ValidateGroupRuleOptimizationResponse> {
     const parsedWindowHours =
-      typeof windowHours === "string" && windowHours.trim().length > 0 ?
-        Number.parseInt(windowHours, 10)
-      : undefined;
+      typeof windowHours === "string" && windowHours.trim().length > 0
+        ? Number.parseInt(windowHours, 10)
+        : undefined;
 
     const parsedLimit =
-      typeof limit === "string" && limit.trim().length > 0 ?
-        Number.parseInt(limit, 10)
-      : undefined;
+      typeof limit === "string" && limit.trim().length > 0
+        ? Number.parseInt(limit, 10)
+        : undefined;
 
     return await this.advancedBlockingService.validateGroupRuleOptimizationSuggestion(
       nodeId,

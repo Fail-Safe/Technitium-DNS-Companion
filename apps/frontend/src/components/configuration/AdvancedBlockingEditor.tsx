@@ -9,6 +9,7 @@ import type {
   AdvancedBlockingUrlEntry,
   AdvancedBlockingUrlOverride,
 } from "../../types/advancedBlocking";
+import { AppInput } from "../common/AppInput";
 
 interface AdvancedBlockingEditorProps {
   overview?: AdvancedBlockingOverview;
@@ -910,7 +911,7 @@ export function AdvancedBlockingEditor({
                                   Group name
                                 </label>
                                 <div className="group-card__name-actions">
-                                  <input
+                                  <AppInput
                                     id="advanced-blocking-group-name"
                                     name="groupName"
                                     type="text"
@@ -1008,7 +1009,7 @@ export function AdvancedBlockingEditor({
                     {/* Add New Group Card */}
                     <div className="group-card group-card--add">
                       <div className="group-card__add-form">
-                        <input
+                        <AppInput
                           aria-label="New group name"
                           name="newGroupName"
                           type="text"
@@ -1261,7 +1262,7 @@ function StringListEditor({
           </ul>
         : <p className="list-editor__empty">No entries yet.</p>}
         <div className="list-editor__input">
-          <input
+          <AppInput
             id={id}
             name={`${id}-input`}
             type="text"
@@ -1584,7 +1585,7 @@ function MappingEditor({
                   {isEditing ?
                     <>
                       <div className="mapping-editor__edit-form">
-                        <input
+                        <AppInput
                           name="editMappingKey"
                           type="text"
                           value={editDraft}
@@ -1684,7 +1685,7 @@ function MappingEditor({
           </div>
         )}
         <div className="mapping-editor__input">
-          <input
+          <AppInput
             id={id}
             name={`${id}-key-input`}
             type="text"

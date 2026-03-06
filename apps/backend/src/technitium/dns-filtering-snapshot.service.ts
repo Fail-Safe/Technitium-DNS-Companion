@@ -5,10 +5,6 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import crypto from "crypto";
-import { promises as fs } from "fs";
-import os from "os";
-import { join } from "path";
 import { AdvancedBlockingService } from "./advanced-blocking.service";
 import { BuiltInBlockingService } from "./built-in-blocking.service";
 import type { BlockingSettings } from "./built-in-blocking.types";
@@ -19,74 +15,28 @@ import type {
   DnsFilteringSnapshotOrigin,
   DnsFilteringSnapshotRestoreResult,
 } from "./technitium.types";
+import { SnapshotFileStore } from "./snapshot-file-store";
 
 @Injectable()
-export class DnsFilteringSnapshotService {
-  private readonly logger = new Logger(DnsFilteringSnapshotService.name);
-  private readonly retentionLimit =
+export class DnsFilteringSnapshotService extends SnapshotFileStore<
+  DnsFilteringSnapshot,
+  DnsFilteringSnapshotMetadata
+> {
+  protected readonly logger = new Logger(DnsFilteringSnapshotService.name);
+  protected readonly retentionLimit =
     Number.parseInt(process.env.DNS_FILTERING_SNAPSHOT_RETENTION ?? "20", 10) ||
     20;
-
-  private readonly baseDirCandidates: string[];
-  private baseDir: string;
 
   constructor(
     private readonly builtInBlockingService: BuiltInBlockingService,
     @Inject(forwardRef(() => AdvancedBlockingService))
     private readonly advancedBlockingService: AdvancedBlockingService,
   ) {
-    const envDir = process.env.DNS_FILTERING_SNAPSHOT_DIR;
-    const projectDataDir = join(
-      process.cwd(),
-      "apps",
-      "backend",
-      "data",
+    super();
+    this.initCandidates(
+      "DNS_FILTERING_SNAPSHOT_DIR",
       "dns-filtering-snapshots",
     );
-    const osTmpDir = join(os.tmpdir(), "tdc-dns-filtering-snapshots");
-    const dockerDefaultDir = "/data/dns-filtering-snapshots";
-
-    this.baseDirCandidates = [
-      envDir,
-      projectDataDir,
-      osTmpDir,
-      dockerDefaultDir,
-    ]
-      .filter(Boolean)
-      .map(String);
-    this.baseDir = this.baseDirCandidates[0];
-  }
-
-  private async ensureBaseDir(): Promise<void> {
-    for (const dir of this.baseDirCandidates) {
-      try {
-        await fs.mkdir(dir, { recursive: true });
-        this.baseDir = dir;
-        return;
-      } catch (error) {
-        this.logger.warn(
-          `Failed to initialize snapshot dir candidate ${dir}: ${(error as Error).message}`,
-        );
-      }
-    }
-    throw new Error("Unable to initialize DNS filtering snapshot directory");
-  }
-
-  private getNodeDir(nodeId: string): string {
-    return join(this.baseDir, nodeId);
-  }
-
-  private getSnapshotPath(nodeId: string, snapshotId: string): string {
-    return join(this.getNodeDir(nodeId), `${snapshotId}.json`);
-  }
-
-  private buildSnapshotId(payload: unknown): string {
-    const hash = crypto
-      .createHash("sha256")
-      .update(JSON.stringify(payload))
-      .digest("hex")
-      .slice(0, 12);
-    return `${Date.now()}-${hash}`;
   }
 
   private async listAllBlockingZones(
@@ -130,9 +80,7 @@ export class DnsFilteringSnapshotService {
     origin: DnsFilteringSnapshotOrigin = "manual",
     note?: string,
   ): Promise<DnsFilteringSnapshotMetadata> {
-    await this.ensureBaseDir();
-    const nodeDir = this.getNodeDir(nodeId);
-    await fs.mkdir(nodeDir, { recursive: true });
+    await this.ensureNodeDir(nodeId);
 
     if (method === "built-in") {
       const settings =
@@ -141,7 +89,6 @@ export class DnsFilteringSnapshotService {
       const blockedDomains = await this.listAllBlockingZones(nodeId, "blocked");
 
       const payload = { method, settings, allowedDomains, blockedDomains };
-
       const snapshotId = this.buildSnapshotId(payload);
 
       const metadata: DnsFilteringSnapshotMetadata = {
@@ -156,17 +103,10 @@ export class DnsFilteringSnapshotService {
         blockedCount: blockedDomains.length,
       };
 
-      const snapshot: DnsFilteringSnapshot = {
+      await this.writeSnapshot(nodeId, snapshotId, {
         metadata,
         builtIn: { settings, allowedDomains, blockedDomains },
-      };
-
-      await fs.writeFile(
-        this.getSnapshotPath(nodeId, snapshotId),
-        JSON.stringify(snapshot, null, 2),
-        "utf8",
-      );
-
+      });
       await this.applyRetention(nodeId, method);
       return metadata;
     }
@@ -183,7 +123,6 @@ export class DnsFilteringSnapshotService {
 
     const payload = { method, config };
     const snapshotId = this.buildSnapshotId(payload);
-
     const groupCount = (config.groups ?? []).length;
 
     const metadata: DnsFilteringSnapshotMetadata = {
@@ -197,141 +136,20 @@ export class DnsFilteringSnapshotService {
       groupCount,
     };
 
-    const dnsSnapshot: DnsFilteringSnapshot = {
+    await this.writeSnapshot(nodeId, snapshotId, {
       metadata,
       advancedBlocking: { config },
-    };
-
-    await fs.writeFile(
-      this.getSnapshotPath(nodeId, snapshotId),
-      JSON.stringify(dnsSnapshot, null, 2),
-      "utf8",
-    );
-
+    });
     await this.applyRetention(nodeId, method);
-
     return metadata;
-  }
-
-  private normalizeSnapshot(
-    snapshot: DnsFilteringSnapshot,
-  ): DnsFilteringSnapshot {
-    return {
-      ...snapshot,
-      metadata: {
-        ...snapshot.metadata,
-        origin: snapshot.metadata.origin ?? "manual",
-        pinned: snapshot.metadata.pinned ?? false,
-      },
-    };
   }
 
   async listSnapshots(
     nodeId: string,
     method: DnsFilteringSnapshotMethod,
   ): Promise<DnsFilteringSnapshotMetadata[]> {
-    await this.ensureBaseDir();
-    const nodeDir = this.getNodeDir(nodeId);
-
-    try {
-      const files = await fs.readdir(nodeDir);
-      const snapshots: DnsFilteringSnapshotMetadata[] = [];
-
-      for (const file of files.filter((name) => name.endsWith(".json"))) {
-        try {
-          const raw = await fs.readFile(join(nodeDir, file), "utf8");
-          const parsed = JSON.parse(raw) as DnsFilteringSnapshot;
-          if (parsed?.metadata?.method !== method) continue;
-          snapshots.push(this.normalizeSnapshot(parsed).metadata);
-        } catch (error) {
-          this.logger.warn(
-            `Failed to read DNS filtering snapshot metadata ${file}: ${(error as Error).message}`,
-          );
-        }
-      }
-
-      return snapshots.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return [];
-      }
-      throw error;
-    }
-  }
-
-  async getSnapshot(
-    nodeId: string,
-    snapshotId: string,
-  ): Promise<DnsFilteringSnapshot | null> {
-    await this.ensureBaseDir();
-
-    try {
-      const raw = await fs.readFile(
-        this.getSnapshotPath(nodeId, snapshotId),
-        "utf8",
-      );
-      return this.normalizeSnapshot(JSON.parse(raw) as DnsFilteringSnapshot);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return null;
-      }
-      throw error;
-    }
-  }
-
-  async deleteSnapshot(nodeId: string, snapshotId: string): Promise<boolean> {
-    await this.ensureBaseDir();
-    try {
-      await fs.unlink(this.getSnapshotPath(nodeId, snapshotId));
-      return true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return false;
-      }
-      throw error;
-    }
-  }
-
-  async updateSnapshotNote(
-    nodeId: string,
-    snapshotId: string,
-    note: string | undefined,
-  ): Promise<DnsFilteringSnapshotMetadata | null> {
-    const snapshot = await this.getSnapshot(nodeId, snapshotId);
-    if (!snapshot) {
-      return null;
-    }
-
-    snapshot.metadata.note = note?.trim() ? note.trim() : undefined;
-
-    await fs.writeFile(
-      this.getSnapshotPath(nodeId, snapshotId),
-      JSON.stringify(snapshot, null, 2),
-      "utf8",
-    );
-
-    return snapshot.metadata;
-  }
-
-  async setPinned(
-    nodeId: string,
-    snapshotId: string,
-    pinned: boolean,
-  ): Promise<DnsFilteringSnapshotMetadata | null> {
-    const snapshot = await this.getSnapshot(nodeId, snapshotId);
-    if (!snapshot) {
-      return null;
-    }
-
-    snapshot.metadata.pinned = pinned;
-
-    await fs.writeFile(
-      this.getSnapshotPath(nodeId, snapshotId),
-      JSON.stringify(snapshot, null, 2),
-      "utf8",
-    );
-
-    return snapshot.metadata;
+    const all = await this.listAllSnapshots(nodeId);
+    return all.filter((s) => s.method === method);
   }
 
   async restoreSnapshot(
@@ -403,23 +221,9 @@ export class DnsFilteringSnapshotService {
     nodeId: string,
     method: DnsFilteringSnapshotMethod,
   ): Promise<void> {
-    const snapshots = await this.listSnapshots(nodeId, method);
-    const unpinned = snapshots.filter((s) => !s.pinned);
-
-    if (unpinned.length <= this.retentionLimit) {
-      return;
-    }
-
-    const excess = unpinned.slice(this.retentionLimit);
-
-    for (const snap of excess) {
-      try {
-        await fs.unlink(this.getSnapshotPath(nodeId, snap.id));
-      } catch (error) {
-        this.logger.warn(
-          `Failed to prune DNS filtering snapshot ${snap.id}: ${(error as Error).message}`,
-        );
-      }
-    }
+    await this.applyRetentionToList(
+      nodeId,
+      await this.listSnapshots(nodeId, method),
+    );
   }
 }

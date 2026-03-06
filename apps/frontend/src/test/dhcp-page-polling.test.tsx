@@ -152,6 +152,18 @@ describe("DhcpPage scope loading and polling setup", () => {
         } as Response);
       }
 
+      if (url.includes("/built-in-blocking/status")) {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              nodes: [],
+              nodesWithAdvancedBlocking: [],
+              nodesWithBuiltInBlocking: [],
+            }),
+        } as Response);
+      }
+
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({}),

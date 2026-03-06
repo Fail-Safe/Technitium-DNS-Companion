@@ -251,6 +251,8 @@ export class TechnitiumService {
     string,
     TechnitiumQueryLoggerMetadata
   >();
+  private lastClusterTopologyFingerprint?: string;
+  private readonly nodeClusterMappingFingerprints = new Map<string, string>();
 
   // Hostname resolution cache: IP → { hostname, lastUpdated, source }
   private readonly hostnameCache = new Map<string, HostnameCacheEntry>();
@@ -262,6 +264,7 @@ export class TechnitiumService {
   private readonly HOSTNAME_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
   private readonly PTR_LOOKUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
   private readonly MAX_PTR_LOOKUPS_PER_CYCLE = 50; // Limit concurrent PTR queries
+  private readonly PTR_FAILURE_LOG_WINDOW_MS = 60 * 1000; // 60 seconds
 
   // DHCP lease caching (background-only). Do NOT cache across interactive users
   // because permission scope may differ per session.
@@ -272,6 +275,10 @@ export class TechnitiumService {
   };
 
   private didWarnBackgroundDhcpDenied = false;
+  private ptrFailureLogState = new Map<
+    string,
+    { windowStartedAt: number; count: number }
+  >();
 
   // Hostname → IP resolution cache (used for cluster node matching)
   private readonly hostnameResolutionCache = new Map<
@@ -443,6 +450,60 @@ export class TechnitiumService {
     }
   }
 
+  private buildClusterTopologyFingerprint(
+    domain: string | undefined,
+    clusterNodes: Array<{
+      name: string;
+      url: string;
+      ipAddress: string;
+      type: "Primary" | "Secondary";
+      state: string;
+    }>,
+  ): string {
+    const normalizedNodes = [...clusterNodes]
+      .map((node) => ({
+        name: node.name || "",
+        url: node.url || "",
+        ipAddress: node.ipAddress || "",
+        type: node.type || "Secondary",
+        state: node.state || "",
+      }))
+      .sort((a, b) =>
+        [a.name, a.url, a.ipAddress, a.type, a.state]
+          .join("|")
+          .localeCompare(
+            [b.name, b.url, b.ipAddress, b.type, b.state].join("|"),
+          ),
+      );
+
+    return JSON.stringify({ domain: domain || "", nodes: normalizedNodes });
+  }
+
+  private shouldLogClusterTopology(fingerprint: string): boolean {
+    if (this.lastClusterTopologyFingerprint === fingerprint) {
+      return false;
+    }
+    this.lastClusterTopologyFingerprint = fingerprint;
+    return true;
+  }
+
+  private logNodeClusterMappingIfChanged(
+    id: string,
+    baseUrl: string,
+    clusterNodeName: string | undefined,
+    nodeType: "Primary" | "Secondary",
+  ): void {
+    const fingerprint = `${baseUrl}|${clusterNodeName || "none"}|${nodeType}`;
+    const previous = this.nodeClusterMappingFingerprints.get(id);
+    if (previous === fingerprint) {
+      return;
+    }
+    this.nodeClusterMappingFingerprints.set(id, fingerprint);
+    this.logger.debug(
+      `Mapping node ${id} (baseUrl=${baseUrl}): found cluster node ${clusterNodeName || "none"}, type: ${nodeType}`,
+    );
+  }
+
   async listNodes(): Promise<TechnitiumNodeSummary[]> {
     // OPTIMIZATION: Only query ONE node for cluster state since any node can tell us about the entire cluster
     // This reduces N API calls to 1, dramatically improving performance (e.g., 3 nodes: 3x faster)
@@ -504,14 +565,19 @@ export class TechnitiumService {
               domain: response.info.clusterDomain,
               clusterNodes,
             };
-            this.logger.log(
-              `Cluster detected: ${response.info.clusterDomain} with ${clusterNodes.length} nodes`,
+            const topologyFingerprint = this.buildClusterTopologyFingerprint(
+              response.info.clusterDomain,
+              clusterNodes,
             );
-            // Log cluster node details for debugging matching issues
-            for (const cn of clusterNodes) {
-              this.logger.debug(
-                `  Cluster node: name="${cn.name}", url="${cn.url}", ip="${cn.ipAddress}", type="${cn.type}"`,
+            if (this.shouldLogClusterTopology(topologyFingerprint)) {
+              this.logger.log(
+                `Cluster detected: ${response.info.clusterDomain} with ${clusterNodes.length} nodes`,
               );
+              for (const cn of clusterNodes) {
+                this.logger.debug(
+                  `  Cluster node: name="${cn.name}", url="${cn.url}", ip="${cn.ipAddress}", type="${cn.type}"`,
+                );
+              }
             }
           }
         } catch (error) {
@@ -646,8 +712,11 @@ export class TechnitiumService {
 
           const nodeType = clusterNode?.type || "Secondary";
 
-          this.logger.debug(
-            `Mapping node ${id} (baseUrl=${baseUrl}): found cluster node ${clusterNode?.name || "none"}, type: ${nodeType}`,
+          this.logNodeClusterMappingIfChanged(
+            id,
+            baseUrl,
+            clusterNode?.name,
+            nodeType,
           );
 
           return {
@@ -937,24 +1006,68 @@ export class TechnitiumService {
 
   async getNodeOverview(nodeId: string): Promise<TechnitiumNodeOverview> {
     const node = this.findNode(nodeId);
+    const startedAt = Date.now();
+    const timingMs: Record<string, number> = {};
+
+    const timed = async <T>(
+      label: string,
+      run: () => Promise<T>,
+    ): Promise<T> => {
+      const callStartedAt = Date.now();
+      try {
+        return await run();
+      } finally {
+        timingMs[label] = Date.now() - callStartedAt;
+      }
+    };
 
     try {
-      // Fetch apps info
-      const appsResponse = await this.getNodeApps(nodeId);
+      // Fetch independent overview slices in parallel to reduce tail latency.
+      const [appsResponse, zonesEnvelope] = await Promise.all([
+        timed("apps", () => this.getNodeApps(nodeId)),
+        timed("zones", () => this.listZones(nodeId)),
+      ]);
 
-      // Fetch zones to count them
-      const zonesEnvelope = await this.listZones(nodeId);
       const totalZones = zonesEnvelope.data.zones?.length ?? 0;
 
-      // Fetch settings for version and uptime
+      // Fetch settings for version and uptime (non-fatal if unavailable)
       let version = "Unknown";
       let uptime = 0;
-      try {
-        const settingsEnvelope = await this.request<
-          TechnitiumApiResponse<TechnitiumSettingsData>
-        >(node, { method: "GET", url: "/api/settings/get", params: {} });
+
+      // Fetch dashboard stats for query counts (non-fatal if unavailable)
+      let totalQueries = 0;
+      let totalBlockedQueries = 0;
+
+      const [settingsResult, statsResult] = await Promise.allSettled([
+        timed("settings", () =>
+          this.request<TechnitiumApiResponse<TechnitiumSettingsData>>(node, {
+            method: "GET",
+            url: "/api/settings/get",
+            params: {},
+          }),
+        ),
+        timed("stats", () =>
+          this.request<TechnitiumApiResponse<TechnitiumDashboardStatsData>>(
+            node,
+            {
+              method: "GET",
+              url: "/api/dashboard/stats/get",
+              params: { type: "LastDay" },
+            },
+          ),
+        ),
+      ]);
+
+      const totalMs = Date.now() - startedAt;
+      if (totalMs >= 4000) {
+        this.logger.warn(
+          `Slow node overview for "${nodeId}": total=${totalMs}ms (apps=${timingMs.apps ?? -1}ms, zones=${timingMs.zones ?? -1}ms, settings=${timingMs.settings ?? -1}ms, stats=${timingMs.stats ?? -1}ms)`,
+        );
+      }
+
+      if (settingsResult.status === "fulfilled") {
         const settingsData = this.unwrapApiResponse(
-          settingsEnvelope,
+          settingsResult.value,
           nodeId,
           "settings",
         );
@@ -967,23 +1080,16 @@ export class TechnitiumService {
             uptime = Math.floor((Date.now() - uptimeDate.getTime()) / 1000);
           }
         }
-      } catch (error) {
-        this.logger.warn(`Failed to fetch settings for node ${nodeId}:`, error);
+      } else {
+        this.logger.warn(
+          `Failed to fetch settings for node ${nodeId}:`,
+          settingsResult.reason,
+        );
       }
 
-      // Fetch dashboard stats for query counts
-      let totalQueries = 0;
-      let totalBlockedQueries = 0;
-      try {
-        const statsEnvelope = await this.request<
-          TechnitiumApiResponse<TechnitiumDashboardStatsData>
-        >(node, {
-          method: "GET",
-          url: "/api/dashboard/stats/get",
-          params: { type: "LastDay" },
-        });
+      if (statsResult.status === "fulfilled") {
         const statsData = this.unwrapApiResponse(
-          statsEnvelope,
+          statsResult.value,
           nodeId,
           "dashboard stats",
         );
@@ -991,10 +1097,10 @@ export class TechnitiumService {
           totalQueries = statsData.stats.totalQueries || 0;
           totalBlockedQueries = statsData.stats.totalBlocked || 0;
         }
-      } catch (error) {
+      } else {
         this.logger.warn(
           `Failed to fetch dashboard stats for node ${nodeId}:`,
-          error,
+          statsResult.reason,
         );
       }
 
@@ -1212,6 +1318,48 @@ export class TechnitiumService {
 
     const ipToHostname = await this.getAllDhcpLeasesWithOptions(options);
     return this.enrichWithHostnames(entries, ipToHostname);
+  }
+
+  /**
+   * Return a deduplicated list of known clients (IPs + hostnames) for use
+   * as autocomplete suggestions. Sources: DHCP leases (live) + PTR hostname
+   * cache (from recent query log enrichment). DHCP takes priority.
+   */
+  async getKnownClients(): Promise<{ ip: string; hostname?: string }[]> {
+    const ipToHostname = new Map<string, string>();
+
+    // Source 1: live DHCP leases
+    try {
+      const dhcp = await this.getAllDhcpLeases();
+      for (const [ip, hostname] of dhcp.entries()) {
+        ipToHostname.set(ip, hostname);
+      }
+    } catch {
+      // Best-effort; fall through to PTR cache
+    }
+
+    // Source 2: PTR-resolved hostname cache (IPs seen in query logs)
+    const now = Date.now();
+    for (const [ip, entry] of this.hostnameCache.entries()) {
+      if (
+        !ipToHostname.has(ip) &&
+        now - entry.lastUpdated < this.HOSTNAME_CACHE_TTL_MS
+      ) {
+        ipToHostname.set(ip, entry.hostname);
+      }
+    }
+
+    const clients: { ip: string; hostname?: string }[] = [];
+
+    for (const [ip, hostname] of ipToHostname.entries()) {
+      clients.push({ ip, hostname });
+    }
+
+    return clients.sort((a, b) => {
+      const aKey = a.hostname ?? a.ip;
+      const bKey = b.hostname ?? b.ip;
+      return aKey.localeCompare(bKey);
+    });
   }
 
   /**
@@ -1657,6 +1805,7 @@ export class TechnitiumService {
     node: TechnitiumNodeConfig,
     config: AxiosRequestConfig,
     token: string,
+    options?: { suppressNetworkErrorLog?: boolean },
   ): Promise<T> {
     if (!token) {
       throw new UnauthorizedException(
@@ -1694,8 +1843,82 @@ export class TechnitiumService {
       if (error instanceof HttpException) {
         throw error;
       }
-      throw this.normalizeAxiosError(error, node.id);
+      throw this.normalizeAxiosError(error, node.id, {
+        suppressNetworkErrorLog: options?.suppressNetworkErrorLog,
+      });
     }
+  }
+
+  private logPtrFailureWithThrottling(
+    nodeId: string,
+    ipAddress: string,
+    error: unknown,
+  ): void {
+    const now = Date.now();
+    const state = this.ptrFailureLogState.get(nodeId);
+    const errorText =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : String(error);
+
+    if (
+      !state ||
+      now - state.windowStartedAt >= this.PTR_FAILURE_LOG_WINDOW_MS
+    ) {
+      const suppressedCount = state ? Math.max(0, state.count - 1) : 0;
+      if (suppressedCount > 0) {
+        this.logger.debug(
+          `Suppressed ${suppressedCount} additional PTR lookup failures for node "${nodeId}" in the last ${Math.round(this.PTR_FAILURE_LOG_WINDOW_MS / 1000)}s.`,
+        );
+      }
+
+      this.ptrFailureLogState.set(nodeId, { windowStartedAt: now, count: 1 });
+      this.logger.debug(
+        `PTR lookup failed on node "${nodeId}" for ${ipAddress}: ${errorText}`,
+      );
+      return;
+    }
+
+    state.count += 1;
+    if (state.count === 2) {
+      this.logger.debug(
+        `Additional PTR lookup failures for node "${nodeId}" are being suppressed for ${Math.round(this.PTR_FAILURE_LOG_WINDOW_MS / 1000)}s.`,
+      );
+    }
+  }
+
+  private ptrErrorToText(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    if (typeof error === "string") {
+      return error;
+    }
+    return String(error);
+  }
+
+  private shouldRetryPtrOnAnotherNode(error: unknown): boolean {
+    if (error instanceof HttpException) {
+      const status = error.getStatus();
+      return status === 503 || status === 504;
+    }
+
+    if (this.isAxiosError(error) && !error.response) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private getPtrLookupCandidateNodes(
+    preferredNode: TechnitiumNodeConfig,
+  ): TechnitiumNodeConfig[] {
+    const fallbackNodes = this.nodeConfigs.filter(
+      (candidate) => candidate.id !== preferredNode.id,
+    );
+    return [preferredNode, ...fallbackNodes];
   }
 
   private async performPtrLookup(
@@ -1718,7 +1941,6 @@ export class TechnitiumService {
         return;
       }
 
-      // Use Technitium's DNS client API to resolve PTR
       const requestConfig: AxiosRequestConfig = {
         method: "GET",
         url: "/api/dnsClient/resolve",
@@ -1731,35 +1953,77 @@ export class TechnitiumService {
         timeout: 5000, // 5 second timeout for PTR lookups
       };
 
-      const envelope = this.sessionAuthEnabled
-        ? await this.requestWithExplicitToken<TechnitiumApiResponse<any>>(
-            node,
-            requestConfig,
-            this.backgroundToken ?? "",
-          )
-        : await this.request<TechnitiumApiResponse<any>>(node, requestConfig);
+      const candidateNodes = this.getPtrLookupCandidateNodes(node);
+      let lastError: unknown;
+      let lastNodeId = node.id;
 
-      const data = this.unwrapApiResponse<TechnitiumPtrLookupResult>(
-        envelope as unknown as TechnitiumApiResponse<TechnitiumPtrLookupResult>,
-        node.id,
-        "PTR lookup",
-      );
+      for (let index = 0; index < candidateNodes.length; index += 1) {
+        const candidate = candidateNodes[index];
+        try {
+          const envelope = this.sessionAuthEnabled
+            ? await this.requestWithExplicitToken<TechnitiumApiResponse<any>>(
+                candidate,
+                requestConfig,
+                this.backgroundToken ?? "",
+                { suppressNetworkErrorLog: true },
+              )
+            : await this.request<TechnitiumApiResponse<any>>(
+                candidate,
+                requestConfig,
+                { authMode: "background", suppressNetworkErrorLog: true },
+              );
 
-      // Extract hostname from PTR response
-      const hostname = this.extractHostnameFromPtrResponse(data);
+          const data = this.unwrapApiResponse<TechnitiumPtrLookupResult>(
+            envelope as unknown as TechnitiumApiResponse<TechnitiumPtrLookupResult>,
+            candidate.id,
+            "PTR lookup",
+          );
 
-      if (hostname) {
-        this.hostnameCache.set(ipAddress, {
-          hostname,
-          lastUpdated: Date.now(),
-          source: "ptr",
-        });
-        this.logger.debug(`Resolved ${ipAddress} → ${hostname} via PTR`);
+          const hostname = this.extractHostnameFromPtrResponse(data);
+          if (!hostname) {
+            return;
+          }
+
+          this.hostnameCache.set(ipAddress, {
+            hostname,
+            lastUpdated: Date.now(),
+            source: "ptr",
+          });
+
+          if (candidate.id === node.id) {
+            this.logger.debug(`Resolved ${ipAddress} → ${hostname} via PTR`);
+          } else {
+            this.logger.debug(
+              `Resolved ${ipAddress} → ${hostname} via PTR on fallback node "${candidate.id}"`,
+            );
+          }
+          return;
+        } catch (error) {
+          lastError = error;
+          lastNodeId = candidate.id;
+
+          const hasFallback = index < candidateNodes.length - 1;
+          if (hasFallback && this.shouldRetryPtrOnAnotherNode(error)) {
+            continue;
+          }
+
+          this.logPtrFailureWithThrottling(candidate.id, ipAddress, error);
+          return;
+        }
+      }
+
+      if (lastError) {
+        const attemptedNodes = candidateNodes.map((candidate) => candidate.id);
+        this.logPtrFailureWithThrottling(
+          node.id,
+          ipAddress,
+          `All PTR candidate nodes failed (${attemptedNodes.join(", ")}); last error from "${lastNodeId}": ${this.ptrErrorToText(lastError)}`,
+        );
       }
     } catch (error) {
       // PTR lookups can fail for many legitimate reasons (no PTR record, timeout, etc.)
-      // Just log at debug level to avoid noise
-      this.logger.debug(`PTR lookup failed for ${ipAddress}: ${error}`);
+      // Keep logs concise by throttling repeated failures per node.
+      this.logPtrFailureWithThrottling(node.id, ipAddress, error);
     }
   }
 
@@ -2293,15 +2557,8 @@ export class TechnitiumService {
 
       this.queryLogCacheStats.misses++;
     } else {
-      this.logger.debug(
-        "Bypassing combined query log cache (disableCache=true).",
-      );
+      // cache is being bypassed; no action needed
     }
-
-    // Debug logging
-    this.logger.debug(
-      `getCombinedQueryLogs called with deduplicateDomains: ${effectiveFilters.deduplicateDomains}, pageNumber: ${pageNumber}`,
-    );
 
     // BALANCED NODE SAMPLING: Fetch enough entries from each node
     // The multi-page fetch in getQueryLogs will handle fetching up to 500 entries per node
@@ -2310,10 +2567,6 @@ export class TechnitiumService {
     // Request enough entries per node to get a good sample
     // getQueryLogs will fetch multiple pages up to 500 entries total
     const entriesPerNode = 500; // Let each node fetch up to 500 entries
-
-    this.logger.debug(
-      `Fetching up to ${entriesPerNode} entries per node (${nodeCount} nodes)`,
-    );
 
     // For combined view, we want ALL entries without client-side filtering
     // The filtering and pagination will be done AFTER combining all node entries
@@ -2415,26 +2668,14 @@ export class TechnitiumService {
     });
 
     // Apply client-side filtering for fields not handled by Technitium DNS API
-    this.logger.debug(
-      `Combined entries before filtering: ${combinedEntries.length}, filters:`,
-      JSON.stringify(effectiveFilters),
-    );
-
     let filteredEntries = combinedEntries.filter((entry) =>
       this.matchesQueryLogFilters(entry, effectiveFilters),
-    );
-
-    this.logger.debug(
-      `After filtering: ${filteredEntries.length} entries (filtered out ${combinedEntries.length - filteredEntries.length}), deduplicateDomains=${effectiveFilters.deduplicateDomains}`,
     );
 
     // Handle deduplication if requested
     let duplicatesRemoved = 0;
     if (effectiveFilters.deduplicateDomains) {
       const entriesBeforeDedup = filteredEntries.length;
-      this.logger.debug(
-        `Starting deduplication of ${entriesBeforeDedup} entries`,
-      );
       const domainMap = new Map<string, TechnitiumCombinedQueryLogEntry>();
       const nodeCountMap = new Map<string, number>(); // Track entries per node
 
@@ -2506,9 +2747,6 @@ export class TechnitiumService {
 
       filteredEntries = Array.from(domainMap.values());
       duplicatesRemoved = entriesBeforeDedup - filteredEntries.length;
-      this.logger.debug(
-        `After deduplication: ${filteredEntries.length} unique entries (removed ${duplicatesRemoved} duplicates)`,
-      );
 
       // Log node distribution after deduplication
       const finalNodeCounts = Array.from(nodeCountMap.entries())
@@ -4590,7 +4828,10 @@ export class TechnitiumService {
   async request<T>(
     node: TechnitiumNodeConfig,
     config: AxiosRequestConfig,
-    options?: { authMode?: "session" | "background" },
+    options?: {
+      authMode?: "session" | "background";
+      suppressNetworkErrorLog?: boolean;
+    },
   ): Promise<T> {
     try {
       const axiosConfig: AxiosRequestConfig = {
@@ -4697,7 +4938,9 @@ export class TechnitiumService {
         );
       }
 
-      throw this.normalizeAxiosError(error, node.id);
+      throw this.normalizeAxiosError(error, node.id, {
+        suppressNetworkErrorLog: options?.suppressNetworkErrorLog,
+      });
     }
   }
 
@@ -5338,10 +5581,6 @@ export class TechnitiumService {
     assign("qtype");
     assign("qclass");
 
-    this.logger.debug(
-      `buildQueryLogParams - filters=${JSON.stringify(filters)} params=${JSON.stringify(params)}`,
-    );
-
     return params;
   }
 
@@ -5433,7 +5672,11 @@ export class TechnitiumService {
     return envelope.response;
   }
 
-  private normalizeAxiosError(error: unknown, nodeId: string): HttpException {
+  private normalizeAxiosError(
+    error: unknown,
+    nodeId: string,
+    options?: { suppressNetworkErrorLog?: boolean },
+  ): HttpException {
     if (this.isAxiosError(error)) {
       const axiosError = error;
 
@@ -5454,9 +5697,12 @@ export class TechnitiumService {
         );
       }
 
-      this.logger.error(
-        `Network error while contacting Technitium DNS node "${nodeId}": ${axiosError.message}`,
-      );
+      if (!options?.suppressNetworkErrorLog) {
+        const targetDetails = this.describeNodeNetworkTarget(nodeId);
+        this.logger.error(
+          `Network error while contacting Technitium DNS node "${nodeId}" (${targetDetails}): ${axiosError.message}`,
+        );
+      }
 
       return new ServiceUnavailableException(
         `Unable to reach Technitium DNS node "${nodeId}". Check connectivity and credentials.`,
@@ -5470,6 +5716,25 @@ export class TechnitiumService {
     return new ServiceUnavailableException(
       "Unexpected error while contacting Technitium DNS node.",
     );
+  }
+
+  private describeNodeNetworkTarget(nodeId: string): string {
+    const node = this.nodeConfigs.find((candidate) => candidate.id === nodeId);
+    if (!node?.baseUrl) {
+      return "target=unknown";
+    }
+
+    try {
+      const parsed = new URL(node.baseUrl);
+      const host = parsed.hostname;
+      const isIpv4Host = /^\d+\.\d+\.\d+\.\d+$/.test(host);
+      const ip = isIpv4Host ? host : "unresolved-from-hostname";
+      const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+
+      return `baseUrl=${node.baseUrl}, host=${host}, ip=${ip}, port=${port}`;
+    } catch {
+      return `baseUrl=${node.baseUrl}`;
+    }
   }
 
   private isAxiosError(error: unknown): error is AxiosError {

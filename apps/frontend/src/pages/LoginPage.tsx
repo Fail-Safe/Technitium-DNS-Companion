@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { clearAuthRedirectReason } from "../config";
 import { useAuth } from "../context/useAuth";
 import { isNodeSessionRequiredButMissing } from "../utils/authSession";
+import { AppInput } from "../components/common/AppInput";
 
 export default function LoginPage() {
   const { status, loading, login } = useAuth();
@@ -120,7 +121,7 @@ export default function LoginPage() {
         >
           Username
         </label>
-        <input
+        <AppInput
           type="text"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
@@ -142,7 +143,7 @@ export default function LoginPage() {
         >
           Password
         </label>
-        <input
+        <AppInput
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -164,7 +165,7 @@ export default function LoginPage() {
         >
           2FA code (optional)
         </label>
-        <input
+        <AppInput
           type="text"
           value={totp}
           onChange={(e) => setTotp(e.target.value)}

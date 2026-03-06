@@ -7,6 +7,7 @@ import type {
     ZoneSnapshotRestoreOptions,
     ZoneSnapshotRestoreResult,
 } from "../../types/zoneSnapshots";
+import { AppTextarea } from "../common/AppInput";
 import { SnapshotDrawerFrame } from "../common/SnapshotDrawerFrame";
 import { SnapshotDrawerItemActions } from "../common/SnapshotDrawerItemActions";
 import {
@@ -693,7 +694,7 @@ export const ZoneSnapshotDrawer: React.FC<ZoneSnapshotDrawerProps> = ({
                     >
                       Zone names
                     </label>
-                    <textarea
+                    <AppTextarea
                       id="zone-snapshot-zones"
                       className="snapshot-drawer__textarea"
                       rows={4}
@@ -711,7 +712,7 @@ export const ZoneSnapshotDrawer: React.FC<ZoneSnapshotDrawerProps> = ({
                     >
                       Note (optional)
                     </label>
-                    <textarea
+                    <AppTextarea
                       id="zone-snapshot-note"
                       className="snapshot-drawer__textarea"
                       rows={2}
@@ -1198,7 +1199,7 @@ export const ZoneSnapshotDrawer: React.FC<ZoneSnapshotDrawerProps> = ({
 
                           {noteEditingId === snapshot.id ?
                             <div className="snapshot-drawer__section-gap">
-                              <textarea
+                              <AppTextarea
                                 value={noteDraft}
                                 onChange={(event) =>
                                   setNoteDraft(event.target.value)

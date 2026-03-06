@@ -76,20 +76,19 @@ services:
       # IMPORTANT: Use a low-privilege Technitium DNS token.
       # TECHNITIUM_BACKGROUND_TOKEN: ${TECHNITIUM_BACKGROUND_TOKEN:-}
 
-    # Optional bind mounts (uncomment as needed)
-    # volumes:
-    #   # Mount SSL certificates (if using HTTPS)
-    #   - ./certs:/app/certs:ro
-    #
-    #   # Optional: Mount config directory
-    #   - ./config:/app/config
-    volumes: []
+    # Persistent data directory: SQLite databases and DNS filtering snapshots survive
+    # container recreates/rebuilds. Create the host directory before first run:
+    #   mkdir -p ./data
+    volumes:
+      - ./data:/app/config
+      # Optional: mount SSL certificates (if using HTTPS)
+      # - ./certs:/app/certs:ro
 
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "wget --no-check-certificate --no-verbose --tries=1 --spider https://localhost:${HTTPS_PORT:-3443}/api/health || wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/api/health",
+          "node -e \"const http=require('http');const https=require('https');const httpsEnabled=String(process.env.HTTPS_ENABLED||'false').toLowerCase()==='true';const primary=httpsEnabled?'https':'http';const secondary=httpsEnabled?'http':'https';const check=(scheme)=>new Promise((resolve)=>{const mod=scheme==='https'?https:http;const port=Number(scheme==='https'?(process.env.HTTPS_PORT||3443):(process.env.PORT||3000));const req=mod.get({hostname:'127.0.0.1',port,path:'/api/health',rejectUnauthorized:false},(r)=>resolve(r.statusCode===200));req.on('error',()=>resolve(false));req.setTimeout(5000,()=>{req.destroy();resolve(false);});});(async()=>{if(await check(primary)||await check(secondary)){process.exit(0);}process.exit(1);})();\"",
         ]
       interval: 30s
       timeout: 10s

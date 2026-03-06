@@ -93,9 +93,11 @@ export async function getOrCreateSelfSignedCert(
   };
 
   const privateKey =
-    typeof generated.private === "string" ? generated.private
-    : typeof generated.privateKey === "string" ? generated.privateKey
-    : undefined;
+    typeof generated.private === "string"
+      ? generated.private
+      : typeof generated.privateKey === "string"
+        ? generated.privateKey
+        : undefined;
   const certificate =
     typeof generated.cert === "string" ? generated.cert : undefined;
 

@@ -416,8 +416,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           const qnameLc = qname ? qname.toLowerCase() : null;
 
           const clientIpAddress = entry.clientIpAddress ?? null;
-          const clientIpLc =
-            clientIpAddress ? clientIpAddress.toLowerCase() : null;
+          const clientIpLc = clientIpAddress
+            ? clientIpAddress.toLowerCase()
+            : null;
 
           const clientName = entry.clientName ?? null;
           const clientNameLc = clientName ? clientName.toLowerCase() : null;
@@ -618,9 +619,8 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const endTs = filters.end ? Date.parse(filters.end) : now;
 
     return {
-      startTs:
-        Number.isFinite(startTs) ?
-          Math.max(retentionStart, startTs)
+      startTs: Number.isFinite(startTs)
+        ? Math.max(retentionStart, startTs)
         : retentionStart,
       endTs: Number.isFinite(endTs) ? endTs : now,
     };
@@ -768,17 +768,15 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const windowHours =
-      (
-        typeof options.windowHours === "number" &&
-        Number.isFinite(options.windowHours)
-      ) ?
-        Math.max(1, Math.trunc(options.windowHours))
-      : 24;
+      typeof options.windowHours === "number" &&
+      Number.isFinite(options.windowHours)
+        ? Math.max(1, Math.trunc(options.windowHours))
+        : 24;
 
     const limit =
-      typeof options.limit === "number" && Number.isFinite(options.limit) ?
-        Math.min(100_000, Math.max(1, Math.trunc(options.limit)))
-      : 10_000;
+      typeof options.limit === "number" && Number.isFinite(options.limit)
+        ? Math.min(100_000, Math.max(1, Math.trunc(options.limit)))
+        : 10_000;
 
     const now = Date.now();
     const startTs = now - windowHours * 60 * 60 * 1000;
@@ -803,6 +801,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
 
   async getStoredCombinedLogs(
     filters: TechnitiumQueryLogFilters = {},
+    options?: { authMode?: "session" | "background" },
   ): Promise<TechnitiumCombinedQueryLogPage> {
     if (!this.db) {
       throw new Error("SQLite query log storage is not enabled.");
@@ -811,9 +810,8 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const db = this.db;
 
     const disableCache = !!filters.disableCache;
-    const cacheKey =
-      !disableCache ?
-        this.buildResponseCacheKey("combined", filters)
+    const cacheKey = !disableCache
+      ? this.buildResponseCacheKey("combined", filters)
       : undefined;
 
     if (cacheKey) {
@@ -879,9 +877,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const totalPages =
-      entriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
-      : 1;
+      entriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
+        : 1;
     const offset = entriesPerPage > 0 ? (pageNumber - 1) * entriesPerPage : 0;
 
     const sortDir = descendingOrder ? "DESC" : "ASC";
@@ -932,7 +930,10 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
 
     const entries = this.parseRowsToEntries(rows);
     const enriched =
-      await this.technitiumService.enrichQueryLogEntriesWithHostnames(entries);
+      await this.technitiumService.enrichQueryLogEntriesWithHostnames(
+        entries,
+        options,
+      );
 
     const nodeSnapshots = this.nodeConfigs.map((node) => {
       const nodeWindowWhere = this.buildWhereClause({}, window, node.id);
@@ -944,11 +945,11 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       const nodeTotalEntries = nodeTotalEntriesRow?.count ?? 0;
 
       const nodeTotalPages =
-        entriesPerPage > 0 ?
-          nodeTotalEntries > 0 ?
-            Math.ceil(nodeTotalEntries / entriesPerPage)
-          : 0
-        : 0;
+        entriesPerPage > 0
+          ? nodeTotalEntries > 0
+            ? Math.ceil(nodeTotalEntries / entriesPerPage)
+            : 0
+          : 0;
 
       return {
         nodeId: node.id,
@@ -992,9 +993,8 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const disableCache = !!filters.disableCache;
-    const cacheKey =
-      !disableCache ?
-        this.buildResponseCacheKey("node", filters, nodeId)
+    const cacheKey = !disableCache
+      ? this.buildResponseCacheKey("node", filters, nodeId)
       : undefined;
 
     if (cacheKey) {
@@ -1061,9 +1061,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     const totalPages =
-      entriesPerPage > 0 ?
-        Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
-      : 1;
+      entriesPerPage > 0
+        ? Math.max(1, Math.ceil(totalMatchingEntries / entriesPerPage))
+        : 1;
     const offset = entriesPerPage > 0 ? (pageNumber - 1) * entriesPerPage : 0;
 
     const sortDir = descendingOrder ? "DESC" : "ASC";

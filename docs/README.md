@@ -69,6 +69,7 @@ Detailed documentation for specific features:
 - **[features/DHCP_BULK_SYNC.md](./features/DHCP_BULK_SYNC.md)** - Bulk DHCP scope operations
 - **[features/DHCP_HOSTNAME_RESOLUTION.md](./features/DHCP_HOSTNAME_RESOLUTION.md)** - Hostname resolution
 - **[features/DOMAIN_LIST_PERSISTENCE.md](./features/DOMAIN_LIST_PERSISTENCE.md)** - Domain list caching
+- **[features/DOMAIN_GROUPS_MVP.md](./features/DOMAIN_GROUPS_MVP.md)** - Domain Groups (global reusable domain/regex objects with entry notes and bindings)
 - **[features/DOMAIN_LISTS_ENHANCEMENTS.md](./features/DOMAIN_LISTS_ENHANCEMENTS.md)** - Domain list improvements
 - **[features/PAGINATION_IMPLEMENTATION.md](./features/PAGINATION_IMPLEMENTATION.md)** - Pagination patterns
 - **[features/UNIFIED_SEARCH_UI.md](./features/UNIFIED_SEARCH_UI.md)** - Global search interface

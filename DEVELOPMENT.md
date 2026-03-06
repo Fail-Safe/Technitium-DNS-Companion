@@ -16,31 +16,18 @@ This guide covers setting up a development environment for Technitium DNS Compan
 
 You have **three options** for development:
 
-### Option 1: Docker with Hot-Reload (Recommended) 🔥
-
-Best for rapid development with instant feedback:
-
-```bash
-# Start development environment
-./scripts/dev-docker.sh start
-
-# Access:
-# - Frontend (HMR): http://localhost:5173
-# - Backend API:    http://localhost:3000/api
-```
-
-**Benefits:**
-
-- ✅ Changes reflected instantly (no rebuild)
-- ✅ Consistent environment across machines
-- ✅ No local Node.js installation needed
-- ✅ Both frontend and backend hot-reload
-
-See [DOCKER.md](./DOCKER.md#development-mode-hot-reload-) for full details.
-
-### Option 1b: Remote Development
+### Option 1: Remote Development (Docker with Hot-Reload) 🔥
 
 Run Docker on a remote server while editing locally:
+
+```bash
+# One-time setup
+cp ./scripts/remote-dev.sh.example ./scripts/remote-dev.sh
+chmod +x ./scripts/remote-dev.sh
+
+# Edit config defaults in scripts/remote-dev.sh (or set env vars):
+#   REMOTE_HOST, REMOTE_USER, REMOTE_PATH, REMOTE_DOMAIN
+```
 
 ```bash
 # Terminal 1: Start remote container
@@ -51,6 +38,14 @@ Run Docker on a remote server while editing locally:
 
 # Edit files locally, they sync to remote and hot-reload
 # Access at http://<your-server>:5173
+```
+
+Useful commands:
+
+```bash
+./scripts/remote-dev.sh recreate   # Reload .env / compose-time env vars
+./scripts/remote-dev.sh rebuild    # Full rebuild with fresh node_modules volumes
+./scripts/remote-dev.sh prodtest   # Run production-mode container on remote host
 ```
 
 **Benefits:**
@@ -79,8 +74,6 @@ npm install
 
 # Common scripts
 npm run lint        # runs lint in each workspace
-npm run format      # runs Prettier in each workspace
-npm run format:repo # formats the entire repo with Prettier
 ```
 
 #### Backend Development
@@ -141,8 +134,6 @@ This project uses ESLint and Prettier to maintain code quality:
 
 ```bash
 npm run lint        # Check for linting issues
-npm run format      # Format code with Prettier
-npm run format:repo # Format entire repository
 ```
 
 ## Architecture Documentation
@@ -171,6 +162,22 @@ When contributing, please:
 - Frontend HMR updates most changes without full page reload
 - Check `docs/` for implementation patterns and design decisions
 - Install the provided git hooks (below) so pushes only happen after tests succeed
+
+### Recover from dev `node_modules` volume issues
+
+If your dev container gets stuck restarting with npm `ENOTEMPTY` errors, run:
+
+```bash
+./scripts/reset-dev-node-modules.sh
+```
+
+This helper stops the dev stack, removes the three `node_modules` Docker volumes,
+rebuilds the dev image, and recreates the dev container.
+
+Optional flags/env:
+
+- `--yes` skips the confirmation prompt.
+- `FORCE_NO_CACHE=true ./scripts/reset-dev-node-modules.sh` forces a no-cache rebuild.
 
 ## Git Hooks
 

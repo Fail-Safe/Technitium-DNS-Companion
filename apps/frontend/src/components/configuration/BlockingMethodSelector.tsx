@@ -18,11 +18,15 @@ export function BlockingMethodSelector({
     hasBuiltInBlocking,
     disabled = false,
 }: BlockingMethodSelectorProps) {
+    const selectId = 'select-blocking-method-selector';
+
     return (
         <div className="blocking-method-selector">
-            <label className="blocking-method-selector__label">Blocking Method:</label>
+            <label className="blocking-method-selector__label" htmlFor={selectId}>Blocking Method:</label>
             <div className="blocking-method-selector__dropdown">
                 <select
+                    id={selectId}
+                    name="blocking-method"
                     value={selectedMethod}
                     onChange={(e) => onMethodChange(e.target.value as BlockingMethod)}
                     disabled={disabled}

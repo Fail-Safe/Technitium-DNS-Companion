@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, useMemo } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faCheck, faBan, faPlus, faMinus, faPencil } from '@fortawesome/free-solid-svg-icons';
 import type { AdvancedBlockingConfig } from '../../types/advancedBlocking';
+import { AppInput } from '../common/AppInput';
 
 interface MultiGroupDomainEditorProps {
     config?: AdvancedBlockingConfig;
@@ -595,7 +596,7 @@ export function MultiGroupDomainEditor({
                                 <option value="blockedRegex">Blocked Regex</option>
                                 <option value="allowedRegex">Allowed Regex</option>
                             </select>
-                            <input
+                            <AppInput
                                 type="text"
                                 value={newDomain}
                                 onChange={(e) => setNewDomain(e.target.value)}
@@ -637,7 +638,7 @@ export function MultiGroupDomainEditor({
 
                     {/* Search/Filter Box */}
                     <div className="multi-group-editor__search">
-                        <input
+                        <AppInput
                             type="text"
                             value={searchFilter}
                             onChange={(e) => setSearchFilter(e.target.value)}
@@ -699,7 +700,7 @@ export function MultiGroupDomainEditor({
                                                         {isEditing ? (
                                                             <>
                                                                 <div className="multi-group-editor__edit-form">
-                                                                    <input
+                                                                    <AppInput
                                                                         type="text"
                                                                         value={editDraft}
                                                                         onChange={(e) => {

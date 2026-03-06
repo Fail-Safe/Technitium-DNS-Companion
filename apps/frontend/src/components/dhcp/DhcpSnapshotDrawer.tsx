@@ -6,6 +6,7 @@ import type {
     DhcpSnapshotRestoreOptions,
     DhcpSnapshotRestoreResult,
 } from "../../types/dhcp";
+import { AppTextarea } from "../common/AppInput";
 import { SnapshotDrawerFrame } from "../common/SnapshotDrawerFrame";
 import { SnapshotDrawerItemActions } from "../common/SnapshotDrawerItemActions";
 import {
@@ -757,7 +758,7 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                           </div>
                           {noteEditingId === snapshot.id ?
                             <div className="snapshot-drawer__section-gap">
-                              <textarea
+                              <AppTextarea
                                 value={noteDraft}
                                 onChange={(event) =>
                                   setNoteDraft(event.target.value)

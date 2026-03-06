@@ -1,4 +1,4 @@
-import type { TechnitiumClusterState } from '../../context/TechnitiumContext';
+import type { TechnitiumClusterState } from '../../types/technitium';
 
 interface ClusterBadgeProps {
     clusterState?: TechnitiumClusterState;
