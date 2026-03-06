@@ -38,7 +38,25 @@ export class LogAlertsRulesService implements OnModuleInit {
     (process.env.LOG_ALERT_RULES_ENABLED ?? "true").trim().toLowerCase() !==
     "false";
 
+  private schemaReady = false;
+
   constructor(private readonly companionDb: CompanionDbService) {}
+
+  /**
+   * Idempotent schema bootstrap — safe to call before onModuleInit.
+   * The evaluator service reads settings in its own onModuleInit, which may
+   * fire before this service's onModuleInit due to NestJS lifecycle ordering.
+   * Calling ensureSchema() at the top of any read method prevents the
+   * "no such table" crash on first boot or fresh databases.
+   */
+  private ensureSchema(): void {
+    if (this.schemaReady) return;
+    const db = this.companionDb.db;
+    if (!db) return;
+    this.initializeSchema();
+    this.migrateSchema();
+    this.schemaReady = true;
+  }
 
   getStatus(): LogAlertRulesStorageStatus {
     return {
@@ -61,8 +79,7 @@ export class LogAlertsRulesService implements OnModuleInit {
     }
 
     try {
-      this.initializeSchema();
-      this.migrateSchema();
+      this.ensureSchema();
       this.logger.log(
         `Log alert rules schema initialized in Companion SQLite at ${this.companionDb.dbPath}`,
       );
@@ -317,6 +334,7 @@ export class LogAlertsRulesService implements OnModuleInit {
     if (!db) {
       return null;
     }
+    this.ensureSchema();
     const row = db
       .prepare(
         `SELECT value FROM log_alert_settings WHERE key = 'evaluator_enabled'`,
@@ -341,6 +359,7 @@ export class LogAlertsRulesService implements OnModuleInit {
     if (!db) {
       return null;
     }
+    this.ensureSchema();
     const row = db
       .prepare(
         `SELECT value FROM log_alert_settings WHERE key = 'evaluator_interval_ms'`,
@@ -366,6 +385,7 @@ export class LogAlertsRulesService implements OnModuleInit {
     if (!db) {
       return null;
     }
+    this.ensureSchema();
     const row = db
       .prepare(
         `SELECT value FROM log_alert_settings WHERE key = 'evaluator_lookback_seconds'`,
