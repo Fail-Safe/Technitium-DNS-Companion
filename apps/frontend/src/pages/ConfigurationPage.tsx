@@ -681,6 +681,8 @@ export function ConfigurationPage() {
   // Domain Group drag-and-drop state
   const [draggedDomainGroupId, setDraggedDomainGroupId] = useState<string | null>(null);
   const [isDraggingDomainGroup, setIsDraggingDomainGroup] = useState(false);
+  // Tracks bindings added in this session (cleared on apply) for per-chip pending distinction
+  const [sessionAddedBindingKeys, setSessionAddedBindingKeys] = useState<Set<string>>(new Set());
 
   // Confirmation modal state
   const [confirmModal, setConfirmModal] = useState<{
@@ -1121,6 +1123,11 @@ export function ConfigurationPage() {
         advancedBlockingGroupName: abGroupName,
         action,
       });
+      setSessionAddedBindingKeys((prev) => {
+        const next = new Set(prev);
+        next.add(`${dgId}||${abGroupName.toLowerCase()}||${action}`);
+        return next;
+      });
       await refreshDomainGroupsPreview();
       if (selectedDomainGroup?.id === dgId) {
         await loadSelectedDomainGroup(dgId);
@@ -1552,14 +1559,19 @@ export function ConfigurationPage() {
 
   const handleSyncConfig = useCallback(
     async (
-      _sourceNodeId: string,
+      sourceNodeId: string,
       targetNodeId: string,
       config: AdvancedBlockingConfig,
     ) => {
       await saveAdvancedBlockingConfig(targetNodeId, config);
       await reloadAdvancedBlocking();
+      pushToast({
+        message: `Synced ${sourceNodeId} → ${targetNodeId}`,
+        tone: "success",
+        timeout: 5000,
+      });
     },
-    [saveAdvancedBlockingConfig, reloadAdvancedBlocking],
+    [saveAdvancedBlockingConfig, reloadAdvancedBlocking, pushToast],
   );
 
   // Initialize testStagedConfig when selectedNodeConfig changes
@@ -3724,6 +3736,7 @@ export function ConfigurationPage() {
                                             },
                                           );
                                         setDomainGroupsApplyResult(result);
+                                        setSessionAddedBindingKeys(new Set());
                                         await refreshDomainGroupsPreview();
                                         if (
                                           result.nodes.some(
@@ -4802,16 +4815,22 @@ export function ConfigurationPage() {
                                     bindingsByGroupAction.get(
                                       `${groupName.toLowerCase()}||${activeDomainTypeAction}`,
                                     ) ?? []
-                                  ).map((binding) => (
+                                  ).map((binding) => {
+                                    const chipBindingKey = `${binding.domainGroupId}||${binding.advancedBlockingGroupName.toLowerCase()}||${binding.action}`;
+                                    const chipPairKey = `${binding.advancedBlockingGroupName.toLowerCase()}||${binding.action}`;
+                                    const isDirectlyAdded = sessionAddedBindingKeys.has(chipBindingKey);
+                                    const isPairPending = pendingPairKeys.has(chipPairKey);
+                                    return (
                                     <div
                                       key={binding.bindingId}
                                       draggable="true"
                                       className={[
                                         "domain-group-binding-chip",
                                         dgPopoverDgId === binding.domainGroupId ? "domain-group-binding-chip--active" : "",
-                                        pendingPairKeys.has(`${binding.advancedBlockingGroupName.toLowerCase()}||${binding.action}`) ? "domain-group-binding-chip--pending" : "",
+                                        isDirectlyAdded ? "domain-group-binding-chip--pending" :
+                                          isPairPending ? "domain-group-binding-chip--pending-sibling" : "",
                                       ].filter(Boolean).join(" ")}
-                                      title={`${binding.domainGroupName} (${binding.action})${pendingPairKeys.has(`${binding.advancedBlockingGroupName.toLowerCase()}||${binding.action}`) ? " — pending apply" : ""} — click to preview · drag to source panel to remove`}
+                                      title={`${binding.domainGroupName} (${binding.action})${isDirectlyAdded ? " — just added, pending apply" : isPairPending ? " — pending apply" : ""} — click to preview · drag to source panel to remove`}
                                       onClick={(e) => void handleDgChipClick(binding.domainGroupId, e)}
                                       onDragStart={(e) =>
                                         handleDomainGroupChipDragStart(
@@ -4828,7 +4847,7 @@ export function ConfigurationPage() {
                                       />
                                       {binding.domainGroupName}
                                     </div>
-                                  ))}
+                                  ); })}
                                   {domains.length === 0 ?
                                     <p
                                       style={{

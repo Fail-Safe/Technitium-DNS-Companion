@@ -1368,12 +1368,19 @@ mark {
   outline-offset: 1px;
 }
 
-/* Pending-apply state for binding chip in group slot */
+/* Directly added this session — strong pending indicator */
 .domain-group-binding-chip--pending {
   border-style: dashed;
   border-color: var(--color-warning, #e6a800);
   color: var(--color-warning-text, #7a5800);
   background: var(--color-warning-bg, #fff7e0);
+}
+
+/* Another binding in this pair changed — subtle sibling indicator */
+.domain-group-binding-chip--pending-sibling {
+  border-style: dashed;
+  border-color: var(--color-warning, #e6a800);
+  opacity: 0.55;
 }
 
 /* Pending DG badge on collapsed group header */

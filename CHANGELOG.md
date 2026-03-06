@@ -45,6 +45,19 @@ All notable changes to this project will be documented in this file.
 - Docker guide now documents healthcheck probe behavior and quick verification commands.
 - Query Logs filtering docs now include the Domain Exclusion List behavior (UI-only, wildcard matching, local persistence).
 
+## [1.4.2] - 2026-03-06
+
+### Fixed
+
+- Configuration Sync: Primary + Secondaries mode no longer shows a blank UI — `targetNode` was always resolving to `undefined` in P+S mode, causing all diff/sync gates to fail silently.
+- Configuration Sync: sync completion now shows a success toast; previously the post-sync `reloadAdvancedBlocking()` re-render could cause the in-component success state to be lost before it rendered.
+
+### Changed
+
+- Configuration Sync: helper functions (`computeGroupDiffs`, `computeConfigDifferences`, `computeSyncPreview`) extracted to module scope so P+S mode can compute per-secondary diffs without duplicating logic.
+- Toast notifications: position adjusted from `1.5rem` to `2rem` from the top-right edge for a more comfortable placement.
+- Domain Groups (UX): added a `--pending-sibling` modifier style for binding chips whose partner binding in the same (group, action) pair has a pending change.
+
 ## [1.4.1] - 2026-02-18
 
 ### Fixed
@@ -313,7 +326,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.0...v1.3.1
