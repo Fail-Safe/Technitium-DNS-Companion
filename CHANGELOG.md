@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-03-06
+
 ### Added
 
 - Query Logs: added a client-side Domain Exclusion List (`Exclude Domains`) with wildcard support (`*`), persisted to localStorage for per-browser noise reduction.
@@ -20,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - Domain Groups (UX): informational toast when dropping a domain onto a group that already contains it.
 - Log Alerts Rules (MVP): added SQLite-backed rule storage and CRUD/enable-toggle endpoints, plus Logs page rule management UI (create/list/delete/enable-disable) alongside existing SMTP test workflow.
 - Log Alerts Evaluator (MVP): added rule-evaluation status/manual-run endpoints and backend evaluator logic to scan recent stored logs, apply selector/pattern/debounce checks, and send SMTP rule alert summaries.
+- Configuration Sync: Primary + Secondaries mode now fully operational — select a primary node and diff/sync its Advanced Blocking config to each secondary independently or all at once.
 
 ### Changed
 
@@ -29,6 +32,9 @@ All notable changes to this project will be documented in this file.
 - Docker Compose (production): `./data` is now bind-mounted to `/app/config` by default, so `companion.sqlite` and `query-logs.sqlite` survive `docker compose up --force-recreate` and image rebuilds without any extra setup.
 - Log Alerts: `advanced_blocking_group_name` SQLite column renamed to `advanced_blocking_group_names`; a startup migration runs automatically via `PRAGMA table_info` so existing databases upgrade silently.
 - Snapshot services (DHCP History, DNS Filtering History, Zone History): refactored to share a common `SnapshotFileStore` base class, standardizing directory resolution, retention pruning, and atomic writes across all three.
+- Configuration Sync: sync helper functions (`computeGroupDiffs`, `computeConfigDifferences`, `computeSyncPreview`) extracted to module scope to support per-secondary diffs in P+S mode without duplicating logic.
+- Toast notifications: position adjusted from `1.5rem` to `2rem` from the top-right edge for a more comfortable placement.
+- Domain Groups (UX): added a `--pending-sibling` modifier style for binding chips whose partner binding in the same (group, action) pair has a pending change.
 
 ### Fixed
 
@@ -38,25 +44,14 @@ All notable changes to this project will be documented in this file.
 - Domain Groups (UX): groups card header now uses flex-start layout so controls stay left-aligned in single-node (non-clustered) mode.
 - Domain Groups (UX): fixed white-on-white text when hovering an already-selected Domain Group button.
 - Rule Optimizer availability and nav gating now handle pre-auth / post-login capability hydration more reliably (reduces false negatives until full state is loaded).
+- Configuration Sync: Primary + Secondaries mode no longer shows a blank UI — `targetNode` was always resolving to `undefined` in P+S mode, causing all diff/sync gates to fail silently.
+- Configuration Sync: sync completion now shows a success toast; previously the post-sync `reloadAdvancedBlocking()` re-render could swallow in-component success state before it rendered.
 
 ### Docs
 
 - Added `AGENTS.md` with project structure, development conventions, and build/test commands for agentic coding assistants and contributors.
 - Docker guide now documents healthcheck probe behavior and quick verification commands.
 - Query Logs filtering docs now include the Domain Exclusion List behavior (UI-only, wildcard matching, local persistence).
-
-## [1.4.2] - 2026-03-06
-
-### Fixed
-
-- Configuration Sync: Primary + Secondaries mode no longer shows a blank UI — `targetNode` was always resolving to `undefined` in P+S mode, causing all diff/sync gates to fail silently.
-- Configuration Sync: sync completion now shows a success toast; previously the post-sync `reloadAdvancedBlocking()` re-render could cause the in-component success state to be lost before it rendered.
-
-### Changed
-
-- Configuration Sync: helper functions (`computeGroupDiffs`, `computeConfigDifferences`, `computeSyncPreview`) extracted to module scope so P+S mode can compute per-secondary diffs without duplicating logic.
-- Toast notifications: position adjusted from `1.5rem` to `2rem` from the top-right edge for a more comfortable placement.
-- Domain Groups (UX): added a `--pending-sibling` modifier style for binding chips whose partner binding in the same (group, action) pair has a pending change.
 
 ## [1.4.1] - 2026-02-18
 
@@ -326,8 +321,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.2...HEAD
-[1.4.2]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.1...v1.4.2
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.3.0...v1.3.1
