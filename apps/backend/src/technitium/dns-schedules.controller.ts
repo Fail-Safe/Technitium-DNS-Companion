@@ -88,26 +88,36 @@ export class DnsSchedulesController {
   }
 
   @Patch("rules/:scheduleId")
-  updateSchedule(
+  async updateSchedule(
     @Param("scheduleId") scheduleId: string,
     @Body() body: unknown,
-  ): DnsSchedule {
+  ): Promise<DnsSchedule> {
     const draft = this.parseDraft(body);
     const schedule = this.schedulesService.updateSchedule(scheduleId, draft);
     this.syncLinkedAlertRule(schedule);
+    if (!schedule.enabled) {
+      await this.evaluatorService.deactivateScheduleIfApplied(schedule).catch((e: unknown) => {
+        this.logger.warn(`Deactivation cleanup failed for "${schedule.name}": ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }
     return schedule;
   }
 
   @Patch("rules/:scheduleId/enabled")
-  setScheduleEnabled(
+  async setScheduleEnabled(
     @Param("scheduleId") scheduleId: string,
     @Body() body: { enabled?: unknown },
-  ): DnsSchedule {
+  ): Promise<DnsSchedule> {
     if (typeof body?.enabled !== "boolean") {
       throw new BadRequestException("enabled must be provided as a boolean.");
     }
     const schedule = this.schedulesService.setScheduleEnabled(scheduleId, body.enabled);
     this.syncLinkedAlertRule(schedule);
+    if (!schedule.enabled) {
+      await this.evaluatorService.deactivateScheduleIfApplied(schedule).catch((e: unknown) => {
+        this.logger.warn(`Deactivation cleanup failed for "${schedule.name}": ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }
     return schedule;
   }
 

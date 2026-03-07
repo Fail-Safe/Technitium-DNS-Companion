@@ -340,6 +340,39 @@ export class DnsSchedulesEvaluatorService
     }
   }
 
+  /**
+   * Immediately removes a schedule from every node it is currently applied to.
+   * Called when a schedule is disabled so Applied Blocking entries are cleaned
+   * up without waiting for the next evaluator tick. Best-effort per node —
+   * failures are logged as warnings and never thrown.
+   */
+  async deactivateScheduleIfApplied(schedule: DnsSchedule): Promise<void> {
+    const applied = this.schedulesService
+      .listAppliedState()
+      .filter((e) => e.scheduleId === schedule.id);
+    if (applied.length === 0) return;
+
+    this.logger.log(
+      `Deactivating disabled schedule "${schedule.name}" from ${applied.length} node(s).`,
+    );
+
+    for (const entry of applied) {
+      try {
+        await this.removeScheduleFromNode(schedule, entry.nodeId);
+        this.schedulesService.markRemoved(schedule.id, entry.nodeId);
+        if (schedule.flushCacheOnChange) {
+          await this.flushDomainsCache(schedule, entry.nodeId);
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Failed to deactivate schedule "${schedule.name}" on node "${entry.nodeId}": ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    this.syncAlertRuleWindow(schedule.id, schedule.name, false);
+  }
+
   private async removeScheduleFromNode(
     schedule: DnsSchedule,
     nodeId: string,
