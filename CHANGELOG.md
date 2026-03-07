@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- DNS Schedules: disabling a schedule that is currently active now immediately removes its Applied Blocking entries from all nodes instead of leaving them until the next evaluator tick. The linked alert rule window is also closed synchronously.
 - DNS Schedules: fixed a silent `RENAME COLUMN` migration failure on existing databases — a prior `replace_all` edit accidentally made the migration a self-rename no-op (`advanced_blocking_group_name → advanced_blocking_group_name`), causing all queries using the plural column name to fail at runtime with "no such column". The migration now correctly renames `advanced_blocking_group_name` to `advanced_blocking_group_names`.
 
 ### Testing
