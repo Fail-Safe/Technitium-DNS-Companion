@@ -174,6 +174,69 @@ export class DnsSchedulesEvaluatorService
       const now = new Date();
       const results: DnsScheduleApplicationResult[] = [];
 
+      // ── Cleanup pass: remove stale state for disabled/deleted schedules ──
+      // Handles schedules that were disabled while their window was open, or
+      // deleted after being applied, without waiting for a controller toggle.
+      {
+        const allSchedulesById = new Map(
+          this.schedulesService.listSchedules().map((s) => [s.id, s]),
+        );
+        const staleEntries = this.schedulesService
+          .listAppliedState()
+          .filter((e) => {
+            const s = allSchedulesById.get(e.scheduleId);
+            return !s || !s.enabled;
+          });
+
+        for (const entry of staleEntries) {
+          const schedule = allSchedulesById.get(entry.scheduleId);
+          if (!schedule) {
+            // Schedule deleted — clear state only, no AB entries to remove.
+            if (!options.dryRun) {
+              this.schedulesService.markRemoved(entry.scheduleId, entry.nodeId);
+            }
+            continue;
+          }
+          if (options.dryRun) {
+            results.push({
+              scheduleId: schedule.id,
+              scheduleName: schedule.name,
+              nodeId: entry.nodeId,
+              action: "skipped",
+              reason: "dry-run-would-remove-stale",
+            });
+            continue;
+          }
+          try {
+            await this.removeScheduleFromNode(schedule, entry.nodeId);
+            this.schedulesService.markRemoved(schedule.id, entry.nodeId);
+            if (schedule.flushCacheOnChange) {
+              await this.flushDomainsCache(schedule, entry.nodeId);
+            }
+            this.logger.log(
+              `Cleaned up stale entries for disabled schedule "${schedule.name}" from node "${entry.nodeId}".`,
+            );
+            results.push({
+              scheduleId: schedule.id,
+              scheduleName: schedule.name,
+              nodeId: entry.nodeId,
+              action: "removed",
+            });
+          } catch (error) {
+            this.logger.warn(
+              `Failed to clean up stale entries for disabled schedule "${schedule.name}" on node "${entry.nodeId}": ${error instanceof Error ? error.message : String(error)}`,
+            );
+            results.push({
+              scheduleId: schedule.id,
+              scheduleName: schedule.name,
+              nodeId: entry.nodeId,
+              action: "error",
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+
       for (const schedule of schedules) {
         const targetNodeIds =
           schedule.nodeIds.length > 0
