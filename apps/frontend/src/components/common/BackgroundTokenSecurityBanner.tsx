@@ -9,6 +9,8 @@ export type BackgroundPtrTokenValidationSummary = {
   username?: string;
   reason?: string;
   tooPrivilegedSections?: string[];
+  /** True when the failure was a transient connectivity error rather than a permission/security issue. */
+  transient?: boolean;
 };
 
 export function BackgroundTokenSecurityBanner({
@@ -19,7 +21,8 @@ export function BackgroundTokenSecurityBanner({
   const showUnsafeBackgroundTokenBanner =
     backgroundPtrToken?.configured === true &&
     backgroundPtrToken.validated === true &&
-    backgroundPtrToken.okForPtr === false;
+    backgroundPtrToken.okForPtr === false &&
+    backgroundPtrToken.transient !== true;
 
   const unsafeDetails =
     backgroundPtrToken?.reason ??

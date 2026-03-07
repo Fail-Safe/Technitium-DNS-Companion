@@ -1,12 +1,21 @@
 export type DnsScheduleAction = "block" | "allow";
+export type DnsScheduleTargetType = "advanced-blocking" | "built-in";
 
 export interface DnsScheduleDraft {
   name: string;
   enabled: boolean;
   /**
-   * Name of the Advanced Blocking group to target (case-sensitive).
+   * Targeting mode.
+   * - "advanced-blocking" (default): writes to an AB group on the node.
+   * - "built-in": writes to Technitium's server-wide blocked/allowed zone.
+   *   Notifications are not supported in this mode.
    */
-  advancedBlockingGroupName: string;
+  targetType: DnsScheduleTargetType;
+  /**
+   * Names of the Advanced Blocking groups to target (case-sensitive).
+   * At least one entry required when targetType is "advanced-blocking"; ignored otherwise.
+   */
+  advancedBlockingGroupNames: string[];
   /**
    * Whether to add entries to the `blocked` or `allowed` list of the target group
    * during the active window.
@@ -68,6 +77,18 @@ export interface DnsScheduleDraft {
    * Default 300 (5 minutes). 0 = no debounce (deliver every match).
    */
   notifyDebounceSeconds: number;
+  /**
+   * Optional free-text message appended to the top of alert emails for this
+   * schedule. Useful for adding context, e.g. "Bedtime rule — devices in Kids
+   * profile should not be online after 9 PM."
+   */
+  notifyMessage?: string;
+  /**
+   * When true and notifyMessage is set, the alert email body consists only of
+   * notifyMessage (no technical details). Intended for non-technical recipients.
+   * Default false.
+   */
+  notifyMessageOnly?: boolean;
 }
 
 export interface DnsSchedule extends DnsScheduleDraft {
@@ -98,6 +119,11 @@ export interface DnsScheduleTokenStatus {
    * null when not yet validated.
    */
   hasAppsModify: boolean | null;
+  /**
+   * Whether the token has Cache: Modify permission needed to flush DNS cache.
+   * null when not yet validated.
+   */
+  hasCacheModify: boolean | null;
 }
 
 export interface DnsScheduleEvaluatorStatus {

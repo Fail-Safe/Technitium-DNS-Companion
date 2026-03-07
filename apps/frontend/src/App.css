@@ -3748,7 +3748,7 @@ button.secondary:disabled,
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  align-items: center;
+  align-items: end;
 }
 
 .logs-page__mode-toggle {
@@ -12744,6 +12744,11 @@ button.danger:disabled {
   color: var(--color-text-tertiary);
 }
 
+.log-alerts__form-hint--warn {
+  color: var(--color-warning, #b45309);
+  font-style: normal;
+}
+
 .log-alerts__form-actions {
   display: flex;
   gap: 0.5rem;
@@ -12862,6 +12867,44 @@ button.danger:disabled {
   color: var(--color-text-primary);
 }
 
+.dns-schedules__toggle-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.dns-schedules__email-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.375rem;
+}
+
+.dns-schedules__email-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.dns-schedules__email-chip:hover:not(:disabled) {
+  background: var(--color-info-bg);
+  border-color: var(--color-info);
+  color: var(--color-info);
+}
+
+.dns-schedules__email-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .dns-schedules__applied-nodes {
   display: flex;
   align-items: center;
@@ -12957,6 +13000,35 @@ button.danger:disabled {
   display: flex;
   justify-content: center;
   padding: 0.25rem 0;
+}
+
+/* === DNS Schedules — mobile responsive fixes === */
+
+@media (max-width: 640px) {
+  /* Collapse the 2-column form grid to single-column */
+  .log-alerts__form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Make the run-result table scroll horizontally instead of blowing out the viewport */
+  .dns-schedules__run-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Hide the "Enabled / Disabled" text label next to the toggle icon so the
+     card action row stays on one line at narrow widths */
+  .dns-schedules__toggle-label {
+    display: none;
+  }
+
+  /* Stack the timezone radio options vertically */
+  .dns-schedules__tz-row {
+    flex-direction: column;
+  }
 }
 
 /* === CRITICAL: Mobile Tab Fix === */

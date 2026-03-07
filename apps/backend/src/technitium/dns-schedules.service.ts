@@ -20,7 +20,8 @@ type DnsScheduleRow = {
   id: string;
   name: string;
   enabled: number;
-  advanced_blocking_group_name: string;
+  target_type: string;
+  advanced_blocking_group_names: string;
   action: DnsScheduleDraft["action"];
   domain_entries_json: string;
   domain_group_names_json: string;
@@ -32,6 +33,8 @@ type DnsScheduleRow = {
   flush_cache_on_change: number;
   notify_emails_json: string;
   notify_debounce_seconds: number;
+  notify_message: string;
+  notify_message_only: number;
   created_at: string;
   updated_at: string;
 };
@@ -100,10 +103,10 @@ export class DnsSchedulesService implements OnModuleInit {
     this.ensureSchema();
     const rows = db
       .prepare(
-        `SELECT id, name, enabled, advanced_blocking_group_name, action,
+        `SELECT id, name, enabled, target_type, advanced_blocking_group_names, action,
                 domain_entries_json, domain_group_names_json, days_of_week_json, start_time, end_time,
                 timezone, node_ids_json, flush_cache_on_change,
-                notify_emails_json, notify_debounce_seconds, created_at, updated_at
+                notify_emails_json, notify_debounce_seconds, notify_message, notify_message_only, created_at, updated_at
          FROM dns_schedules
          ORDER BY updated_at DESC, created_at DESC`,
       )
@@ -121,17 +124,18 @@ export class DnsSchedulesService implements OnModuleInit {
     try {
       db.prepare(
         `INSERT INTO dns_schedules (
-           id, name, name_lc, enabled, advanced_blocking_group_name, action,
+           id, name, name_lc, enabled, target_type, advanced_blocking_group_names, action,
            domain_entries_json, domain_group_names_json, days_of_week_json, start_time, end_time,
            timezone, node_ids_json, flush_cache_on_change,
-           notify_emails_json, notify_debounce_seconds, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           notify_emails_json, notify_debounce_seconds, notify_message, notify_message_only, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         draft.name,
         nameLc,
         draft.enabled ? 1 : 0,
-        draft.advancedBlockingGroupName,
+        draft.targetType ?? "advanced-blocking",
+        JSON.stringify(draft.advancedBlockingGroupNames ?? []),
         draft.action,
         JSON.stringify(draft.domainEntries),
         JSON.stringify(draft.domainGroupNames ?? []),
@@ -143,6 +147,8 @@ export class DnsSchedulesService implements OnModuleInit {
         draft.flushCacheOnChange ? 1 : 0,
         JSON.stringify(draft.notifyEmails ?? []),
         draft.notifyDebounceSeconds ?? 300,
+        draft.notifyMessage?.trim() ?? "",
+        draft.notifyMessageOnly ? 1 : 0,
         now,
         now,
       );
@@ -167,18 +173,20 @@ export class DnsSchedulesService implements OnModuleInit {
         .prepare(
           `UPDATE dns_schedules
            SET name = ?, name_lc = ?, enabled = ?,
-               advanced_blocking_group_name = ?, action = ?,
+               target_type = ?, advanced_blocking_group_names = ?, action = ?,
                domain_entries_json = ?, domain_group_names_json = ?, days_of_week_json = ?,
                start_time = ?, end_time = ?, timezone = ?,
                node_ids_json = ?, flush_cache_on_change = ?,
-               notify_emails_json = ?, notify_debounce_seconds = ?, updated_at = ?
+               notify_emails_json = ?, notify_debounce_seconds = ?, notify_message = ?, notify_message_only = ?,
+               updated_at = ?
            WHERE id = ?`,
         )
         .run(
           draft.name,
           nameLc,
           draft.enabled ? 1 : 0,
-          draft.advancedBlockingGroupName,
+          draft.targetType ?? "advanced-blocking",
+          JSON.stringify(draft.advancedBlockingGroupNames ?? []),
           draft.action,
           JSON.stringify(draft.domainEntries),
           JSON.stringify(draft.domainGroupNames ?? []),
@@ -190,6 +198,8 @@ export class DnsSchedulesService implements OnModuleInit {
           draft.flushCacheOnChange ? 1 : 0,
           JSON.stringify(draft.notifyEmails ?? []),
           draft.notifyDebounceSeconds ?? 300,
+          draft.notifyMessage?.trim() ?? "",
+          draft.notifyMessageOnly ? 1 : 0,
           now,
           scheduleId,
         );
@@ -359,7 +369,8 @@ export class DnsSchedulesService implements OnModuleInit {
         name TEXT NOT NULL,
         name_lc TEXT NOT NULL UNIQUE,
         enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-        advanced_blocking_group_name TEXT NOT NULL,
+        target_type TEXT NOT NULL DEFAULT 'advanced-blocking',
+        advanced_blocking_group_names TEXT NOT NULL DEFAULT '[]',
         action TEXT NOT NULL CHECK (action IN ('block', 'allow')),
         domain_entries_json TEXT NOT NULL,
         domain_group_names_json TEXT NOT NULL DEFAULT '[]',
@@ -371,6 +382,8 @@ export class DnsSchedulesService implements OnModuleInit {
         flush_cache_on_change INTEGER NOT NULL DEFAULT 0,
         notify_emails_json TEXT NOT NULL DEFAULT '[]',
         notify_debounce_seconds INTEGER NOT NULL DEFAULT 300,
+        notify_message TEXT NOT NULL DEFAULT '',
+        notify_message_only INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -390,12 +403,19 @@ export class DnsSchedulesService implements OnModuleInit {
         value TEXT NOT NULL
       );
     `);
-    // Migrations for existing deployments — swallow errors when column already exists.
+    // Migrations for existing deployments — swallow errors when already applied.
     for (const migration of [
       `ALTER TABLE dns_schedules ADD COLUMN domain_group_names_json TEXT NOT NULL DEFAULT '[]'`,
       `ALTER TABLE dns_schedules ADD COLUMN flush_cache_on_change INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE dns_schedules ADD COLUMN notify_emails_json TEXT NOT NULL DEFAULT '[]'`,
       `ALTER TABLE dns_schedules ADD COLUMN notify_debounce_seconds INTEGER NOT NULL DEFAULT 300`,
+      `ALTER TABLE dns_schedules ADD COLUMN notify_message TEXT NOT NULL DEFAULT ''`,
+      `ALTER TABLE dns_schedules ADD COLUMN notify_message_only INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE dns_schedules ADD COLUMN target_type TEXT NOT NULL DEFAULT 'advanced-blocking'`,
+      // Rename single-group column to multi-group (SQLite 3.25+). No-op on fresh installs.
+      `ALTER TABLE dns_schedules RENAME COLUMN advanced_blocking_group_name TO advanced_blocking_group_names`,
+      // Convert plain string values to JSON arrays (idempotent — skips already-converted rows).
+      `UPDATE dns_schedules SET advanced_blocking_group_names = CASE WHEN advanced_blocking_group_names = '' THEN '[]' ELSE json_array(advanced_blocking_group_names) END WHERE advanced_blocking_group_names NOT LIKE '[%'`,
     ]) {
       try {
         db.exec(migration);
@@ -409,10 +429,10 @@ export class DnsSchedulesService implements OnModuleInit {
     const db = this.getDb();
     const row = db
       .prepare(
-        `SELECT id, name, enabled, advanced_blocking_group_name, action,
+        `SELECT id, name, enabled, target_type, advanced_blocking_group_names, action,
                 domain_entries_json, domain_group_names_json, days_of_week_json, start_time, end_time,
                 timezone, node_ids_json, flush_cache_on_change,
-                notify_emails_json, notify_debounce_seconds, created_at, updated_at
+                notify_emails_json, notify_debounce_seconds, notify_message, notify_message_only, created_at, updated_at
          FROM dns_schedules WHERE id = ?`,
       )
       .get(scheduleId) as DnsScheduleRow | undefined;
@@ -429,7 +449,9 @@ export class DnsSchedulesService implements OnModuleInit {
       id: row.id,
       name: row.name,
       enabled: row.enabled === 1,
-      advancedBlockingGroupName: row.advanced_blocking_group_name,
+      targetType:
+        row.target_type === "built-in" ? "built-in" : "advanced-blocking",
+      advancedBlockingGroupNames: this.parseJsonStringArray(row.advanced_blocking_group_names ?? "[]", "advancedBlockingGroupNames"),
       action: row.action,
       domainEntries: this.parseJsonStringArray(row.domain_entries_json, "domainEntries"),
       domainGroupNames: this.parseJsonStringArray(row.domain_group_names_json ?? "[]", "domainGroupNames"),
@@ -441,6 +463,8 @@ export class DnsSchedulesService implements OnModuleInit {
       flushCacheOnChange: (row.flush_cache_on_change ?? 0) === 1,
       notifyEmails: this.parseJsonStringArray(row.notify_emails_json ?? "[]", "notifyEmails"),
       notifyDebounceSeconds: row.notify_debounce_seconds ?? 300,
+      notifyMessage: row.notify_message || undefined,
+      notifyMessageOnly: (row.notify_message_only ?? 0) === 1,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -479,11 +503,18 @@ export class DnsSchedulesService implements OnModuleInit {
     if (draft.name.length > 120) {
       throw new BadRequestException("name cannot exceed 120 characters.");
     }
-    if (!draft.advancedBlockingGroupName?.trim()) {
-      throw new BadRequestException("advancedBlockingGroupName is required.");
-    }
-    if (draft.advancedBlockingGroupName.length > 200) {
-      throw new BadRequestException("advancedBlockingGroupName cannot exceed 200 characters.");
+    if (draft.targetType !== "built-in") {
+      if (!Array.isArray(draft.advancedBlockingGroupNames) || draft.advancedBlockingGroupNames.length === 0) {
+        throw new BadRequestException("At least one advancedBlockingGroupName is required.");
+      }
+      for (const g of draft.advancedBlockingGroupNames) {
+        if (!g.trim()) {
+          throw new BadRequestException("advancedBlockingGroupNames entries must be non-empty strings.");
+        }
+        if (g.length > 200) {
+          throw new BadRequestException("advancedBlockingGroupNames entry cannot exceed 200 characters.");
+        }
+      }
     }
     if (!["block", "allow"].includes(draft.action)) {
       throw new BadRequestException("action must be 'block' or 'allow'.");

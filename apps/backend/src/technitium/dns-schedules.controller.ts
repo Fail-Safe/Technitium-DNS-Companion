@@ -63,6 +63,12 @@ export class DnsSchedulesController {
     return this.technitiumService.getScheduleTokenStatus();
   }
 
+  @Post("token/revalidate")
+  revalidateToken(): DnsScheduleTokenStatus {
+    this.technitiumService.resetScheduleTokenValidation();
+    return this.technitiumService.getScheduleTokenStatus();
+  }
+
   @Get("storage/status")
   getStorageStatus(): DnsSchedulesStorageStatus {
     return this.schedulesService.getStatus();
@@ -173,12 +179,17 @@ export class DnsSchedulesController {
 
     const enabled = input.enabled !== false;
 
-    const advancedBlockingGroupName =
-      typeof input.advancedBlockingGroupName === "string"
-        ? input.advancedBlockingGroupName.trim()
-        : undefined;
-    if (!advancedBlockingGroupName) {
-      throw new BadRequestException("advancedBlockingGroupName is required.");
+    const targetType: DnsScheduleDraft["targetType"] =
+      input.targetType === "built-in" ? "built-in" : "advanced-blocking";
+
+    const advancedBlockingGroupNames = Array.isArray(input.advancedBlockingGroupNames)
+      ? (input.advancedBlockingGroupNames as unknown[])
+          .filter((v): v is string => typeof v === "string")
+          .map((v) => v.trim())
+          .filter((v) => v.length > 0)
+      : [];
+    if (targetType === "advanced-blocking" && advancedBlockingGroupNames.length === 0) {
+      throw new BadRequestException("advancedBlockingGroupNames must contain at least one group.");
     }
 
     const action =
@@ -232,12 +243,16 @@ export class DnsSchedulesController {
 
     const flushCacheOnChange = input.flushCacheOnChange === true;
 
-    const notifyEmails = Array.isArray(input.notifyEmails)
-      ? (input.notifyEmails as unknown[])
-          .filter((v): v is string => typeof v === "string")
-          .map((v) => v.trim())
-          .filter((v) => v.length > 0)
-      : [];
+    // Notifications are not supported in built-in mode — hard-blocked.
+    const notifyEmails =
+      targetType === "built-in"
+        ? []
+        : Array.isArray(input.notifyEmails)
+          ? (input.notifyEmails as unknown[])
+              .filter((v): v is string => typeof v === "string")
+              .map((v) => v.trim())
+              .filter((v) => v.length > 0)
+          : [];
 
     const notifyDebounceSecondsRaw = Number(input.notifyDebounceSeconds ?? 300);
     const notifyDebounceSeconds =
@@ -245,10 +260,21 @@ export class DnsSchedulesController {
         ? Math.round(notifyDebounceSecondsRaw)
         : 300;
 
+    const notifyMessageRaw = typeof input.notifyMessage === "string"
+      ? input.notifyMessage.trim()
+      : undefined;
+    const notifyMessage = notifyMessageRaw && targetType !== "built-in"
+      ? notifyMessageRaw
+      : undefined;
+
+    const notifyMessageOnly =
+      targetType !== "built-in" && !!notifyMessage && input.notifyMessageOnly === true;
+
     return {
       name,
       enabled,
-      advancedBlockingGroupName,
+      targetType,
+      advancedBlockingGroupNames,
       action: action as DnsScheduleDraft["action"],
       domainEntries,
       domainGroupNames,
@@ -260,6 +286,8 @@ export class DnsSchedulesController {
       flushCacheOnChange,
       notifyEmails,
       notifyDebounceSeconds,
+      notifyMessage,
+      notifyMessageOnly,
     };
   }
 
@@ -273,7 +301,10 @@ export class DnsSchedulesController {
    */
   private syncLinkedAlertRule(schedule: DnsSchedule): void {
     try {
-      if (schedule.notifyEmails.length === 0) {
+      if (
+        schedule.targetType === "built-in" ||
+        schedule.notifyEmails.length === 0
+      ) {
         this.deleteLinkedAlertRule(schedule.id);
         return;
       }
@@ -281,13 +312,16 @@ export class DnsSchedulesController {
       const ruleName = `__schedule:${schedule.id}__`;
       const draft: LogAlertRuleDraft = {
         name: ruleName,
-        enabled: schedule.enabled,
+        displayName: schedule.name,
+        notifyMessage: schedule.notifyMessage,
+        enabled: false, // Evaluator controls enabled state; rule activates only during the window
         outcomeMode: "blocked-only",
         domainPattern: "*",
         domainPatternType: "wildcard",
-        advancedBlockingGroupNames: [schedule.advancedBlockingGroupName],
+        advancedBlockingGroupNames: schedule.advancedBlockingGroupNames,
         debounceSeconds: schedule.notifyDebounceSeconds,
         emailRecipients: schedule.notifyEmails,
+        notifyMessageOnly: schedule.notifyMessageOnly,
       };
 
       const existing = this.logAlertsRulesService

@@ -15,6 +15,7 @@ import type {
   DnsScheduleEvaluatorStatus,
   RunDnsScheduleEvaluatorResponse,
 } from "./dns-schedules.types";
+import { LogAlertsRulesService } from "./log-alerts-rules.service";
 import { TechnitiumService } from "./technitium.service";
 
 @Injectable()
@@ -49,6 +50,7 @@ export class DnsSchedulesEvaluatorService
     private readonly advancedBlockingService: AdvancedBlockingService,
     private readonly technitiumService: TechnitiumService,
     private readonly domainGroupsService: DomainGroupsService,
+    private readonly logAlertsRulesService: LogAlertsRulesService,
   ) {}
 
   onModuleInit(): void {
@@ -187,6 +189,14 @@ export class DnsSchedulesEvaluatorService
           );
           results.push(result);
         }
+
+        if (!options.dryRun) {
+          this.syncAlertRuleWindow(
+            schedule.id,
+            schedule.name,
+            this.isWindowActive(schedule, now),
+          );
+        }
       }
 
       const applied = results.filter((r) => r.action === "applied").length;
@@ -254,8 +264,12 @@ export class DnsSchedulesEvaluatorService
       if (shouldBeActive) {
         await this.applyScheduleToNode(schedule, nodeId);
         this.schedulesService.markApplied(schedule.id, nodeId);
+        const modeDetail =
+          schedule.targetType === "built-in"
+            ? "mode=built-in"
+            : `groups=${schedule.advancedBlockingGroupNames.join(",")}`;
         this.logger.log(
-          `Applied schedule "${schedule.name}" to node "${nodeId}" (action=${schedule.action}, group=${schedule.advancedBlockingGroupName}).`,
+          `Applied schedule "${schedule.name}" to node "${nodeId}" (action=${schedule.action}, ${modeDetail}).`,
         );
         if (schedule.flushCacheOnChange) {
           await this.flushDomainsCache(schedule, nodeId);
@@ -319,6 +333,86 @@ export class DnsSchedulesEvaluatorService
     schedule: DnsSchedule,
     nodeId: string,
   ): Promise<void> {
+    if (schedule.targetType === "built-in") {
+      await this.applyBuiltInScheduleToNode(schedule, nodeId);
+    } else {
+      await this.applyAdvancedBlockingScheduleToNode(schedule, nodeId);
+    }
+  }
+
+  private async removeScheduleFromNode(
+    schedule: DnsSchedule,
+    nodeId: string,
+  ): Promise<void> {
+    if (schedule.targetType === "built-in") {
+      await this.removeBuiltInScheduleFromNode(schedule, nodeId);
+    } else {
+      await this.removeAdvancedBlockingScheduleFromNode(schedule, nodeId);
+    }
+  }
+
+  private async applyBuiltInScheduleToNode(
+    schedule: DnsSchedule,
+    nodeId: string,
+  ): Promise<void> {
+    const endpoint = schedule.action === "block" ? "blocked" : "allowed";
+    const resolvedEntries = this.resolveDomainEntries(schedule);
+    const errors: string[] = [];
+
+    for (const domain of resolvedEntries) {
+      try {
+        await this.technitiumService.executeAction(
+          nodeId,
+          { method: "GET", url: `/api/${endpoint}/add`, params: { domain } },
+          { authMode: "schedule" },
+        );
+      } catch (error) {
+        errors.push(
+          `${domain}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        );
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new Error(
+        `Failed to add ${errors.length} domain(s) to built-in ${endpoint} list: ${errors.slice(0, 3).join("; ")}`,
+      );
+    }
+  }
+
+  private async removeBuiltInScheduleFromNode(
+    schedule: DnsSchedule,
+    nodeId: string,
+  ): Promise<void> {
+    const endpoint = schedule.action === "block" ? "blocked" : "allowed";
+    const resolvedEntries = this.resolveDomainEntries(schedule);
+    const errors: string[] = [];
+
+    for (const domain of resolvedEntries) {
+      try {
+        await this.technitiumService.executeAction(
+          nodeId,
+          { method: "GET", url: `/api/${endpoint}/delete`, params: { domain } },
+          { authMode: "schedule" },
+        );
+      } catch (error) {
+        errors.push(
+          `${domain}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        );
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new Error(
+        `Failed to remove ${errors.length} domain(s) from built-in ${endpoint} list: ${errors.slice(0, 3).join("; ")}`,
+      );
+    }
+  }
+
+  private async applyAdvancedBlockingScheduleToNode(
+    schedule: DnsSchedule,
+    nodeId: string,
+  ): Promise<void> {
     const snapshot = await this.advancedBlockingService.getSnapshotWithAuth(
       nodeId,
       "schedule",
@@ -330,41 +424,36 @@ export class DnsSchedulesEvaluatorService
       );
     }
 
-    const groupIdx = config.groups.findIndex(
-      (g) => g.name === schedule.advancedBlockingGroupName,
-    );
-    if (groupIdx === -1) {
-      throw new Error(
-        `Advanced Blocking group "${schedule.advancedBlockingGroupName}" not found on node "${nodeId}".`,
-      );
-    }
-
-    const group = config.groups[groupIdx];
-    if (!group) {
-      throw new Error(`Group index out of bounds for node "${nodeId}".`);
-    }
-
+    const resolvedEntries = this.resolveDomainEntries(schedule);
     const listKey: keyof Pick<AdvancedBlockingGroup, "blocked" | "allowed"> =
       schedule.action === "block" ? "blocked" : "allowed";
 
-    const currentEntries = group[listKey] ?? [];
-    const resolvedEntries = this.resolveDomainEntries(schedule);
-    const toAdd = resolvedEntries.filter(
-      (entry) => !currentEntries.includes(entry),
-    );
+    const updatedGroups = [...config.groups];
+    let changed = false;
 
-    if (toAdd.length === 0) {
-      // Already all present — still mark as applied so we track ownership
-      return;
+    for (const groupName of schedule.advancedBlockingGroupNames) {
+      const groupIdx = updatedGroups.findIndex((g) => g.name === groupName);
+      if (groupIdx === -1) {
+        throw new Error(
+          `Advanced Blocking group "${groupName}" not found on node "${nodeId}".`,
+        );
+      }
+      const group = updatedGroups[groupIdx]!;
+      const currentEntries = group[listKey] ?? [];
+      const toAdd = resolvedEntries.filter((e) => !currentEntries.includes(e));
+      if (toAdd.length > 0) {
+        updatedGroups[groupIdx] = {
+          ...group,
+          [listKey]: [...currentEntries, ...toAdd],
+        };
+        changed = true;
+      }
     }
 
-    const updatedGroup: AdvancedBlockingGroup = {
-      ...group,
-      [listKey]: [...currentEntries, ...toAdd],
-    };
-
-    const updatedGroups = [...config.groups];
-    updatedGroups[groupIdx] = updatedGroup;
+    if (!changed) {
+      // Already all present in all groups — still mark as applied so we track ownership
+      return;
+    }
 
     await this.advancedBlockingService.setConfigWithAuth(
       nodeId,
@@ -373,7 +462,7 @@ export class DnsSchedulesEvaluatorService
     );
   }
 
-  private async removeScheduleFromNode(
+  private async removeAdvancedBlockingScheduleFromNode(
     schedule: DnsSchedule,
     nodeId: string,
   ): Promise<void> {
@@ -387,38 +476,29 @@ export class DnsSchedulesEvaluatorService
       return;
     }
 
-    const groupIdx = config.groups.findIndex(
-      (g) => g.name === schedule.advancedBlockingGroupName,
-    );
-    if (groupIdx === -1) {
-      // Group gone — treat as removed
-      return;
-    }
-
-    const group = config.groups[groupIdx];
-    if (!group) return;
-
+    const scheduleEntrySet = new Set(this.resolveDomainEntries(schedule));
     const listKey: keyof Pick<AdvancedBlockingGroup, "blocked" | "allowed"> =
       schedule.action === "block" ? "blocked" : "allowed";
 
-    const scheduleEntrySet = new Set(this.resolveDomainEntries(schedule));
-    const currentEntries = group[listKey] ?? [];
-    const remainingEntries = currentEntries.filter(
-      (entry) => !scheduleEntrySet.has(entry),
-    );
+    const updatedGroups = [...config.groups];
+    let changed = false;
 
-    if (remainingEntries.length === currentEntries.length) {
-      // Nothing to remove — entries were already gone
-      return;
+    for (const groupName of schedule.advancedBlockingGroupNames) {
+      const groupIdx = updatedGroups.findIndex((g) => g.name === groupName);
+      if (groupIdx === -1) continue; // Group gone — treat as removed for this group
+
+      const group = updatedGroups[groupIdx]!;
+      const currentEntries = group[listKey] ?? [];
+      const remainingEntries = currentEntries.filter(
+        (e) => !scheduleEntrySet.has(e),
+      );
+      if (remainingEntries.length < currentEntries.length) {
+        updatedGroups[groupIdx] = { ...group, [listKey]: remainingEntries };
+        changed = true;
+      }
     }
 
-    const updatedGroup: AdvancedBlockingGroup = {
-      ...group,
-      [listKey]: remainingEntries,
-    };
-
-    const updatedGroups = [...config.groups];
-    updatedGroups[groupIdx] = updatedGroup;
+    if (!changed) return;
 
     await this.advancedBlockingService.setConfigWithAuth(
       nodeId,
@@ -464,6 +544,40 @@ export class DnsSchedulesEvaluatorService
     } else {
       this.logger.log(
         `Cache flushed for ${flushed} domain(s) after schedule "${schedule.name}" change on node "${nodeId}".`,
+      );
+    }
+  }
+
+  /**
+   * Enables or disables the linked Log Alert rule for the schedule to match
+   * the current window state. This is the authoritative toggle — the rule is
+   * only enabled while the window is open, preventing false alerts from
+   * domains that are permanently blocked in the same AB group.
+   * Best-effort: failures are logged as warnings and never propagate.
+   */
+  private syncAlertRuleWindow(
+    scheduleId: string,
+    scheduleName: string,
+    shouldBeActive: boolean,
+  ): void {
+    try {
+      const ruleName = `__schedule:${scheduleId}__`;
+      const existing = this.logAlertsRulesService
+        .listRules()
+        .find((r) => r.name === ruleName);
+      if (!existing) return; // No linked rule — notifyEmails is empty
+      if (existing.enabled === shouldBeActive) return; // Already correct
+      this.logAlertsRulesService.updateRule(existing.id, {
+        ...existing,
+        enabled: shouldBeActive,
+      });
+      this.logger.log(
+        `${shouldBeActive ? "Enabled" : "Disabled"} linked alert rule for schedule "${scheduleName}".`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to ${shouldBeActive ? "enable" : "disable"} linked alert rule for schedule "${scheduleName}": ` +
+          `${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

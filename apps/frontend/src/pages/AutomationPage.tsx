@@ -4,6 +4,7 @@ import {
   faChevronDown,
   faChevronUp,
   faCircleInfo,
+  faCopy,
   faExclamationTriangle,
   faPlay,
   faPlus,
@@ -15,6 +16,7 @@ import {
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppInput, AppTextarea } from "../components/common/AppInput";
+import { ConfirmModal } from "../components/common/ConfirmModal";
 import { apiFetch } from "../config";
 import { useTechnitiumState } from "../context/useTechnitiumState";
 import { useToast } from "../context/useToast";
@@ -49,13 +51,16 @@ const BROWSER_TIMEZONE =
 const DEFAULT_DRAFT: DnsScheduleDraft = {
   name: "",
   enabled: true,
-  advancedBlockingGroupName: "",
+  targetType: "advanced-blocking",
+  advancedBlockingGroupNames: [],
   action: "block",
   domainEntries: [],
   domainGroupNames: [],
   flushCacheOnChange: false,
   notifyEmails: [],
   notifyDebounceSeconds: 300,
+  notifyMessage: undefined,
+  notifyMessageOnly: undefined,
   daysOfWeek: [],
   startTime: "22:00",
   endTime: "06:00",
@@ -128,9 +133,13 @@ function formatTimeWindow(startTime: string, endTime: string): string {
 function TokenStatusCard({
   tokenStatus,
   storageStatus,
+  onRevalidate,
+  revalidating,
 }: {
   tokenStatus: DnsScheduleTokenStatus | null;
   storageStatus: DnsSchedulesStorageStatus | null;
+  onRevalidate?: () => void;
+  revalidating?: boolean;
 }) {
   if (!tokenStatus && !storageStatus) return null;
 
@@ -203,6 +212,20 @@ function TokenStatusCard({
               Add <code>TECHNITIUM_SCHEDULE_TOKEN=&lt;your-token&gt;</code> to
               your <code>.env</code> file, then restart the container.
             </p>
+            {onRevalidate && tokenStatus?.configured && (
+              <p className="log-alerts__status-card-hint">
+                <strong>Already configured?</strong> If you recently updated
+                permissions or replaced the token, click{" "}
+                <button
+                  className="btn btn--secondary btn--sm"
+                  onClick={onRevalidate}
+                  disabled={revalidating}
+                >
+                  {revalidating ? "Re-validating…" : "Re-validate token"}
+                </button>{" "}
+                to refresh the validation result without restarting the server.
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -454,6 +477,8 @@ interface ScheduleFormProps {
   availableAbGroups: string[];
   availableDomainGroups: DomainGroup[];
   smtpStatus?: LogAlertsSmtpStatus | null;
+  knownEmails?: string[];
+  tokenStatus?: DnsScheduleTokenStatus | null;
 }
 
 function ScheduleForm({
@@ -467,8 +492,11 @@ function ScheduleForm({
   availableAbGroups,
   availableDomainGroups,
   smtpStatus,
+  knownEmails,
+  tokenStatus,
 }: ScheduleFormProps) {
   const domainEntriesText = draft.domainEntries.join("\n");
+  const [emailText, setEmailText] = useState(() => draft.notifyEmails.join("\n"));
 
   const handleDomainEntriesChange = (text: string) => {
     const entries = text
@@ -522,7 +550,46 @@ function ScheduleForm({
           </button>
         </div>
 
-        {/* AB Group */}
+        {/* Blocking target */}
+        <div className="log-alerts__form-field log-alerts__form-field--wide">
+          <label className="log-alerts__form-label">Blocking target</label>
+          <div className="log-alerts__radio-group">
+            <label className="log-alerts__radio-label">
+              <input
+                type="radio"
+                name="schedule-target-type"
+                value="advanced-blocking"
+                checked={draft.targetType !== "built-in"}
+                disabled={submitting}
+                onChange={() =>
+                  onChange({ ...draft, targetType: "advanced-blocking" })
+                }
+              />
+              Advanced Blocking group
+            </label>
+            <label className="log-alerts__radio-label">
+              <input
+                type="radio"
+                name="schedule-target-type"
+                value="built-in"
+                checked={draft.targetType === "built-in"}
+                disabled={submitting}
+                onChange={() =>
+                  onChange({
+                    ...draft,
+                    targetType: "built-in",
+                    advancedBlockingGroupNames: [],
+                    notifyEmails: [],
+                  })
+                }
+              />
+              Built-in blocking (all clients)
+            </label>
+          </div>
+        </div>
+
+        {/* AB Group — only for advanced-blocking mode */}
+        {draft.targetType !== "built-in" && (
         <div className="log-alerts__form-field log-alerts__form-field--wide">
           <label className="log-alerts__form-label">
             Advanced Blocking group
@@ -535,7 +602,7 @@ function ScheduleForm({
           {availableAbGroups.length > 0 ? (
             <div className="logs-page__ab-group-pills">
               {availableAbGroups.map((name) => {
-                const selected = draft.advancedBlockingGroupName === name;
+                const selected = draft.advancedBlockingGroupNames.includes(name);
                 return (
                   <label
                     key={name}
@@ -543,16 +610,14 @@ function ScheduleForm({
                   >
                     <input
                       className="logs-page__ab-group-pill__checkbox"
-                      type="radio"
-                      name="schedule-ab-group"
+                      type="checkbox"
                       checked={selected}
                       disabled={submitting}
-                      onChange={() =>
-                        onChange({ ...draft, advancedBlockingGroupName: name })
-                      }
-                      onClick={() => {
-                        if (selected)
-                          onChange({ ...draft, advancedBlockingGroupName: "" });
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? [...draft.advancedBlockingGroupNames, name]
+                          : draft.advancedBlockingGroupNames.filter((g) => g !== name);
+                        onChange({ ...draft, advancedBlockingGroupNames: next });
                       }}
                     />
                     <span className="logs-page__ab-group-pill__label">
@@ -564,15 +629,22 @@ function ScheduleForm({
             </div>
           ) : (
             <AppInput
-              value={draft.advancedBlockingGroupName}
+              value={draft.advancedBlockingGroupNames.join(", ")}
               onChange={(e) =>
-                onChange({ ...draft, advancedBlockingGroupName: e.target.value })
+                onChange({
+                  ...draft,
+                  advancedBlockingGroupNames: e.target.value
+                    .split(",")
+                    .map((v) => v.trim())
+                    .filter((v) => v.length > 0),
+                })
               }
-              placeholder="e.g. Kids"
+              placeholder="e.g. Kids, Parents"
               disabled={submitting}
             />
           )}
         </div>
+        )}
 
         {/* Action */}
         <div className="log-alerts__form-field">
@@ -754,31 +826,39 @@ function ScheduleForm({
             />
             <span>Flush DNS cache when schedule activates or deactivates</span>
           </label>
-          {draft.flushCacheOnChange && (
+          {draft.flushCacheOnChange && tokenStatus?.hasCacheModify !== true && (
             <p className="log-alerts__form-hint">
-              Requires <strong>DNS Server: Modify</strong> permission on the
-              companion-scheduler user (Administration → Permissions → DNS
-              Server → Edit Permissions). Flush is best-effort — schedule
-              evaluation succeeds even if the flush fails.
+              Requires <strong>Cache: Modify</strong> permission on the
+              companion-scheduler user (Administration → Permissions → Cache →
+              Edit Permissions). Flush is best-effort — schedule evaluation
+              succeeds even if the flush fails.
+            </p>
+          )}
+          {draft.flushCacheOnChange && tokenStatus?.hasCacheModify === false && (
+            <p className="log-alerts__form-hint log-alerts__form-hint--warn">
+              The companion-scheduler token does not have Cache: Modify
+              permission. Cache flush will be skipped.
             </p>
           )}
         </div>
 
-        {/* Email notifications */}
-        <div className="log-alerts__form-field log-alerts__form-field--wide">
+        {/* Email notifications — not available in built-in mode */}
+        {draft.targetType !== "built-in" && <div className="log-alerts__form-field log-alerts__form-field--wide">
           <label className="log-alerts__form-label">
             Email notifications{" "}
             <span className="log-alerts__form-hint">
-              (alerted when blocked domains are queried — one address per line)
+              (alerted when blocked domains are queried — one address per line or comma-separated)
             </span>
           </label>
           <AppTextarea
-            value={draft.notifyEmails.join("\n")}
-            onChange={(e) => {
-              const emails = e.target.value
-                .split("\n")
+            value={emailText}
+            onChange={(e) => setEmailText(e.target.value)}
+            onBlur={() => {
+              const emails = emailText
+                .split(/[\n,]/)
                 .map((l) => l.trim())
                 .filter((l) => l.length > 0);
+              setEmailText(emails.join("\n"));
               onChange({ ...draft, notifyEmails: emails });
             }}
             placeholder={"admin@example.com\nparent@example.com"}
@@ -786,6 +866,31 @@ function ScheduleForm({
             disabled={submitting}
             className="log-alerts__domain-textarea"
           />
+          {(() => {
+            const suggestions = (knownEmails ?? []).filter(
+              (e) => !draft.notifyEmails.includes(e),
+            );
+            return suggestions.length > 0 ? (
+              <div className="dns-schedules__email-suggestions">
+                <span className="log-alerts__form-hint">Previously used:</span>
+                {suggestions.map((email) => (
+                  <button
+                    key={email}
+                    type="button"
+                    className="dns-schedules__email-chip"
+                    onClick={() => {
+                      const newEmails = [...draft.notifyEmails, email];
+                      setEmailText(newEmails.join("\n"));
+                      onChange({ ...draft, notifyEmails: newEmails });
+                    }}
+                    disabled={submitting}
+                  >
+                    + {email}
+                  </button>
+                ))}
+              </div>
+            ) : null;
+          })()}
           {draft.notifyEmails.length > 0 && smtpStatus && !smtpStatus.configured && (
             <p className="log-alerts__form-hint" style={{ color: "var(--color-warn)" }}>
               SMTP is not configured — emails will not be delivered. Add{" "}
@@ -793,10 +898,10 @@ function ScheduleForm({
               <code>.env</code> to enable email delivery.
             </p>
           )}
-        </div>
+        </div>}
 
-        {/* Debounce (only when emails are set) */}
-        {draft.notifyEmails.length > 0 && (
+        {/* Debounce (only when emails are set and not built-in mode) */}
+        {draft.targetType !== "built-in" && draft.notifyEmails.length > 0 && (
           <div className="log-alerts__form-field">
             <label className="log-alerts__form-label">
               Alert debounce{" "}
@@ -820,6 +925,51 @@ function ScheduleForm({
               Minimum time between repeat emails for this schedule&apos;s alert
               rule.
             </p>
+          </div>
+        )}
+
+        {/* Custom email message (only when emails are set and not built-in mode) */}
+        {draft.targetType !== "built-in" && draft.notifyEmails.length > 0 && (
+          <div className="log-alerts__form-field log-alerts__form-field--wide">
+            <label className="log-alerts__form-label">
+              Email message{" "}
+              <span className="log-alerts__form-hint">(optional)</span>
+            </label>
+            <AppTextarea
+              value={draft.notifyMessage ?? ""}
+              onChange={(e) =>
+                onChange({
+                  ...draft,
+                  notifyMessage: e.target.value || undefined,
+                  notifyMessageOnly: e.target.value ? draft.notifyMessageOnly : false,
+                })
+              }
+              placeholder="Optional note to include at the top of alert emails, e.g. 'Bedtime rule — kids should be offline.'"
+              rows={3}
+              disabled={submitting}
+            />
+          </div>
+        )}
+
+        {/* Message-only mode (only when a custom message is set) */}
+        {draft.targetType !== "built-in" && draft.notifyEmails.length > 0 && !!draft.notifyMessage && (
+          <div className="log-alerts__form-field">
+            <label className="dns-schedules__dow-label">
+              <input
+                type="checkbox"
+                checked={!!draft.notifyMessageOnly}
+                onChange={(e) =>
+                  onChange({ ...draft, notifyMessageOnly: e.target.checked })
+                }
+                disabled={submitting}
+              />
+              <span>
+                Send custom message only{" "}
+                <span className="log-alerts__form-hint">
+                  (replaces technical details — better for non-technical recipients)
+                </span>
+              </span>
+            </label>
           </div>
         )}
 
@@ -883,7 +1033,11 @@ export function AutomationPage() {
   } = useTechnitiumState();
   const { pushToast } = useToast();
 
-  const availableNodeIds = nodes.map((n) => n.id);
+  // Only standalone nodes are individually targetable. In a native cluster,
+  // writes go through the primary only — secondary nodes are not valid targets.
+  const availableNodeIds = nodes
+    .filter((n) => !n.clusterState?.type || n.clusterState.type === "Standalone")
+    .map((n) => n.id);
 
   // ── AB group picker ──────────────────────────────────────────────────────
 
@@ -930,6 +1084,9 @@ export function AutomationPage() {
   const [evaluatorStatus, setEvaluatorStatus] =
     useState<DnsScheduleEvaluatorStatus | null>(null);
   const [schedules, setSchedules] = useState<DnsSchedule[]>([]);
+  const knownEmails = Array.from(
+    new Set(schedules.flatMap((s) => s.notifyEmails)),
+  ).sort();
   const [appliedState, setAppliedState] = useState<DnsScheduleStateEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -944,6 +1101,8 @@ export function AutomationPage() {
   // Action state
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [cloningId, setCloningId] = useState<string | null>(null);
+  const [deleteConfirmSchedule, setDeleteConfirmSchedule] = useState<DnsSchedule | null>(null);
   const [evaluatorToggling, setEvaluatorToggling] = useState(false);
   const [evaluatorRunning, setEvaluatorRunning] = useState(false);
   const [lastRunResult, setLastRunResult] =
@@ -1010,6 +1169,28 @@ export function AutomationPage() {
     };
   }, [loadAll]);
 
+  const [revalidatingToken, setRevalidatingToken] = useState(false);
+
+  const handleRevalidateToken = useCallback(async () => {
+    setRevalidatingToken(true);
+    try {
+      await apiFetch("/nodes/dns-schedules/token/revalidate", { method: "POST" });
+      // Poll until validation completes (valid transitions away from null)
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        const res = await apiFetch("/nodes/dns-schedules/token/status");
+        if (!res.ok || !mountedRef.current) break;
+        const status = (await res.json()) as DnsScheduleTokenStatus;
+        if (mountedRef.current) setTokenStatus(status);
+        if (status.valid !== null) break;
+      }
+    } catch {
+      // ignore — stale UI is acceptable
+    } finally {
+      if (mountedRef.current) setRevalidatingToken(false);
+    }
+  }, []);
+
   const refreshEvaluatorStatus = useCallback(async () => {
     try {
       const res = await apiFetch("/nodes/dns-schedules/evaluator/status");
@@ -1043,13 +1224,16 @@ export function AutomationPage() {
     setFormDraft({
       name: schedule.name,
       enabled: schedule.enabled,
-      advancedBlockingGroupName: schedule.advancedBlockingGroupName,
+      targetType: schedule.targetType ?? "advanced-blocking",
+      advancedBlockingGroupNames: schedule.advancedBlockingGroupNames ?? [],
       action: schedule.action,
       domainEntries: schedule.domainEntries,
       domainGroupNames: schedule.domainGroupNames ?? [],
       flushCacheOnChange: schedule.flushCacheOnChange ?? false,
       notifyEmails: schedule.notifyEmails ?? [],
       notifyDebounceSeconds: schedule.notifyDebounceSeconds ?? 300,
+      notifyMessage: schedule.notifyMessage,
+      notifyMessageOnly: schedule.notifyMessageOnly,
       daysOfWeek: schedule.daysOfWeek,
       startTime: schedule.startTime,
       endTime: schedule.endTime,
@@ -1073,9 +1257,12 @@ export function AutomationPage() {
       pushToast({ message: "Schedule name is required.", tone: "info", timeout: 4000 });
       return;
     }
-    if (!formDraft.advancedBlockingGroupName.trim()) {
+    if (
+      formDraft.targetType !== "built-in" &&
+      formDraft.advancedBlockingGroupNames.length === 0
+    ) {
       pushToast({
-        message: "Advanced Blocking group name is required.",
+        message: "At least one Advanced Blocking group is required.",
         tone: "info",
         timeout: 4000,
       });
@@ -1180,15 +1367,14 @@ export function AutomationPage() {
 
   // ── Delete ────────────────────────────────────────────────────────────────
 
-  const handleDeleteSchedule = async (schedule: DnsSchedule) => {
-    if (
-      !window.confirm(
-        `Delete schedule "${schedule.name}"? This will not immediately remove applied entries from Advanced Blocking — wait for the evaluator to deactivate them, or remove them manually.`,
-      )
-    ) {
-      return;
-    }
+  const handleDeleteSchedule = (schedule: DnsSchedule) => {
+    setDeleteConfirmSchedule(schedule);
+  };
 
+  const executeDeleteSchedule = async () => {
+    const schedule = deleteConfirmSchedule;
+    if (!schedule) return;
+    setDeleteConfirmSchedule(null);
     setDeletingId(schedule.id);
     try {
       const res = await apiFetch(`/nodes/dns-schedules/rules/${schedule.id}`, {
@@ -1218,6 +1404,58 @@ export function AutomationPage() {
       });
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  // ── Clone ──────────────────────────────────────────────────────────────────
+
+  const handleCloneSchedule = async (schedule: DnsSchedule) => {
+    setCloningId(schedule.id);
+    try {
+      const draft: DnsScheduleDraft = {
+        name: `Copy of ${schedule.name}`,
+        enabled: false,
+        targetType: schedule.targetType,
+        advancedBlockingGroupNames: [...schedule.advancedBlockingGroupNames],
+        action: schedule.action,
+        domainEntries: [...schedule.domainEntries],
+        domainGroupNames: [...(schedule.domainGroupNames ?? [])],
+        daysOfWeek: [...schedule.daysOfWeek],
+        startTime: schedule.startTime,
+        endTime: schedule.endTime,
+        timezone: schedule.timezone,
+        nodeIds: [...schedule.nodeIds],
+        flushCacheOnChange: schedule.flushCacheOnChange,
+        notifyEmails: [...(schedule.notifyEmails ?? [])],
+        notifyDebounceSeconds: schedule.notifyDebounceSeconds,
+        notifyMessage: schedule.notifyMessage,
+        notifyMessageOnly: schedule.notifyMessageOnly,
+      };
+      const res = await apiFetch("/nodes/dns-schedules/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      if (!res.ok) {
+        const msg = await readApiErrorMessage(res, "Clone failed.");
+        throw new Error(msg);
+      }
+      const cloned = (await res.json()) as DnsSchedule;
+      setSchedules((prev) => [cloned, ...prev]);
+      handleEditSchedule(cloned);
+      pushToast({
+        message: `Cloned as "${cloned.name}". Rename and save to keep changes.`,
+        tone: "success",
+        timeout: 4000,
+      });
+    } catch (e) {
+      pushToast({
+        message: e instanceof Error ? e.message : "Clone failed.",
+        tone: "error",
+        timeout: 4000,
+      });
+    } finally {
+      setCloningId(null);
     }
   };
 
@@ -1337,7 +1575,12 @@ export function AutomationPage() {
         </div>
       )}
 
-      <TokenStatusCard tokenStatus={tokenStatus} storageStatus={storageStatus} />
+      <TokenStatusCard
+        tokenStatus={tokenStatus}
+        storageStatus={storageStatus}
+        onRevalidate={() => void handleRevalidateToken()}
+        revalidating={revalidatingToken}
+      />
 
       {/* Evaluator panel */}
       <div className="log-alerts__evaluator-card">
@@ -1475,6 +1718,8 @@ export function AutomationPage() {
             availableAbGroups={availableAbGroups}
             availableDomainGroups={availableDomainGroups}
             smtpStatus={smtpStatus}
+            knownEmails={knownEmails}
+            tokenStatus={tokenStatus}
           />
         </div>
       )}
@@ -1520,7 +1765,10 @@ export function AutomationPage() {
                     </span>
                   )}
                   <span className="log-alerts__rule-meta">
-                    {schedule.advancedBlockingGroupName} &middot;{" "}
+                    {schedule.targetType === "built-in"
+                      ? "Built-in"
+                      : (schedule.advancedBlockingGroupNames ?? []).join(", ") || "—"}{" "}
+                    &middot;{" "}
                     {schedule.action === "block" ? "Block" : "Allow"} &middot;{" "}
                     {formatDaysOfWeek(schedule.daysOfWeek)} &middot;{" "}
                     {formatTimeWindow(schedule.startTime, schedule.endTime)} &middot;{" "}
@@ -1545,7 +1793,7 @@ export function AutomationPage() {
                     className={`log-alerts__toggle-btn log-alerts__toggle-btn--sm ${schedule.enabled ? "log-alerts__toggle-btn--on" : "log-alerts__toggle-btn--off"}`}
                     onClick={() => void handleToggleEnabled(schedule)}
                     disabled={togglingId === schedule.id}
-                    title={schedule.enabled ? "Disable" : "Enable"}
+                    title={schedule.enabled ? "Disable schedule" : "Enable schedule"}
                   >
                     <FontAwesomeIcon
                       icon={
@@ -1556,7 +1804,14 @@ export function AutomationPage() {
                             : faToggleOff
                       }
                       className={togglingId === schedule.id ? "fa-spin" : ""}
-                    />
+                    />{" "}
+                    <span className="dns-schedules__toggle-label">
+                      {togglingId === schedule.id
+                        ? ""
+                        : schedule.enabled
+                          ? "Enabled"
+                          : "Disabled"}
+                    </span>
                   </button>
 
                   <button
@@ -1575,7 +1830,20 @@ export function AutomationPage() {
 
                   <button
                     type="button"
-                    className="btn btn--ghost btn--sm btn--danger"
+                    className="btn btn--ghost btn--sm"
+                    onClick={() => void handleCloneSchedule(schedule)}
+                    disabled={cloningId === schedule.id}
+                    title="Clone schedule"
+                  >
+                    <FontAwesomeIcon
+                      icon={cloningId === schedule.id ? faRotate : faCopy}
+                      className={cloningId === schedule.id ? "fa-spin" : ""}
+                    />
+                  </button>
+
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
                     onClick={() => void handleDeleteSchedule(schedule)}
                     disabled={deletingId === schedule.id}
                     title="Delete schedule"
@@ -1613,11 +1881,15 @@ export function AutomationPage() {
                 <div className="dns-schedules__rule-detail">
                   <div className="dns-schedules__detail-grid">
                     <div>
-                      <strong>Group:</strong> {schedule.advancedBlockingGroupName}
+                      {schedule.targetType === "built-in" ? (
+                        <><strong>Target:</strong> Built-in blocking (all clients)</>
+                      ) : (
+                        <><strong>Group{(schedule.advancedBlockingGroupNames?.length ?? 0) > 1 ? "s" : ""}:</strong> {(schedule.advancedBlockingGroupNames ?? []).join(", ") || "—"}</>
+                      )}
                     </div>
                     <div>
                       <strong>Action:</strong>{" "}
-                      {schedule.action === "block" ? "Add to blocked list" : "Add to allowed list"}
+                      {schedule.action === "block" ? "Block" : "Allow"}
                     </div>
                     <div>
                       <strong>Days:</strong> {formatDaysOfWeek(schedule.daysOfWeek)}
@@ -1639,14 +1911,27 @@ export function AutomationPage() {
                       <strong>Cache flush:</strong>{" "}
                       {schedule.flushCacheOnChange ? "On change" : "Disabled"}
                     </div>
-                    {(schedule.notifyEmails?.length ?? 0) > 0 && (
+                    <div>
+                      <strong>Notifications:</strong>{" "}
+                      {(schedule.notifyEmails?.length ?? 0) > 0 ? (
+                        <>
+                          {schedule.notifyEmails.join(", ")}{" "}
+                          <span className="log-alerts__rule-meta">
+                            (debounce:{" "}
+                            {Math.round(schedule.notifyDebounceSeconds / 60)} min)
+                          </span>
+                        </>
+                      ) : (
+                        <span className="log-alerts__rule-meta">None</span>
+                      )}
+                    </div>
+                    {schedule.notifyMessage && (
                       <div>
-                        <strong>Email alerts:</strong>{" "}
-                        {schedule.notifyEmails.join(", ")}{" "}
-                        <span className="log-alerts__rule-meta">
-                          (debounce:{" "}
-                          {Math.round(schedule.notifyDebounceSeconds / 60)} min)
-                        </span>
+                        <strong>Email message:</strong>{" "}
+                        <span className="log-alerts__rule-meta">{schedule.notifyMessage}</span>
+                        {schedule.notifyMessageOnly && (
+                          <span className="log-alerts__rule-meta"> (message only)</span>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1694,12 +1979,24 @@ export function AutomationPage() {
                   availableAbGroups={availableAbGroups}
                   availableDomainGroups={availableDomainGroups}
                   smtpStatus={smtpStatus}
+                  knownEmails={knownEmails}
+                  tokenStatus={tokenStatus}
                 />
               )}
             </div>
           );
         })}
       </div>
+
+      <ConfirmModal
+        isOpen={deleteConfirmSchedule !== null}
+        title="Delete schedule"
+        message={`Delete "${deleteConfirmSchedule?.name}"? This will not immediately remove applied entries from Advanced Blocking — wait for the evaluator to deactivate them, or remove them manually.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => void executeDeleteSchedule()}
+        onCancel={() => setDeleteConfirmSchedule(null)}
+      />
     </section>
   );
 }

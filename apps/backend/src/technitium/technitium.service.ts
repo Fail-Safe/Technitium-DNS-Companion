@@ -247,6 +247,8 @@ export class TechnitiumService {
         username?: string;
         reason?: string;
         tooPrivilegedSections?: string[];
+        /** True when the failure was a transient connectivity error, not a permission/security issue. */
+        transient?: boolean;
       }
     | { validated: false } = { validated: false };
 
@@ -255,6 +257,7 @@ export class TechnitiumService {
         validated: true;
         valid: boolean;
         hasAppsModify: boolean;
+        hasCacheModify: boolean;
         username?: string;
         reason?: string;
       }
@@ -386,6 +389,7 @@ export class TechnitiumService {
     username?: string;
     reason?: string;
     tooPrivilegedSections?: string[];
+    transient?: boolean;
   } {
     const configured = !!this.backgroundToken;
     const sessionAuthEnabled = this.sessionAuthEnabled;
@@ -412,6 +416,7 @@ export class TechnitiumService {
       reason: this.backgroundTokenValidation.reason,
       tooPrivilegedSections:
         this.backgroundTokenValidation.tooPrivilegedSections,
+      transient: this.backgroundTokenValidation.transient,
     };
   }
 
@@ -425,6 +430,7 @@ export class TechnitiumService {
     username?: string;
     reason?: string;
     hasAppsModify: boolean | null;
+    hasCacheModify: boolean | null;
   } {
     const configured = !!this.scheduleToken;
 
@@ -434,13 +440,14 @@ export class TechnitiumService {
         valid: false,
         reason: "TECHNITIUM_SCHEDULE_TOKEN is not set.",
         hasAppsModify: null,
+        hasCacheModify: null,
       };
     }
 
     if (!this.scheduleTokenValidation.validated) {
       // Trigger async validation; return pending state
       void this.validateScheduleToken();
-      return { configured, valid: null, hasAppsModify: null };
+      return { configured, valid: null, hasAppsModify: null, hasCacheModify: null };
     }
 
     return {
@@ -449,7 +456,19 @@ export class TechnitiumService {
       username: this.scheduleTokenValidation.username,
       reason: this.scheduleTokenValidation.reason,
       hasAppsModify: this.scheduleTokenValidation.hasAppsModify,
+      hasCacheModify: this.scheduleTokenValidation.hasCacheModify,
     };
+  }
+
+  /**
+   * Clears the cached schedule token validation result so the next call to
+   * getScheduleTokenStatus() triggers a fresh re-validation. Safe to call
+   * while validation may already be in progress (idempotent guard in
+   * validateScheduleToken prevents duplicate runs).
+   */
+  resetScheduleTokenValidation(): void {
+    this.scheduleTokenValidation = { validated: false };
+    void this.validateScheduleToken();
   }
 
   getConfiguredNodeIds(): string[] {
@@ -1534,6 +1553,7 @@ export class TechnitiumService {
       this.backgroundTokenValidation = {
         validated: true,
         okForPtr: false,
+        transient: true,
         reason: `Failed to validate TECHNITIUM_BACKGROUND_TOKEN permissions against node "${node.id}": ${message}`,
       };
       return this.backgroundTokenValidation;
@@ -1658,6 +1678,7 @@ export class TechnitiumService {
         validated: true,
         valid: false,
         hasAppsModify: false,
+        hasCacheModify: false,
         reason: "TECHNITIUM_SCHEDULE_TOKEN is not set.",
       };
       return;
@@ -1669,6 +1690,7 @@ export class TechnitiumService {
         validated: true,
         valid: false,
         hasAppsModify: false,
+        hasCacheModify: false,
         reason: "No nodes are configured; cannot validate TECHNITIUM_SCHEDULE_TOKEN.",
       };
       return;
@@ -1698,6 +1720,7 @@ export class TechnitiumService {
         validated: true,
         valid: false,
         hasAppsModify: false,
+        hasCacheModify: false,
         reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN against node "${node.id}": ${message}`,
       };
       return;
@@ -1713,6 +1736,7 @@ export class TechnitiumService {
         validated: true,
         valid: false,
         hasAppsModify: false,
+        hasCacheModify: false,
         reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN: unexpected response from node "${node.id}".`,
       };
       return;
@@ -1723,6 +1747,7 @@ export class TechnitiumService {
         validated: true,
         valid: false,
         hasAppsModify: false,
+        hasCacheModify: false,
         reason:
           envelopeObj.status === "invalid-token"
             ? `TECHNITIUM_SCHEDULE_TOKEN was rejected by node "${node.id}": invalid token.`
@@ -1741,11 +1766,13 @@ export class TechnitiumService {
 
     const permissions = sessionInfo?.info?.permissions ?? {};
     const hasAppsModify = permissions["Apps"]?.canModify === true;
+    const hasCacheModify = permissions["Cache"]?.canModify === true;
 
     this.scheduleTokenValidation = {
       validated: true,
       valid: true,
       hasAppsModify,
+      hasCacheModify,
       username: sessionInfo?.username,
       reason: hasAppsModify
         ? undefined
@@ -1753,7 +1780,7 @@ export class TechnitiumService {
     };
 
     this.logger.log(
-      `Validated TECHNITIUM_SCHEDULE_TOKEN (user: ${sessionInfo?.username ?? "unknown"}, Apps:Modify=${String(hasAppsModify)}).`,
+      `Validated TECHNITIUM_SCHEDULE_TOKEN (user: ${sessionInfo?.username ?? "unknown"}, Apps:Modify=${String(hasAppsModify)}, Cache:Modify=${String(hasCacheModify)}).`,
     );
   }
 

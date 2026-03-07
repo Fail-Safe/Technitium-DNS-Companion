@@ -1,9 +1,11 @@
 export type DnsScheduleAction = "block" | "allow";
+export type DnsScheduleTargetType = "advanced-blocking" | "built-in";
 
 export interface DnsScheduleDraft {
   name: string;
   enabled: boolean;
-  advancedBlockingGroupName: string;
+  targetType: DnsScheduleTargetType;
+  advancedBlockingGroupNames: string[];
   action: DnsScheduleAction;
   domainEntries: string[];
   domainGroupNames: string[];
@@ -12,6 +14,10 @@ export interface DnsScheduleDraft {
   notifyEmails: string[];
   /** Minimum seconds between repeat alert emails. Default 300. */
   notifyDebounceSeconds: number;
+  /** Optional free-text message prepended to alert email bodies for this schedule. */
+  notifyMessage?: string;
+  /** When true and notifyMessage is set, the email body is only the custom message (no technical details). */
+  notifyMessageOnly?: boolean;
   /** 0=Sun, 1=Mon, ..., 6=Sat. Empty = every day. */
   daysOfWeek: number[];
   startTime: string; // "HH:MM"
@@ -38,6 +44,7 @@ export interface DnsScheduleTokenStatus {
   username?: string;
   reason?: string;
   hasAppsModify: boolean | null;
+  hasCacheModify: boolean | null;
 }
 
 export interface DnsScheduleEvaluatorStatus {

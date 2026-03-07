@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -305,6 +305,15 @@ describe("LogsPage SMTP card", () => {
         );
       }
 
+      if (path === "/nodes/known-clients") {
+        return Promise.resolve(
+          new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
       return Promise.resolve(
         new Response(JSON.stringify({}), {
           status: 200,
@@ -316,6 +325,8 @@ describe("LogsPage SMTP card", () => {
 
   it("renders SMTP status details from the backend", async () => {
     render(<LogsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Alert Rules" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand SMTP" }));
 
     expect(
       await screen.findByRole("heading", { name: "Log Alert SMTP Settings" }),
@@ -341,6 +352,8 @@ describe("LogsPage SMTP card", () => {
   it("submits SMTP test email payload to backend", async () => {
     const user = userEvent.setup();
     render(<LogsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Alert Rules" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand SMTP" }));
 
     await screen.findByRole("heading", { name: "Log Alert SMTP Settings" });
     const smtpCard = screen.getByRole("region", {
@@ -452,6 +465,15 @@ describe("LogsPage SMTP card", () => {
         );
       }
 
+      if (path === "/nodes/known-clients") {
+        return Promise.resolve(
+          new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
       return Promise.resolve(
         new Response(JSON.stringify({}), {
           status: 200,
@@ -461,6 +483,8 @@ describe("LogsPage SMTP card", () => {
     });
 
     render(<LogsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Alert Rules" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand SMTP" }));
 
     await screen.findByRole("heading", { name: "Log Alert SMTP Settings" });
     const smtpCard = screen.getByRole("region", {
@@ -507,6 +531,8 @@ describe("LogsPage SMTP card", () => {
   it("re-fetches SMTP status when refresh button is clicked", async () => {
     const user = userEvent.setup();
     render(<LogsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Alert Rules" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand SMTP" }));
 
     await screen.findByRole("heading", { name: "Log Alert SMTP Settings" });
 
@@ -533,6 +559,8 @@ describe("LogsPage SMTP card", () => {
   it("renders log alert rules and allows toggling enabled state", async () => {
     const user = userEvent.setup();
     render(<LogsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Alert Rules" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand SMTP" }));
 
     expect(
       await screen.findByRole("heading", { name: "Log Alert Rules" }),
@@ -554,6 +582,8 @@ describe("LogsPage SMTP card", () => {
   it("submits new log alert rule payload to backend", async () => {
     const user = userEvent.setup();
     render(<LogsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Alert Rules" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand SMTP" }));
 
     await screen.findByRole("heading", { name: "Log Alert Rules" });
 
@@ -567,6 +597,10 @@ describe("LogsPage SMTP card", () => {
     await user.type(
       screen.getByLabelText(/Email recipients \(comma-separated\)/i),
       "admin@example.com",
+    );
+    await user.type(
+      screen.getByLabelText(/Client identifier/i),
+      "kid-tablet",
     );
 
     apiFetchMock.mockClear();
@@ -598,6 +632,8 @@ describe("LogsPage SMTP card", () => {
   it("runs log alert evaluator from Logs page", async () => {
     const user = userEvent.setup();
     render(<LogsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Alert Rules" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand SMTP" }));
 
     await screen.findByRole("heading", { name: "Log Alert Rules" });
 
