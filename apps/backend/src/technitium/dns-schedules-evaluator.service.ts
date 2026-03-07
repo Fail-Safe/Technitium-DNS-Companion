@@ -604,42 +604,32 @@ export class DnsSchedulesEvaluatorService
   }
 
   /**
-   * Best-effort DNS resolver cache flush for each domain resolved by the
-   * schedule. Failures (e.g. missing DNS Server: Modify permission on the
-   * schedule token) are logged as warnings and never propagate to callers.
+   * Best-effort full DNS resolver cache flush on the node. A full flush
+   * (no domain param) is used rather than per-domain flushes because
+   * Technitium evaluates Advanced Blocking rules on cache misses only —
+   * stale subdomain entries (e.g. www.youtube.com when youtube.com is
+   * blocked) survive a per-domain flush and continue resolving from cache.
+   * Failures (e.g. missing Cache: Modify permission) are logged as
+   * warnings and never propagate to callers.
    */
   private async flushDomainsCache(
     schedule: DnsSchedule,
     nodeId: string,
   ): Promise<void> {
-    const domains = this.resolveDomainEntries(schedule);
-    if (domains.length === 0) return;
-
-    let flushed = 0;
-    let failed = 0;
-
-    for (const domain of domains) {
-      try {
-        await this.technitiumService.executeAction(
-          nodeId,
-          { method: "GET", url: "/api/cache/flush", params: { domain } },
-          { authMode: "schedule" },
-        );
-        flushed++;
-      } catch {
-        failed++;
-      }
-    }
-
-    if (failed > 0) {
-      this.logger.warn(
-        `Cache flush for schedule "${schedule.name}" on node "${nodeId}": ` +
-          `${flushed} flushed, ${failed} failed ` +
-          `(token may lack DNS Server: Modify permission).`,
+    try {
+      await this.technitiumService.executeAction(
+        nodeId,
+        { method: "GET", url: "/api/cache/flush" },
+        { authMode: "schedule" },
       );
-    } else {
       this.logger.log(
-        `Cache flushed for ${flushed} domain(s) after schedule "${schedule.name}" change on node "${nodeId}".`,
+        `Full cache flush completed on node "${nodeId}" after schedule "${schedule.name}" change.`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Cache flush failed for schedule "${schedule.name}" on node "${nodeId}": ` +
+          `${error instanceof Error ? error.message : String(error)} ` +
+          `(token may lack Cache: Modify permission).`,
       );
     }
   }
