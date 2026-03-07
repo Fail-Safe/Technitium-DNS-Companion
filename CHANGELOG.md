@@ -9,6 +9,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- DNS Schedules: time-window-based blocking/allow rules with day-of-week selection (any subset of Sun–Sat, or every day), start/end time, and full IANA timezone support (evaluates windows in the schedule's configured timezone, not the server clock). Schedules are bidirectional — entries are added when the window opens and cleanly removed when it closes, leaving manually-managed entries untouched.
+- DNS Schedules: support for multiple Advanced Blocking groups per schedule (previously limited to one group).
+- DNS Schedules: Domain Group integration — bind Domain Groups as the domain source for a schedule instead of (or in addition to) manually listed entries.
+- DNS Schedules: optional cache flush on window activate and deactivate, ensuring DNS resolvers pick up changes immediately without waiting for TTL expiry.
+- DNS Schedules: email notifications when blocked domains are queried during an active window — configurable recipients, per-schedule debounce interval, and an optional custom message prepended to alert emails. Set `notifyMessageOnly` to send only the custom message body (no technical details).
+- DNS Schedules: Clone button on each schedule card — creates a disabled "Copy of {name}" draft pre-filled with the source schedule's settings, then opens it for editing.
+- DNS Schedules: schedule token status now reports `hasCacheModify` permission so the UI can surface a clear error when the token lacks cache-flush capability.
+
+### Changed
+
+- DNS Schedule alert emails now use a human-readable subject line (`DNS Schedule alert: {schedule name}`) instead of the internal rule name (`__schedule:uuid__`).
+- Delete schedule confirmation now uses the app's `ConfirmModal` (danger variant with animated slide-in and mobile bottom-sheet) instead of a browser `window.confirm` dialog.
+- Background token security banner is no longer shown when the validation failure was caused by a transient connectivity error, preventing false-positive "token too privileged" warnings during temporary network hiccups.
+- Mobile CSS improvements for the Automation page: form grids collapse to a single column at 640px, the run-result table scrolls horizontally instead of overflowing, the enable/disable toggle label is hidden at 480px, and the timezone row stacks vertically at 480px.
+
+### Fixed
+
+- DNS Schedules: fixed a silent `RENAME COLUMN` migration failure on existing databases — a prior `replace_all` edit accidentally made the migration a self-rename no-op (`advanced_blocking_group_name → advanced_blocking_group_name`), causing all queries using the plural column name to fail at runtime with "no such column". The migration now correctly renames `advanced_blocking_group_name` to `advanced_blocking_group_names`.
+
+### Testing
+
+- DNS Schedules unit tests: 119 tests across three suites — evaluator service (24: window logic, overnight windows, day-of-week gating, IANA timezones, apply/remove, cache flush, notification debounce), service CRUD (48: schema migration, all fields including `notifyMessage`), and controller `parseDraft` (47: validation and parsing for every field).
+- Automation page E2E: 10 Playwright tests (Firefox) covering schedule create, edit, clone, delete via `ConfirmModal`, enable/disable toggle, evaluator manual run, and email notification field visibility.
+
 ## [1.5.1] - 2026-03-06
 
 ### Fixed
