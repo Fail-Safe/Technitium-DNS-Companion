@@ -1,6 +1,7 @@
 import {
     faBars,
     faBolt,
+    faCalendarDays,
     faChartLine,
     faCheck,
     faCircleInfo,
@@ -127,6 +128,7 @@ export function Header() {
         },
       ]
     : []),
+    { to: "/automation", label: "DNS Schedules", icon: faCalendarDays },
     { to: "/dns-lookup", label: "DNS Lookup", icon: faMagnifyingGlass },
     { to: "/zones", label: "DNS Zones", icon: faGlobe },
     { to: "/dhcp", label: "DHCP Scopes", icon: faPlug },

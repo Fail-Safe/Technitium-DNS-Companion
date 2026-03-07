@@ -155,7 +155,7 @@ export class AdvancedBlockingService {
 
   async getSnapshotWithAuth(
     nodeId: string,
-    authMode: "session" | "background",
+    authMode: "session" | "background" | "schedule",
   ): Promise<AdvancedBlockingSnapshot> {
     const summaries = await this.technitiumService.listNodes();
     const summary = summaries.find(
@@ -175,6 +175,14 @@ export class AdvancedBlockingService {
     nodeId: string,
     config: AdvancedBlockingConfig,
   ): Promise<AdvancedBlockingSnapshot> {
+    return this.setConfigWithAuth(nodeId, config, "session");
+  }
+
+  async setConfigWithAuth(
+    nodeId: string,
+    config: AdvancedBlockingConfig,
+    authMode: "session" | "schedule",
+  ): Promise<AdvancedBlockingSnapshot> {
     const serialized = this.serializeConfig(config);
     const body = new URLSearchParams();
     body.set("config", JSON.stringify(serialized, null, 2));
@@ -184,16 +192,20 @@ export class AdvancedBlockingService {
 
     for (const appName of appNames) {
       try {
-        await this.technitiumService.executeAction(nodeId, {
-          method: "POST",
-          url: "/api/apps/config/set",
-          params: { name: appName },
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: body.toString(),
-        });
+        await this.technitiumService.executeAction(
+          nodeId,
+          {
+            method: "POST",
+            url: "/api/apps/config/set",
+            params: { name: appName },
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString(),
+          },
+          { authMode },
+        );
 
         this.appNameByNode.set(nodeId, appName);
-        return this.getSnapshot(nodeId);
+        return this.getSnapshotWithAuth(nodeId, authMode);
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
         this.logger.warn(
@@ -213,7 +225,7 @@ export class AdvancedBlockingService {
 
   private async loadSnapshot(
     summary: TechnitiumNodeSummary,
-    authMode: "session" | "background",
+    authMode: "session" | "background" | "schedule",
   ): Promise<AdvancedBlockingSnapshot> {
     const baseSnapshot: AdvancedBlockingSnapshot = {
       nodeId: summary.id,
@@ -257,7 +269,7 @@ export class AdvancedBlockingService {
 
   private async fetchConfigWithFallback(
     nodeId: string,
-    authMode: "session" | "background",
+    authMode: "session" | "background" | "schedule",
   ): Promise<{ envelope: TechnitiumAppConfigEnvelope; appName?: string }> {
     const appNames = this.resolveAppNameCandidates(nodeId);
     let lastError: Error | undefined;

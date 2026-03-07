@@ -230,6 +230,8 @@ export class TechnitiumService {
   private readonly sessionAuthEnabled = true;
   private readonly backgroundToken =
     (process.env.TECHNITIUM_BACKGROUND_TOKEN ?? "").trim() || undefined;
+  private readonly scheduleToken =
+    (process.env.TECHNITIUM_SCHEDULE_TOKEN ?? "").trim() || undefined;
 
   // Reuse a single Agent so Node can reuse sockets (and DNS results) instead of
   // resolving/reconnecting for every Technitium request.
@@ -245,6 +247,16 @@ export class TechnitiumService {
         username?: string;
         reason?: string;
         tooPrivilegedSections?: string[];
+      }
+    | { validated: false } = { validated: false };
+
+  private scheduleTokenValidation:
+    | {
+        validated: true;
+        valid: boolean;
+        hasAppsModify: boolean;
+        username?: string;
+        reason?: string;
       }
     | { validated: false } = { validated: false };
   private readonly queryLoggerCache = new Map<
@@ -400,6 +412,43 @@ export class TechnitiumService {
       reason: this.backgroundTokenValidation.reason,
       tooPrivilegedSections:
         this.backgroundTokenValidation.tooPrivilegedSections,
+    };
+  }
+
+  /**
+   * Returns the current validation status for TECHNITIUM_SCHEDULE_TOKEN.
+   * Triggers async validation on first call. Safe to call frequently (caches).
+   */
+  getScheduleTokenStatus(): {
+    configured: boolean;
+    valid: boolean | null;
+    username?: string;
+    reason?: string;
+    hasAppsModify: boolean | null;
+  } {
+    const configured = !!this.scheduleToken;
+
+    if (!configured) {
+      return {
+        configured,
+        valid: false,
+        reason: "TECHNITIUM_SCHEDULE_TOKEN is not set.",
+        hasAppsModify: null,
+      };
+    }
+
+    if (!this.scheduleTokenValidation.validated) {
+      // Trigger async validation; return pending state
+      void this.validateScheduleToken();
+      return { configured, valid: null, hasAppsModify: null };
+    }
+
+    return {
+      configured,
+      valid: this.scheduleTokenValidation.valid,
+      username: this.scheduleTokenValidation.username,
+      reason: this.scheduleTokenValidation.reason,
+      hasAppsModify: this.scheduleTokenValidation.hasAppsModify,
     };
   }
 
@@ -1124,7 +1173,7 @@ export class TechnitiumService {
   async executeAction<T = unknown>(
     nodeId: string,
     payload: TechnitiumActionPayload,
-    options?: { authMode?: "session" | "background" },
+    options?: { authMode?: "session" | "background" | "schedule" },
   ): Promise<T> {
     const node = this.findNode(nodeId);
     const config: AxiosRequestConfig = {
@@ -1600,6 +1649,112 @@ export class TechnitiumService {
       `Validated TECHNITIUM_BACKGROUND_TOKEN for background PTR hostname resolution (user: ${sessionInfo?.username ?? "unknown"}).`,
     );
     return this.backgroundTokenValidation;
+  }
+
+  private async validateScheduleToken(): Promise<void> {
+    if (this.scheduleTokenValidation.validated) return;
+    if (!this.scheduleToken) {
+      this.scheduleTokenValidation = {
+        validated: true,
+        valid: false,
+        hasAppsModify: false,
+        reason: "TECHNITIUM_SCHEDULE_TOKEN is not set.",
+      };
+      return;
+    }
+
+    const node = this.nodeConfigs[0];
+    if (!node) {
+      this.scheduleTokenValidation = {
+        validated: true,
+        valid: false,
+        hasAppsModify: false,
+        reason: "No nodes are configured; cannot validate TECHNITIUM_SCHEDULE_TOKEN.",
+      };
+      return;
+    }
+
+    type Permission = { canView?: boolean; canModify?: boolean; canDelete?: boolean };
+    type PermissionMap = Record<string, Permission | undefined>;
+    type SessionInfo = {
+      username?: string;
+      displayName?: string;
+      info?: { permissions?: PermissionMap };
+    };
+
+    let envelope: unknown;
+    try {
+      envelope = await this.requestWithExplicitToken<
+        TechnitiumApiResponse<SessionInfo>
+      >(node, { method: "GET", url: "/api/user/session/get" }, this.scheduleToken);
+    } catch (error) {
+      const message =
+        error instanceof HttpException
+          ? (error.message ?? "Request failed")
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      this.scheduleTokenValidation = {
+        validated: true,
+        valid: false,
+        hasAppsModify: false,
+        reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN against node "${node.id}": ${message}`,
+      };
+      return;
+    }
+
+    const envelopeObj =
+      envelope && typeof envelope === "object"
+        ? (envelope as Partial<TechnitiumApiResponse<SessionInfo>>)
+        : undefined;
+
+    if (!envelopeObj || typeof envelopeObj.status !== "string") {
+      this.scheduleTokenValidation = {
+        validated: true,
+        valid: false,
+        hasAppsModify: false,
+        reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN: unexpected response from node "${node.id}".`,
+      };
+      return;
+    }
+
+    if (envelopeObj.status !== "ok") {
+      this.scheduleTokenValidation = {
+        validated: true,
+        valid: false,
+        hasAppsModify: false,
+        reason:
+          envelopeObj.status === "invalid-token"
+            ? `TECHNITIUM_SCHEDULE_TOKEN was rejected by node "${node.id}": invalid token.`
+            : `TECHNITIUM_SCHEDULE_TOKEN validation failed on node "${node.id}": ${envelopeObj.errorMessage ?? "unknown error"}.`,
+      };
+      return;
+    }
+
+    const flattened = envelopeObj as unknown as SessionInfo & { status?: string };
+    const sessionInfo: SessionInfo | undefined =
+      envelopeObj.response !== undefined
+        ? envelopeObj.response
+        : flattened && (flattened.info || flattened.username || flattened.displayName)
+          ? flattened
+          : undefined;
+
+    const permissions = sessionInfo?.info?.permissions ?? {};
+    const hasAppsModify = permissions["Apps"]?.canModify === true;
+
+    this.scheduleTokenValidation = {
+      validated: true,
+      valid: true,
+      hasAppsModify,
+      username: sessionInfo?.username,
+      reason: hasAppsModify
+        ? undefined
+        : "Token authenticated but lacks Apps: Modify permission needed to update Advanced Blocking config.",
+    };
+
+    this.logger.log(
+      `Validated TECHNITIUM_SCHEDULE_TOKEN (user: ${sessionInfo?.username ?? "unknown"}, Apps:Modify=${String(hasAppsModify)}).`,
+    );
   }
 
   private async pickPrimaryNodeForAdminToken(
@@ -4829,7 +4984,7 @@ export class TechnitiumService {
     node: TechnitiumNodeConfig,
     config: AxiosRequestConfig,
     options?: {
-      authMode?: "session" | "background";
+      authMode?: "session" | "background" | "schedule";
       suppressNetworkErrorLog?: boolean;
     },
   ): Promise<T> {
@@ -4856,6 +5011,14 @@ export class TechnitiumService {
           if (!effectiveToken) {
             throw new UnauthorizedException(
               `Authentication required for background access to Technitium node "${node.id}". Set TECHNITIUM_BACKGROUND_TOKEN to enable background tasks.`,
+            );
+          }
+        } else if (authMode === "schedule") {
+          // DNS Schedule evaluator uses a dedicated token with Apps: Modify permission.
+          effectiveToken = this.scheduleToken;
+          if (!effectiveToken) {
+            throw new UnauthorizedException(
+              `Authentication required for DNS schedule operations on node "${node.id}". Set TECHNITIUM_SCHEDULE_TOKEN to enable DNS schedules.`,
             );
           }
         } else {

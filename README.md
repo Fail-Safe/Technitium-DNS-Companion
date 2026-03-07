@@ -53,6 +53,15 @@ Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_
 
 ## Quick Start with Docker (or similar) [Recommended]
 
+**Available image tags** (published to [GitHub Container Registry](https://github.com/Fail-Safe/Technitium-DNS-Companion/pkgs/container/technitium-dns-companion)):
+
+| Tag | Description |
+|---|---|
+| `latest` | Stable release (default) |
+| `1.5`, `1.5.1` | Pinned version tags |
+| `beta` | Pre-release from the `next` branch — may include features not yet in stable |
+| `next` | Rolling `next` branch head (same image as `beta`, dev-facing alias) |
+
 The fastest path is the download-and-run script (no repo clone required). For full options and HTTPS details, see [DOCKER.md](DOCKER.md).
 
 macOS/Linux:

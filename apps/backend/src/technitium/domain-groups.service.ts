@@ -395,6 +395,28 @@ export class DomainGroupsService implements OnModuleInit {
     return row;
   }
 
+  /**
+   * Returns the deduplicated set of exact-match entry values for the given
+   * Domain Group names. Used by the DNS Schedules evaluator to expand DG
+   * references into concrete domain entries at evaluation time.
+   */
+  getExactEntriesByGroupNames(names: string[]): string[] {
+    if (names.length === 0) return [];
+    const db = this.companionDb.db;
+    if (!db) return [];
+    this.initializeSchema();
+    const placeholders = names.map(() => "?").join(", ");
+    const rows = db
+      .prepare(
+        `SELECT dge.value
+         FROM domain_group_entries dge
+         JOIN domain_groups dg ON dg.id = dge.domain_group_id
+         WHERE dg.name IN (${placeholders}) AND dge.match_type = 'exact'`,
+      )
+      .all(...names) as { value: string }[];
+    return [...new Set(rows.map((r) => r.value))];
+  }
+
   listDomainGroups(): DomainGroup[] {
     const db = this.getDb();
     const rows = db
