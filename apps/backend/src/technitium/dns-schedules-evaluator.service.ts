@@ -303,13 +303,30 @@ export class DnsSchedulesEvaluatorService
     const shouldBeActive = this.isWindowActive(schedule, now);
     const isCurrentlyApplied = this.schedulesService.isApplied(schedule.id, nodeId);
 
-    if (shouldBeActive === isCurrentlyApplied) {
+    // Already inactive — nothing to do this tick.
+    if (!shouldBeActive && !isCurrentlyApplied) {
       return {
         scheduleId: schedule.id,
         scheduleName: schedule.name,
         nodeId,
         action: "skipped",
-        reason: shouldBeActive ? "already-applied" : "already-inactive",
+        reason: "already-inactive",
+      };
+    }
+
+    // Window active and already applied. For advanced-blocking schedules,
+    // fall through to re-apply so any DG entry additions since the last apply
+    // are picked up (applyAdvancedBlockingScheduleToNode diffs against live
+    // Technitium state and skips setConfig when nothing changed).
+    // Built-in mode calls individual add-per-domain APIs with no diff, so
+    // skip as before to avoid redundant per-domain requests.
+    if (shouldBeActive && isCurrentlyApplied && schedule.targetType === "built-in") {
+      return {
+        scheduleId: schedule.id,
+        scheduleName: schedule.name,
+        nodeId,
+        action: "skipped",
+        reason: "already-applied",
       };
     }
 
@@ -319,29 +336,46 @@ export class DnsSchedulesEvaluatorService
         scheduleName: schedule.name,
         nodeId,
         action: "skipped",
-        reason: `dry-run-would-${shouldBeActive ? "apply" : "remove"}`,
+        reason: shouldBeActive && isCurrentlyApplied
+          ? "already-applied"
+          : `dry-run-would-${shouldBeActive ? "apply" : "remove"}`,
       };
     }
 
     try {
       if (shouldBeActive) {
-        await this.applyScheduleToNode(schedule, nodeId);
-        this.schedulesService.markApplied(schedule.id, nodeId);
-        const modeDetail =
-          schedule.targetType === "built-in"
-            ? "mode=built-in"
-            : `groups=${schedule.advancedBlockingGroupNames.join(",")}`;
-        this.logger.log(
-          `Applied schedule "${schedule.name}" to node "${nodeId}" (action=${schedule.action}, ${modeDetail}).`,
-        );
-        if (schedule.flushCacheOnChange) {
+        const changed = await this.applyScheduleToNode(schedule, nodeId);
+        if (!isCurrentlyApplied) {
+          this.schedulesService.markApplied(schedule.id, nodeId);
+          const modeDetail =
+            schedule.targetType === "built-in"
+              ? "mode=built-in"
+              : `groups=${schedule.advancedBlockingGroupNames.join(",")}`;
+          this.logger.log(
+            `Applied schedule "${schedule.name}" to node "${nodeId}" (action=${schedule.action}, ${modeDetail}).`,
+          );
+        } else if (changed) {
+          this.logger.log(
+            `Re-applied schedule "${schedule.name}" to node "${nodeId}" — DG entries updated.`,
+          );
+        }
+        if (changed && schedule.flushCacheOnChange) {
           await this.flushDomainsCache(schedule, nodeId);
+        }
+        if (!isCurrentlyApplied || changed) {
+          return {
+            scheduleId: schedule.id,
+            scheduleName: schedule.name,
+            nodeId,
+            action: "applied",
+          };
         }
         return {
           scheduleId: schedule.id,
           scheduleName: schedule.name,
           nodeId,
-          action: "applied",
+          action: "skipped",
+          reason: "already-applied",
         };
       } else {
         await this.removeScheduleFromNode(schedule, nodeId);
@@ -395,11 +429,12 @@ export class DnsSchedulesEvaluatorService
   private async applyScheduleToNode(
     schedule: DnsSchedule,
     nodeId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (schedule.targetType === "built-in") {
       await this.applyBuiltInScheduleToNode(schedule, nodeId);
+      return true;
     } else {
-      await this.applyAdvancedBlockingScheduleToNode(schedule, nodeId);
+      return this.applyAdvancedBlockingScheduleToNode(schedule, nodeId);
     }
   }
 
@@ -508,7 +543,7 @@ export class DnsSchedulesEvaluatorService
   private async applyAdvancedBlockingScheduleToNode(
     schedule: DnsSchedule,
     nodeId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const snapshot = await this.advancedBlockingService.getSnapshotWithAuth(
       nodeId,
       "schedule",
@@ -547,8 +582,7 @@ export class DnsSchedulesEvaluatorService
     }
 
     if (!changed) {
-      // Already all present in all groups — still mark as applied so we track ownership
-      return;
+      return false;
     }
 
     await this.advancedBlockingService.setConfigWithAuth(
@@ -556,6 +590,7 @@ export class DnsSchedulesEvaluatorService
       { ...config, groups: updatedGroups },
       "schedule",
     );
+    return true;
   }
 
   private async removeAdvancedBlockingScheduleFromNode(
