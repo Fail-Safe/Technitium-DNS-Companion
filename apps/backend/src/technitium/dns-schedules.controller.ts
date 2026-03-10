@@ -320,14 +320,16 @@ export class DnsSchedulesController {
       }
 
       const ruleName = `__schedule:${schedule.id}__`;
+      const { pattern: domainPattern, type: domainPatternType } =
+        this.evaluatorService.buildAlertDomainPattern(schedule);
       const draft: LogAlertRuleDraft = {
         name: ruleName,
         displayName: schedule.name,
         notifyMessage: schedule.notifyMessage,
         enabled: false, // Evaluator controls enabled state; rule activates only during the window
         outcomeMode: "blocked-only",
-        domainPattern: "*",
-        domainPatternType: "wildcard",
+        domainPattern,
+        domainPatternType,
         advancedBlockingGroupNames: schedule.advancedBlockingGroupNames,
         debounceSeconds: schedule.notifyDebounceSeconds,
         emailRecipients: schedule.notifyEmails,

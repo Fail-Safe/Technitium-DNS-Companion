@@ -9,11 +9,15 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
+import { DnsSchedulesEvaluatorService } from "./dns-schedules-evaluator.service";
 import { DomainGroupsService } from "./domain-groups.service";
 
 @Controller("domain-groups")
 export class DomainGroupsController {
-  constructor(private readonly domainGroupsService: DomainGroupsService) {}
+  constructor(
+    private readonly domainGroupsService: DomainGroupsService,
+    private readonly evaluatorService: DnsSchedulesEvaluatorService,
+  ) {}
 
   @Get()
   listDomainGroups() {
@@ -88,7 +92,10 @@ export class DomainGroupsController {
 
   @Delete(":groupId")
   deleteDomainGroup(@Param("groupId") groupId: string) {
-    return this.domainGroupsService.deleteDomainGroup(groupId);
+    const { name } = this.domainGroupsService.getDomainGroup(groupId);
+    const result = this.domainGroupsService.deleteDomainGroup(groupId);
+    this.evaluatorService.syncAlertRulesForDomainGroup(name);
+    return result;
   }
 
   @Post(":groupId/entries")
@@ -96,7 +103,10 @@ export class DomainGroupsController {
     @Param("groupId") groupId: string,
     @Body() body: { matchType?: unknown; value?: unknown; note?: unknown },
   ) {
-    return this.domainGroupsService.addEntry(groupId, body);
+    const { name } = this.domainGroupsService.getDomainGroup(groupId);
+    const result = this.domainGroupsService.addEntry(groupId, body);
+    this.evaluatorService.syncAlertRulesForDomainGroup(name);
+    return result;
   }
 
   @Patch(":groupId/entries/:entryId")
@@ -105,7 +115,10 @@ export class DomainGroupsController {
     @Param("entryId") entryId: string,
     @Body() body: { matchType?: unknown; value?: unknown; note?: unknown },
   ) {
-    return this.domainGroupsService.updateEntry(groupId, entryId, body);
+    const { name } = this.domainGroupsService.getDomainGroup(groupId);
+    const result = this.domainGroupsService.updateEntry(groupId, entryId, body);
+    this.evaluatorService.syncAlertRulesForDomainGroup(name);
+    return result;
   }
 
   @Delete(":groupId/entries/:entryId")
@@ -113,7 +126,10 @@ export class DomainGroupsController {
     @Param("groupId") groupId: string,
     @Param("entryId") entryId: string,
   ) {
-    return this.domainGroupsService.removeEntry(groupId, entryId);
+    const { name } = this.domainGroupsService.getDomainGroup(groupId);
+    const result = this.domainGroupsService.removeEntry(groupId, entryId);
+    this.evaluatorService.syncAlertRulesForDomainGroup(name);
+    return result;
   }
 
   @Post(":groupId/bindings")

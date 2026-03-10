@@ -141,10 +141,16 @@ function TokenStatusCard({
   onRevalidate?: () => void;
   revalidating?: boolean;
 }) {
-  if (!tokenStatus && !storageStatus) return null;
+  // Don't render until token status has loaded and validation has completed.
+  // valid === null means the backend fetch returned but validation is still
+  // in-flight; showing the banner at that point is a false positive.
+  if (tokenStatus === null || (tokenStatus.configured && tokenStatus.valid === null)) {
+    return null;
+  }
 
-  const tokenOk = tokenStatus?.valid === true && tokenStatus.hasAppsModify === true;
-  const storageOk = storageStatus?.ready === true;
+  const tokenOk = tokenStatus.valid === true && tokenStatus.hasAppsModify === true;
+  // Treat null storageStatus as still-loading (not broken).
+  const storageOk = storageStatus === null || storageStatus.ready === true;
 
   if (tokenOk && storageOk) return null;
 

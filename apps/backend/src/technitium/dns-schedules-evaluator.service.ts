@@ -704,6 +704,94 @@ export class DnsSchedulesEvaluatorService
   }
 
   /**
+   * Derives a domain pattern scoped to the schedule's actual domain sources
+   * (manual entries + resolved Domain Group entries). Falls back to wildcard:*
+   * only when the schedule has no domain sources configured.
+   */
+  buildAlertDomainPattern(schedule: DnsSchedule): {
+    pattern: string;
+    type: "wildcard" | "regex";
+  } {
+    let dgEntries: string[] = [];
+    if (schedule.domainGroupNames.length > 0) {
+      try {
+        dgEntries = this.domainGroupsService.getExactEntriesByGroupNames(
+          schedule.domainGroupNames,
+        );
+      } catch {
+        // DG service unavailable; use manual entries only
+      }
+    }
+    const allEntries = [
+      ...new Set([...schedule.domainEntries, ...dgEntries]),
+    ].filter((e) => e.length > 0);
+
+    if (allEntries.length === 0) {
+      return { pattern: "*", type: "wildcard" };
+    }
+
+    const escaped = allEntries.map((e) =>
+      e.replace(/[.+*?^${}()|[\]\\]/g, "\\$&"),
+    );
+    return {
+      pattern: `(?:^|\\.)(?:${escaped.join("|")})$`,
+      type: "regex",
+    };
+  }
+
+  /**
+   * Re-syncs the domain pattern of the linked alert rule for every schedule
+   * that references the given Domain Group by name. Called after DG entry
+   * mutations so alert rules stay accurate without requiring a manual
+   * schedule re-save. Best-effort: failures are logged and never propagate.
+   */
+  syncAlertRulesForDomainGroup(dgName: string): void {
+    try {
+      const schedules = this.schedulesService.listSchedules();
+      for (const schedule of schedules) {
+        if (
+          schedule.notifyEmails.length === 0 ||
+          !schedule.domainGroupNames.includes(dgName)
+        ) {
+          continue;
+        }
+        try {
+          const ruleName = `__schedule:${schedule.id}__`;
+          const existing = this.logAlertsRulesService
+            .listRules()
+            .find((r) => r.name === ruleName);
+          if (!existing) continue;
+          const { pattern, type } = this.buildAlertDomainPattern(schedule);
+          if (
+            existing.domainPattern === pattern &&
+            existing.domainPatternType === type
+          ) {
+            continue;
+          }
+          this.logAlertsRulesService.updateRule(existing.id, {
+            ...existing,
+            domainPattern: pattern,
+            domainPatternType: type,
+          });
+          this.logger.log(
+            `Updated alert rule pattern for schedule "${schedule.name}" after DG "${dgName}" change.`,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `Failed to update alert rule pattern for schedule "${schedule.name}": ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to sync alert rules for domain group "${dgName}": ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
    * Determines whether the schedule's time window is currently active.
    *
    * For overnight windows (startTime > endTime, e.g. 22:00–07:00):
