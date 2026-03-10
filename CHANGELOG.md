@@ -9,6 +9,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-03-10
+
+### Fixed
+
+- DNS Logs: fixed app discovery selecting write-only log exporter apps (implementing `IDnsQueryLogger`) instead of queryable log apps (implementing `IDnsQueryLogs`). Apps like Log Exporter that only write logs will no longer be selected as the query source, preventing the `'LogExporter.App' class path was not found` error from Technitium. Error messaging now clearly directs users to install the "Query Logs (Sqlite)" app.
+
 ## [1.5.1] - 2026-03-06
 
 ### Fixed

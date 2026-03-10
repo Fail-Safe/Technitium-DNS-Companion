@@ -2,8 +2,8 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches:
-      - "main"
+    tags:
+      - "v*"
   workflow_dispatch: # Allow manual trigger
     inputs:
       push_image:
@@ -38,15 +38,15 @@ jobs:
 
       - name: Derive major.minor version tag
         id: package-version-minor
-        run: |
-          version="${{ steps.package-version.outputs.version }}"
-          echo "major_minor=${version%.*}" >> "$GITHUB_OUTPUT"
+        env:
+          PKG_VERSION: ${{ steps.package-version.outputs.version }}
+        run: echo "major_minor=${PKG_VERSION%.*}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
-        if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.push_image)
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.push_image)
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -62,12 +62,10 @@ jobs:
             org.opencontainers.image.title=Technitium DNS Companion
             org.opencontainers.image.description=Web UI to manage and sync multiple Technitium DNS servers (Technitium DNS Companion)
           tags: |
-            # Rolling branch tag — updated on every main push
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
-            # latest and semver tags derived from package.json version
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=${{ steps.package-version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=${{ steps.package-version-minor.outputs.major_minor }},enable=${{ github.ref == 'refs/heads/main' }}
+            # Semver tags derived from package.json version, published on v* tag pushes
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=${{ steps.package-version.outputs.version }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=${{ steps.package-version-minor.outputs.major_minor }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             # Manual runs: stable name + sha tag (safe for optional pushing)
             type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' }}
             type=sha,enable=${{ github.event_name == 'workflow_dispatch' }}
@@ -76,7 +74,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: ${{ github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && inputs.push_image) }}
+          push: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.push_image) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
