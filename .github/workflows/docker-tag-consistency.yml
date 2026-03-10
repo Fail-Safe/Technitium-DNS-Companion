@@ -6,8 +6,6 @@ on:
       - Build and Push Docker Image
     types:
       - completed
-    branches:
-      - main
   workflow_dispatch:
 
 env:
@@ -15,7 +13,13 @@ env:
 
 jobs:
   verify-tags:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    # Only run after a successful v* tag build (semver tags are only published on tag pushes).
+    # main branch builds only update the rolling `main` tag, which intentionally differs from
+    # the semver tags between releases — no consistency check needed there.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -35,7 +39,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tags=(main latest "${{ steps.version.outputs.major_minor }}" "${{ steps.version.outputs.version }}")
+          tags=(latest "${{ steps.version.outputs.major_minor }}" "${{ steps.version.outputs.version }}")
           baseline_digest=""
 
           resolve_digest() {
