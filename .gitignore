@@ -68,3 +68,4 @@ docker-entrypoint-dev.sh
 Dockerfile.dev
 technitium.env
 test*.json
+claude.local.md
