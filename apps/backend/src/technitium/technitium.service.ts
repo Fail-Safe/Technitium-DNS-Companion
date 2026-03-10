@@ -74,7 +74,11 @@ interface TechnitiumQueryLoggerMetadata {
 interface TechnitiumAppsListPayload {
   apps?: Array<{
     name?: string;
-    dnsApps?: Array<{ classPath?: string; isQueryLogger?: boolean }>;
+    dnsApps?: Array<{
+      classPath?: string;
+      isQueryLogger?: boolean;
+      isQueryLogs?: boolean;
+    }>;
   }>;
 }
 
@@ -5813,7 +5817,7 @@ export class TechnitiumService {
       }
 
       for (const dnsApp of app.dnsApps ?? []) {
-        if (dnsApp?.isQueryLogger && dnsApp.classPath) {
+        if (dnsApp?.isQueryLogs && dnsApp.classPath) {
           const metadata: TechnitiumQueryLoggerMetadata = {
             name: app.name,
             classPath: dnsApp.classPath,
@@ -5825,7 +5829,9 @@ export class TechnitiumService {
     }
 
     throw new ServiceUnavailableException(
-      `Technitium DNS node "${node.id}" does not report any query logger apps.`,
+      `Technitium DNS node "${node.id}" has no installed app that supports log querying (IDnsQueryLogs). ` +
+        `Install the "Query Logs (Sqlite)" app to enable DNS log search. ` +
+        `Note: the "Log Exporter" app only writes logs and cannot be queried.`,
     );
   }
 
