@@ -1,0 +1,130 @@
+name: Bug Report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. The more detail you provide, the faster it can be diagnosed and fixed.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear description of what went wrong and what you expected instead.
+      placeholder: |
+        What happened?
+        What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can this be reliably reproduced?
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See error
+    validations:
+      required: true
+
+  - type: dropdown
+    id: feature_area
+    attributes:
+      label: Feature area
+      description: Which part of the Companion is affected?
+      options:
+        - DNS Logs
+        - DNS Filtering / Advanced Blocking
+        - DNS Schedules
+        - Domain Groups
+        - Log Alerts
+        - Configuration Sync
+        - DHCP
+        - DNS Zones
+        - DNS Lookup
+        - Authentication / Token Setup
+        - Docker / Deployment
+        - Other / General
+    validations:
+      required: true
+
+  - type: input
+    id: companion_version
+    attributes:
+      label: Companion version
+      description: Found on the Overview page or the container image tag (e.g. `1.5.2`, `latest`, `main`)
+      placeholder: "1.5.2"
+    validations:
+      required: true
+
+  - type: input
+    id: technitium_version
+    attributes:
+      label: Technitium DNS Server version
+      description: Found in Administration → About (e.g. `14.3`)
+      placeholder: "14.3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment method
+      options:
+        - Docker Compose
+        - Docker (manual run)
+        - Kubernetes
+        - Bare metal / Node.js directly
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Container architecture
+      options:
+        - linux/amd64
+        - linux/arm64
+        - Not applicable (bare metal)
+        - Unknown
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: technitium_apps
+    attributes:
+      label: Technitium DNS apps installed
+      description: Check all that apply. Especially relevant for DNS Logs and Scheduling bugs.
+      options:
+        - label: Query Logs (Sqlite)
+        - label: Log Exporter
+        - label: Advanced Blocking
+        - label: Block List
+        - label: Other (describe in additional context)
+
+  - type: textarea
+    id: backend_logs
+    attributes:
+      label: Backend / container logs
+      description: |
+        The single most useful artifact. Paste relevant lines from `docker compose logs technitium-dns-companion` or `kubectl logs <pod>`.
+      render: text
+      placeholder: |
+        [2026-03-08 18:58:14 UTC] Error: ...
+
+  - type: textarea
+    id: browser_console
+    attributes:
+      label: Browser console errors
+      description: Open DevTools → Console and paste any red errors here. Useful for frontend-only symptoms.
+      render: text
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context
+      description: Screenshots, docker-compose.yml snippets, environment variable config (redact any secrets), or anything else that might help.
