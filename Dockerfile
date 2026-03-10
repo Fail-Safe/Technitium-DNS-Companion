@@ -2,7 +2,7 @@
 # Multi-stage build for Technitium DNS Companion (Monorepo)
 
 ARG BUILDPLATFORM=linux/amd64
-ARG NPM_VERSION=11.8.0
+ARG NPM_VERSION=11.11.0
 
 
 # Stage 0: Shared manifest context (reduces repeated COPY invalidations)
