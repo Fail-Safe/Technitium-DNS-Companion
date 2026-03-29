@@ -3748,7 +3748,7 @@ button.secondary:disabled,
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  align-items: center;
+  align-items: end;
 }
 
 .logs-page__mode-toggle {
@@ -12426,6 +12426,609 @@ button.danger:disabled {
 
 .advanced-blocking-summary__card p {
   color: var(--color-text-tertiary);
+}
+
+/* === Log Alerts + DNS Schedules shared layout === */
+
+.log-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding-bottom: 2rem;
+}
+
+.log-alerts__header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.log-alerts__header-title h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.log-alerts__header-icon {
+  color: var(--color-primary);
+  font-size: 1.25rem;
+}
+
+.log-alerts__header-desc {
+  margin: 0;
+  color: var(--color-text-secondary);
+  max-width: 560px;
+  font-size: 0.9rem;
+}
+
+.log-alerts__header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.log-alerts__error-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+  border-radius: 0.75rem;
+  font-size: 0.9rem;
+}
+
+/* Status warning cards */
+.log-alerts__status-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.log-alerts__status-card {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 0.75rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.log-alerts__status-card--warn {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning);
+}
+
+.log-alerts__status-card-icon {
+  font-size: 1.2rem;
+  color: var(--color-warning);
+  padding-top: 0.1rem;
+  flex-shrink: 0;
+}
+
+.log-alerts__status-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.log-alerts__status-card-body p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.log-alerts__status-card-hint {
+  font-size: 0.8rem !important;
+  color: var(--color-text-tertiary) !important;
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  line-height: 1.5;
+}
+
+/* Evaluator panel */
+.log-alerts__evaluator-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.log-alerts__evaluator-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.log-alerts__evaluator-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.log-alerts__evaluator-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.log-alerts__evaluator-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.75rem;
+}
+
+/* Toggle button */
+.log-alerts__toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s;
+}
+
+.log-alerts__toggle-btn--on {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  border-color: var(--color-success);
+}
+
+.log-alerts__toggle-btn--off {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+}
+
+.log-alerts__toggle-btn--sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 1.1rem;
+  border: none;
+  background: transparent;
+}
+
+.log-alerts__toggle-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.log-alerts__ok {
+  color: var(--color-success);
+}
+
+.log-alerts__warn {
+  color: var(--color-warning-dark);
+}
+
+/* Rules section */
+.log-alerts__rules-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.log-alerts__rules-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.log-alerts__rules-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.log-alerts__loading,
+.log-alerts__empty {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  background: var(--color-bg-tertiary);
+  border-radius: 0.75rem;
+  border: 1px dashed var(--color-border);
+}
+
+/* Rule cards */
+.log-alerts__rule-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.log-alerts__rule-card--new {
+  border-color: var(--color-primary-light);
+  background: var(--color-primary-bg);
+}
+
+.log-alerts__rule-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem;
+}
+
+.log-alerts__rule-card-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.75rem 1rem 0;
+}
+
+.log-alerts__rule-card-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.log-alerts__rule-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.log-alerts__rule-meta {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.log-alerts__rule-card-actions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Rule form */
+.log-alerts__rule-form {
+  padding: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.log-alerts__form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.875rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.log-alerts__form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.log-alerts__form-field--wide {
+  grid-column: 1 / -1;
+}
+
+.log-alerts__form-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.log-alerts__form-hint {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--color-text-tertiary);
+}
+
+.log-alerts__form-hint--warn {
+  color: var(--color-warning, #b45309);
+  font-style: normal;
+}
+
+.log-alerts__form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.log-alerts__radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.log-alerts__radio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.log-alerts__domain-textarea {
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 0.8rem;
+}
+
+/* Btn size modifiers */
+.btn--sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.btn--xs {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+/* === DNS Schedules specific === */
+
+.dns-schedules__dow-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.dns-schedules__dow-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  transition: background 0.15s;
+}
+
+.dns-schedules__dow-label:hover {
+  background: var(--color-info-bg);
+}
+
+.dns-schedules__tz-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.dns-schedules__rule-card--active {
+  border-color: var(--color-success);
+  box-shadow: 0 0 0 1px var(--color-success);
+}
+
+.dns-schedules__active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.dns-schedules__rule-detail {
+  padding: 0.875rem 1rem;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.dns-schedules__detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.5rem 1rem;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.dns-schedules__entries-list {
+  font-size: 0.875rem;
+}
+
+.dns-schedules__entries-list ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.dns-schedules__entries-list code {
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 0.8rem;
+  color: var(--color-text-primary);
+}
+
+.dns-schedules__toggle-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.dns-schedules__email-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.375rem;
+}
+
+.dns-schedules__email-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 9999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.dns-schedules__email-chip:hover:not(:disabled) {
+  background: var(--color-info-bg);
+  border-color: var(--color-info);
+  color: var(--color-info);
+}
+
+.dns-schedules__email-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dns-schedules__applied-nodes {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--color-success-text);
+  background: var(--color-success-bg);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+}
+
+/* Run result panel */
+.dns-schedules__run-result {
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dns-schedules__run-result-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+}
+
+.dns-schedules__dry-run-badge {
+  padding: 0.2rem 0.5rem;
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.dns-schedules__run-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.dns-schedules__run-table th {
+  text-align: left;
+  padding: 0.4rem 0.75rem;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dns-schedules__run-table td {
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-text-secondary);
+}
+
+.dns-schedules__run-row--error td {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
+.dns-schedules__action-badge {
+  padding: 0.15rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dns-schedules__action-badge--applied {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.dns-schedules__action-badge--removed {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-dark);
+}
+
+.dns-schedules__action-badge--error {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
+/* Clock arc time window preview */
+.dns-schedules__clock-arc {
+  display: flex;
+  justify-content: center;
+  padding: 0.25rem 0;
+}
+
+/* === DNS Schedules — mobile responsive fixes === */
+
+@media (max-width: 640px) {
+  /* Collapse the 2-column form grid to single-column */
+  .log-alerts__form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Make the run-result table scroll horizontally instead of blowing out the viewport */
+  .dns-schedules__run-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Hide the "Enabled / Disabled" text label next to the toggle icon so the
+     card action row stays on one line at narrow widths */
+  .dns-schedules__toggle-label {
+    display: none;
+  }
+
+  /* Stack the timezone radio options vertically */
+  .dns-schedules__tz-row {
+    flex-direction: column;
+  }
 }
 
 /* === CRITICAL: Mobile Tab Fix === */

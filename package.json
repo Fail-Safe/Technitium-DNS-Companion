@@ -1,7 +1,7 @@
 {
   "name": "technitium-dns-companion",
   "private": true,
-  "version": "1.5.2",
+  "version": "1.6.0",
   "license": "MIT",
   "workspaces": [
     "apps/backend",
@@ -11,6 +11,11 @@
     "lint": "npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
+  },
+  "overrides": {
+    "handlebars": "4.7.9",
+    "path-to-regexp": "8.4.0",
+    "serialize-javascript": "7.0.5"
   },
   "devDependencies": {
     "baseline-browser-mapping": "^2.9.17"

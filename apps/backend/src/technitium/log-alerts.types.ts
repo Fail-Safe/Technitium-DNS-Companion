@@ -4,6 +4,9 @@ export type LogAlertDomainPatternType = "exact" | "wildcard" | "regex";
 
 export interface LogAlertRuleDraft {
   name: string;
+  displayName?: string;
+  notifyMessage?: string;
+  notifyMessageOnly?: boolean;
   enabled: boolean;
   outcomeMode: LogAlertOutcomeMode;
   domainPattern: string;

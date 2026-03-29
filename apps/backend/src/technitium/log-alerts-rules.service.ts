@@ -18,6 +18,9 @@ import type {
 type LogAlertRuleRow = {
   id: string;
   name: string;
+  display_name: string | null;
+  notify_message: string | null;
+  notify_message_only: number;
   enabled: number;
   outcome_mode: LogAlertRuleDraft["outcomeMode"];
   domain_pattern: string;
@@ -99,6 +102,9 @@ export class LogAlertsRulesService implements OnModuleInit {
         SELECT
           id,
           name,
+          display_name,
+          notify_message,
+          notify_message_only,
           enabled,
           outcome_mode,
           domain_pattern,
@@ -132,6 +138,9 @@ export class LogAlertsRulesService implements OnModuleInit {
           id,
           name,
           name_lc,
+          display_name,
+          notify_message,
+          notify_message_only,
           enabled,
           outcome_mode,
           domain_pattern,
@@ -142,12 +151,15 @@ export class LogAlertsRulesService implements OnModuleInit {
           email_recipients_json,
           created_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       ).run(
         id,
         rule.name,
         nameLc,
+        rule.displayName?.trim() || null,
+        rule.notifyMessage?.trim() || null,
+        rule.notifyMessageOnly ? 1 : 0,
         rule.enabled ? 1 : 0,
         rule.outcomeMode,
         rule.domainPattern,
@@ -187,6 +199,9 @@ export class LogAlertsRulesService implements OnModuleInit {
           UPDATE log_alert_rules
           SET name = ?,
               name_lc = ?,
+              display_name = ?,
+              notify_message = ?,
+              notify_message_only = ?,
               enabled = ?,
               outcome_mode = ?,
               domain_pattern = ?,
@@ -202,6 +217,9 @@ export class LogAlertsRulesService implements OnModuleInit {
         .run(
           rule.name,
           nameLc,
+          rule.displayName?.trim() || null,
+          rule.notifyMessage?.trim() || null,
+          rule.notifyMessageOnly ? 1 : 0,
           rule.enabled ? 1 : 0,
           rule.outcomeMode,
           rule.domainPattern,
@@ -298,6 +316,18 @@ export class LogAlertsRulesService implements OnModuleInit {
         "Migrated log_alert_rules: renamed advanced_blocking_group_name → advanced_blocking_group_names",
       );
     }
+    const newColumns = [
+      `ALTER TABLE log_alert_rules ADD COLUMN display_name TEXT`,
+      `ALTER TABLE log_alert_rules ADD COLUMN notify_message TEXT`,
+      `ALTER TABLE log_alert_rules ADD COLUMN notify_message_only INTEGER NOT NULL DEFAULT 0`,
+    ];
+    for (const sql of newColumns) {
+      try {
+        db.prepare(sql).run();
+      } catch {
+        // Column already present — no action needed.
+      }
+    }
   }
 
   private initializeSchema(): void {
@@ -307,6 +337,9 @@ export class LogAlertsRulesService implements OnModuleInit {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         name_lc TEXT NOT NULL UNIQUE,
+        display_name TEXT,
+        notify_message TEXT,
+        notify_message_only INTEGER NOT NULL DEFAULT 0,
         enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
         outcome_mode TEXT NOT NULL CHECK (outcome_mode IN ('blocked-only', 'all-outcomes')),
         domain_pattern TEXT NOT NULL,
@@ -451,6 +484,9 @@ export class LogAlertsRulesService implements OnModuleInit {
     return {
       id: row.id,
       name: row.name,
+      displayName: row.display_name ?? undefined,
+      notifyMessage: row.notify_message ?? undefined,
+      notifyMessageOnly: row.notify_message_only === 1,
       enabled: row.enabled === 1,
       outcomeMode: row.outcome_mode,
       domainPattern: row.domain_pattern,
@@ -474,6 +510,9 @@ export class LogAlertsRulesService implements OnModuleInit {
         SELECT
           id,
           name,
+          display_name,
+          notify_message,
+          notify_message_only,
           enabled,
           outcome_mode,
           domain_pattern,
@@ -499,8 +538,10 @@ export class LogAlertsRulesService implements OnModuleInit {
 
   private assertRuleMaxLengths(rule: LogAlertRuleDraft): void {
     this.assertMaxLength("Rule name", rule.name, 120);
+    this.assertMaxLength("Display name", rule.displayName, 120);
     this.assertMaxLength("Domain pattern", rule.domainPattern, 300);
     this.assertMaxLength("Client identifier", rule.clientIdentifier, 200);
+    this.assertMaxLength("Notify message", rule.notifyMessage, 2000);
     for (const groupName of rule.advancedBlockingGroupNames ?? []) {
       this.assertMaxLength("Advanced Blocking group", groupName, 200);
     }

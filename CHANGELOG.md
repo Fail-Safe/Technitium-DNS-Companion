@@ -9,6 +9,44 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-03-29
+
+### Added
+
+- DNS Schedules: time-window-based blocking/allow rules with day-of-week selection (any subset of Sun–Sat, or every day), start/end time, and full IANA timezone support (evaluates windows in the schedule's configured timezone, not the server clock). Schedules are bidirectional — entries are added when the window opens and cleanly removed when it closes, leaving manually-managed entries untouched.
+- DNS Schedules: support for multiple Advanced Blocking groups per schedule (previously limited to one group).
+- DNS Schedules: Domain Group integration — bind Domain Groups as the domain source for a schedule instead of (or in addition to) manually listed entries.
+- DNS Schedules: optional cache flush on window activate and deactivate, ensuring DNS resolvers pick up changes immediately without waiting for TTL expiry.
+- DNS Schedules: email notifications when blocked domains are queried during an active window — configurable recipients, per-schedule debounce interval, and an optional custom message prepended to alert emails. Set `notifyMessageOnly` to send only the custom message body (no technical details).
+- DNS Schedules: Clone button on each schedule card — creates a disabled "Copy of {name}" draft pre-filled with the source schedule's settings, then opens it for editing.
+- DNS Schedules: schedule token status now reports `hasCacheModify` permission so the UI can surface a clear error when the token lacks cache-flush capability.
+
+### Changed
+
+- DNS Schedule alert emails now use a human-readable subject line (`DNS Schedule alert: {schedule name}`) instead of the internal rule name (`__schedule:uuid__`).
+- Delete schedule confirmation now uses the app's `ConfirmModal` (danger variant with animated slide-in and mobile bottom-sheet) instead of a browser `window.confirm` dialog.
+- Background token security banner is no longer shown when the validation failure was caused by a transient connectivity error, preventing false-positive "token too privileged" warnings during temporary network hiccups.
+- Mobile CSS improvements for the Automation page: form grids collapse to a single column at 640px, the run-result table scrolls horizontally instead of overflowing, the enable/disable toggle label is hidden at 480px, and the timezone row stacks vertically at 480px.
+
+### Fixed
+
+- DNS Schedules: disabling a schedule that is currently active now immediately removes its Applied Blocking entries from all nodes instead of leaving them until the next evaluator tick. The linked alert rule window is also closed synchronously.
+- DNS Schedules: evaluator now performs a cleanup pass each tick to remove applied entries belonging to disabled or deleted schedules. Covers retroactive cases where the controller-level deactivation fix was deployed after a schedule had already been left in an applied state.
+- DNS Schedules: switched from per-domain cache flush to full node cache flush on schedule apply/remove, ensuring subdomain entries (e.g. `www.example.com`) are also evicted when a parent domain changes.
+- DNS Schedules: re-applies domain entries on every evaluator tick when a schedule window is active, so domains added to a bound Domain Group during an active window take effect immediately without requiring the window to close and reopen.
+- DNS Schedules: alert rule domain patterns now match only the schedule's configured domains (manual entries plus resolved Domain Group entries) instead of the entire Advanced Blocking group. Patterns are also re-synced automatically whenever Domain Group entries are added, updated, or removed.
+- DNS Schedules: alert email subject lines now correctly show the schedule's display name after the schedule is updated. Previously, rules created before display name support was added showed the internal `__schedule:UUID__` name; affected schedules self-heal on the next evaluator tick.
+- Domain Management: "Apply to DNS" button now appears in the Domains tab footer when Domain Group bindings are pending, allowing bindings to be applied without switching to the Domain Groups tab.
+- Domain Groups: fixed a render inconsistency after renaming a group where the right panel briefly showed the new name while the group list and binding chips still displayed the old name. Both fetches now run in parallel so the UI updates atomically.
+- Log Queries: fixed app discovery incorrectly filtering on `isQueryLogger` (write-only sink) instead of `isQueryLogs` (required for log querying). Apps like Log Exporter that only implement the write interface were incorrectly selected, causing `class path not found` errors from Technitium when attempting to query logs.
+- DNS Schedules: fixed a silent `RENAME COLUMN` migration failure on existing databases — a prior `replace_all` edit accidentally made the migration a self-rename no-op (`advanced_blocking_group_name → advanced_blocking_group_name`), causing all queries using the plural column name to fail at runtime with "no such column". The migration now correctly renames `advanced_blocking_group_name` to `advanced_blocking_group_names`.
+- Security: updated `nodemailer` to 8.0.4 and `yaml` to 2.8.3; added npm overrides forcing `handlebars@4.7.9`, `path-to-regexp@8.4.0`, and `serialize-javascript@7.0.5` to resolve Dependabot advisories.
+
+### Testing
+
+- DNS Schedules unit tests: 119 tests across three suites — evaluator service (24: window logic, overnight windows, day-of-week gating, IANA timezones, apply/remove, cache flush, notification debounce), service CRUD (48: schema migration, all fields including `notifyMessage`), and controller `parseDraft` (47: validation and parsing for every field).
+- Automation page E2E: 10 Playwright tests (Firefox) covering schedule create, edit, clone, delete via `ConfirmModal`, enable/disable toggle, evaluator manual run, and email notification field visibility.
+
 ## [1.5.2] - 2026-03-10
 
 ### Fixed

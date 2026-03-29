@@ -30,6 +30,7 @@ const LoginPage = lazy(() => import("./pages/LoginPage"));
 const AdvancedBlockingRuleOptimizerPage = lazy(
   () => import("./pages/AdvancedBlockingRuleOptimizerPage"),
 );
+const AutomationPage = lazy(() => import("./pages/AutomationPage"));
 
 // Loading fallback component
 const PageLoader = () => (
@@ -130,6 +131,7 @@ export default function App() {
                     <Route path="/logs" element={<LogsPage />} />
                     <Route path="/zones" element={<ZonesPage />} />
                     <Route path="/dns-lookup" element={<DnsLookupPage />} />
+                    <Route path="/automation" element={<AutomationPage />} />
                     <Route
                       path="/advanced-blocking/rule-optimizer"
                       element={<AdvancedBlockingRuleOptimizerPage />}

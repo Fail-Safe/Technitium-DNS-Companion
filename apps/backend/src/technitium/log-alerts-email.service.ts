@@ -69,28 +69,40 @@ export class LogAlertsEmailService {
     dryRun?: boolean;
   }): Promise<LogAlertsSendTestEmailResponse | null> {
     const timestamp = params.latestMatchAt ?? new Date().toISOString();
-    const subject = `[Technitium DNS Companion] Log alert: ${params.rule.name}`;
-    const lines = [
-      `Rule: ${params.rule.name}`,
-      `Matched entries: ${params.matchedCount}`,
-      `Latest match: ${timestamp}`,
-      `Outcome mode: ${params.rule.outcomeMode}`,
-      `Pattern: ${params.rule.domainPatternType}:${params.rule.domainPattern}`,
-      `Client selector: ${params.rule.clientIdentifier ?? "any"}`,
-      `Group selector: ${params.rule.advancedBlockingGroupNames?.join(", ") ?? "any"}`,
-      "",
-      "Recent matches:",
-      ...(params.sampleLines.length > 0
-        ? params.sampleLines
-        : ["(no sample lines)"]),
-    ];
+    const { rule } = params;
+    const displayName = rule.displayName ?? rule.name;
+    const label = rule.displayName ? "Schedule" : "Rule";
+    const subject = `[Technitium DNS Companion] ${rule.displayName ? "DNS Schedule alert" : "Log alert"}: ${displayName}`;
+
+    const lines: string[] = [];
+    if (rule.notifyMessage && rule.notifyMessageOnly) {
+      lines.push(rule.notifyMessage);
+    } else {
+      if (rule.notifyMessage) {
+        lines.push(rule.notifyMessage, "", "---", "");
+      }
+      lines.push(
+        `${label}: ${displayName}`,
+        `Matched entries: ${params.matchedCount}`,
+        `Latest match: ${timestamp}`,
+        `Outcome mode: ${rule.outcomeMode}`,
+        `Pattern: ${rule.domainPatternType}:${rule.domainPattern}`,
+        `Client selector: ${rule.clientIdentifier ?? "any"}`,
+        `Group selector: ${rule.advancedBlockingGroupNames?.join(", ") ?? "any"}`,
+        "",
+        "Recent matches:",
+        ...(params.sampleLines.length > 0
+          ? params.sampleLines
+          : ["(no sample lines)"]),
+      );
+    }
 
     if (params.dryRun) {
       return null;
     }
 
     return this.sendEmail({
-      to: params.rule.emailRecipients,
+      to: rule.emailRecipients,
       subject,
       text: lines.join("\n"),
     });

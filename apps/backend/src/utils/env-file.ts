@@ -77,6 +77,7 @@ export function getEnvOrFile(
  *
  * Supported variables:
  * - TECHNITIUM_BACKGROUND_TOKEN
+ * - TECHNITIUM_SCHEDULE_TOKEN
  * - TECHNITIUM_<NODE>_TOKEN (for each node in TECHNITIUM_NODES)
  *
  * @example
@@ -84,7 +85,7 @@ export function getEnvOrFile(
  * resolveEnvFileVariables();
  */
 export function resolveEnvFileVariables(): void {
-  const sensitiveVars = ["TECHNITIUM_BACKGROUND_TOKEN"];
+  const sensitiveVars = ["TECHNITIUM_BACKGROUND_TOKEN", "TECHNITIUM_SCHEDULE_TOKEN"];
 
   // Resolve statically-known sensitive variables
   for (const envVar of sensitiveVars) {

@@ -2297,6 +2297,49 @@ export function ConfigurationPage() {
     }
   }, [selectedNodeConfig]);
 
+  // Domain Groups: Apply materialization to DNS (shared by DG tab and Domains tab footer)
+  const handleApplyDomainGroups = useCallback(async () => {
+    try {
+      setDomainGroupsActionLoading(true);
+      const effectiveNodeOnly =
+        !isClusterEnabled && nodes.length > 1 && applySelectedNodeOnly;
+      const result = await applyDomainGroupMaterialization({
+        dryRun: false,
+        nodeIds:
+          effectiveNodeOnly && selectedNodeId ? [selectedNodeId] : undefined,
+      });
+      setDomainGroupsApplyResult(result);
+      setSessionAddedBindingKeys(new Set());
+      await refreshDomainGroupsPreview();
+      if (result.nodes.some((r) => r.updatedGroups.length > 0)) {
+        await reloadAdvancedBlocking();
+      }
+      pushToast({
+        message:
+          result.conflicts.length > 0 ?
+            "Apply blocked due to conflicts."
+          : "Domain Groups applied.",
+        tone: result.conflicts.length > 0 ? "error" : "success",
+      });
+    } catch (error) {
+      setDomainGroupsError(getErrorMessage(error));
+    } finally {
+      setDomainGroupsActionLoading(false);
+    }
+  }, [
+    isClusterEnabled,
+    nodes.length,
+    applySelectedNodeOnly,
+    selectedNodeId,
+    applyDomainGroupMaterialization,
+    setDomainGroupsApplyResult,
+    setSessionAddedBindingKeys,
+    refreshDomainGroupsPreview,
+    reloadAdvancedBlocking,
+    pushToast,
+    setDomainGroupsError,
+  ]);
+
   // Domain Management tab: Edit domain
   const handleEditDomain = useCallback(
     (domain: string) => {
@@ -3163,10 +3206,12 @@ export function ConfigurationPage() {
                                                       undefined,
                                                   },
                                                 );
-                                                await loadSelectedDomainGroup(
-                                                  selectedDomainGroup.id,
-                                                );
-                                                await loadDomainGroupsData();
+                                                await Promise.all([
+                                                  loadSelectedDomainGroup(
+                                                    selectedDomainGroup.id,
+                                                  ),
+                                                  loadDomainGroupsData(),
+                                                ]);
                                                 pushToast({
                                                   message:
                                                     "Domain Group updated.",
@@ -3714,56 +3759,7 @@ export function ConfigurationPage() {
                                       applySelectedNodeOnly &&
                                       !selectedNodeId)
                                   }
-                                  onClick={() => {
-                                    void (async () => {
-                                      try {
-                                        setDomainGroupsActionLoading(true);
-                                        const effectiveNodeOnly =
-                                          !isClusterEnabled &&
-                                          nodes.length > 1 &&
-                                          applySelectedNodeOnly;
-                                        const result =
-                                          await applyDomainGroupMaterialization(
-                                            {
-                                              dryRun: false,
-                                              nodeIds:
-                                                (
-                                                  effectiveNodeOnly &&
-                                                  selectedNodeId
-                                                ) ?
-                                                  [selectedNodeId]
-                                                : undefined,
-                                            },
-                                          );
-                                        setDomainGroupsApplyResult(result);
-                                        setSessionAddedBindingKeys(new Set());
-                                        await refreshDomainGroupsPreview();
-                                        if (
-                                          result.nodes.some(
-                                            (r) => r.updatedGroups.length > 0,
-                                          )
-                                        ) {
-                                          await reloadAdvancedBlocking();
-                                        }
-                                        pushToast({
-                                          message:
-                                            result.conflicts.length > 0 ?
-                                              "Apply blocked due to conflicts."
-                                            : "Domain Groups applied.",
-                                          tone:
-                                            result.conflicts.length > 0 ?
-                                              "error"
-                                            : "success",
-                                        });
-                                      } catch (error) {
-                                        setDomainGroupsError(
-                                          getErrorMessage(error),
-                                        );
-                                      } finally {
-                                        setDomainGroupsActionLoading(false);
-                                      }
-                                    })();
-                                  }}
+                                  onClick={() => void handleApplyDomainGroups()}
                                 >
                                   Apply to DNS
                                 </button>
@@ -4987,6 +4983,27 @@ export function ConfigurationPage() {
                           </ul>
                         </div>
                       )}
+                  </>
+                )}
+                {isDomainGroupsTabVisible && pendingPairKeys.size > 0 && (
+                  <>
+                    <span className="multi-group-editor__footer-hint">
+                      {pendingPairKeys.size} Domain Group binding
+                      {pendingPairKeys.size !== 1 ? "s" : ""} pending
+                    </span>
+                    <div className="multi-group-editor__footer-actions">
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={
+                          domainGroupsActionLoading ||
+                          !!domainGroupPreview?.hasConflicts
+                        }
+                        onClick={() => void handleApplyDomainGroups()}
+                      >
+                        Apply to DNS
+                      </button>
+                    </div>
                   </>
                 )}
                 <div className="multi-group-editor__footer-actions">
