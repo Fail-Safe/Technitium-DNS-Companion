@@ -690,6 +690,7 @@ export class DnsSchedulesEvaluatorService
       if (existing.enabled === shouldBeActive) return; // Already correct
       this.logAlertsRulesService.updateRule(existing.id, {
         ...existing,
+        displayName: scheduleName,
         enabled: shouldBeActive,
       });
       this.logger.log(
@@ -770,6 +771,7 @@ export class DnsSchedulesEvaluatorService
           }
           this.logAlertsRulesService.updateRule(existing.id, {
             ...existing,
+            displayName: schedule.name,
             domainPattern: pattern,
             domainPatternType: type,
           });
