@@ -3206,10 +3206,12 @@ export function ConfigurationPage() {
                                                       undefined,
                                                   },
                                                 );
-                                                await loadSelectedDomainGroup(
-                                                  selectedDomainGroup.id,
-                                                );
-                                                await loadDomainGroupsData();
+                                                await Promise.all([
+                                                  loadSelectedDomainGroup(
+                                                    selectedDomainGroup.id,
+                                                  ),
+                                                  loadDomainGroupsData(),
+                                                ]);
                                                 pushToast({
                                                   message:
                                                     "Domain Group updated.",
@@ -4984,23 +4986,25 @@ export function ConfigurationPage() {
                   </>
                 )}
                 {isDomainGroupsTabVisible && pendingPairKeys.size > 0 && (
-                  <div className="multi-group-editor__footer-actions multi-group-editor__footer-actions--dg">
+                  <>
                     <span className="multi-group-editor__footer-hint">
                       {pendingPairKeys.size} Domain Group binding
                       {pendingPairKeys.size !== 1 ? "s" : ""} pending
                     </span>
-                    <button
-                      type="button"
-                      className="button button--primary"
-                      disabled={
-                        domainGroupsActionLoading ||
-                        !!domainGroupPreview?.hasConflicts
-                      }
-                      onClick={() => void handleApplyDomainGroups()}
-                    >
-                      Apply to DNS
-                    </button>
-                  </div>
+                    <div className="multi-group-editor__footer-actions">
+                      <button
+                        type="button"
+                        className="primary"
+                        disabled={
+                          domainGroupsActionLoading ||
+                          !!domainGroupPreview?.hasConflicts
+                        }
+                        onClick={() => void handleApplyDomainGroups()}
+                      >
+                        Apply to DNS
+                      </button>
+                    </div>
+                  </>
                 )}
                 <div className="multi-group-editor__footer-actions">
                   <button
