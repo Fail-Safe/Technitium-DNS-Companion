@@ -67,7 +67,7 @@ test.describe("Automation page", () => {
 
     await expect(page.getByRole("heading", { name: "New Schedule" })).toBeVisible();
     await expect(page.getByText("Schedule name")).toBeVisible();
-    await expect(page.getByText("Advanced Blocking group")).toBeVisible();
+    await expect(page.getByText("Advanced Blocking group", { exact: true })).toBeVisible();
     await expect(page.getByText("Start time (24h)")).toBeVisible();
   });
 
@@ -101,7 +101,7 @@ test.describe("Automation page", () => {
     // Fill required fields: name, AB group, and at least one domain entry.
     // Time fields are pre-filled by DEFAULT_DRAFT (22:00 / 06:00).
     await page.getByPlaceholder("e.g. Kids bedtime block").fill("Bedtime Block");
-    await page.getByPlaceholder("e.g. Kids", { exact: true }).fill("KidsGroup");
+    await page.getByPlaceholder("e.g. Kids, Parents", { exact: true }).fill("KidsGroup");
     await page.getByPlaceholder(/social\.example\.com/).fill("example.com");
 
     await page.getByRole("button", { name: "Create Schedule" }).click();
@@ -115,7 +115,7 @@ test.describe("Automation page", () => {
   test("after creating a schedule the empty state is gone", async ({ page }) => {
     await page.getByRole("button", { name: /new schedule/i }).click();
     await page.getByPlaceholder("e.g. Kids bedtime block").fill("Morning Block");
-    await page.getByPlaceholder("e.g. Kids", { exact: true }).fill("KidsGroup");
+    await page.getByPlaceholder("e.g. Kids, Parents", { exact: true }).fill("KidsGroup");
     await page.getByPlaceholder(/social\.example\.com/).fill("example.com");
     await page.getByRole("button", { name: "Create Schedule" }).click();
 
