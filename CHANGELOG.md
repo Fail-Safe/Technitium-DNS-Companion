@@ -47,6 +47,12 @@ All notable changes to this project will be documented in this file.
 - DNS Schedules unit tests: 119 tests across three suites — evaluator service (24: window logic, overnight windows, day-of-week gating, IANA timezones, apply/remove, cache flush, notification debounce), service CRUD (48: schema migration, all fields including `notifyMessage`), and controller `parseDraft` (47: validation and parsing for every field).
 - Automation page E2E: 10 Playwright tests (Firefox) covering schedule create, edit, clone, delete via `ConfirmModal`, enable/disable toggle, evaluator manual run, and email notification field visibility.
 
+## [1.5.2] - 2026-03-10
+
+### Fixed
+
+- DNS Logs: fixed app discovery selecting write-only log exporter apps (implementing `IDnsQueryLogger`) instead of queryable log apps (implementing `IDnsQueryLogs`). Apps like Log Exporter that only write logs will no longer be selected as the query source, preventing the `'LogExporter.App' class path was not found` error from Technitium. Error messaging now clearly directs users to install the "Query Logs (Sqlite)" app.
+
 ## [1.5.1] - 2026-03-06
 
 ### Fixed
