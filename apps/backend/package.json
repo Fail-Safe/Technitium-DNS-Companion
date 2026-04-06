@@ -24,7 +24,7 @@
     "@nestjs/axios": "^4.0.1",
     "@nestjs/cache-manager": "^3.0.1",
     "@nestjs/common": "^11.0.1",
-    "@nestjs/core": "^11.0.1",
+    "@nestjs/core": "^11.1.18",
     "@nestjs/platform-express": "^11.1.9",
     "@nestjs/throttler": "^6.4.0",
     "@types/nodemailer": "^7.0.10",
