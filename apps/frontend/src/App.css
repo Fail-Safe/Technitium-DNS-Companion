@@ -3411,6 +3411,15 @@ button.secondary:disabled,
   vertical-align: middle;
 }
 
+/* Tints the schedule-managed badge to make it visually distinct from the
+   pattern-type / outcome badges that live in the same row. Indicates the rule
+   is owned by a DNS Schedule and not directly editable here. */
+.logs-page__schedule-linked-badge {
+  background-color: var(--color-accent-bg, rgba(99, 102, 241, 0.12));
+  color: var(--color-accent, #4f46e5);
+  border-color: var(--color-accent-border, rgba(99, 102, 241, 0.35));
+}
+
 .logs-page__pattern-sep {
   margin: 0 0.35rem;
   color: var(--color-text-secondary);

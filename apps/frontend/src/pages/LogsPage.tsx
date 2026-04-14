@@ -90,6 +90,17 @@ const REFRESH_OPTIONS = [
 // event happens. Enforce a hard timeout so the page can self-recover.
 const LOGS_FETCH_TIMEOUT_MS = 25000;
 
+// Schedule-linked alert rules are created by the DNS Schedules controller and
+// kept in sync each evaluator tick. Their `name` is the link key (a UUID-tagged
+// machine string the user shouldn't see) and `displayName` carries the friendly
+// name. Detect them by prefix so the UI shows displayName, hides futile edit
+// affordances, and lets clone produce a clean standalone rule.
+const SCHEDULE_LINKED_RULE_NAME_PREFIX = "__schedule:";
+const isScheduleLinkedRule = (rule: { name?: string }): boolean =>
+  !!rule.name && rule.name.startsWith(SCHEDULE_LINKED_RULE_NAME_PREFIX);
+const SCHEDULE_LINKED_TOOLTIP =
+  "Managed by a DNS Schedule — edit the schedule on the Automation page.";
+
 // Domain-list check calls can hang (sleep/VPN/offline). Enforce a hard timeout so
 // tooltip lookups don't get stuck showing "Looking up block sources…" forever.
 const DOMAIN_BLOCK_SOURCE_FETCH_TIMEOUT_MS = 12000;
@@ -2478,8 +2489,17 @@ export function LogsPage() {
 
   const startCloneRule = useCallback((rule: LogAlertRule) => {
     setEditingRuleId(null);
+    // For schedule-linked rules, the raw `name` is a `__schedule:UUID__` link
+    // key the user shouldn't ever see. Use displayName so the clone reads as
+    // `Copy of "Nighttime YouTube Block (Flo)"` instead of `Copy of __schedule:efbf…__`.
+    // The clone is intentionally a plain standalone rule — stripping the prefix
+    // also breaks the schedule link, which is what the user wants when cloning.
+    const sourceName =
+      isScheduleLinkedRule(rule) && rule.displayName
+        ? rule.displayName
+        : rule.name;
     setLogAlertRuleDraft({
-      name: `Copy of ${rule.name}`,
+      name: `Copy of ${sourceName}`,
       enabled: rule.enabled,
       outcomeMode: rule.outcomeMode,
       domainPattern: rule.domainPattern,
@@ -7152,14 +7172,28 @@ export function LogsPage() {
                     No log alert rules configured.
                   </p>
                 ) : (
-                  logAlertRules.map((rule) => (
+                  logAlertRules.map((rule) => {
+                    const scheduleLinked = isScheduleLinkedRule(rule);
+                    const headingText = rule.displayName || rule.name;
+                    return (
                     <article
                       key={rule.id}
                       className="logs-page__log-alert-rule-item"
                     >
                       <div className="logs-page__log-alert-rule-item-header">
                         <div>
-                          <h3>{rule.name}</h3>
+                          <h3>
+                            {headingText}
+                            {scheduleLinked && (
+                              <span
+                                className="logs-page__pattern-type-badge logs-page__schedule-linked-badge"
+                                title={SCHEDULE_LINKED_TOOLTIP}
+                                style={{ marginLeft: "0.5rem" }}
+                              >
+                                schedule-managed
+                              </span>
+                            )}
+                          </h3>
                           <p className="logs-page__log-alert-rule-pattern">
                             <span className="logs-page__pattern-type-badge">
                               {rule.domainPatternType}
@@ -7182,7 +7216,13 @@ export function LogsPage() {
                               type="button"
                               className="btn btn--ghost"
                               onClick={() => startEditRule(rule)}
-                              disabled={logAlertRuleActionId === rule.id}
+                              disabled={
+                                logAlertRuleActionId === rule.id ||
+                                scheduleLinked
+                              }
+                              title={
+                                scheduleLinked ? SCHEDULE_LINKED_TOOLTIP : undefined
+                              }
                             >
                               Edit
                             </button>
@@ -7203,7 +7243,13 @@ export function LogsPage() {
                                   !rule.enabled,
                                 );
                               }}
-                              disabled={logAlertRuleActionId === rule.id}
+                              disabled={
+                                logAlertRuleActionId === rule.id ||
+                                scheduleLinked
+                              }
+                              title={
+                                scheduleLinked ? SCHEDULE_LINKED_TOOLTIP : undefined
+                              }
                             >
                               {rule.enabled ? "Disable" : "Enable"}
                             </button>
@@ -7213,7 +7259,13 @@ export function LogsPage() {
                               onClick={() => {
                                 void deleteLogAlertRule(rule.id);
                               }}
-                              disabled={logAlertRuleActionId === rule.id}
+                              disabled={
+                                logAlertRuleActionId === rule.id ||
+                                scheduleLinked
+                              }
+                              title={
+                                scheduleLinked ? SCHEDULE_LINKED_TOOLTIP : undefined
+                              }
                             >
                               Delete
                             </button>
@@ -7254,7 +7306,8 @@ export function LogsPage() {
                         </span>
                       </div>
                     </article>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </section>
