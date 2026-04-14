@@ -50,6 +50,16 @@ export class CompanionDbService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     try {
+      // SQLite's recommended pre-close cleanup. Cheap (runs ANALYZE only when
+      // the planner thinks it'd help) and keeps query plans accurate as table
+      // statistics drift over time.
+      try {
+        this._db.prepare("PRAGMA optimize;").run();
+      } catch (error) {
+        this.logger.warn(
+          `PRAGMA optimize failed before Companion SQLite close: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       this._db.close();
     } catch (error) {
       this.logger.warn("Failed to close Companion SQLite DB", error as Error);
