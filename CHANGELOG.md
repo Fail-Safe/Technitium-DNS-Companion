@@ -9,6 +9,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-04-14
+
+### Added
+
+- DNS Schedules: eager `TECHNITIUM_SCHEDULE_TOKEN` validation at startup. The token is now probed against the configured nodes during boot (not just lazily on first UI request) so missing `Apps: Modify` permission, missing `Cache: Modify` permission, an invalid token, or a transient connectivity issue surfaces as a `WARN [TechnitiumService] TECHNITIUM_SCHEDULE_TOKEN …` line in the boot log instead of when the next schedule fires hours later.
+- SQLite query-logs nightly maintenance: one-time `auto_vacuum=INCREMENTAL` migration on first boot (one full `VACUUM` to switch modes — fast on small DBs, may take 30s–2min on multi-GB DBs), then a daily timer at ~3:30 AM ± 10 min local time that runs `PRAGMA wal_checkpoint(TRUNCATE)` + `PRAGMA incremental_vacuum(1000)`. Without this, retention prunes never returned freed pages to the OS and the WAL could grow unbounded behind long-held read transactions. Gated by `QUERY_LOG_SQLITE_AUTO_VACUUM_MIGRATION` (default `true`) so operators with very large existing DBs can defer the migration. `companion.sqlite` gets a smaller treatment: `PRAGMA optimize` on graceful shutdown to keep query plans fresh.
+
+### Changed
+
+- Navbar: DNS Schedules now precedes DNS Rule Optimizer (frequency-of-use ordering — Schedules is daily-use, Rule Optimizer is occasional maintenance).
+- Log Alert Rules page: schedule-linked rules now display the friendly schedule name (e.g. "Nighttime YouTube Block (Flo)") instead of the internal `__schedule:UUID__` link key. A "schedule-managed" badge appears next to the heading. Edit / Disable / Delete buttons are disabled for schedule-linked rules with a tooltip directing the user to edit the schedule on the Automation page (the evaluator overwrites manual edits on every tick anyway). Clone strips the link prefix and uses the schedule's friendly name as the source, producing a clean standalone rule.
+- `[TechnitiumService]` cluster timing settings warning is no longer emitted on transient network failures. The previous WARN ("admin permissions may be required") was misleading whenever the underlying error was actually a network blip — network errors now route to DEBUG alongside other expected non-critical cases (400/401/403/404). Empty error messages are also coalesced to a fallback string so the log never renders as `…: . Using default polling intervals.`.
+
+### Fixed
+
+- **DNS Schedules: write Advanced Blocking config to the cluster Primary only.** Previously the evaluator iterated every node and called `setConfig` on each one, racing Technitium's own config replication. Writes to secondaries got reverted on the next sync round, the next evaluator tick saw entries missing and re-applied, and the cycle repeated every minute — visible as repeating `Re-applied schedule "…" — DG entries updated` log lines. Cache flush still hits all physical nodes since it's a per-node runtime operation, not replicated. New `TechnitiumService.resolveClusterWriteTargets()` returns `{writeTarget, flushNodes}` per candidate so multiple secondaries of the same cluster collapse to one Primary write per tick. `dns_schedule_state` now tracks Primaries; pre-existing per-secondary state rows are benign and age out on subsequent disable/cleanup.
+- DNS Schedules: cluster topology probe inside the evaluator now uses the schedule token (`authMode: "schedule"`). Previously `listNodes()` always probed with session auth, but the evaluator timer runs outside any HTTP request context so `AuthRequestContext.getSession()` returned undefined and every node appeared `Standalone` — silently defeating the Primary-routing fix above. `listNodes()` now accepts an `authMode` option (default unchanged for HTTP callers).
+- DNS Schedules: evaluator's remove path no longer silently succeeds when the cluster snapshot fetch fails. Previously, a transient `ECONNRESET` during a window-close tick would let `removeAdvancedBlockingScheduleFromNode` early-return, the caller would still call `markRemoved`, state would clear, and entries would be orphaned — staying live in Technitium while the schedule's tracking thought it had cleaned up. Now throws so the next tick retries until the node is reachable again.
+
+### Testing
+
+- 7 new unit tests for `TechnitiumService.resolveClusterWriteTargets` covering all topology permutations: standalone-only, single-cluster collapse, two independent clusters, mixed standalone + clustered, missing-Primary fallback with WARN, unknown-node passthrough.
+- 6 new tests for `logScheduleTokenValidationOutcome` covering each WARN/LOG branch (full-permission success, missing Apps:Modify, missing Cache:Modify, transient network error with retry hint, invalid-token without retry hint, opt-out silence).
+- 4 new tests for `getClusterSettings` error classification (network → DEBUG, 403 → DEBUG, 5xx → WARN, empty-message fallback string).
+- 5 new tests for `QueryLogSqliteService` SQLite maintenance (NONE→INCREMENTAL migration, no-op when already INCREMENTAL, env opt-out, page reclamation via `runMaintenance`, no-op when DB is closed).
+- 3 new tests for `DnsSchedulesEvaluatorService` snapshot-error symmetry (apply throws when snapshot has error, remove throws when snapshot has error, remove proceeds normally on healthy snapshot).
+
 ## [1.6.0] - 2026-03-29
 
 ### Added
