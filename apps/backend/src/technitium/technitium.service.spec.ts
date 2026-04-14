@@ -634,3 +634,145 @@ describe("TechnitiumService request (session auth)", () => {
     expect(session.tokensByNodeId.node1).toBeUndefined();
   });
 });
+
+// ── Eager TECHNITIUM_SCHEDULE_TOKEN validation outcome logging ──────────────
+// Operators need to see permission / connectivity problems in the boot log
+// instead of discovering them when a schedule first fires. These tests pin
+// which state -> log level -> message shape, so the eager-startup path stays
+// consistent with what `getScheduleTokenStatus()` callers will also observe.
+
+describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
+  type OutcomeFn = () => void;
+  type InternalShape = {
+    scheduleTokenValidation:
+      | {
+          validated: true;
+          valid: boolean;
+          hasAppsModify: boolean;
+          hasCacheModify: boolean;
+          username?: string;
+          reason?: string;
+          transient?: boolean;
+        }
+      | { validated: false };
+    logger: { warn: jest.Mock; log: jest.Mock };
+    logScheduleTokenValidationOutcome: OutcomeFn;
+  };
+
+  function build(): InternalShape {
+    const service = new TechnitiumService([], new DhcpSnapshotService());
+    const internal = service as unknown as InternalShape;
+    internal.logger = { warn: jest.fn(), log: jest.fn() };
+    return internal;
+  }
+
+  it("logs success at LOG level when the token is valid with full permissions", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: true,
+      hasAppsModify: true,
+      hasCacheModify: true,
+      username: "companion-schedule",
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.warn).not.toHaveBeenCalled();
+    expect(s.logger.log).toHaveBeenCalledTimes(1);
+    expect(s.logger.log.mock.calls[0][0]).toContain(
+      "Validated TECHNITIUM_SCHEDULE_TOKEN (user: companion-schedule",
+    );
+  });
+
+  it("warns when Apps: Modify is missing (fatal for schedule apply)", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: true,
+      hasAppsModify: false,
+      hasCacheModify: true,
+      username: "low-priv",
+      reason: "Token authenticated but lacks Apps: Modify permission needed to update Advanced Blocking config.",
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.log).not.toHaveBeenCalled();
+    expect(s.logger.warn).toHaveBeenCalledTimes(1);
+    const msg = s.logger.warn.mock.calls[0][0];
+    expect(msg).toContain("missing Apps: Modify");
+    expect(msg).toContain("DNS Schedules cannot update Advanced Blocking config");
+  });
+
+  it("warns when Cache: Modify is missing (flushCacheOnChange will fail)", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: true,
+      hasAppsModify: true,
+      hasCacheModify: false,
+      username: "apps-only",
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.log).not.toHaveBeenCalled();
+    expect(s.logger.warn).toHaveBeenCalledTimes(1);
+    const msg = s.logger.warn.mock.calls[0][0];
+    expect(msg).toContain("missing Cache: Modify");
+    expect(msg).toContain("flushCacheOnChange=true");
+    expect(msg).toContain("apply/remove will otherwise work");
+  });
+
+  it("warns with transient-retry hint when validation hit a network error", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: false,
+      hasAppsModify: false,
+      hasCacheModify: false,
+      transient: true,
+      reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN against node "eq12": read ECONNRESET`,
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.log).not.toHaveBeenCalled();
+    expect(s.logger.warn).toHaveBeenCalledTimes(1);
+    const msg = s.logger.warn.mock.calls[0][0];
+    expect(msg).toContain("ECONNRESET");
+    expect(msg).toContain("Will re-validate the next time the Automation UI is opened");
+  });
+
+  it("warns without retry hint when validation hit a config error (invalid-token)", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: false,
+      hasAppsModify: false,
+      hasCacheModify: false,
+      reason: `TECHNITIUM_SCHEDULE_TOKEN was rejected by node "eq12": invalid token.`,
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.log).not.toHaveBeenCalled();
+    expect(s.logger.warn).toHaveBeenCalledTimes(1);
+    const msg = s.logger.warn.mock.calls[0][0];
+    expect(msg).toContain("invalid token");
+    expect(msg).not.toContain("re-validate");
+  });
+
+  it("stays silent for the opt-out case (TECHNITIUM_SCHEDULE_TOKEN is not set)", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: false,
+      hasAppsModify: false,
+      hasCacheModify: false,
+      reason: "TECHNITIUM_SCHEDULE_TOKEN is not set.",
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.warn).not.toHaveBeenCalled();
+    expect(s.logger.log).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when validation has not yet completed", () => {
+    const s = build();
+    s.scheduleTokenValidation = { validated: false };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.warn).not.toHaveBeenCalled();
+    expect(s.logger.log).not.toHaveBeenCalled();
+  });
+});

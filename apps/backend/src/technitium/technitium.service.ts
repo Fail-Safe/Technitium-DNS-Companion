@@ -264,6 +264,7 @@ export class TechnitiumService {
         hasCacheModify: boolean;
         username?: string;
         reason?: string;
+        transient?: boolean;
       }
     | { validated: false } = { validated: false };
   private readonly queryLoggerCache = new Map<
@@ -364,11 +365,29 @@ export class TechnitiumService {
 
       // In session-auth mode we return early because PTR timers are conditionally started above.
       if (this.sessionAuthEnabled) {
+        this.scheduleEagerScheduleTokenValidation();
         return;
       }
     }
 
+    this.scheduleEagerScheduleTokenValidation();
     this.startPtrTimer();
+  }
+
+  /**
+   * Eagerly validates TECHNITIUM_SCHEDULE_TOKEN at startup so operators see
+   * permission or connectivity problems in the boot log instead of discovering
+   * them when a schedule first fires. Fire-and-forget — failures never block
+   * bootstrap. Lazy-validation callers (`getScheduleTokenStatus()`) short-circuit
+   * on the cached result.
+   */
+  private scheduleEagerScheduleTokenValidation(): void {
+    if (!this.scheduleToken) return;
+    this.validateScheduleToken().catch((error) => {
+      this.logger.warn(
+        `TECHNITIUM_SCHEDULE_TOKEN validation threw: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
   }
 
   private startPtrTimer(): void {
@@ -1697,6 +1716,7 @@ export class TechnitiumService {
         hasCacheModify: false,
         reason: "No nodes are configured; cannot validate TECHNITIUM_SCHEDULE_TOKEN.",
       };
+      this.logScheduleTokenValidationOutcome();
       return;
     }
 
@@ -1725,8 +1745,10 @@ export class TechnitiumService {
         valid: false,
         hasAppsModify: false,
         hasCacheModify: false,
+        transient: true,
         reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN against node "${node.id}": ${message}`,
       };
+      this.logScheduleTokenValidationOutcome();
       return;
     }
 
@@ -1743,6 +1765,7 @@ export class TechnitiumService {
         hasCacheModify: false,
         reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN: unexpected response from node "${node.id}".`,
       };
+      this.logScheduleTokenValidationOutcome();
       return;
     }
 
@@ -1757,6 +1780,7 @@ export class TechnitiumService {
             ? `TECHNITIUM_SCHEDULE_TOKEN was rejected by node "${node.id}": invalid token.`
             : `TECHNITIUM_SCHEDULE_TOKEN validation failed on node "${node.id}": ${envelopeObj.errorMessage ?? "unknown error"}.`,
       };
+      this.logScheduleTokenValidationOutcome();
       return;
     }
 
@@ -1783,8 +1807,45 @@ export class TechnitiumService {
         : "Token authenticated but lacks Apps: Modify permission needed to update Advanced Blocking config.",
     };
 
+    this.logScheduleTokenValidationOutcome();
+  }
+
+  /**
+   * Emits a single LOG/WARN line summarising the current schedule-token
+   * validation state. Called at the end of every `validateScheduleToken`
+   * branch that reaches a decision. Uses WARN for anything operators need
+   * to act on (invalid token, missing permissions, network failure) and LOG
+   * only for the fully-healthy case. Callers silent-skip when the token is
+   * simply not set — that's an opt-out, not an error.
+   */
+  private logScheduleTokenValidationOutcome(): void {
+    const v = this.scheduleTokenValidation;
+    if (!v.validated) return;
+    if (!v.valid) {
+      // Silently ignore the opt-out case — "token not set" is not a warning.
+      if (v.reason === "TECHNITIUM_SCHEDULE_TOKEN is not set.") return;
+      const suffix = v.transient
+        ? " Will re-validate the next time the Automation UI is opened."
+        : "";
+      this.logger.warn(
+        `TECHNITIUM_SCHEDULE_TOKEN validation failed: ${v.reason ?? "unknown reason"}.${suffix}`,
+      );
+      return;
+    }
+    if (!v.hasAppsModify) {
+      this.logger.warn(
+        `TECHNITIUM_SCHEDULE_TOKEN is missing Apps: Modify permission — DNS Schedules cannot update Advanced Blocking config and every window transition will log an error. ${v.reason ?? ""}`.trim(),
+      );
+      return;
+    }
+    if (!v.hasCacheModify) {
+      this.logger.warn(
+        `TECHNITIUM_SCHEDULE_TOKEN is missing Cache: Modify permission — schedules with flushCacheOnChange=true will log warnings at window transitions, but apply/remove will otherwise work.`,
+      );
+      return;
+    }
     this.logger.log(
-      `Validated TECHNITIUM_SCHEDULE_TOKEN (user: ${sessionInfo?.username ?? "unknown"}, Apps:Modify=${String(hasAppsModify)}, Cache:Modify=${String(hasCacheModify)}).`,
+      `Validated TECHNITIUM_SCHEDULE_TOKEN (user: ${v.username ?? "unknown"}, Apps:Modify=true, Cache:Modify=true).`,
     );
   }
 
