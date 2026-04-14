@@ -168,7 +168,13 @@ export class DnsSchedulesEvaluatorService
         .listSchedules()
         .filter((s) => s.enabled);
 
-      const allNodes = await this.technitiumService.listNodes();
+      // Use schedule auth for the cluster probe so cluster topology is
+      // resolvable in this background timer context. With the default session
+      // auth, `AuthRequestContext.getSession()` returns undefined here and
+      // every node would appear Standalone — defeating Primary-only routing.
+      const allNodes = await this.technitiumService.listNodes({
+        authMode: "schedule",
+      });
       const allNodeIds = allNodes.map((n) => n.id);
 
       // In a Technitium native cluster, only the Primary accepts config writes.
@@ -499,9 +505,17 @@ export class DnsSchedulesEvaluatorService
     // Resolve every applied node to its cluster write target + flush nodes.
     // State rows may predate Primary routing (legacy secondary entries), so we
     // can't assume `entry.nodeId` is the write-addressable node.
+    // Use schedule auth so cluster topology is resolvable even when this is
+    // called outside a request context (e.g. from a future timer-driven path).
     const appliedNodeIds = applied.map((e) => e.nodeId);
+    const allNodes = await this.technitiumService.listNodes({
+      authMode: "schedule",
+    });
     const { perCandidate } =
-      await this.technitiumService.resolveClusterWriteTargets(appliedNodeIds);
+      await this.technitiumService.resolveClusterWriteTargets(
+        appliedNodeIds,
+        allNodes,
+      );
 
     const seenWriteTargets = new Set<string>();
     for (const entry of applied) {

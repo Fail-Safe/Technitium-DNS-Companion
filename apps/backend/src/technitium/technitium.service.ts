@@ -595,9 +595,12 @@ export class TechnitiumService {
     );
   }
 
-  async listNodes(): Promise<TechnitiumNodeSummary[]> {
+  async listNodes(opts?: {
+    authMode?: "session" | "background" | "schedule";
+  }): Promise<TechnitiumNodeSummary[]> {
     // OPTIMIZATION: Only query ONE node for cluster state since any node can tell us about the entire cluster
     // This reduces N API calls to 1, dramatically improving performance (e.g., 3 nodes: 3x faster)
+    const authMode = opts?.authMode ?? "session";
     let sharedClusterInfo: {
       initialized: boolean;
       domain?: string;
@@ -612,12 +615,23 @@ export class TechnitiumService {
     } | null = null;
 
     // Try to get cluster info from a node we are authenticated to.
-    // In session-auth mode we may only have tokens for a subset of nodes.
+    // - "session" mode (default, request-scoped): require a per-user session
+    //   token for the probe target. This is the original behavior and is
+    //   correct for interactive HTTP calls.
+    // - "background" / "schedule" mode (timer-scoped): no per-user session
+    //   exists; pick any configured node and let `request()` pull the
+    //   appropriate env token. Without this fallback, every background call
+    //   would see all nodes as Standalone and skip cluster-aware behavior.
     if (this.nodeConfigs.length > 0) {
       const session = AuthRequestContext.getSession();
-      const probeNode = this.sessionAuthEnabled
-        ? this.nodeConfigs.find((node) => !!session?.tokensByNodeId?.[node.id])
-        : this.nodeConfigs[0];
+      const probeNode =
+        authMode === "session"
+          ? this.sessionAuthEnabled
+            ? this.nodeConfigs.find(
+                (node) => !!session?.tokensByNodeId?.[node.id],
+              )
+            : this.nodeConfigs[0]
+          : this.nodeConfigs[0];
 
       if (!probeNode) {
         // No authenticated nodes available (or no nodes configured)
@@ -643,11 +657,15 @@ export class TechnitiumService {
               }>;
             };
             server?: string;
-          }>(probeNode, {
-            method: "GET",
-            url: "/api/user/session/get",
-            params: {},
-          });
+          }>(
+            probeNode,
+            {
+              method: "GET",
+              url: "/api/user/session/get",
+              params: {},
+            },
+            { authMode },
+          );
 
           if (response.status === "ok" && response.info?.clusterInitialized) {
             const clusterNodes = response.info.clusterNodes || [];
