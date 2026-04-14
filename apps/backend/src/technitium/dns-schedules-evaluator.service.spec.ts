@@ -235,3 +235,112 @@ describe("DnsSchedulesEvaluatorService — isWindowActive", () => {
     });
   });
 });
+
+// ── Snapshot-error handling (apply + remove symmetry) ───────────────────────
+// Regression: when `getSnapshotWithAuth` returned `{ error, config: undefined }`
+// (e.g. transient ECONNRESET), remove used to silently no-op and the caller
+// would still call `markRemoved` — orphaning entries live in Technitium. Apply
+// already threw in this case; these tests pin both paths to the same behavior.
+
+describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
+  function makeService(getSnapshotWithAuth: jest.Mock) {
+    const setConfigWithAuth = jest.fn();
+    const service = new DnsSchedulesEvaluatorService(
+      {} as never,
+      { getSnapshotWithAuth, setConfigWithAuth } as never,
+      {} as never,
+      { getExactEntriesByGroupNames: () => [] } as never,
+      {} as never,
+    );
+    return { service, setConfigWithAuth };
+  }
+
+  const failingSnapshot = {
+    nodeId: "eq14",
+    baseUrl: "https://eq14.test",
+    fetchedAt: "2024-01-15T00:00:00Z",
+    metrics: {},
+    error: "read ECONNRESET",
+  };
+
+  it("remove throws when snapshot has an error (no silent markRemoved)", async () => {
+    const getSnapshotWithAuth = jest.fn().mockResolvedValue(failingSnapshot);
+    const { service, setConfigWithAuth } = makeService(getSnapshotWithAuth);
+
+    await expect(
+      // Private method under test — the evaluator's own try/catch in
+      // evaluateScheduleForNode will observe the throw and skip markRemoved.
+      (service as unknown as {
+        removeAdvancedBlockingScheduleFromNode: (
+          s: DnsSchedule,
+          n: string,
+        ) => Promise<void>;
+      }).removeAdvancedBlockingScheduleFromNode(makeSchedule(), "eq14"),
+    ).rejects.toThrow(/eq14.*ECONNRESET/);
+
+    expect(setConfigWithAuth).not.toHaveBeenCalled();
+  });
+
+  it("apply throws with the underlying error surfaced in the message", async () => {
+    const getSnapshotWithAuth = jest.fn().mockResolvedValue(failingSnapshot);
+    const { service, setConfigWithAuth } = makeService(getSnapshotWithAuth);
+
+    await expect(
+      (service as unknown as {
+        applyAdvancedBlockingScheduleToNode: (
+          s: DnsSchedule,
+          n: string,
+        ) => Promise<boolean>;
+      }).applyAdvancedBlockingScheduleToNode(makeSchedule(), "eq14"),
+    ).rejects.toThrow(/eq14.*ECONNRESET/);
+
+    expect(setConfigWithAuth).not.toHaveBeenCalled();
+  });
+
+  it("remove proceeds normally when snapshot is healthy with a non-empty config", async () => {
+    const getSnapshotWithAuth = jest.fn().mockResolvedValue({
+      nodeId: "eq14",
+      baseUrl: "https://eq14.test",
+      fetchedAt: "2024-01-15T00:00:00Z",
+      metrics: {},
+      config: {
+        enableBlocking: true,
+        localEndPointGroupMap: {},
+        networkGroupMap: {},
+        groups: [
+          {
+            name: "social",
+            blockingAddresses: [],
+            allowed: [],
+            blocked: ["example.com", "keep.me"],
+            allowListUrls: [],
+            blockListUrls: [],
+            allowedRegex: [],
+            blockedRegex: [],
+            regexAllowListUrls: [],
+            regexBlockListUrls: [],
+            adblockListUrls: [],
+          },
+        ],
+      },
+    });
+    const { service, setConfigWithAuth } = makeService(getSnapshotWithAuth);
+
+    await (service as unknown as {
+      removeAdvancedBlockingScheduleFromNode: (
+        s: DnsSchedule,
+        n: string,
+      ) => Promise<void>;
+    }).removeAdvancedBlockingScheduleFromNode(
+      makeSchedule({
+        advancedBlockingGroupNames: ["social"],
+        domainEntries: ["example.com"],
+      }),
+      "eq14",
+    );
+
+    expect(setConfigWithAuth).toHaveBeenCalledTimes(1);
+    const [, nextConfig] = setConfigWithAuth.mock.calls[0];
+    expect(nextConfig.groups[0].blocked).toEqual(["keep.me"]);
+  });
+});

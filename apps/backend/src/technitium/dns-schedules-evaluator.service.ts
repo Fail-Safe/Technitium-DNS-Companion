@@ -548,12 +548,12 @@ export class DnsSchedulesEvaluatorService
       nodeId,
       "schedule",
     );
-    const config = snapshot.config;
-    if (!config) {
+    if (snapshot.error || !snapshot.config) {
       throw new Error(
-        `No Advanced Blocking config available on node "${nodeId}".`,
+        `Unable to load Advanced Blocking config from node "${nodeId}": ${snapshot.error ?? "no config in response"}`,
       );
     }
+    const config = snapshot.config;
 
     const resolvedEntries = this.resolveDomainEntries(schedule);
     const listKey: keyof Pick<AdvancedBlockingGroup, "blocked" | "allowed"> =
@@ -601,11 +601,15 @@ export class DnsSchedulesEvaluatorService
       nodeId,
       "schedule",
     );
-    const config = snapshot.config;
-    if (!config) {
-      // Config gone — treat as already removed
-      return;
+    // loadSnapshot populates `error` on caught failures and leaves `config`
+    // undefined. Propagating the error keeps the caller from calling
+    // markRemoved and orphaning entries that are still live in Technitium.
+    if (snapshot.error || !snapshot.config) {
+      throw new Error(
+        `Unable to load Advanced Blocking config from node "${nodeId}": ${snapshot.error ?? "no config in response"}`,
+      );
     }
+    const config = snapshot.config;
 
     const scheduleEntrySet = new Set(this.resolveDomainEntries(schedule));
     const listKey: keyof Pick<AdvancedBlockingGroup, "blocked" | "allowed"> =
