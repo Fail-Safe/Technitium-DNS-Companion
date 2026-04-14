@@ -1018,16 +1018,27 @@ export class TechnitiumService {
         }
       }
 
-      // Expected / non-critical cases:
-      // - 401/403: token lacks admin permission for /api/admin/*
-      // - 404: older Technitium versions or endpoint not exposed
-      // - 400: node not Primary / not in a cluster / other Technitium validation
-      if (
+      // Guard against empty `detail` (some network errors surface with empty
+      // `error.message` and no response body) so the log never renders as
+      // `…: . Using default polling intervals.`
+      if (!detail) {
+        detail = "no error detail available";
+      }
+
+      // Expected / non-critical cases — route to DEBUG (silent in prod):
+      // - 400/401/403/404: token lacks admin permission, older Technitium,
+      //   not-primary / not-clustered, other Technitium-side validation.
+      // - status === undefined: no HTTP response received at all (transient
+      //   network blip). The old "admin permissions may be required" WARN
+      //   was misleading in that case — it has nothing to do with perms.
+      const isExpectedFailure =
+        status === undefined ||
+        status === 400 ||
         status === 401 ||
         status === 403 ||
-        status === 404 ||
-        status === 400
-      ) {
+        status === 404;
+
+      if (isExpectedFailure) {
         this.logger.debug(
           `Skipping cluster timing settings for ${nodeId}: ${detail}. Using default polling intervals.`,
         );

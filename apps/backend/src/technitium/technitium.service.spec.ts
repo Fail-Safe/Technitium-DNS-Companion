@@ -776,3 +776,101 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
     expect(s.logger.log).not.toHaveBeenCalled();
   });
 });
+
+// ── getClusterSettings error classification ────────────────────────────────
+// The /api/admin/cluster/state/get endpoint is admin-only. Non-admin tokens,
+// non-primary nodes, and network blips all cause errors here. Classifying all
+// non-HTTP-response errors as "admin permissions may be required" WARNs was
+// misleading (a network blip has nothing to do with permissions) and produced
+// `…: . Using default polling intervals.` lines when error.message was empty.
+
+describe("TechnitiumService — getClusterSettings error classification", () => {
+  const node: TechnitiumNodeConfig = {
+    id: "eq14",
+    name: "eq14",
+    baseUrl: "https://eq14.test",
+    token: "t",
+  };
+  type InjectableLogger = { warn: jest.Mock; log: jest.Mock; debug: jest.Mock };
+  let service: TechnitiumService;
+  let logger: InjectableLogger;
+
+  beforeEach(() => {
+    process.env.NODE_ENV = "test";
+    service = new TechnitiumService([node], new DhcpSnapshotService());
+    logger = { warn: jest.fn(), log: jest.fn(), debug: jest.fn() };
+    (service as unknown as { logger: InjectableLogger }).logger = logger;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    service.onModuleDestroy();
+  });
+
+  it("routes network errors (no HTTP response) to DEBUG, not WARN", async () => {
+    const netErr = Object.assign(new Error("read ECONNRESET"), {
+      isAxiosError: true,
+      response: undefined,
+    });
+    jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
+    jest.spyOn(service, "request").mockRejectedValue(netErr);
+
+    await service.getClusterSettings("eq14");
+
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.debug).toHaveBeenCalledTimes(1);
+    expect(logger.debug.mock.calls[0][0]).toContain("read ECONNRESET");
+    expect(logger.debug.mock.calls[0][0]).toContain("Skipping cluster timing settings for eq14");
+  });
+
+  it("routes 403 permission errors to DEBUG (expected for low-priv tokens)", async () => {
+    const permErr = Object.assign(new Error("Request failed"), {
+      isAxiosError: true,
+      response: { status: 403, data: { message: "Forbidden" } },
+    });
+    jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
+    jest.spyOn(service, "request").mockRejectedValue(permErr);
+
+    await service.getClusterSettings("eq14");
+
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.debug).toHaveBeenCalledTimes(1);
+    expect(logger.debug.mock.calls[0][0]).toContain("HTTP 403");
+  });
+
+  it("routes unexpected 5xx errors to WARN (genuine server failure)", async () => {
+    const serverErr = Object.assign(new Error("Request failed"), {
+      isAxiosError: true,
+      response: { status: 500, data: { message: "server exploded" } },
+    });
+    jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
+    jest.spyOn(service, "request").mockRejectedValue(serverErr);
+
+    await service.getClusterSettings("eq14");
+
+    expect(logger.debug).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0][0]).toContain("HTTP 500");
+    expect(logger.warn.mock.calls[0][0]).toContain("server exploded");
+  });
+
+  it("falls back to a non-empty detail string when error.message is empty", async () => {
+    // Reproduces the `: . Using default polling intervals.` bug — an axios
+    // network error with empty `error.message` and no response body.
+    const emptyErr = Object.assign(new Error(""), {
+      isAxiosError: true,
+      response: undefined,
+    });
+    jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
+    jest.spyOn(service, "request").mockRejectedValue(emptyErr);
+
+    await service.getClusterSettings("eq14");
+
+    // Network-error classification → DEBUG branch
+    expect(logger.debug).toHaveBeenCalledTimes(1);
+    const line = logger.debug.mock.calls[0][0];
+    expect(line).toContain("no error detail available");
+    // The exact ugly pattern we're fixing: `: . Using default…`
+    expect(line).not.toMatch(/:\s*\.\s+Using/);
+  });
+});
