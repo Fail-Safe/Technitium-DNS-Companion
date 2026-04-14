@@ -847,6 +847,115 @@ export class TechnitiumService {
   }
 
   /**
+   * For a set of candidate node IDs, resolves each to the node that should
+   * receive config writes and the physical nodes that should receive cache
+   * flush calls.
+   *
+   * In a Technitium native cluster, only the Primary accepts config writes;
+   * writes to secondaries race cluster replication and get reverted on the
+   * next sync round. Cache flush is a per-node runtime op (not replicated) so
+   * every physical node in the cluster still needs its own flush to avoid
+   * serving stale blocked-domain answers from its resolver cache.
+   *
+   * For each cluster group this returns:
+   *   writeTarget = the Primary's node ID (writes are idempotent and replicated)
+   *   flushNodes  = every physical node in the cluster (Primary + secondaries)
+   *
+   * Standalone candidates are passed through unchanged (write == flush == self).
+   * If a candidate is part of a cluster but no Primary is discoverable, falls
+   * back to direct-write with a WARN so the caller still makes progress.
+   *
+   * Pre-fetched `summaries` can be passed to avoid a duplicate `listNodes()`
+   * call when the caller already has them.
+   */
+  async resolveClusterWriteTargets(
+    candidateNodeIds: string[],
+    summaries?: TechnitiumNodeSummary[],
+  ): Promise<{
+    perCandidate: Map<string, { writeTarget: string; flushNodes: string[] }>;
+    writeTargets: string[];
+  }> {
+    const nodes = summaries ?? (await this.listNodes());
+    const byId = new Map(nodes.map((s) => [s.id, s]));
+
+    // Index: clusterDomain → Primary summary. Multiple Primaries per domain
+    // shouldn't happen; we take the first one encountered.
+    const primaryByDomain = new Map<string, TechnitiumNodeSummary>();
+    // Index: clusterDomain → all physical node IDs in that cluster.
+    const clusterMembers = new Map<string, string[]>();
+    for (const s of nodes) {
+      const domain = s.clusterState?.domain;
+      if (!s.clusterState?.initialized || !domain) continue;
+      if (s.isPrimary && !primaryByDomain.has(domain)) {
+        primaryByDomain.set(domain, s);
+      }
+      if (!clusterMembers.has(domain)) clusterMembers.set(domain, []);
+      clusterMembers.get(domain)!.push(s.id);
+    }
+
+    const perCandidate = new Map<
+      string,
+      { writeTarget: string; flushNodes: string[] }
+    >();
+    const writeTargetSet = new Set<string>();
+
+    for (const nodeId of candidateNodeIds) {
+      const summary = byId.get(nodeId);
+      // Unknown node: pass through — legacy behavior, will error at request time
+      // if truly invalid. Callers can decide what to do with the result.
+      if (!summary) {
+        perCandidate.set(nodeId, {
+          writeTarget: nodeId,
+          flushNodes: [nodeId],
+        });
+        writeTargetSet.add(nodeId);
+        continue;
+      }
+
+      const domain = summary.clusterState?.domain;
+      const clustered = summary.clusterState?.initialized === true;
+
+      if (!clustered || !domain) {
+        // Standalone — self-write, self-flush.
+        perCandidate.set(nodeId, {
+          writeTarget: nodeId,
+          flushNodes: [nodeId],
+        });
+        writeTargetSet.add(nodeId);
+        continue;
+      }
+
+      const primary = primaryByDomain.get(domain);
+      if (!primary) {
+        // Clustered but Primary wasn't discoverable (probe failed, or this
+        // node's cluster has no node marked Primary in our summaries).
+        // Fall back to direct write so we make progress; warn once.
+        this.logger.warn(
+          `Cluster "${domain}" has no discoverable Primary — falling back to direct write on "${nodeId}".`,
+        );
+        perCandidate.set(nodeId, {
+          writeTarget: nodeId,
+          flushNodes: [nodeId],
+        });
+        writeTargetSet.add(nodeId);
+        continue;
+      }
+
+      const flushNodes = clusterMembers.get(domain) ?? [nodeId];
+      perCandidate.set(nodeId, {
+        writeTarget: primary.id,
+        flushNodes,
+      });
+      writeTargetSet.add(primary.id);
+    }
+
+    return {
+      perCandidate,
+      writeTargets: [...writeTargetSet],
+    };
+  }
+
+  /**
    * Get cluster state for a specific node.
    * Returns cluster initialization status and node role (Primary/Secondary/Standalone).
    */

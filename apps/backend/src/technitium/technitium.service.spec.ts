@@ -6,7 +6,11 @@ import path from "path";
 import { AuthRequestContext } from "../auth/auth-request-context";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { TechnitiumService } from "./technitium.service";
-import { TechnitiumDhcpScope, TechnitiumNodeConfig } from "./technitium.types";
+import {
+  TechnitiumDhcpScope,
+  TechnitiumNodeConfig,
+  TechnitiumNodeSummary,
+} from "./technitium.types";
 
 describe("TechnitiumService buildDhcpScopeFormData", () => {
   let service: TechnitiumService;
@@ -872,5 +876,152 @@ describe("TechnitiumService — getClusterSettings error classification", () => 
     expect(line).toContain("no error detail available");
     // The exact ugly pattern we're fixing: `: . Using default…`
     expect(line).not.toMatch(/:\s*\.\s+Using/);
+  });
+});
+
+// ── resolveClusterWriteTargets — cluster-Primary routing ────────────────────
+// In a Technitium native cluster, only the Primary accepts config writes.
+// Writes to secondaries race the cluster's own config replication and get
+// reverted on the next sync. These tests pin the resolver's collapse logic so
+// the schedule evaluator routes one write per cluster Primary while still
+// flushing the DNS resolver cache on every physical node.
+
+describe("TechnitiumService — resolveClusterWriteTargets", () => {
+  let service: TechnitiumService;
+
+  beforeEach(() => {
+    process.env.NODE_ENV = "test";
+    service = new TechnitiumService([], new DhcpSnapshotService());
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    service.onModuleDestroy();
+  });
+
+  function summary(
+    id: string,
+    opts: { domain?: string; primary?: boolean; clustered?: boolean } = {},
+  ): TechnitiumNodeSummary {
+    const clustered = opts.clustered ?? !!opts.domain;
+    return {
+      id,
+      baseUrl: `https://${id}.test`,
+      clusterState: clustered
+        ? {
+            initialized: true,
+            domain: opts.domain,
+            type: opts.primary ? "Primary" : "Secondary",
+          }
+        : { initialized: false, type: "Standalone" },
+      isPrimary: !!opts.primary,
+    };
+  }
+
+  it("passes standalone nodes through unchanged (write == flush == self)", async () => {
+    const nodes = [summary("a"), summary("b")];
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(["a", "b"], nodes);
+    expect(writeTargets.sort()).toEqual(["a", "b"]);
+    expect(perCandidate.get("a")).toEqual({
+      writeTarget: "a",
+      flushNodes: ["a"],
+    });
+    expect(perCandidate.get("b")).toEqual({
+      writeTarget: "b",
+      flushNodes: ["b"],
+    });
+  });
+
+  it("collapses a 3-node cluster to a single Primary write target with all nodes as flush targets", async () => {
+    const nodes = [
+      summary("eq14", { domain: "home-dns.com", primary: true }),
+      summary("eq12", { domain: "home-dns.com" }),
+      summary("eq10", { domain: "home-dns.com" }),
+    ];
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(
+        ["eq14", "eq12", "eq10"],
+        nodes,
+      );
+    expect(writeTargets).toEqual(["eq14"]);
+    for (const id of ["eq14", "eq12", "eq10"]) {
+      const op = perCandidate.get(id);
+      expect(op?.writeTarget).toBe("eq14");
+      expect(op?.flushNodes.sort()).toEqual(["eq10", "eq12", "eq14"]);
+    }
+  });
+
+  it("handles two independent clusters — each writes to its own Primary", async () => {
+    const nodes = [
+      summary("a1", { domain: "A", primary: true }),
+      summary("a2", { domain: "A" }),
+      summary("b1", { domain: "B", primary: true }),
+      summary("b2", { domain: "B" }),
+    ];
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(
+        ["a1", "a2", "b1", "b2"],
+        nodes,
+      );
+    expect(writeTargets.sort()).toEqual(["a1", "b1"]);
+    expect(perCandidate.get("a2")?.writeTarget).toBe("a1");
+    expect(perCandidate.get("b2")?.writeTarget).toBe("b1");
+    expect(perCandidate.get("a2")?.flushNodes.sort()).toEqual(["a1", "a2"]);
+    expect(perCandidate.get("b2")?.flushNodes.sort()).toEqual(["b1", "b2"]);
+  });
+
+  it("mixes standalone and clustered candidates without crosstalk", async () => {
+    const nodes = [
+      summary("solo"),
+      summary("eq14", { domain: "home-dns.com", primary: true }),
+      summary("eq12", { domain: "home-dns.com" }),
+    ];
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(
+        ["solo", "eq14", "eq12"],
+        nodes,
+      );
+    expect(writeTargets.sort()).toEqual(["eq14", "solo"]);
+    expect(perCandidate.get("solo")).toEqual({
+      writeTarget: "solo",
+      flushNodes: ["solo"],
+    });
+    expect(perCandidate.get("eq12")?.writeTarget).toBe("eq14");
+  });
+
+  it("falls back to direct write with WARN when a cluster has no discoverable Primary", async () => {
+    const nodes = [
+      summary("x", { domain: "X" }),
+      summary("y", { domain: "X" }),
+    ];
+    const warnSpy = jest.fn();
+    (service as unknown as { logger: { warn: jest.Mock } }).logger = {
+      warn: warnSpy,
+    } as never;
+
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(["x", "y"], nodes);
+    expect(perCandidate.get("x")).toEqual({
+      writeTarget: "x",
+      flushNodes: ["x"],
+    });
+    expect(perCandidate.get("y")).toEqual({
+      writeTarget: "y",
+      flushNodes: ["y"],
+    });
+    expect(writeTargets.sort()).toEqual(["x", "y"]);
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy.mock.calls[0][0]).toContain("no discoverable Primary");
+  });
+
+  it("passes unknown node IDs through untouched (legacy compat)", async () => {
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(["ghost"], []);
+    expect(perCandidate.get("ghost")).toEqual({
+      writeTarget: "ghost",
+      flushNodes: ["ghost"],
+    });
+    expect(writeTargets).toEqual(["ghost"]);
   });
 });
