@@ -57,6 +57,10 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
   private pollTimer: NodeJS.Timeout | null = null;
   private retentionTimer: NodeJS.Timeout | null = null;
   private maintenanceTimer: NodeJS.Timeout | null = null;
+  // Set true by initializeFtsIndex() on successful FTS5 setup. When true,
+  // buildWhereClause routes substring filters through FTS5 MATCH instead of
+  // unsargable LIKE when the caller has dedup enabled.
+  private ftsEnabled = false;
 
   private readonly enabled = process.env.QUERY_LOG_SQLITE_ENABLED === "true";
   private readonly retentionHours = Math.max(
@@ -198,6 +202,13 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     this.db.exec("PRAGMA journal_mode=WAL;");
     this.db.exec("PRAGMA synchronous=NORMAL;");
     this.db.exec("PRAGMA temp_store=MEMORY;");
+    // Tier 1 perf tunables (benchmarked ~20-25% win on dedup/LIKE queries):
+    // - mmap_size: let SQLite memory-map up to 256 MB of the DB file so the
+    //   OS page cache backs repeated scans instead of SQLite's own smaller cache.
+    // - cache_size: bump from the 2 MB default to 64 MB; helps the window
+    //   function and other sort-heavy ops stay in memory instead of spilling.
+    this.db.exec("PRAGMA mmap_size=268435456;");
+    this.db.exec("PRAGMA cache_size=-65536;");
 
     this.initializeSchema();
     this.maybeMigrateAutoVacuum();
@@ -308,6 +319,97 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       CREATE INDEX IF NOT EXISTS idx_query_log_responseType_ts ON query_log_entries(responseType, ts);
       CREATE INDEX IF NOT EXISTS idx_query_log_qtype_ts ON query_log_entries(qtype, ts);
     `);
+
+    this.initializeFtsIndex();
+  }
+
+  /**
+   * FTS5 contentless-shadow index over `qnameLc` and `clientNameLc`.
+   *
+   * Substring filters on these columns historically used `LIKE '%needle%'`,
+   * which is not sargable and forces a scan over every row in the time
+   * window. Benchmarks on a 1M-row synthetic DB showed worst-case LIKE
+   * queries taking ~1.4s; the same queries via FTS5 drop to <1ms when
+   * results are rare, and flatten to ~200ms even for abundant matches.
+   *
+   * We route to FTS only when `deduplicateDomains` is true (the window
+   * function defeats LIKE's short-circuit anyway, so FTS wins). Plain
+   * paginated LIKE keeps its <1ms best case for popular substrings when
+   * dedup is off.
+   *
+   * Contentless schema means the FTS table stores only the tokenized
+   * index, not duplicate column data — keeps disk overhead minimal.
+   * Triggers below keep it in sync with INSERT/DELETE on the base table.
+   */
+  private initializeFtsIndex(): void {
+    if (!this.db) return;
+
+    const migrationEnabled =
+      (process.env.QUERY_LOG_SQLITE_FTS_MIGRATION ?? "true").toLowerCase() !==
+      "false";
+    if (!migrationEnabled) {
+      this.logger.warn(
+        "SQLite FTS5 index migration disabled by QUERY_LOG_SQLITE_FTS_MIGRATION=false. " +
+          "Substring filters will fall back to LIKE scans.",
+      );
+      return;
+    }
+
+    try {
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS query_log_fts USING fts5(
+          qnameLc, clientNameLc,
+          content='query_log_entries', content_rowid='rowid',
+          tokenize='unicode61 remove_diacritics 2'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS query_log_ai AFTER INSERT ON query_log_entries BEGIN
+          INSERT INTO query_log_fts (rowid, qnameLc, clientNameLc)
+          VALUES (new.rowid, new.qnameLc, new.clientNameLc);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS query_log_ad AFTER DELETE ON query_log_entries BEGIN
+          INSERT INTO query_log_fts (query_log_fts, rowid, qnameLc, clientNameLc)
+          VALUES ('delete', old.rowid, old.qnameLc, old.clientNameLc);
+        END;
+      `);
+
+      // One-time backfill: if the FTS table is empty but the base table
+      // has rows, populate. Subsequent boots see the FTS index already
+      // populated and skip.
+      const ftsCountRow = this.db
+        .prepare("SELECT COUNT(*) AS count FROM query_log_fts")
+        .get() as { count?: number } | undefined;
+      const baseCountRow = this.db
+        .prepare("SELECT COUNT(*) AS count FROM query_log_entries")
+        .get() as { count?: number } | undefined;
+      const ftsCount = ftsCountRow?.count ?? 0;
+      const baseCount = baseCountRow?.count ?? 0;
+
+      if (ftsCount === 0 && baseCount > 0) {
+        const startedAt = Date.now();
+        this.logger.warn(
+          `Backfilling SQLite FTS5 index from ${baseCount.toLocaleString()} existing rows. ` +
+            "This may take a few seconds on large DBs.",
+        );
+        this.db.exec(
+          `INSERT INTO query_log_fts (rowid, qnameLc, clientNameLc)
+           SELECT rowid, qnameLc, clientNameLc FROM query_log_entries`,
+        );
+        const elapsedMs = Date.now() - startedAt;
+        this.logger.warn(
+          `FTS5 backfill complete in ${elapsedMs}ms (${baseCount.toLocaleString()} rows).`,
+        );
+      }
+
+      this.ftsEnabled = true;
+    } catch (error) {
+      this.logger.warn(
+        `SQLite FTS5 index initialization failed: ${error instanceof Error ? error.message : String(error)}. ` +
+          "Continuing without FTS5; substring filters will use LIKE scans.",
+      );
+      this.ftsEnabled = false;
+    }
   }
 
   private safeApplyRetention(): void {
@@ -787,18 +889,42 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     clauses.push("ts <= ?");
     params.push(window.endTs);
 
+    // Route substring filters through FTS5 when dedup is on — the window
+    // function defeats LIKE's LIMIT short-circuit so FTS5 wins cleanly.
+    // When dedup is off, keep LIKE for its <1ms best case on popular
+    // substrings. See query-log-sqlite.bench.spec.ts for the data.
+    const useFtsForSubstring =
+      this.ftsEnabled && filters.deduplicateDomains === true;
+
     const qname = filters.qname?.trim();
     if (qname) {
-      clauses.push("qnameLc LIKE ?");
-      params.push(`%${qname.toLowerCase()}%`);
+      if (useFtsForSubstring) {
+        // FTS5 tokenizes on `.`, `-`, etc.; a prefix match on the search
+        // term finds tokens that start with it (e.g. "yout" → "youtube").
+        clauses.push(
+          "rowid IN (SELECT rowid FROM query_log_fts WHERE qnameLc MATCH ?)",
+        );
+        params.push(`${qname.toLowerCase()}*`);
+      } else {
+        clauses.push("qnameLc LIKE ?");
+        params.push(`%${qname.toLowerCase()}%`);
+      }
     }
 
     const client = filters.clientIpAddress?.trim();
     if (client) {
-      // Match either client IP or hostname.
-      clauses.push("(clientIpLc LIKE ? OR clientNameLc LIKE ?)");
       const needle = `%${client.toLowerCase()}%`;
-      params.push(needle, needle);
+      if (useFtsForSubstring) {
+        // Hostname side goes through FTS; IP side stays LIKE since numeric
+        // IPs don't tokenize usefully under unicode61.
+        clauses.push(
+          "(clientIpLc LIKE ? OR rowid IN (SELECT rowid FROM query_log_fts WHERE clientNameLc MATCH ?))",
+        );
+        params.push(needle, `${client.toLowerCase()}*`);
+      } else {
+        clauses.push("(clientIpLc LIKE ? OR clientNameLc LIKE ?)");
+        params.push(needle, needle);
+      }
     }
 
     if (filters.protocol) {
