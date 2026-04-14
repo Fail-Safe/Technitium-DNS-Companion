@@ -119,6 +119,7 @@ export function Header() {
     { to: "/", label: "Overview", end: true, icon: faChartLine },
     { to: "/logs", label: "DNS Logs", icon: faFileLines },
     { to: "/configuration", label: "DNS Filtering", icon: faShield },
+    { to: "/automation", label: "DNS Schedules", icon: faCalendarDays },
     ...(canShowDnsRuleOptimizer ?
       [
         {
@@ -128,7 +129,6 @@ export function Header() {
         },
       ]
     : []),
-    { to: "/automation", label: "DNS Schedules", icon: faCalendarDays },
     { to: "/dns-lookup", label: "DNS Lookup", icon: faMagnifyingGlass },
     { to: "/zones", label: "DNS Zones", icon: faGlobe },
     { to: "/dhcp", label: "DHCP Scopes", icon: faPlug },
