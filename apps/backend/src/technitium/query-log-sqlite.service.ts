@@ -361,37 +361,37 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      // Detect pre-v1.6.2 FTS indexes — they were built without an AFTER
-      // UPDATE trigger. `backfillMissingClientNames` (line ~810) updates
-      // clientName/clientNameLc when hostname resolution catches up for
-      // previously-unknown IPs; without the trigger, the FTS index stays
-      // tokenized on the pre-update value and substring searches miss
-      // hostnames like "eq14.tailnet.vpost.net". Row counts don't diverge
-      // (UPDATE doesn't change them) so the earlier count-only skew guard
-      // can't catch it.
+      // Schema-version guard for the FTS index. Bumped whenever the FTS
+      // implementation changes in a way that invalidates existing DBs:
+      //   v1 = initial FTS5 with INSERT/DELETE triggers only (buggy — missed
+      //        UPDATE path, and used broken manual backfill syntax).
+      //   v2 = added AFTER UPDATE trigger and switched backfill to the
+      //        proper FTS5 'rebuild' command. All pre-v2 DBs need a forced
+      //        rebuild because their shadow index is sparsely tokenized.
+      // Stored in PRAGMA user_version (SQLite header, survives VACUUM).
+      const CURRENT_FTS_SCHEMA_VERSION = 2;
+      const versionRow = this.db.prepare("PRAGMA user_version").get() as
+        | { user_version?: number }
+        | undefined;
+      const storedVersion = versionRow?.user_version ?? 0;
+      const baseCountProbe = this.db
+        .prepare("SELECT COUNT(*) AS count FROM query_log_entries")
+        .get() as { count?: number } | undefined;
       const ftsTableExistedBefore = !!this.db
         .prepare(
           "SELECT name FROM sqlite_master WHERE type='table' AND name='query_log_fts'",
         )
         .get();
-      const updateTriggerExistedBefore = !!this.db
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type='trigger' AND name='query_log_au'",
-        )
-        .get();
-      const baseCountProbe = this.db
-        .prepare("SELECT COUNT(*) AS count FROM query_log_entries")
-        .get() as { count?: number } | undefined;
       const needsLegacyRebuild =
         ftsTableExistedBefore &&
-        !updateTriggerExistedBefore &&
+        storedVersion < CURRENT_FTS_SCHEMA_VERSION &&
         (baseCountProbe?.count ?? 0) > 0;
       if (needsLegacyRebuild) {
         this.logger.warn(
-          "Upgrading FTS index: pre-v1.6.2 schema detected (missing " +
-            "AFTER UPDATE trigger). Dropping and rebuilding from current " +
-            "base data to pick up any hostname backfills that the old " +
-            "triggers missed.",
+          `Upgrading FTS index: stored schema version ${storedVersion} < ` +
+            `current ${CURRENT_FTS_SCHEMA_VERSION}. Dropping and rebuilding ` +
+            "via FTS5 'rebuild' command to repopulate any rows whose tokens " +
+            "got lost to the earlier buggy backfill path.",
         );
         this.db.exec("DROP TABLE IF EXISTS query_log_fts");
       }
@@ -484,6 +484,13 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(
           `FTS5 backfill complete in ${elapsedMs}ms (${baseCount.toLocaleString()} rows).`,
         );
+      }
+
+      // Stamp the version so future boots skip the rebuild. Done even when
+      // no rebuild happened this boot (fresh install or already-current DB)
+      // so the version is always in sync with the running code's schema.
+      if (storedVersion !== CURRENT_FTS_SCHEMA_VERSION) {
+        this.db.exec(`PRAGMA user_version = ${CURRENT_FTS_SCHEMA_VERSION}`);
       }
 
       this.ftsEnabled = true;
