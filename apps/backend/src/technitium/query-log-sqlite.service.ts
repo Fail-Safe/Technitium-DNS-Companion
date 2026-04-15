@@ -211,7 +211,14 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     this.db.exec("PRAGMA cache_size=-65536;");
 
     this.initializeSchema();
+    // Order matters: auto_vacuum migration runs VACUUM which rewrites all
+    // rowids on the composite-PK `query_log_entries` table. If FTS5 shadow
+    // init happened first, the backfilled FTS index would reference the
+    // pre-VACUUM rowids and silently diverge, corrupting on next retention
+    // DELETE. Run VACUUM first (no-op on empty DBs, one-time cost on
+    // existing installs), then build FTS against post-VACUUM rowids.
     this.maybeMigrateAutoVacuum();
+    this.initializeFtsIndex();
 
     this.logger.log(
       `SQLite query log storage enabled (path=${dbPath}, retention=${this.retentionHours}h, poll=${this.pollIntervalMs}ms).`,
@@ -319,8 +326,6 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       CREATE INDEX IF NOT EXISTS idx_query_log_responseType_ts ON query_log_entries(responseType, ts);
       CREATE INDEX IF NOT EXISTS idx_query_log_qtype_ts ON query_log_entries(qtype, ts);
     `);
-
-    this.initializeFtsIndex();
   }
 
   /**
@@ -374,9 +379,12 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
         END;
       `);
 
-      // One-time backfill: if the FTS table is empty but the base table
-      // has rows, populate. Subsequent boots see the FTS index already
-      // populated and skip.
+      // Sanity-check FTS vs base rowcounts. Any material skew means the
+      // shadow index has drifted (could be a legacy DB from before the
+      // auto_vacuum ordering fix, or an unclean shutdown between insert
+      // trigger and base commit). Drop and rebuild rather than ship with
+      // a stale index that will either return wrong results or corrupt
+      // the DB on the next retention DELETE.
       const ftsCountRow = this.db
         .prepare("SELECT COUNT(*) AS count FROM query_log_fts")
         .get() as { count?: number } | undefined;
@@ -386,7 +394,34 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       const ftsCount = ftsCountRow?.count ?? 0;
       const baseCount = baseCountRow?.count ?? 0;
 
-      if (ftsCount === 0 && baseCount > 0) {
+      // Tolerance window: during a poll-write trigger burst, FTS and base
+      // counts can legitimately diverge by a handful of rows for a moment.
+      // Rebuild only if the skew exceeds this threshold.
+      const skew = Math.abs(baseCount - ftsCount);
+      const skewTolerance = Math.max(100, Math.floor(baseCount * 0.01));
+      const needsBackfill = ftsCount === 0 && baseCount > 0;
+      const needsRebuild = !needsBackfill && skew > skewTolerance;
+
+      if (needsRebuild) {
+        this.logger.warn(
+          `SQLite FTS5 index skew detected: base=${baseCount.toLocaleString()}, ` +
+            `fts=${ftsCount.toLocaleString()} (skew=${skew.toLocaleString()}, ` +
+            `tolerance=${skewTolerance.toLocaleString()}). Rebuilding shadow index.`,
+        );
+        // Fully drop so CREATE VIRTUAL TABLE IF NOT EXISTS on the next
+        // call rebuilds a clean one. Triggers survive and will keep the
+        // fresh index in sync going forward.
+        this.db.exec("DROP TABLE IF EXISTS query_log_fts");
+        this.db.exec(`
+          CREATE VIRTUAL TABLE query_log_fts USING fts5(
+            qnameLc, clientNameLc,
+            content='query_log_entries', content_rowid='rowid',
+            tokenize='unicode61 remove_diacritics 2'
+          );
+        `);
+      }
+
+      if (needsBackfill || needsRebuild) {
         const startedAt = Date.now();
         this.logger.warn(
           `Backfilling SQLite FTS5 index from ${baseCount.toLocaleString()} existing rows. ` +
@@ -410,6 +445,38 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       );
       this.ftsEnabled = false;
     }
+  }
+
+  /**
+   * Safely converts a user-entered search term into an FTS5 MATCH expression.
+   *
+   * FTS5 MATCH syntax treats `.`, `-`, `:`, etc. as special / punctuation.
+   * Passing a raw `"google.com*"` string crashes with `fts5: syntax error
+   * near "."`. unicode61 tokenizes on those same characters when indexing,
+   * so what the user really means by "google.com" is "find rows where the
+   * tokens `google` AND `com` both appear" — plus a prefix wildcard on the
+   * last token so partial entries (`googleapi`, `commanded`) still match.
+   *
+   * Returns a space-separated token expression with `*` appended to the
+   * last token. Empty string if the input has no alphanumeric content (the
+   * caller should then skip the FTS clause entirely).
+   *
+   * Examples:
+   *   "flore"            -> "flore*"
+   *   "google.com"       -> "google com*"
+   *   "www.youtube.com"  -> "www youtube com*"
+   *   "10.0.1"           -> "10 0 1*"      (unusual but valid)
+   *   "!!!"              -> ""             (caller: skip filter)
+   */
+  private buildFtsMatchExpression(input: string): string {
+    const tokens = input
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 0);
+    if (tokens.length === 0) return "";
+    const last = tokens[tokens.length - 1];
+    const rest = tokens.slice(0, -1);
+    return [...rest, `${last}*`].join(" ");
   }
 
   private safeApplyRetention(): void {
@@ -484,9 +551,18 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       const elapsedMs = Date.now() - startedAt;
 
       const afterPages = this.readPageCount();
+      const delta = beforePages - afterPages;
+      const deltaDescription =
+        delta > 0
+          ? `reclaimed ${delta}`
+          : delta < 0
+            ? // INCREMENTAL mode adds bookkeeping pages; tiny near-empty DBs
+              // net-grow by ~1 page from this migration.
+              `+${-delta} bookkeeping page${-delta === 1 ? "" : "s"}`
+            : "no change";
       this.logger.warn(
         `Migration complete in ${elapsedMs}ms. Pages: ${beforePages} → ${afterPages} ` +
-          `(reclaimed ${beforePages - afterPages}). Future maintenance will be incremental.`,
+          `(${deltaDescription}). Future maintenance will be incremental.`,
       );
     } catch (error) {
       this.logger.warn(
@@ -899,12 +975,18 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const qname = filters.qname?.trim();
     if (qname) {
       if (useFtsForSubstring) {
-        // FTS5 tokenizes on `.`, `-`, etc.; a prefix match on the search
-        // term finds tokens that start with it (e.g. "yout" → "youtube").
-        clauses.push(
-          "rowid IN (SELECT rowid FROM query_log_fts WHERE qnameLc MATCH ?)",
-        );
-        params.push(`${qname.toLowerCase()}*`);
+        // buildFtsMatchExpression splits on punctuation and prefix-stars the
+        // last token so `"google.com"` becomes `"google com*"` instead of
+        // crashing FTS5's parser. Empty expression (no alphanumerics in the
+        // input) means we skip the filter entirely rather than producing an
+        // invalid clause.
+        const matchExpr = this.buildFtsMatchExpression(qname);
+        if (matchExpr.length > 0) {
+          clauses.push(
+            "rowid IN (SELECT rowid FROM query_log_fts WHERE qnameLc MATCH ?)",
+          );
+          params.push(matchExpr);
+        }
       } else {
         clauses.push("qnameLc LIKE ?");
         params.push(`%${qname.toLowerCase()}%`);
@@ -913,15 +995,40 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
 
     const client = filters.clientIpAddress?.trim();
     if (client) {
-      const needle = `%${client.toLowerCase()}%`;
+      const lowerClient = client.toLowerCase();
+      const needle = `%${lowerClient}%`;
+      // Heuristic to avoid `LIKE … OR FTS …`. The OR forces SQLite to
+      // evaluate both sides per row — the unsargable LIKE scan then
+      // dominates even when FTS would be fast. Instead, pick the branch
+      // the search term is actually asking about:
+      //   - term contains letters → hostname search (FTS when dedup is on)
+      //   - term is purely digits/dots/colons → IP-literal search (LIKE)
+      //   - ambiguous → fall back to the original OR (rare)
+      const hasLetter = /[a-z]/.test(lowerClient);
+      const looksLikeIpLiteral = /^[0-9a-f.:]+$/.test(lowerClient) && !hasLetter;
+
       if (useFtsForSubstring) {
-        // Hostname side goes through FTS; IP side stays LIKE since numeric
-        // IPs don't tokenize usefully under unicode61.
-        clauses.push(
-          "(clientIpLc LIKE ? OR rowid IN (SELECT rowid FROM query_log_fts WHERE clientNameLc MATCH ?))",
-        );
-        params.push(needle, `${client.toLowerCase()}*`);
+        if (looksLikeIpLiteral) {
+          clauses.push("clientIpLc LIKE ?");
+          params.push(needle);
+        } else if (hasLetter) {
+          const matchExpr = this.buildFtsMatchExpression(lowerClient);
+          if (matchExpr.length > 0) {
+            clauses.push(
+              "rowid IN (SELECT rowid FROM query_log_fts WHERE clientNameLc MATCH ?)",
+            );
+            params.push(matchExpr);
+          }
+        } else {
+          // Ambiguous (e.g. only-punctuation input). Fall back to IP LIKE
+          // — FTS would have no non-empty match expression to use anyway.
+          clauses.push("clientIpLc LIKE ?");
+          params.push(needle);
+        }
       } else {
+        // Dedup off path: LIKE's LIMIT+ORDER-BY short-circuit is usually
+        // fast for popular hostnames. Keep the original OR so IP lookups
+        // still work without a routing change.
         clauses.push("(clientIpLc LIKE ? OR clientNameLc LIKE ?)");
         params.push(needle, needle);
       }

@@ -392,7 +392,22 @@ function buildQueryCases(): QueryCase[] {
     USE_FTS
       ? `rowid IN (SELECT rowid FROM query_log_fts WHERE ${column} MATCH ?)`
       : `${column} LIKE ?`;
-  const ftsLikeParam = (term: string) => (USE_FTS ? `${term}*` : `%${term}%`);
+  // Mirror QueryLogSqliteService.buildFtsMatchExpression: split on
+  // non-alphanumerics and prefix-star the last token. Without this, a term
+  // like "google.com" crashes FTS5 with "syntax error near ." — which is
+  // the bug that took down the test container last night.
+  const ftsLikeParam = (term: string) => {
+    if (!USE_FTS) return `%${term}%`;
+    const tokens = term
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 0);
+    if (tokens.length === 0) return "*";
+    return [
+      ...tokens.slice(0, -1),
+      `${tokens[tokens.length - 1]}*`,
+    ].join(" ");
+  };
 
   return [
     {
@@ -493,6 +508,48 @@ function buildQueryCases(): QueryCase[] {
       name: "13 per-node COUNT(*) (single node, window-scoped)",
       sql: `SELECT COUNT(*) AS count FROM query_log_entries WHERE nodeId = ? AND ${tsClause}`,
       params: ["eq14", ...tsParams],
+    },
+    // Regression case for the crash the test container hit: a dotted
+    // search term. Pre-sanitizer, the FTS MATCH expression was
+    // "google.com*" which is a syntax error. With buildFtsMatchExpression
+    // it becomes "google com*" and works.
+    {
+      name: "14 dotted domain 'google.com' (dedup on)",
+      sql: `WITH ranked AS (
+        SELECT nodeId, data, ts,
+          ROW_NUMBER() OVER (PARTITION BY qnameLc ORDER BY blockedRank DESC, aRank DESC, ts DESC) AS rn
+        FROM query_log_entries
+        WHERE ${tsClause} AND qnameLc IS NOT NULL AND ${ftsLikeSubquery("qnameLc", "google.com")}
+      ) SELECT nodeId, data FROM ranked WHERE rn = 1 ORDER BY ts DESC LIMIT 50`,
+      params: [...tsParams, ftsLikeParam("google.com")],
+    },
+    // The case that motivated last night's incident: client hostname
+    // substring search with dedup enabled. The UI default sends dedup=true,
+    // so this is the realistic path — not the dedup-off shortcut case 05.
+    // Pre-heuristic-fix this was ~7-8s due to `LIKE … OR FTS …` forcing a
+    // full scan on the IP side.
+    {
+      name: "15 client substring 'phone' + dedup on",
+      sql: `WITH ranked AS (
+        SELECT nodeId, data, ts,
+          ROW_NUMBER() OVER (PARTITION BY qnameLc ORDER BY blockedRank DESC, aRank DESC, ts DESC) AS rn
+        FROM query_log_entries
+        WHERE ${tsClause} AND qnameLc IS NOT NULL AND ${ftsLikeSubquery("clientNameLc", "phone")}
+      ) SELECT nodeId, data FROM ranked WHERE rn = 1 ORDER BY ts DESC LIMIT 50`,
+      params: [...tsParams, ftsLikeParam("phone")],
+    },
+    // Rare-client-substring + dedup: worst-case combination in production
+    // — rare matches mean no LIMIT short-circuit, dedup means window
+    // function over the full filtered result.
+    {
+      name: "16 client substring 'guest' + dedup on",
+      sql: `WITH ranked AS (
+        SELECT nodeId, data, ts,
+          ROW_NUMBER() OVER (PARTITION BY qnameLc ORDER BY blockedRank DESC, aRank DESC, ts DESC) AS rn
+        FROM query_log_entries
+        WHERE ${tsClause} AND qnameLc IS NOT NULL AND ${ftsLikeSubquery("clientNameLc", "guest")}
+      ) SELECT nodeId, data FROM ranked WHERE rn = 1 ORDER BY ts DESC LIMIT 50`,
+      params: [...tsParams, ftsLikeParam("guest")],
     },
   ];
 }
