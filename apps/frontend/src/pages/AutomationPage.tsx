@@ -1935,10 +1935,10 @@ export function AutomationPage() {
                       <div>
                         <strong>Email message:</strong>{" "}
                         <span className="log-alerts__rule-meta">{schedule.notifyMessage}</span>
-                        <span className="log-alerts__rule-meta">
+                        <span className="dns-schedules__message-mode-badge">
                           {schedule.notifyMessageOnly
-                            ? " (message only)"
-                            : " (with technical details)"}
+                            ? "message only"
+                            : "with technical details"}
                         </span>
                       </div>
                     )}
