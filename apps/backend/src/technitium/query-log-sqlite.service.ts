@@ -1108,6 +1108,14 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const base = this.buildWhereClause(filters, window);
 
     const deduplicateDomains = !!filters.deduplicateDomains;
+    // When true, dedup key = (qnameLc, clientIpLc). Each (domain, client)
+    // pair becomes its own row in the result — answers "which client looked
+    // up what?" instead of "what domains showed up?".
+    const deduplicatePerClient =
+      deduplicateDomains && !!filters.deduplicatePerClient;
+    const dedupPartition = deduplicatePerClient
+      ? "qnameLc, clientIpLc"
+      : "qnameLc";
 
     let totalMatchingEntries = 0;
     let duplicatesRemoved: number | undefined;
@@ -1120,15 +1128,15 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
         .get(...base.params) as { count: number };
       totalMatchingEntries = countRow?.count ?? 0;
     } else {
-      // Count of unique domains in the filtered set (ignoring NULL qname).
+      // Count of unique (domain [, client]) keys in the filtered set.
       const countRow = this.db
         .prepare(
           `SELECT COUNT(*) AS count FROM (
-            SELECT qnameLc
+            SELECT ${dedupPartition}
             FROM query_log_entries
             ${base.whereSql}
             AND qnameLc IS NOT NULL
-            GROUP BY qnameLc
+            GROUP BY ${dedupPartition}
           )`,
         )
         .get(...base.params) as { count: number };
@@ -1169,14 +1177,16 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           offset,
         ) as StoredLogRowWithClient[];
     } else {
-      // Deduplicate by domain using a rank that approximates existing behavior:
+      // Deduplicate using a rank that approximates existing behavior:
       // 1) blocked over allowed, 2) A over non-A, 3) newest timestamp.
+      // Partition key is either qnameLc alone (by-domain) or
+      // (qnameLc, clientIpLc) (per-client) depending on the caller's choice.
       rows = this.db
         .prepare(
           `WITH ranked AS (
             SELECT nodeId, baseUrl, clientIpAddress, clientName, data, ts,
               ROW_NUMBER() OVER (
-                PARTITION BY qnameLc
+                PARTITION BY ${dedupPartition}
                 ORDER BY blockedRank DESC, aRank DESC, ts DESC
               ) AS rn
             FROM query_log_entries
@@ -1293,6 +1303,11 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const base = this.buildWhereClause(filters, window, nodeId);
 
     const deduplicateDomains = !!filters.deduplicateDomains;
+    const deduplicatePerClient =
+      deduplicateDomains && !!filters.deduplicatePerClient;
+    const dedupPartition = deduplicatePerClient
+      ? "qnameLc, clientIpLc"
+      : "qnameLc";
 
     let totalMatchingEntries = 0;
     let duplicatesRemoved: number | undefined;
@@ -1308,11 +1323,11 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       const countRow = this.db
         .prepare(
           `SELECT COUNT(*) AS count FROM (
-            SELECT qnameLc
+            SELECT ${dedupPartition}
             FROM query_log_entries
             ${base.whereSql}
             AND qnameLc IS NOT NULL
-            GROUP BY qnameLc
+            GROUP BY ${dedupPartition}
           )`,
         )
         .get(...base.params) as { count: number };
@@ -1358,7 +1373,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           `WITH ranked AS (
             SELECT nodeId, baseUrl, clientIpAddress, clientName, data, ts,
               ROW_NUMBER() OVER (
-                PARTITION BY qnameLc
+                PARTITION BY ${dedupPartition}
                 ORDER BY blockedRank DESC, aRank DESC, ts DESC
               ) AS rn
             FROM query_log_entries

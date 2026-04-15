@@ -137,6 +137,12 @@ export interface TechnitiumQueryLogFilters {
   qtype?: string;
   qclass?: string;
   deduplicateDomains?: boolean;
+  // When true (and deduplicateDomains is also true), dedup key becomes
+  // (qnameLc, clientIpLc) instead of just qnameLc — one row per unique
+  // (domain, client) pair. Answers "which client → domain pairs showed up?"
+  // instead of "what domains showed up?". Parental-controls audit usually
+  // wants this (you care who queried a domain, not just that *someone* did).
+  deduplicatePerClient?: boolean;
   disableCache?: boolean;
 }
 
