@@ -62,6 +62,16 @@ export class DnsSchedulesEvaluatorService
     ) || 3,
   );
 
+  // Admin-only recipient list for drift alerts. Intentionally decoupled
+  // from schedule.notifyEmails because those may target the schedule's
+  // subject (e.g. a child) rather than an operator — see v1.6.3 fix.
+  private readonly driftAlertRecipients: string[] = (
+    process.env.DNS_SCHEDULES_DRIFT_ALERT_RECIPIENTS ?? ""
+  )
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
   constructor(
     private readonly schedulesService: DnsSchedulesService,
     private readonly advancedBlockingService: AdvancedBlockingService,
@@ -1023,7 +1033,7 @@ export class DnsSchedulesEvaluatorService
         `${count} consecutive re-applies. Another process may be mutating the Advanced Blocking config.`,
     );
 
-    if (schedule.notifyEmails.length === 0) return;
+    if (this.driftAlertRecipients.length === 0) return;
 
     // Best-effort email; failures never block the evaluator tick.
     const revertedEntries = this.resolveDomainEntries(schedule);
@@ -1034,12 +1044,11 @@ export class DnsSchedulesEvaluatorService
     void this.logAlertsEmailService
       .sendScheduleDriftAlert({
         scheduleName: schedule.name,
-        scheduleNotifyMessage: schedule.notifyMessage,
         nodeId,
         consecutiveTicks: count,
         tickIntervalSeconds,
         revertedEntries,
-        recipients: schedule.notifyEmails,
+        recipients: this.driftAlertRecipients,
       })
       .catch((error) => {
         this.logger.warn(

@@ -108,18 +108,10 @@ export class LogAlertsEmailService {
     });
   }
 
-  /**
-   * Sends a drift alert for a DNS Schedule when its AB config write
-   * keeps getting reverted across consecutive evaluator ticks. This is
-   * a trust-but-verify signal for parental-controls setups: "the
-   * intended block isn't sticking — something else is mutating it."
-   *
-   * Called at most once per drift episode (caller debounces). If the
-   * drift resolves on its own, the counter resets and no email fires.
-   */
+  // Drift alerts are operator-only: recipients come from an admin env var,
+  // not the schedule's notifyEmails (which may target the schedule's subject).
   async sendScheduleDriftAlert(params: {
     scheduleName: string;
-    scheduleNotifyMessage?: string;
     nodeId: string;
     consecutiveTicks: number;
     tickIntervalSeconds: number;
@@ -128,7 +120,6 @@ export class LogAlertsEmailService {
   }): Promise<LogAlertsSendTestEmailResponse | null> {
     const {
       scheduleName,
-      scheduleNotifyMessage,
       nodeId,
       consecutiveTicks,
       tickIntervalSeconds,
@@ -148,9 +139,6 @@ export class LogAlertsEmailService {
     const subject = `[Technitium DNS Companion] DNS Schedule drift detected: ${scheduleName}`;
 
     const lines: string[] = [];
-    if (scheduleNotifyMessage && scheduleNotifyMessage.trim().length > 0) {
-      lines.push(scheduleNotifyMessage.trim(), "", "---", "");
-    }
     lines.push(
       `The DNS Schedule "${scheduleName}" is not converging to its intended state.`,
       "",

@@ -355,6 +355,7 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
     driftCounters: Map<string, number>;
     driftAlertedEpisodes: Set<string>;
     driftAlertThreshold: number;
+    driftAlertRecipients: string[];
     intervalMs: number;
     logger: { warn: jest.Mock; log: jest.Mock; debug: jest.Mock };
     logAlertsEmailService: { sendScheduleDriftAlert: jest.Mock };
@@ -363,7 +364,9 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
     resetDriftState: (scheduleId: string, nodeId: string) => void;
   }
 
-  function makeService(options: { threshold?: number } = {}): {
+  function makeService(
+    options: { threshold?: number; recipients?: string[] } = {},
+  ): {
     service: DnsSchedulesEvaluatorService;
     internal: DriftInternals;
     emailMock: jest.Mock;
@@ -378,10 +381,10 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
       { sendScheduleDriftAlert: emailMock } as never,
     );
     const internal = service as unknown as DriftInternals;
-    // Override threshold for test speed; production default is 3.
     if (options.threshold !== undefined) {
       internal.driftAlertThreshold = options.threshold;
     }
+    internal.driftAlertRecipients = options.recipients ?? ["admin@example.com"];
     internal.logger = { warn: jest.fn(), log: jest.fn(), debug: jest.fn() };
     return { service, internal, emailMock };
   }
@@ -399,7 +402,6 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
     const schedule = makeSchedule({
       id: "s1",
       name: "Nighttime Block",
-      notifyEmails: ["parent@example.com"],
     });
 
     internal.recordDriftTick(schedule, "nodeA"); // 1 - silent
@@ -417,16 +419,13 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
       scheduleName: "Nighttime Block",
       nodeId: "nodeA",
       consecutiveTicks: 3,
-      recipients: ["parent@example.com"],
+      recipients: ["admin@example.com"],
     });
   });
 
   it("does not re-send email within the same drift episode (debounce)", () => {
     const { internal, emailMock } = makeService({ threshold: 2 });
-    const schedule = makeSchedule({
-      id: "s1",
-      notifyEmails: ["parent@example.com"],
-    });
+    const schedule = makeSchedule({ id: "s1" });
 
     internal.recordDriftTick(schedule, "nodeA");
     internal.recordDriftTick(schedule, "nodeA"); // threshold
@@ -439,9 +438,12 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
     expect(emailMock).toHaveBeenCalledTimes(1);
   });
 
-  it("skips the email entirely when schedule.notifyEmails is empty", () => {
-    const { internal, emailMock } = makeService({ threshold: 2 });
-    const schedule = makeSchedule({ id: "s1", notifyEmails: [] });
+  it("skips the email entirely when DNS_SCHEDULES_DRIFT_ALERT_RECIPIENTS is empty", () => {
+    const { internal, emailMock } = makeService({
+      threshold: 2,
+      recipients: [],
+    });
+    const schedule = makeSchedule({ id: "s1" });
 
     internal.recordDriftTick(schedule, "nodeA");
     internal.recordDriftTick(schedule, "nodeA"); // threshold
@@ -450,12 +452,28 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
     expect(emailMock).not.toHaveBeenCalled(); // but no email
   });
 
-  it("resetDriftState clears both counter and alerted-episode flag", () => {
-    const { internal, emailMock } = makeService({ threshold: 2 });
+  it("never uses schedule.notifyEmails as drift recipients (kid-safety)", () => {
+    const { internal, emailMock } = makeService({
+      threshold: 2,
+      recipients: ["admin@example.com"],
+    });
     const schedule = makeSchedule({
       id: "s1",
-      notifyEmails: ["parent@example.com"],
+      notifyEmails: ["kid@example.com"],
     });
+
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA"); // threshold
+
+    expect(emailMock).toHaveBeenCalledTimes(1);
+    const call = emailMock.mock.calls[0][0] as { recipients: string[] };
+    expect(call.recipients).toEqual(["admin@example.com"]);
+    expect(call.recipients).not.toContain("kid@example.com");
+  });
+
+  it("resetDriftState clears both counter and alerted-episode flag", () => {
+    const { internal, emailMock } = makeService({ threshold: 2 });
+    const schedule = makeSchedule({ id: "s1" });
 
     internal.recordDriftTick(schedule, "nodeA");
     internal.recordDriftTick(schedule, "nodeA"); // threshold crossed, alerted
@@ -473,10 +491,7 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
 
   it("isolates counters per (schedule, node) pair", () => {
     const { internal, emailMock } = makeService({ threshold: 2 });
-    const schedule = makeSchedule({
-      id: "s1",
-      notifyEmails: ["parent@example.com"],
-    });
+    const schedule = makeSchedule({ id: "s1" });
 
     internal.recordDriftTick(schedule, "nodeA"); // 1 on nodeA
     internal.recordDriftTick(schedule, "nodeB"); // 1 on nodeB (separate counter)
