@@ -10,7 +10,8 @@
   "scripts": {
     "lint": "npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "overrides": {
     "handlebars": "4.7.9",

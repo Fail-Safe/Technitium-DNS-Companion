@@ -1,0 +1,66 @@
+name: Sync next from main after release
+
+# When a v* release tag is pushed, main has a fresh squash-merge commit
+# that next doesn't carry. Without reconciling, the next release PR hits
+# a squash-merge conflict on the same files (classic pattern — see the
+# v1.6.0 and v1.6.1 release cycles). This workflow merges main into next
+# automatically so the history stays reconciled.
+#
+# Runs as a peer of release.yml and docker-publish.yml on the same
+# trigger. Fails loudly if the merge has conflicts — that's a signal to
+# manually resolve on `next` before the next PR.
+#
+# Security: no untrusted input (issue titles, PR bodies, commit messages)
+# is interpolated into run: commands. Only hardcoded branch names and
+# static git operations.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  sync-next:
+    name: Merge main into next
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout next branch with full history
+        uses: actions/checkout@v4
+        with:
+          ref: next
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch main
+        run: git fetch origin main
+
+      - name: Check if next already contains main
+        id: check
+        run: |
+          if git merge-base --is-ancestor origin/main HEAD; then
+            echo "needs_merge=false" >> "$GITHUB_OUTPUT"
+            echo "next already contains origin/main; no merge needed."
+          else
+            echo "needs_merge=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge main into next
+        if: steps.check.outputs.needs_merge == 'true'
+        run: |
+          if ! git merge origin/main --no-edit --no-ff; then
+            echo "::error::Merge conflict between main and next. Resolve manually: git checkout next && git merge origin/main"
+            git merge --abort || true
+            exit 1
+          fi
+
+      - name: Push updated next
+        if: steps.check.outputs.needs_merge == 'true'
+        run: git push origin next
