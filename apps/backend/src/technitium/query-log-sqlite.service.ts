@@ -471,9 +471,14 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           `Backfilling SQLite FTS5 index from ${baseCount.toLocaleString()} existing rows. ` +
             "This may take a few seconds on large DBs.",
         );
+        // External-content FTS5 requires the 'rebuild' command to repopulate
+        // from the content table — a manual `INSERT INTO fts SELECT FROM base`
+        // registers rowids but doesn't actually tokenize content via the
+        // FTS5 tokenizer. See SQLite FTS5 docs §4.4.3. Manual backfill was
+        // the source of the "token index is sparse" bug: rowids matched, but
+        // most searches returned zero because the inverted index was empty.
         this.db.exec(
-          `INSERT INTO query_log_fts (rowid, qnameLc, clientNameLc)
-           SELECT rowid, qnameLc, clientNameLc FROM query_log_entries`,
+          `INSERT INTO query_log_fts(query_log_fts) VALUES('rebuild')`,
         );
         const elapsedMs = Date.now() - startedAt;
         this.logger.warn(

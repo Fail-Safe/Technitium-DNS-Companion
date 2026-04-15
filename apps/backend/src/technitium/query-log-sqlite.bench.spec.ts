@@ -368,10 +368,10 @@ function ensureFtsTable(db: DatabaseSync): void {
       tokenize='unicode61 remove_diacritics 2'
     )`,
   ).run();
-  db.prepare(
-    `INSERT INTO query_log_fts (rowid, qnameLc, clientNameLc)
-     SELECT rowid, qnameLc, clientNameLc FROM query_log_entries`,
-  ).run();
+  // External-content FTS5 requires the 'rebuild' command; a manual
+  // INSERT INTO ... SELECT registers rowids but doesn't actually tokenize
+  // content. Earlier bench numbers were misleading because of this.
+  db.prepare(`INSERT INTO query_log_fts(query_log_fts) VALUES('rebuild')`).run();
 }
 
 // ── Benchmark harness ──────────────────────────────────────────────────────
@@ -621,6 +621,27 @@ describeOrSkip("QueryLogSqliteService — SQLite query performance benchmarks", 
     if (USE_FTS) {
       const db = openBenchmarkDb(BENCH_DB_PATH);
       ensureFtsTable(db);
+      // Sanity check: a freshly-built FTS index over a DB where at least
+      // one query term appears should return non-zero matches for that
+      // term. This catches the "FTS populated but not tokenized" bug we
+      // hit in production — previously the bench was measuring a sparse
+      // index and reporting bogus "FTS wins" numbers.
+      const sanityRow = db
+        .prepare(
+          "SELECT COUNT(*) AS c FROM query_log_fts WHERE qnameLc MATCH 'google*'",
+        )
+        .get() as { c?: number } | undefined;
+      const sanityCount = sanityRow?.c ?? 0;
+      if (sanityCount === 0) {
+        throw new Error(
+          "FTS5 sanity check failed: 'google*' returned 0 matches after " +
+            "ensureFtsTable(). Index is either empty or tokens weren't " +
+            "built. Did the rebuild command fire correctly?",
+        );
+      }
+      console.log(
+        `[bench] FTS5 sanity: MATCH 'google*' returned ${sanityCount.toLocaleString()} rows.`,
+      );
       db.close();
     }
 
