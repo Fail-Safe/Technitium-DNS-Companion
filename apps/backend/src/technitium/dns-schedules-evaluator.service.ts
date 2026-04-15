@@ -15,6 +15,7 @@ import type {
   DnsScheduleEvaluatorStatus,
   RunDnsScheduleEvaluatorResponse,
 } from "./dns-schedules.types";
+import { LogAlertsEmailService } from "./log-alerts-email.service";
 import { LogAlertsRulesService } from "./log-alerts-rules.service";
 import { TechnitiumService } from "./technitium.service";
 
@@ -45,12 +46,29 @@ export class DnsSchedulesEvaluatorService
   private lastSkipped?: number;
   private lastErrored?: number;
 
+  // Phase B: drift detection state (in-memory, transient).
+  // Key: `${scheduleId}:${writeNodeId}`. Counter tracks consecutive
+  // evaluator ticks where an applied schedule's re-apply observed
+  // `changed=true` — meaning the AB config lost entries we wrote.
+  // Reset to zero on first `changed=false` observation; removed from
+  // alerted-episodes set so the next drift episode can alert again.
+  private readonly driftCounters = new Map<string, number>();
+  private readonly driftAlertedEpisodes = new Set<string>();
+  private readonly driftAlertThreshold = Math.max(
+    1,
+    Number.parseInt(
+      process.env.DNS_SCHEDULES_DRIFT_ALERT_THRESHOLD ?? "3",
+      10,
+    ) || 3,
+  );
+
   constructor(
     private readonly schedulesService: DnsSchedulesService,
     private readonly advancedBlockingService: AdvancedBlockingService,
     private readonly technitiumService: TechnitiumService,
     private readonly domainGroupsService: DomainGroupsService,
     private readonly logAlertsRulesService: LogAlertsRulesService,
+    private readonly logAlertsEmailService: LogAlertsEmailService,
   ) {}
 
   onModuleInit(): void {
@@ -398,10 +416,21 @@ export class DnsSchedulesEvaluatorService
           this.logger.log(
             `Applied schedule "${schedule.name}" to node "${nodeId}" (action=${schedule.action}, ${modeDetail}).`,
           );
+          // Fresh apply — any prior drift bookkeeping is stale; reset so the
+          // next window cycle starts clean.
+          this.resetDriftState(schedule.id, nodeId);
         } else if (changed) {
           this.logger.log(
             `Re-applied schedule "${schedule.name}" to node "${nodeId}" — DG entries updated.`,
           );
+          // The schedule was already applied but we had to write again —
+          // classic drift signal. Track consecutive occurrences; alert when
+          // the count crosses the threshold (caller-configurable).
+          this.recordDriftTick(schedule, nodeId);
+        } else {
+          // changed=false after a re-apply means the AB config already has
+          // everything we want. Drift episode (if any) has resolved.
+          this.resetDriftState(schedule.id, nodeId);
         }
         if (changed && schedule.flushCacheOnChange) {
           for (const flushNodeId of flushNodeIds) {
@@ -429,6 +458,9 @@ export class DnsSchedulesEvaluatorService
         this.logger.log(
           `Removed schedule "${schedule.name}" from node "${nodeId}".`,
         );
+        // Window closed — drop any drift bookkeeping for this pair. Next
+        // window opens with a clean counter.
+        this.resetDriftState(schedule.id, nodeId);
         if (schedule.flushCacheOnChange) {
           for (const flushNodeId of flushNodeIds) {
             await this.flushDomainsCache(schedule, flushNodeId);
@@ -966,5 +998,66 @@ export class DnsSchedulesEvaluatorService
   private timeToMinutes(time: string): number {
     const [h, m] = time.split(":").map(Number);
     return (h ?? 0) * 60 + (m ?? 0);
+  }
+
+  // ── Phase B: drift detection ────────────────────────────────────────────
+
+  /**
+   * Records one consecutive evaluator tick where an already-applied
+   * schedule needed re-applying (meaning something mutated the AB config
+   * between ticks). Fires a drift alert once per episode when the
+   * threshold is crossed; subsequent ticks within the same episode
+   * increment silently until the counter resets.
+   */
+  private recordDriftTick(schedule: DnsSchedule, nodeId: string): void {
+    const key = `${schedule.id}:${nodeId}`;
+    const count = (this.driftCounters.get(key) ?? 0) + 1;
+    this.driftCounters.set(key, count);
+
+    if (count < this.driftAlertThreshold) return;
+    if (this.driftAlertedEpisodes.has(key)) return;
+    this.driftAlertedEpisodes.add(key);
+
+    this.logger.warn(
+      `Configuration drift detected for schedule "${schedule.name}" on node "${nodeId}": ` +
+        `${count} consecutive re-applies. Another process may be mutating the Advanced Blocking config.`,
+    );
+
+    if (schedule.notifyEmails.length === 0) return;
+
+    // Best-effort email; failures never block the evaluator tick.
+    const revertedEntries = this.resolveDomainEntries(schedule);
+    const tickIntervalSeconds = Math.max(
+      1,
+      Math.floor(this.intervalMs / 1000),
+    );
+    void this.logAlertsEmailService
+      .sendScheduleDriftAlert({
+        scheduleName: schedule.name,
+        scheduleNotifyMessage: schedule.notifyMessage,
+        nodeId,
+        consecutiveTicks: count,
+        tickIntervalSeconds,
+        revertedEntries,
+        recipients: schedule.notifyEmails,
+      })
+      .catch((error) => {
+        this.logger.warn(
+          `Failed to send drift alert email for schedule "${schedule.name}" ` +
+            `on node "${nodeId}": ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  /**
+   * Clears drift bookkeeping for a (schedule, node) pair. Called whenever
+   * the drift episode has demonstrably ended: first `changed=false` after
+   * a streak of re-applies, a fresh markApplied, window close, or schedule
+   * deactivation.
+   */
+  private resetDriftState(scheduleId: string, nodeId: string): void {
+    const key = `${scheduleId}:${nodeId}`;
+    this.driftCounters.delete(key);
+    this.driftAlertedEpisodes.delete(key);
   }
 }

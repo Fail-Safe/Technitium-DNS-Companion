@@ -108,6 +108,76 @@ export class LogAlertsEmailService {
     });
   }
 
+  /**
+   * Sends a drift alert for a DNS Schedule when its AB config write
+   * keeps getting reverted across consecutive evaluator ticks. This is
+   * a trust-but-verify signal for parental-controls setups: "the
+   * intended block isn't sticking — something else is mutating it."
+   *
+   * Called at most once per drift episode (caller debounces). If the
+   * drift resolves on its own, the counter resets and no email fires.
+   */
+  async sendScheduleDriftAlert(params: {
+    scheduleName: string;
+    scheduleNotifyMessage?: string;
+    nodeId: string;
+    consecutiveTicks: number;
+    tickIntervalSeconds: number;
+    revertedEntries: string[];
+    recipients: string[];
+  }): Promise<LogAlertsSendTestEmailResponse | null> {
+    const {
+      scheduleName,
+      scheduleNotifyMessage,
+      nodeId,
+      consecutiveTicks,
+      tickIntervalSeconds,
+      revertedEntries,
+      recipients,
+    } = params;
+
+    const recipientList = this.normalizeRecipients(recipients);
+    if (recipientList.length === 0) return null;
+
+    const approxDurationSeconds = consecutiveTicks * tickIntervalSeconds;
+    const durationLabel =
+      approxDurationSeconds >= 60
+        ? `${Math.round(approxDurationSeconds / 60)} minute${approxDurationSeconds >= 120 ? "s" : ""}`
+        : `${approxDurationSeconds} seconds`;
+
+    const subject = `[Technitium DNS Companion] DNS Schedule drift detected: ${scheduleName}`;
+
+    const lines: string[] = [];
+    if (scheduleNotifyMessage && scheduleNotifyMessage.trim().length > 0) {
+      lines.push(scheduleNotifyMessage.trim(), "", "---", "");
+    }
+    lines.push(
+      `The DNS Schedule "${scheduleName}" is not converging to its intended state.`,
+      "",
+      `Node: ${nodeId}`,
+      `Drift persisted: ${consecutiveTicks} consecutive evaluator ticks (~${durationLabel}).`,
+      `Reverted entries (${revertedEntries.length}):`,
+      ...(revertedEntries.length > 0
+        ? revertedEntries.slice(0, 20).map((e) => `  - ${e}`)
+        : ["  (none reported)"]),
+      ...(revertedEntries.length > 20
+        ? [`  … and ${revertedEntries.length - 20} more`]
+        : []),
+      "",
+      "This usually means another process is mutating the Advanced Blocking",
+      "config for this group — for example a manual edit in the Technitium UI,",
+      "a Domain Groups apply that conflicts with the schedule, or an external",
+      "automation. The evaluator will keep trying to enforce the schedule every",
+      "tick; this alert will not re-fire until the drift resolves and recurs.",
+    );
+
+    return this.sendEmail({
+      to: recipientList,
+      subject,
+      text: lines.join("\n"),
+    });
+  }
+
   private readConfig(): SmtpConfig {
     const host = (process.env.SMTP_HOST ?? "").trim() || undefined;
     const portRaw = (process.env.SMTP_PORT ?? "").trim();

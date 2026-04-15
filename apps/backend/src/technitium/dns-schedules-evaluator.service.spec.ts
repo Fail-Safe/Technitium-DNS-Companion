@@ -344,3 +344,148 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
     expect(nextConfig.groups[0].blocked).toEqual(["keep.me"]);
   });
 });
+
+// ── Phase B: drift detection counter + alert behavior ─────────────────────
+// When an applied schedule's re-apply observes `changed=true`, that's drift
+// (another process mutated the AB config between ticks). These tests pin the
+// counter increment/reset logic and the one-email-per-episode debounce.
+
+describe("DnsSchedulesEvaluatorService — drift detection", () => {
+  interface DriftInternals {
+    driftCounters: Map<string, number>;
+    driftAlertedEpisodes: Set<string>;
+    driftAlertThreshold: number;
+    intervalMs: number;
+    logger: { warn: jest.Mock; log: jest.Mock; debug: jest.Mock };
+    logAlertsEmailService: { sendScheduleDriftAlert: jest.Mock };
+    domainGroupsService: { getExactEntriesByGroupNames: jest.Mock };
+    recordDriftTick: (s: DnsSchedule, nodeId: string) => void;
+    resetDriftState: (scheduleId: string, nodeId: string) => void;
+  }
+
+  function makeService(options: { threshold?: number } = {}): {
+    service: DnsSchedulesEvaluatorService;
+    internal: DriftInternals;
+    emailMock: jest.Mock;
+  } {
+    const emailMock = jest.fn().mockResolvedValue({ messageId: "ok" });
+    const service = new DnsSchedulesEvaluatorService(
+      {} as never,
+      {} as never,
+      {} as never,
+      { getExactEntriesByGroupNames: () => ["example.com"] } as never,
+      {} as never,
+      { sendScheduleDriftAlert: emailMock } as never,
+    );
+    const internal = service as unknown as DriftInternals;
+    // Override threshold for test speed; production default is 3.
+    if (options.threshold !== undefined) {
+      internal.driftAlertThreshold = options.threshold;
+    }
+    internal.logger = { warn: jest.fn(), log: jest.fn(), debug: jest.fn() };
+    return { service, internal, emailMock };
+  }
+
+  it("increments the counter on each drift tick", () => {
+    const { internal } = makeService({ threshold: 3 });
+    const schedule = makeSchedule({ id: "s1" });
+    internal.recordDriftTick(schedule, "eq14");
+    internal.recordDriftTick(schedule, "eq14");
+    expect(internal.driftCounters.get("s1:eq14")).toBe(2);
+  });
+
+  it("logs WARN and sends one email when counter crosses the threshold", () => {
+    const { internal, emailMock } = makeService({ threshold: 3 });
+    const schedule = makeSchedule({
+      id: "s1",
+      name: "Nighttime Block",
+      notifyEmails: ["parent@example.com"],
+    });
+
+    internal.recordDriftTick(schedule, "eq14"); // 1 - silent
+    internal.recordDriftTick(schedule, "eq14"); // 2 - silent
+    expect(internal.logger.warn).not.toHaveBeenCalled();
+    expect(emailMock).not.toHaveBeenCalled();
+
+    internal.recordDriftTick(schedule, "eq14"); // 3 - threshold crossed
+    expect(internal.logger.warn).toHaveBeenCalledTimes(1);
+    expect(internal.logger.warn.mock.calls[0][0]).toContain(
+      'Configuration drift detected for schedule "Nighttime Block"',
+    );
+    expect(emailMock).toHaveBeenCalledTimes(1);
+    expect(emailMock.mock.calls[0][0]).toMatchObject({
+      scheduleName: "Nighttime Block",
+      nodeId: "eq14",
+      consecutiveTicks: 3,
+      recipients: ["parent@example.com"],
+    });
+  });
+
+  it("does not re-send email within the same drift episode (debounce)", () => {
+    const { internal, emailMock } = makeService({ threshold: 2 });
+    const schedule = makeSchedule({
+      id: "s1",
+      notifyEmails: ["parent@example.com"],
+    });
+
+    internal.recordDriftTick(schedule, "eq14");
+    internal.recordDriftTick(schedule, "eq14"); // threshold
+    internal.recordDriftTick(schedule, "eq14"); // still in episode
+    internal.recordDriftTick(schedule, "eq14"); // still in episode
+
+    // Counter climbs but only the first threshold-crossing fired email/warn.
+    expect(internal.driftCounters.get("s1:eq14")).toBe(4);
+    expect(internal.logger.warn).toHaveBeenCalledTimes(1);
+    expect(emailMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the email entirely when schedule.notifyEmails is empty", () => {
+    const { internal, emailMock } = makeService({ threshold: 2 });
+    const schedule = makeSchedule({ id: "s1", notifyEmails: [] });
+
+    internal.recordDriftTick(schedule, "eq14");
+    internal.recordDriftTick(schedule, "eq14"); // threshold
+
+    expect(internal.logger.warn).toHaveBeenCalledTimes(1); // WARN still fires
+    expect(emailMock).not.toHaveBeenCalled(); // but no email
+  });
+
+  it("resetDriftState clears both counter and alerted-episode flag", () => {
+    const { internal, emailMock } = makeService({ threshold: 2 });
+    const schedule = makeSchedule({
+      id: "s1",
+      notifyEmails: ["parent@example.com"],
+    });
+
+    internal.recordDriftTick(schedule, "eq14");
+    internal.recordDriftTick(schedule, "eq14"); // threshold crossed, alerted
+    expect(emailMock).toHaveBeenCalledTimes(1);
+
+    internal.resetDriftState("s1", "eq14");
+    expect(internal.driftCounters.has("s1:eq14")).toBe(false);
+    expect(internal.driftAlertedEpisodes.has("s1:eq14")).toBe(false);
+
+    // New episode can alert again.
+    internal.recordDriftTick(schedule, "eq14");
+    internal.recordDriftTick(schedule, "eq14"); // threshold crossed again
+    expect(emailMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("isolates counters per (schedule, node) pair", () => {
+    const { internal, emailMock } = makeService({ threshold: 2 });
+    const schedule = makeSchedule({
+      id: "s1",
+      notifyEmails: ["parent@example.com"],
+    });
+
+    internal.recordDriftTick(schedule, "eq14"); // 1 on eq14
+    internal.recordDriftTick(schedule, "eq12"); // 1 on eq12 (separate counter)
+    expect(internal.driftCounters.get("s1:eq14")).toBe(1);
+    expect(internal.driftCounters.get("s1:eq12")).toBe(1);
+    expect(emailMock).not.toHaveBeenCalled();
+
+    internal.recordDriftTick(schedule, "eq14"); // crosses threshold on eq14 only
+    expect(emailMock).toHaveBeenCalledTimes(1);
+    expect(emailMock.mock.calls[0][0].nodeId).toBe("eq14");
+  });
+});
