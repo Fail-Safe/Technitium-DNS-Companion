@@ -365,11 +365,17 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       // implementation changes in a way that invalidates existing DBs:
       //   v1 = initial FTS5 with INSERT/DELETE triggers only (buggy — missed
       //        UPDATE path, and used broken manual backfill syntax).
-      //   v2 = added AFTER UPDATE trigger and switched backfill to the
-      //        proper FTS5 'rebuild' command. All pre-v2 DBs need a forced
-      //        rebuild because their shadow index is sparsely tokenized.
+      //   v2 = added AFTER UPDATE trigger and (intended to) switch to the
+      //        FTS5 'rebuild' command — but the rebuild was guarded by a
+      //        count-based needsBackfill check that always returned false
+      //        because COUNT(*) on external-content FTS5 delegates to the
+      //        content table. Result: DBs stamped v2 may still have sparse
+      //        token indexes. Force another pass.
+      //   v3 = unconditional 'rebuild' when legacy-upgrade fires, removing
+      //        the broken count heuristic. All pre-v3 DBs get one more
+      //        forced rebuild; after that they stay stamped.
       // Stored in PRAGMA user_version (SQLite header, survives VACUUM).
-      const CURRENT_FTS_SCHEMA_VERSION = 2;
+      const CURRENT_FTS_SCHEMA_VERSION = 3;
       const versionRow = this.db.prepare("PRAGMA user_version").get() as
         | { user_version?: number }
         | undefined;
@@ -429,54 +435,27 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       // trigger and base commit). Drop and rebuild rather than ship with
       // a stale index that will either return wrong results or corrupt
       // the DB on the next retention DELETE.
-      const ftsCountRow = this.db
-        .prepare("SELECT COUNT(*) AS count FROM query_log_fts")
-        .get() as { count?: number } | undefined;
       const baseCountRow = this.db
         .prepare("SELECT COUNT(*) AS count FROM query_log_entries")
         .get() as { count?: number } | undefined;
-      const ftsCount = ftsCountRow?.count ?? 0;
       const baseCount = baseCountRow?.count ?? 0;
 
-      // Tolerance window: during a poll-write trigger burst, FTS and base
-      // counts can legitimately diverge by a handful of rows for a moment.
-      // Rebuild only if the skew exceeds this threshold.
-      const skew = Math.abs(baseCount - ftsCount);
-      const skewTolerance = Math.max(100, Math.floor(baseCount * 0.01));
-      const needsBackfill = ftsCount === 0 && baseCount > 0;
-      const needsRebuild = !needsBackfill && skew > skewTolerance;
-
-      if (needsRebuild) {
-        this.logger.warn(
-          `SQLite FTS5 index skew detected: base=${baseCount.toLocaleString()}, ` +
-            `fts=${ftsCount.toLocaleString()} (skew=${skew.toLocaleString()}, ` +
-            `tolerance=${skewTolerance.toLocaleString()}). Rebuilding shadow index.`,
-        );
-        // Fully drop so CREATE VIRTUAL TABLE IF NOT EXISTS on the next
-        // call rebuilds a clean one. Triggers survive and will keep the
-        // fresh index in sync going forward.
-        this.db.exec("DROP TABLE IF EXISTS query_log_fts");
-        this.db.exec(`
-          CREATE VIRTUAL TABLE query_log_fts USING fts5(
-            qnameLc, clientNameLc,
-            content='query_log_entries', content_rowid='rowid',
-            tokenize='unicode61 remove_diacritics 2'
-          );
-        `);
-      }
-
-      if (needsBackfill || needsRebuild) {
+      // NOTE: `SELECT COUNT(*) FROM query_log_fts` on external-content FTS5
+      // delegates to the content table and returns the base row count — NOT
+      // the count of indexed rows. A count-based skew check can't detect
+      // "shadow index is sparse" because the count always matches base.
+      // That's why earlier heuristics didn't force the needed rebuild.
+      //
+      // Instead: when `needsLegacyRebuild` fires, we always run the FTS5
+      // 'rebuild' command unconditionally. It's idempotent, fast on empty
+      // DBs, and guaranteed to correctly populate the token index from
+      // content. No heuristic can be more reliable than just running it.
+      if (needsLegacyRebuild && baseCount > 0) {
         const startedAt = Date.now();
         this.logger.warn(
           `Backfilling SQLite FTS5 index from ${baseCount.toLocaleString()} existing rows. ` +
             "This may take a few seconds on large DBs.",
         );
-        // External-content FTS5 requires the 'rebuild' command to repopulate
-        // from the content table — a manual `INSERT INTO fts SELECT FROM base`
-        // registers rowids but doesn't actually tokenize content via the
-        // FTS5 tokenizer. See SQLite FTS5 docs §4.4.3. Manual backfill was
-        // the source of the "token index is sparse" bug: rowids matched, but
-        // most searches returned zero because the inverted index was empty.
         this.db.exec(
           `INSERT INTO query_log_fts(query_log_fts) VALUES('rebuild')`,
         );
