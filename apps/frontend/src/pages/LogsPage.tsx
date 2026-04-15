@@ -25,7 +25,7 @@ import {
   SkeletonLogsSummary,
 } from "../components/common/LoadingSkeleton";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
-import { apiFetch, getAuthRedirectReason } from "../config";
+import { apiFetch, apiFetchStatus, getAuthRedirectReason } from "../config";
 import { useTechnitiumState } from "../context/useTechnitiumState";
 import { useToast } from "../context/useToast";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
@@ -1863,7 +1863,7 @@ export function LogsPage() {
     setSmtpStatusError(null);
 
     try {
-      const response = await apiFetch("/nodes/log-alerts/smtp/status");
+      const response = await apiFetchStatus("/nodes/log-alerts/smtp/status");
       if (!response.ok) {
         const message = await readApiErrorMessage(
           response,
@@ -1958,7 +1958,7 @@ export function LogsPage() {
   const loadLogAlertEvaluatorStatus = useCallback(async () => {
     setLogAlertEvaluatorLoading(true);
     try {
-      const response = await apiFetch("/nodes/log-alerts/evaluator/status");
+      const response = await apiFetchStatus("/nodes/log-alerts/evaluator/status");
       if (!response.ok) {
         const message = await readApiErrorMessage(
           response,
@@ -2169,7 +2169,7 @@ export function LogsPage() {
     try {
       const [capabilitiesResponse, statusResponse] = await Promise.all([
         apiFetch("/nodes/log-alerts/capabilities"),
-        apiFetch("/nodes/log-alerts/rules/status"),
+        apiFetchStatus("/nodes/log-alerts/rules/status"),
       ]);
 
       if (!capabilitiesResponse.ok) {

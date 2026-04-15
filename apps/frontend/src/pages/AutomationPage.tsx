@@ -17,7 +17,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppInput, AppTextarea } from "../components/common/AppInput";
 import { ConfirmModal } from "../components/common/ConfirmModal";
-import { apiFetch } from "../config";
+import { apiFetch, apiFetchStatus } from "../config";
 import { useTechnitiumState } from "../context/useTechnitiumState";
 import { useToast } from "../context/useToast";
 import type { DomainGroup } from "../types/domainGroups";
@@ -1128,13 +1128,13 @@ export function AutomationPage() {
     try {
       const [tokenRes, storageRes, evalRes, schedulesRes, stateRes, dgRes, smtpRes] =
         await Promise.all([
-          apiFetch("/nodes/dns-schedules/token/status"),
-          apiFetch("/nodes/dns-schedules/storage/status"),
-          apiFetch("/nodes/dns-schedules/evaluator/status"),
+          apiFetchStatus("/nodes/dns-schedules/token/status"),
+          apiFetchStatus("/nodes/dns-schedules/storage/status"),
+          apiFetchStatus("/nodes/dns-schedules/evaluator/status"),
           apiFetch("/nodes/dns-schedules/rules"),
-          apiFetch("/nodes/dns-schedules/state"),
+          apiFetchStatus("/nodes/dns-schedules/state"),
           apiFetch("/domain-groups"),
-          apiFetch("/nodes/log-alerts/smtp/status"),
+          apiFetchStatus("/nodes/log-alerts/smtp/status"),
         ]);
 
       if (!mountedRef.current) return;
@@ -1184,7 +1184,7 @@ export function AutomationPage() {
       // Poll until validation completes (valid transitions away from null)
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 500));
-        const res = await apiFetch("/nodes/dns-schedules/token/status");
+        const res = await apiFetchStatus("/nodes/dns-schedules/token/status");
         if (!res.ok || !mountedRef.current) break;
         const status = (await res.json()) as DnsScheduleTokenStatus;
         if (mountedRef.current) setTokenStatus(status);
@@ -1199,7 +1199,7 @@ export function AutomationPage() {
 
   const refreshEvaluatorStatus = useCallback(async () => {
     try {
-      const res = await apiFetch("/nodes/dns-schedules/evaluator/status");
+      const res = await apiFetchStatus("/nodes/dns-schedules/evaluator/status");
       if (res.ok && mountedRef.current) {
         setEvaluatorStatus((await res.json()) as DnsScheduleEvaluatorStatus);
       }
@@ -1210,7 +1210,7 @@ export function AutomationPage() {
 
   const refreshAppliedState = useCallback(async () => {
     try {
-      const res = await apiFetch("/nodes/dns-schedules/state");
+      const res = await apiFetchStatus("/nodes/dns-schedules/state");
       if (res.ok && mountedRef.current) {
         setAppliedState((await res.json()) as DnsScheduleStateEntry[]);
       }

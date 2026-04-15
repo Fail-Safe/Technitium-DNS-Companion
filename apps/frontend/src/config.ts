@@ -200,6 +200,20 @@ export const apiFetch = (
     });
 };
 
+// Use for read-only status probes: warns in devtools on non-OK so path typos surface instead of blank UI.
+export const apiFetchStatus = async (
+  path: string,
+  options?: RequestInit,
+): Promise<Response> => {
+  const response = await apiFetch(path, options);
+  if (!response.ok) {
+    console.warn(
+      `[apiFetchStatus] ${path} returned ${response.status} ${response.statusText}`,
+    );
+  }
+  return response;
+};
+
 export const getAuthRedirectReason = (): string | null => {
   if (typeof window === "undefined") return null;
   try {

@@ -150,6 +150,7 @@ const {
 
 vi.mock("../config", () => ({
   apiFetch: apiFetchMock,
+  apiFetchStatus: apiFetchMock,
   getAuthRedirectReason: () => null,
 }));
 
