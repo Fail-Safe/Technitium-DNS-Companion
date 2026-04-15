@@ -1935,9 +1935,11 @@ export function AutomationPage() {
                       <div>
                         <strong>Email message:</strong>{" "}
                         <span className="log-alerts__rule-meta">{schedule.notifyMessage}</span>
-                        {schedule.notifyMessageOnly && (
-                          <span className="log-alerts__rule-meta"> (message only)</span>
-                        )}
+                        <span className="log-alerts__rule-meta">
+                          {schedule.notifyMessageOnly
+                            ? " (message only)"
+                            : " (with technical details)"}
+                        </span>
                       </div>
                     )}
                   </div>
