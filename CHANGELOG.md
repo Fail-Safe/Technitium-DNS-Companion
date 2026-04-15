@@ -9,6 +9,40 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-04-15
+
+### Added
+
+- **DNS Schedules drift detection.** When an applied schedule's Advanced Blocking config keeps getting reverted across consecutive evaluator ticks (another process is mutating the group — a manual UI edit, a conflicting Domain Groups apply, or an external automation), the evaluator logs a WARN and optionally sends a one-shot email alert per drift episode. Alerts debounce on the alerted-episode level: they don't re-fire until the drift resolves and recurs. Configurable via `DNS_SCHEDULES_DRIFT_ALERT_THRESHOLD` (default 3 consecutive ticks, ~2–3 min at the default evaluator interval) and `DNS_SCHEDULES_DRIFT_ALERT_RECIPIENTS` (comma-separated admin email list; empty by default, in which case only the WARN log fires).
+- **`apiFetchStatus` frontend helper.** Wraps `apiFetch` with a `console.warn` on non-OK responses so that silent 404s on status-probe endpoints (e.g. a path typo, or a disabled backend module) surface in devtools instead of silently populating blank UI. Applied to 13 status/health/state GET call sites across Automation, Logs, and the Technitium context; mutation and expected-404 reads keep plain `apiFetch`.
+- **Schedule detail view: message-mode indicator.** When a schedule has a custom notify message, the detail view now shows a subdued pill next to the message — either `message only` or `with technical details` — so the mode is visible at a glance without entering edit mode. Previously the detail view rendered only "(message only)" when the flag was on and nothing at all when off, so you couldn't distinguish "mode not set" from "mode set to default."
+
+### Changed
+
+- **Drift alert recipients are admin-only, not schedule recipients.** Drift alerts are an operator-grade signal ("the enforcement gate is not holding"), so they must not be delivered to the schedule's `notifyEmails` — those may target the schedule's subject (e.g. a child receiving bedtime-reminder emails). The drift alert now pulls recipients from the new `DNS_SCHEDULES_DRIFT_ALERT_RECIPIENTS` env var, and the `sendScheduleDriftAlert` signature no longer accepts `scheduleNotifyMessage` so kid-facing text cannot leak into an admin email at the type level. This was a behavior change on unreleased Phase B code — no migration impact.
+
+### Fixed
+
+- **Automation page SMTP status probe hit a 404.** `AutomationPage.tsx` called `/log-alerts/smtp/status` but the backend controller is mounted at `/nodes/log-alerts/smtp/status`; the SMTP status card silently showed blank state. Corrected.
+
+### Removed
+
+- **`ALERTS_EMAIL_FROM` environment variable.** Documented as a "backward-compatibility fallback for `SMTP_FROM`" but introduced in the same commit as `SMTP_FROM` (no prior version ever used it), so it was effectively a dual-name alternative that doubled SMTP config surface area with no migration value.
+
+### Security
+
+- **13 Dependabot advisories cleared** via flat + nested npm overrides (handlebars, path-to-regexp, serialize-javascript, ajv, picomatch). None were runtime-reachable on the backend/frontend, but the advisories were flagging on GitHub's default-branch security panel and will now clear once this release merges to `main`.
+
+### Workflow
+
+- **`.githooks/pre-commit`** blocks `git commit` on `main` with a clear message directing the operator to `next`. Auto-installed via the `prepare` script (`git config core.hooksPath .githooks`). Legitimate hotfixes use `ALLOW_MAIN_COMMIT=1`.
+- **`.github/workflows/sync-next-from-main.yml`** triggers on `v*` tag push and merges `main` back into `next` automatically. Prevents the squash-merge conflict pattern that bit the v1.6.0 and v1.6.1 release cycles.
+
+### Testing
+
+- 1 new kid-safety regression test on the drift evaluator: verifies `schedule.notifyEmails` never appears in drift alert recipients, even when it's populated.
+- Spec fixtures redacted of private local node identifiers; replaced with generic `nodeA`/`nodeB`/`nodeC` + `example.com`.
+
 ## [1.6.2] - 2026-04-15
 
 ### Added
