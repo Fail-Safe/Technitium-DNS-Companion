@@ -256,8 +256,8 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
   }
 
   const failingSnapshot = {
-    nodeId: "eq14",
-    baseUrl: "https://eq14.test",
+    nodeId: "nodeA",
+    baseUrl: "https://nodeA.test",
     fetchedAt: "2024-01-15T00:00:00Z",
     metrics: {},
     error: "read ECONNRESET",
@@ -275,8 +275,8 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
           s: DnsSchedule,
           n: string,
         ) => Promise<void>;
-      }).removeAdvancedBlockingScheduleFromNode(makeSchedule(), "eq14"),
-    ).rejects.toThrow(/eq14.*ECONNRESET/);
+      }).removeAdvancedBlockingScheduleFromNode(makeSchedule(), "nodeA"),
+    ).rejects.toThrow(/nodeA.*ECONNRESET/);
 
     expect(setConfigWithAuth).not.toHaveBeenCalled();
   });
@@ -291,16 +291,16 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
           s: DnsSchedule,
           n: string,
         ) => Promise<boolean>;
-      }).applyAdvancedBlockingScheduleToNode(makeSchedule(), "eq14"),
-    ).rejects.toThrow(/eq14.*ECONNRESET/);
+      }).applyAdvancedBlockingScheduleToNode(makeSchedule(), "nodeA"),
+    ).rejects.toThrow(/nodeA.*ECONNRESET/);
 
     expect(setConfigWithAuth).not.toHaveBeenCalled();
   });
 
   it("remove proceeds normally when snapshot is healthy with a non-empty config", async () => {
     const getSnapshotWithAuth = jest.fn().mockResolvedValue({
-      nodeId: "eq14",
-      baseUrl: "https://eq14.test",
+      nodeId: "nodeA",
+      baseUrl: "https://nodeA.test",
       fetchedAt: "2024-01-15T00:00:00Z",
       metrics: {},
       config: {
@@ -336,7 +336,7 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
         advancedBlockingGroupNames: ["social"],
         domainEntries: ["example.com"],
       }),
-      "eq14",
+      "nodeA",
     );
 
     expect(setConfigWithAuth).toHaveBeenCalledTimes(1);
@@ -389,9 +389,9 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
   it("increments the counter on each drift tick", () => {
     const { internal } = makeService({ threshold: 3 });
     const schedule = makeSchedule({ id: "s1" });
-    internal.recordDriftTick(schedule, "eq14");
-    internal.recordDriftTick(schedule, "eq14");
-    expect(internal.driftCounters.get("s1:eq14")).toBe(2);
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA");
+    expect(internal.driftCounters.get("s1:nodeA")).toBe(2);
   });
 
   it("logs WARN and sends one email when counter crosses the threshold", () => {
@@ -402,12 +402,12 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
       notifyEmails: ["parent@example.com"],
     });
 
-    internal.recordDriftTick(schedule, "eq14"); // 1 - silent
-    internal.recordDriftTick(schedule, "eq14"); // 2 - silent
+    internal.recordDriftTick(schedule, "nodeA"); // 1 - silent
+    internal.recordDriftTick(schedule, "nodeA"); // 2 - silent
     expect(internal.logger.warn).not.toHaveBeenCalled();
     expect(emailMock).not.toHaveBeenCalled();
 
-    internal.recordDriftTick(schedule, "eq14"); // 3 - threshold crossed
+    internal.recordDriftTick(schedule, "nodeA"); // 3 - threshold crossed
     expect(internal.logger.warn).toHaveBeenCalledTimes(1);
     expect(internal.logger.warn.mock.calls[0][0]).toContain(
       'Configuration drift detected for schedule "Nighttime Block"',
@@ -415,7 +415,7 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
     expect(emailMock).toHaveBeenCalledTimes(1);
     expect(emailMock.mock.calls[0][0]).toMatchObject({
       scheduleName: "Nighttime Block",
-      nodeId: "eq14",
+      nodeId: "nodeA",
       consecutiveTicks: 3,
       recipients: ["parent@example.com"],
     });
@@ -428,13 +428,13 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
       notifyEmails: ["parent@example.com"],
     });
 
-    internal.recordDriftTick(schedule, "eq14");
-    internal.recordDriftTick(schedule, "eq14"); // threshold
-    internal.recordDriftTick(schedule, "eq14"); // still in episode
-    internal.recordDriftTick(schedule, "eq14"); // still in episode
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA"); // threshold
+    internal.recordDriftTick(schedule, "nodeA"); // still in episode
+    internal.recordDriftTick(schedule, "nodeA"); // still in episode
 
     // Counter climbs but only the first threshold-crossing fired email/warn.
-    expect(internal.driftCounters.get("s1:eq14")).toBe(4);
+    expect(internal.driftCounters.get("s1:nodeA")).toBe(4);
     expect(internal.logger.warn).toHaveBeenCalledTimes(1);
     expect(emailMock).toHaveBeenCalledTimes(1);
   });
@@ -443,8 +443,8 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
     const { internal, emailMock } = makeService({ threshold: 2 });
     const schedule = makeSchedule({ id: "s1", notifyEmails: [] });
 
-    internal.recordDriftTick(schedule, "eq14");
-    internal.recordDriftTick(schedule, "eq14"); // threshold
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA"); // threshold
 
     expect(internal.logger.warn).toHaveBeenCalledTimes(1); // WARN still fires
     expect(emailMock).not.toHaveBeenCalled(); // but no email
@@ -457,17 +457,17 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
       notifyEmails: ["parent@example.com"],
     });
 
-    internal.recordDriftTick(schedule, "eq14");
-    internal.recordDriftTick(schedule, "eq14"); // threshold crossed, alerted
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA"); // threshold crossed, alerted
     expect(emailMock).toHaveBeenCalledTimes(1);
 
-    internal.resetDriftState("s1", "eq14");
-    expect(internal.driftCounters.has("s1:eq14")).toBe(false);
-    expect(internal.driftAlertedEpisodes.has("s1:eq14")).toBe(false);
+    internal.resetDriftState("s1", "nodeA");
+    expect(internal.driftCounters.has("s1:nodeA")).toBe(false);
+    expect(internal.driftAlertedEpisodes.has("s1:nodeA")).toBe(false);
 
     // New episode can alert again.
-    internal.recordDriftTick(schedule, "eq14");
-    internal.recordDriftTick(schedule, "eq14"); // threshold crossed again
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA"); // threshold crossed again
     expect(emailMock).toHaveBeenCalledTimes(2);
   });
 
@@ -478,14 +478,14 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
       notifyEmails: ["parent@example.com"],
     });
 
-    internal.recordDriftTick(schedule, "eq14"); // 1 on eq14
-    internal.recordDriftTick(schedule, "eq12"); // 1 on eq12 (separate counter)
-    expect(internal.driftCounters.get("s1:eq14")).toBe(1);
-    expect(internal.driftCounters.get("s1:eq12")).toBe(1);
+    internal.recordDriftTick(schedule, "nodeA"); // 1 on nodeA
+    internal.recordDriftTick(schedule, "nodeB"); // 1 on nodeB (separate counter)
+    expect(internal.driftCounters.get("s1:nodeA")).toBe(1);
+    expect(internal.driftCounters.get("s1:nodeB")).toBe(1);
     expect(emailMock).not.toHaveBeenCalled();
 
-    internal.recordDriftTick(schedule, "eq14"); // crosses threshold on eq14 only
+    internal.recordDriftTick(schedule, "nodeA"); // crosses threshold on nodeA only
     expect(emailMock).toHaveBeenCalledTimes(1);
-    expect(emailMock.mock.calls[0][0].nodeId).toBe("eq14");
+    expect(emailMock.mock.calls[0][0].nodeId).toBe("nodeA");
   });
 });
