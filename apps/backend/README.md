@@ -48,12 +48,6 @@ Optional variables:
 SMTP_REPLY_TO=admin@example.com
 ```
 
-Compatibility fallback (prefer `SMTP_FROM`):
-
-```dotenv
-ALERTS_EMAIL_FROM=alerts@example.com
-```
-
 ### SMTP endpoint examples
 
 Check SMTP configuration status:

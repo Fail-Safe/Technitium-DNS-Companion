@@ -179,9 +179,7 @@ export class LogAlertsEmailService {
 
     const user = (process.env.SMTP_USER ?? "").trim() || undefined;
     const pass = (process.env.SMTP_PASS ?? "").trim() || undefined;
-    const from =
-      (process.env.SMTP_FROM ?? process.env.ALERTS_EMAIL_FROM ?? "").trim() ||
-      undefined;
+    const from = (process.env.SMTP_FROM ?? "").trim() || undefined;
     const replyTo = (process.env.SMTP_REPLY_TO ?? "").trim() || undefined;
 
     return { host, port, secure, user, pass, from, replyTo };
