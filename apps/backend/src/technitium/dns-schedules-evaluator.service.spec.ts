@@ -256,8 +256,8 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
   }
 
   const failingSnapshot = {
-    nodeId: "eq14",
-    baseUrl: "https://eq14.test",
+    nodeId: "nodeA",
+    baseUrl: "https://nodeA.test",
     fetchedAt: "2024-01-15T00:00:00Z",
     metrics: {},
     error: "read ECONNRESET",
@@ -275,8 +275,8 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
           s: DnsSchedule,
           n: string,
         ) => Promise<void>;
-      }).removeAdvancedBlockingScheduleFromNode(makeSchedule(), "eq14"),
-    ).rejects.toThrow(/eq14.*ECONNRESET/);
+      }).removeAdvancedBlockingScheduleFromNode(makeSchedule(), "nodeA"),
+    ).rejects.toThrow(/nodeA.*ECONNRESET/);
 
     expect(setConfigWithAuth).not.toHaveBeenCalled();
   });
@@ -291,16 +291,16 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
           s: DnsSchedule,
           n: string,
         ) => Promise<boolean>;
-      }).applyAdvancedBlockingScheduleToNode(makeSchedule(), "eq14"),
-    ).rejects.toThrow(/eq14.*ECONNRESET/);
+      }).applyAdvancedBlockingScheduleToNode(makeSchedule(), "nodeA"),
+    ).rejects.toThrow(/nodeA.*ECONNRESET/);
 
     expect(setConfigWithAuth).not.toHaveBeenCalled();
   });
 
   it("remove proceeds normally when snapshot is healthy with a non-empty config", async () => {
     const getSnapshotWithAuth = jest.fn().mockResolvedValue({
-      nodeId: "eq14",
-      baseUrl: "https://eq14.test",
+      nodeId: "nodeA",
+      baseUrl: "https://nodeA.test",
       fetchedAt: "2024-01-15T00:00:00Z",
       metrics: {},
       config: {
@@ -336,11 +336,171 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
         advancedBlockingGroupNames: ["social"],
         domainEntries: ["example.com"],
       }),
-      "eq14",
+      "nodeA",
     );
 
     expect(setConfigWithAuth).toHaveBeenCalledTimes(1);
     const [, nextConfig] = setConfigWithAuth.mock.calls[0];
     expect(nextConfig.groups[0].blocked).toEqual(["keep.me"]);
+  });
+});
+
+// ── Phase B: drift detection counter + alert behavior ─────────────────────
+// When an applied schedule's re-apply observes `changed=true`, that's drift
+// (another process mutated the AB config between ticks). These tests pin the
+// counter increment/reset logic and the one-email-per-episode debounce.
+
+describe("DnsSchedulesEvaluatorService — drift detection", () => {
+  interface DriftInternals {
+    driftCounters: Map<string, number>;
+    driftAlertedEpisodes: Set<string>;
+    driftAlertThreshold: number;
+    driftAlertRecipients: string[];
+    intervalMs: number;
+    logger: { warn: jest.Mock; log: jest.Mock; debug: jest.Mock };
+    logAlertsEmailService: { sendScheduleDriftAlert: jest.Mock };
+    domainGroupsService: { getExactEntriesByGroupNames: jest.Mock };
+    recordDriftTick: (s: DnsSchedule, nodeId: string) => void;
+    resetDriftState: (scheduleId: string, nodeId: string) => void;
+  }
+
+  function makeService(
+    options: { threshold?: number; recipients?: string[] } = {},
+  ): {
+    service: DnsSchedulesEvaluatorService;
+    internal: DriftInternals;
+    emailMock: jest.Mock;
+  } {
+    const emailMock = jest.fn().mockResolvedValue({ messageId: "ok" });
+    const service = new DnsSchedulesEvaluatorService(
+      {} as never,
+      {} as never,
+      {} as never,
+      { getExactEntriesByGroupNames: () => ["example.com"] } as never,
+      {} as never,
+      { sendScheduleDriftAlert: emailMock } as never,
+    );
+    const internal = service as unknown as DriftInternals;
+    if (options.threshold !== undefined) {
+      internal.driftAlertThreshold = options.threshold;
+    }
+    internal.driftAlertRecipients = options.recipients ?? ["admin@example.com"];
+    internal.logger = { warn: jest.fn(), log: jest.fn(), debug: jest.fn() };
+    return { service, internal, emailMock };
+  }
+
+  it("increments the counter on each drift tick", () => {
+    const { internal } = makeService({ threshold: 3 });
+    const schedule = makeSchedule({ id: "s1" });
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA");
+    expect(internal.driftCounters.get("s1:nodeA")).toBe(2);
+  });
+
+  it("logs WARN and sends one email when counter crosses the threshold", () => {
+    const { internal, emailMock } = makeService({ threshold: 3 });
+    const schedule = makeSchedule({
+      id: "s1",
+      name: "Nighttime Block",
+    });
+
+    internal.recordDriftTick(schedule, "nodeA"); // 1 - silent
+    internal.recordDriftTick(schedule, "nodeA"); // 2 - silent
+    expect(internal.logger.warn).not.toHaveBeenCalled();
+    expect(emailMock).not.toHaveBeenCalled();
+
+    internal.recordDriftTick(schedule, "nodeA"); // 3 - threshold crossed
+    expect(internal.logger.warn).toHaveBeenCalledTimes(1);
+    expect(internal.logger.warn.mock.calls[0][0]).toContain(
+      'Configuration drift detected for schedule "Nighttime Block"',
+    );
+    expect(emailMock).toHaveBeenCalledTimes(1);
+    expect(emailMock.mock.calls[0][0]).toMatchObject({
+      scheduleName: "Nighttime Block",
+      nodeId: "nodeA",
+      consecutiveTicks: 3,
+      recipients: ["admin@example.com"],
+    });
+  });
+
+  it("does not re-send email within the same drift episode (debounce)", () => {
+    const { internal, emailMock } = makeService({ threshold: 2 });
+    const schedule = makeSchedule({ id: "s1" });
+
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA"); // threshold
+    internal.recordDriftTick(schedule, "nodeA"); // still in episode
+    internal.recordDriftTick(schedule, "nodeA"); // still in episode
+
+    // Counter climbs but only the first threshold-crossing fired email/warn.
+    expect(internal.driftCounters.get("s1:nodeA")).toBe(4);
+    expect(internal.logger.warn).toHaveBeenCalledTimes(1);
+    expect(emailMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the email entirely when DNS_SCHEDULES_DRIFT_ALERT_RECIPIENTS is empty", () => {
+    const { internal, emailMock } = makeService({
+      threshold: 2,
+      recipients: [],
+    });
+    const schedule = makeSchedule({ id: "s1" });
+
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA"); // threshold
+
+    expect(internal.logger.warn).toHaveBeenCalledTimes(1); // WARN still fires
+    expect(emailMock).not.toHaveBeenCalled(); // but no email
+  });
+
+  it("never uses schedule.notifyEmails as drift recipients (kid-safety)", () => {
+    const { internal, emailMock } = makeService({
+      threshold: 2,
+      recipients: ["admin@example.com"],
+    });
+    const schedule = makeSchedule({
+      id: "s1",
+      notifyEmails: ["kid@example.com"],
+    });
+
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA"); // threshold
+
+    expect(emailMock).toHaveBeenCalledTimes(1);
+    const call = emailMock.mock.calls[0][0] as { recipients: string[] };
+    expect(call.recipients).toEqual(["admin@example.com"]);
+    expect(call.recipients).not.toContain("kid@example.com");
+  });
+
+  it("resetDriftState clears both counter and alerted-episode flag", () => {
+    const { internal, emailMock } = makeService({ threshold: 2 });
+    const schedule = makeSchedule({ id: "s1" });
+
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA"); // threshold crossed, alerted
+    expect(emailMock).toHaveBeenCalledTimes(1);
+
+    internal.resetDriftState("s1", "nodeA");
+    expect(internal.driftCounters.has("s1:nodeA")).toBe(false);
+    expect(internal.driftAlertedEpisodes.has("s1:nodeA")).toBe(false);
+
+    // New episode can alert again.
+    internal.recordDriftTick(schedule, "nodeA");
+    internal.recordDriftTick(schedule, "nodeA"); // threshold crossed again
+    expect(emailMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("isolates counters per (schedule, node) pair", () => {
+    const { internal, emailMock } = makeService({ threshold: 2 });
+    const schedule = makeSchedule({ id: "s1" });
+
+    internal.recordDriftTick(schedule, "nodeA"); // 1 on nodeA
+    internal.recordDriftTick(schedule, "nodeB"); // 1 on nodeB (separate counter)
+    expect(internal.driftCounters.get("s1:nodeA")).toBe(1);
+    expect(internal.driftCounters.get("s1:nodeB")).toBe(1);
+    expect(emailMock).not.toHaveBeenCalled();
+
+    internal.recordDriftTick(schedule, "nodeA"); // crosses threshold on nodeA only
+    expect(emailMock).toHaveBeenCalledTimes(1);
+    expect(emailMock.mock.calls[0][0].nodeId).toBe("nodeA");
   });
 });

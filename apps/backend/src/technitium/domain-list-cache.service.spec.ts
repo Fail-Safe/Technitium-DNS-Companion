@@ -57,9 +57,9 @@ describe("DomainListCacheService scheduled refresh auth mode", () => {
       throw new Error("scheduleNodeRefresh is not available on service");
     }
 
-    await (schedule as (nodeId: string) => Promise<void>).call(service, "eq14");
+    await (schedule as (nodeId: string) => Promise<void>).call(service, "nodeA");
 
-    expect(getSnapshotWithAuth).toHaveBeenCalledWith("eq14", "background");
+    expect(getSnapshotWithAuth).toHaveBeenCalledWith("nodeA", "background");
 
     // Trigger the interval.
     const timers = jest as unknown as {
@@ -67,7 +67,7 @@ describe("DomainListCacheService scheduled refresh auth mode", () => {
     };
     timers.advanceTimersByTime(60_000);
 
-    expect(refreshListsSpy).toHaveBeenCalledWith("eq14", {
+    expect(refreshListsSpy).toHaveBeenCalledWith("nodeA", {
       authMode: "background",
     });
 

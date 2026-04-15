@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Block accidental commits to `main`. Day-to-day work lands on `next`;
+# main only receives squash-merges from release PRs. See CONTRIBUTING
+# notes (or CLAUDE.md) for the full branching convention.
+#
+# Escape hatch for legitimate hotfix commits:
+#   ALLOW_MAIN_COMMIT=1 git commit -m "..."
+
+set -eu
+
+branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo '')"
+
+if [ "$branch" = "main" ] && [ "${ALLOW_MAIN_COMMIT:-}" != "1" ]; then
+  printf '\n\033[1;31mRefusing to commit on `main`.\033[0m\n' >&2
+  printf 'Day-to-day work belongs on `next`. Switch branches:\n\n' >&2
+  printf '  git checkout next\n' >&2
+  printf '  # (re-stage if needed, then commit)\n\n' >&2
+  printf 'If this is a legitimate hotfix on `main`, re-run with:\n\n' >&2
+  printf '  ALLOW_MAIN_COMMIT=1 git commit ...\n\n' >&2
+  exit 1
+fi

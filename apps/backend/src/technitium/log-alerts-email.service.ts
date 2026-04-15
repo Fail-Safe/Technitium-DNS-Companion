@@ -108,6 +108,64 @@ export class LogAlertsEmailService {
     });
   }
 
+  // Drift alerts are operator-only: recipients come from an admin env var,
+  // not the schedule's notifyEmails (which may target the schedule's subject).
+  async sendScheduleDriftAlert(params: {
+    scheduleName: string;
+    nodeId: string;
+    consecutiveTicks: number;
+    tickIntervalSeconds: number;
+    revertedEntries: string[];
+    recipients: string[];
+  }): Promise<LogAlertsSendTestEmailResponse | null> {
+    const {
+      scheduleName,
+      nodeId,
+      consecutiveTicks,
+      tickIntervalSeconds,
+      revertedEntries,
+      recipients,
+    } = params;
+
+    const recipientList = this.normalizeRecipients(recipients);
+    if (recipientList.length === 0) return null;
+
+    const approxDurationSeconds = consecutiveTicks * tickIntervalSeconds;
+    const durationLabel =
+      approxDurationSeconds >= 60
+        ? `${Math.round(approxDurationSeconds / 60)} minute${approxDurationSeconds >= 120 ? "s" : ""}`
+        : `${approxDurationSeconds} seconds`;
+
+    const subject = `[Technitium DNS Companion] DNS Schedule drift detected: ${scheduleName}`;
+
+    const lines: string[] = [];
+    lines.push(
+      `The DNS Schedule "${scheduleName}" is not converging to its intended state.`,
+      "",
+      `Node: ${nodeId}`,
+      `Drift persisted: ${consecutiveTicks} consecutive evaluator ticks (~${durationLabel}).`,
+      `Reverted entries (${revertedEntries.length}):`,
+      ...(revertedEntries.length > 0
+        ? revertedEntries.slice(0, 20).map((e) => `  - ${e}`)
+        : ["  (none reported)"]),
+      ...(revertedEntries.length > 20
+        ? [`  … and ${revertedEntries.length - 20} more`]
+        : []),
+      "",
+      "This usually means another process is mutating the Advanced Blocking",
+      "config for this group — for example a manual edit in the Technitium UI,",
+      "a Domain Groups apply that conflicts with the schedule, or an external",
+      "automation. The evaluator will keep trying to enforce the schedule every",
+      "tick; this alert will not re-fire until the drift resolves and recurs.",
+    );
+
+    return this.sendEmail({
+      to: recipientList,
+      subject,
+      text: lines.join("\n"),
+    });
+  }
+
   private readConfig(): SmtpConfig {
     const host = (process.env.SMTP_HOST ?? "").trim() || undefined;
     const portRaw = (process.env.SMTP_PORT ?? "").trim();
@@ -121,9 +179,7 @@ export class LogAlertsEmailService {
 
     const user = (process.env.SMTP_USER ?? "").trim() || undefined;
     const pass = (process.env.SMTP_PASS ?? "").trim() || undefined;
-    const from =
-      (process.env.SMTP_FROM ?? process.env.ALERTS_EMAIL_FROM ?? "").trim() ||
-      undefined;
+    const from = (process.env.SMTP_FROM ?? "").trim() || undefined;
     const replyTo = (process.env.SMTP_REPLY_TO ?? "").trim() || undefined;
 
     return { host, port, secure, user, pass, from, replyTo };

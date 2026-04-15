@@ -22,7 +22,7 @@ describe("AuthController /auth/me", () => {
       });
 
     const technitiumServiceMock: Partial<TechnitiumService> = {
-      getConfiguredNodeIds: jest.fn().mockReturnValue(["eq14", "eq12"]),
+      getConfiguredNodeIds: jest.fn().mockReturnValue(["nodeA", "nodeB"]),
       getBackgroundPtrTokenValidationSummary:
         getBackgroundPtrTokenValidationSummaryMock,
     };
@@ -67,7 +67,7 @@ describe("AuthController /auth/me", () => {
     expect(res).toEqual({
       sessionAuthEnabled: true,
       authenticated: false,
-      configuredNodeIds: ["eq14", "eq12"],
+      configuredNodeIds: ["nodeA", "nodeB"],
       backgroundPtrToken,
     });
 
@@ -82,7 +82,7 @@ describe("AuthController /auth/me", () => {
       createdAt: new Date().toISOString(),
       lastSeenAt: Date.now(),
       user: "alice",
-      tokensByNodeId: { eq14: "t1", eq12: "t2" },
+      tokensByNodeId: { nodeA: "t1", nodeB: "t2" },
     };
 
     const res = withContext(session, () => controller.me());
@@ -90,8 +90,8 @@ describe("AuthController /auth/me", () => {
     expect(res.authenticated).toBe(true);
     expect(res.sessionAuthEnabled).toBe(true);
     expect(res.user).toBe("alice");
-    expect(res.nodeIds?.sort()).toEqual(["eq12", "eq14"]);
-    expect(res.configuredNodeIds?.sort()).toEqual(["eq12", "eq14"]);
+    expect(res.nodeIds?.sort()).toEqual(["nodeA", "nodeB"]);
+    expect(res.configuredNodeIds?.sort()).toEqual(["nodeA", "nodeB"]);
     expect(res.backgroundPtrToken).toBeDefined();
   });
 });

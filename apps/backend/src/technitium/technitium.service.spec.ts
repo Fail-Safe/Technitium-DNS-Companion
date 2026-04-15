@@ -731,7 +731,7 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
       hasAppsModify: false,
       hasCacheModify: false,
       transient: true,
-      reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN against node "eq12": read ECONNRESET`,
+      reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN against node "nodeB": read ECONNRESET`,
     };
     s.logScheduleTokenValidationOutcome();
     expect(s.logger.log).not.toHaveBeenCalled();
@@ -748,7 +748,7 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
       valid: false,
       hasAppsModify: false,
       hasCacheModify: false,
-      reason: `TECHNITIUM_SCHEDULE_TOKEN was rejected by node "eq12": invalid token.`,
+      reason: `TECHNITIUM_SCHEDULE_TOKEN was rejected by node "nodeB": invalid token.`,
     };
     s.logScheduleTokenValidationOutcome();
     expect(s.logger.log).not.toHaveBeenCalled();
@@ -790,9 +790,9 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
 
 describe("TechnitiumService — getClusterSettings error classification", () => {
   const node: TechnitiumNodeConfig = {
-    id: "eq14",
-    name: "eq14",
-    baseUrl: "https://eq14.test",
+    id: "nodeA",
+    name: "nodeA",
+    baseUrl: "https://nodeA.test",
     token: "t",
   };
   type InjectableLogger = { warn: jest.Mock; log: jest.Mock; debug: jest.Mock };
@@ -819,12 +819,12 @@ describe("TechnitiumService — getClusterSettings error classification", () => 
     jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
     jest.spyOn(service, "request").mockRejectedValue(netErr);
 
-    await service.getClusterSettings("eq14");
+    await service.getClusterSettings("nodeA");
 
     expect(logger.warn).not.toHaveBeenCalled();
     expect(logger.debug).toHaveBeenCalledTimes(1);
     expect(logger.debug.mock.calls[0][0]).toContain("read ECONNRESET");
-    expect(logger.debug.mock.calls[0][0]).toContain("Skipping cluster timing settings for eq14");
+    expect(logger.debug.mock.calls[0][0]).toContain("Skipping cluster timing settings for nodeA");
   });
 
   it("routes 403 permission errors to DEBUG (expected for low-priv tokens)", async () => {
@@ -835,7 +835,7 @@ describe("TechnitiumService — getClusterSettings error classification", () => 
     jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
     jest.spyOn(service, "request").mockRejectedValue(permErr);
 
-    await service.getClusterSettings("eq14");
+    await service.getClusterSettings("nodeA");
 
     expect(logger.warn).not.toHaveBeenCalled();
     expect(logger.debug).toHaveBeenCalledTimes(1);
@@ -850,7 +850,7 @@ describe("TechnitiumService — getClusterSettings error classification", () => 
     jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
     jest.spyOn(service, "request").mockRejectedValue(serverErr);
 
-    await service.getClusterSettings("eq14");
+    await service.getClusterSettings("nodeA");
 
     expect(logger.debug).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledTimes(1);
@@ -868,7 +868,7 @@ describe("TechnitiumService — getClusterSettings error classification", () => 
     jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
     jest.spyOn(service, "request").mockRejectedValue(emptyErr);
 
-    await service.getClusterSettings("eq14");
+    await service.getClusterSettings("nodeA");
 
     // Network-error classification → DEBUG branch
     expect(logger.debug).toHaveBeenCalledTimes(1);
@@ -935,20 +935,20 @@ describe("TechnitiumService — resolveClusterWriteTargets", () => {
 
   it("collapses a 3-node cluster to a single Primary write target with all nodes as flush targets", async () => {
     const nodes = [
-      summary("eq14", { domain: "home-dns.com", primary: true }),
-      summary("eq12", { domain: "home-dns.com" }),
-      summary("eq10", { domain: "home-dns.com" }),
+      summary("nodeA", { domain: "example.com", primary: true }),
+      summary("nodeB", { domain: "example.com" }),
+      summary("nodeC", { domain: "example.com" }),
     ];
     const { perCandidate, writeTargets } =
       await service.resolveClusterWriteTargets(
-        ["eq14", "eq12", "eq10"],
+        ["nodeA", "nodeB", "nodeC"],
         nodes,
       );
-    expect(writeTargets).toEqual(["eq14"]);
-    for (const id of ["eq14", "eq12", "eq10"]) {
+    expect(writeTargets).toEqual(["nodeA"]);
+    for (const id of ["nodeA", "nodeB", "nodeC"]) {
       const op = perCandidate.get(id);
-      expect(op?.writeTarget).toBe("eq14");
-      expect(op?.flushNodes.sort()).toEqual(["eq10", "eq12", "eq14"]);
+      expect(op?.writeTarget).toBe("nodeA");
+      expect(op?.flushNodes.sort()).toEqual(["nodeA", "nodeB", "nodeC"]);
     }
   });
 
@@ -974,20 +974,20 @@ describe("TechnitiumService — resolveClusterWriteTargets", () => {
   it("mixes standalone and clustered candidates without crosstalk", async () => {
     const nodes = [
       summary("solo"),
-      summary("eq14", { domain: "home-dns.com", primary: true }),
-      summary("eq12", { domain: "home-dns.com" }),
+      summary("nodeA", { domain: "example.com", primary: true }),
+      summary("nodeB", { domain: "example.com" }),
     ];
     const { perCandidate, writeTargets } =
       await service.resolveClusterWriteTargets(
-        ["solo", "eq14", "eq12"],
+        ["solo", "nodeA", "nodeB"],
         nodes,
       );
-    expect(writeTargets.sort()).toEqual(["eq14", "solo"]);
+    expect(writeTargets.sort()).toEqual(["nodeA", "solo"]);
     expect(perCandidate.get("solo")).toEqual({
       writeTarget: "solo",
       flushNodes: ["solo"],
     });
-    expect(perCandidate.get("eq12")?.writeTarget).toBe("eq14");
+    expect(perCandidate.get("nodeB")?.writeTarget).toBe("nodeA");
   });
 
   it("falls back to direct write with WARN when a cluster has no discoverable Primary", async () => {

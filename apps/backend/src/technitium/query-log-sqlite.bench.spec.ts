@@ -48,9 +48,9 @@ const START_MS = NOW_MS - WINDOW_MS;
 const UNIQUE_DOMAINS = 5_000;
 const ZIPF_EXPONENT = 1.1; // standard DNS popularity distribution
 const NODES = [
-  { id: "eq14", baseUrl: "https://eq14.home-dns.com:53443" },
-  { id: "eq12", baseUrl: "https://eq12.home-dns.com:53443" },
-  { id: "eq10", baseUrl: "https://eq10.home-dns.com:53443" },
+  { id: "nodeA", baseUrl: "https://nodeA.example.com:53443" },
+  { id: "nodeB", baseUrl: "https://nodeB.example.com:53443" },
+  { id: "nodeC", baseUrl: "https://nodeC.example.com:53443" },
 ];
 const CLIENTS: Array<{ ip: string; name: string }> = [
   { ip: "10.0.1.10", name: "parent-laptop" },
@@ -507,7 +507,7 @@ function buildQueryCases(): QueryCase[] {
     {
       name: "13 per-node COUNT(*) (single node, window-scoped)",
       sql: `SELECT COUNT(*) AS count FROM query_log_entries WHERE nodeId = ? AND ${tsClause}`,
-      params: ["eq14", ...tsParams],
+      params: ["nodeA", ...tsParams],
     },
     // Regression case for the crash the test container hit: a dotted
     // search term. Pre-sanitizer, the FTS MATCH expression was

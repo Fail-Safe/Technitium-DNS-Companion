@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
     apiFetch,
+    apiFetchStatus,
     isApiFetchNetworkError,
     triggerAuthRedirect,
     triggerNodesConfigLoadFailed,
@@ -1675,7 +1676,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   );
 
   const loadDomainGroupsStatus = useCallback(async () => {
-    const response = await apiFetch("/domain-groups/status");
+    const response = await apiFetchStatus("/domain-groups/status");
 
     if (!response.ok) {
       throw new Error(
@@ -2698,7 +2699,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     setLoadingBlockingStatus(true);
 
     try {
-      const response = await apiFetch("/built-in-blocking/status");
+      const response = await apiFetchStatus("/built-in-blocking/status");
       if (!response.ok) {
         throw new Error(`Failed to load blocking status (${response.status})`);
       }

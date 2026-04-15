@@ -39,7 +39,7 @@ describe("AuthService.login", () => {
   }
 
   it("throws when username/password missing", async () => {
-    const { service } = createService([{ id: "eq14", baseUrl: "https://n1" }]);
+    const { service } = createService([{ id: "nodeA", baseUrl: "https://n1" }]);
 
     await expect(
       service.login({ username: "", password: "" }),
@@ -48,8 +48,8 @@ describe("AuthService.login", () => {
 
   it("stores only tokens that pass /api/user/session/get verification", async () => {
     const { service, axiosMock } = createService([
-      { id: "eq14", baseUrl: "https://n1" },
-      { id: "eq12", baseUrl: "https://n2" },
+      { id: "nodeA", baseUrl: "https://n1" },
+      { id: "nodeB", baseUrl: "https://n2" },
     ]);
 
     axiosMock.get.mockImplementation((url: string) => {
@@ -78,22 +78,22 @@ describe("AuthService.login", () => {
     });
 
     expect(session.user).toBe("alice");
-    expect(session.tokensByNodeId).toEqual({ eq14: "t1" });
+    expect(session.tokensByNodeId).toEqual({ nodeA: "t1" });
 
     expect(response.authenticated).toBe(true);
 
-    const eq14 = response.nodes.find((n) => n.nodeId === "eq14");
-    const eq12 = response.nodes.find((n) => n.nodeId === "eq12");
+    const nodeA = response.nodes.find((n) => n.nodeId === "nodeA");
+    const nodeB = response.nodes.find((n) => n.nodeId === "nodeB");
 
-    expect(eq14).toMatchObject({
-      nodeId: "eq14",
+    expect(nodeA).toMatchObject({
+      nodeId: "nodeA",
       success: true,
       status: "ok",
       token: "t1",
     });
 
-    expect(eq12).toMatchObject({
-      nodeId: "eq12",
+    expect(nodeB).toMatchObject({
+      nodeId: "nodeB",
       success: false,
       status: "ok",
       error: "invalid token",
@@ -102,7 +102,7 @@ describe("AuthService.login", () => {
 
   it("rejects login when no node yields a verified token", async () => {
     const { service, axiosMock } = createService([
-      { id: "eq14", baseUrl: "https://n1" },
+      { id: "nodeA", baseUrl: "https://n1" },
     ]);
 
     axiosMock.get.mockImplementation((url: string) => {
@@ -125,7 +125,7 @@ describe("AuthService.login", () => {
 
   it("captures redirect diagnostics when Technitium baseUrl redirects", async () => {
     const { service, axiosMock } = createService([
-      { id: "eq14", baseUrl: "https://n1" },
+      { id: "nodeA", baseUrl: "https://n1" },
     ]);
 
     axiosMock.get.mockImplementation((url: string) => {
