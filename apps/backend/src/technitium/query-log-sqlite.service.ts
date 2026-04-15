@@ -361,6 +361,41 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
+      // Detect pre-v1.6.2 FTS indexes — they were built without an AFTER
+      // UPDATE trigger. `backfillMissingClientNames` (line ~810) updates
+      // clientName/clientNameLc when hostname resolution catches up for
+      // previously-unknown IPs; without the trigger, the FTS index stays
+      // tokenized on the pre-update value and substring searches miss
+      // hostnames like "eq14.tailnet.vpost.net". Row counts don't diverge
+      // (UPDATE doesn't change them) so the earlier count-only skew guard
+      // can't catch it.
+      const ftsTableExistedBefore = !!this.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='query_log_fts'",
+        )
+        .get();
+      const updateTriggerExistedBefore = !!this.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='trigger' AND name='query_log_au'",
+        )
+        .get();
+      const baseCountProbe = this.db
+        .prepare("SELECT COUNT(*) AS count FROM query_log_entries")
+        .get() as { count?: number } | undefined;
+      const needsLegacyRebuild =
+        ftsTableExistedBefore &&
+        !updateTriggerExistedBefore &&
+        (baseCountProbe?.count ?? 0) > 0;
+      if (needsLegacyRebuild) {
+        this.logger.warn(
+          "Upgrading FTS index: pre-v1.6.2 schema detected (missing " +
+            "AFTER UPDATE trigger). Dropping and rebuilding from current " +
+            "base data to pick up any hostname backfills that the old " +
+            "triggers missed.",
+        );
+        this.db.exec("DROP TABLE IF EXISTS query_log_fts");
+      }
+
       this.db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS query_log_fts USING fts5(
           qnameLc, clientNameLc,
@@ -376,6 +411,15 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
         CREATE TRIGGER IF NOT EXISTS query_log_ad AFTER DELETE ON query_log_entries BEGIN
           INSERT INTO query_log_fts (query_log_fts, rowid, qnameLc, clientNameLc)
           VALUES ('delete', old.rowid, old.qnameLc, old.clientNameLc);
+        END;
+
+        -- Re-index on UPDATE so hostname-resolution backfills stay in sync.
+        -- Delete the old tokens for the row, then re-insert the new content.
+        CREATE TRIGGER IF NOT EXISTS query_log_au AFTER UPDATE ON query_log_entries BEGIN
+          INSERT INTO query_log_fts (query_log_fts, rowid, qnameLc, clientNameLc)
+          VALUES ('delete', old.rowid, old.qnameLc, old.clientNameLc);
+          INSERT INTO query_log_fts (rowid, qnameLc, clientNameLc)
+          VALUES (new.rowid, new.qnameLc, new.clientNameLc);
         END;
       `);
 
