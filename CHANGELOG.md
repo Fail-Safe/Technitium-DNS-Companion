@@ -9,6 +9,35 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-04-15
+
+### Added
+
+- **Per-client dedup toggle** on the DNS Logs page — new checkbox nested under "Deduplicate Domains" in Table Settings. When enabled, the dedup key becomes `(domain, client)` instead of just `domain`, so each unique `(domain, client)` pair gets its own row. Useful for parental-controls audits where you care *who* queried a domain, not just whether anyone did. Setting persists to `localStorage` (`technitiumLogs.deduplicatePerClient`). Only active when Deduplicate Domains is on.
+- **SQLite FTS5 substring-search index** for the query-logs DB, active when dedup is enabled. Replaces unsargable `LIKE '%term%'` scans with a tokenized shadow index. On a 1M-row benchmark DB, no-match substring searches drop from ~1.4s to ~0.04ms; rare substrings go from ~21ms to ~2ms; dedup-combined substring queries improve 15–30%. Schema versioned via `PRAGMA user_version` so future tokenizer or trigger changes auto-rebuild the index on upgrade.
+- **Tier 1 SQLite performance PRAGMAs** applied unconditionally at boot: `mmap_size=256MB` and `cache_size=64MB`. ~20–25% improvement on dedup/window-function queries and up to 67% on full-scan `LIKE` queries across the benchmark suite.
+- **Synthetic 1M-row benchmark harness** (`RUN_QLOG_BENCHMARKS=true`) with 16 representative query cases covering dedup on/off, dotted-substring searches, client-with-dedup combos, deep pagination, and COUNT(*) patterns. Includes a tokenization sanity check that fails fast if a rebuild doesn't populate the FTS token index.
+
+### Changed
+
+- **Dedup pill on the Logs page now reads `N unique (M dupes)` instead of the ambiguous `Deduped M`.** The previous wording was ambiguous — could mean either "M remaining after dedup" or "M duplicates removed." The new format shows both the result count *and* the savings at a glance. Hover tooltip updated to reflect per-client mode when that's on.
+- `TechnitiumService.getClusterSettings` warning no longer mislabels transient network errors as missing-admin-permissions. Network errors (axios error with no response, so `status === undefined`) now route to DEBUG alongside 400/401/403/404 rather than WARN. Empty error messages also get a fallback string so the log never renders as `…: . Using default polling intervals.`.
+
+### Fixed
+
+- **Substring searches with dedup enabled return correct results.** Several rounds of FTS5 hardening got us here:
+  - The FTS5 MATCH sanitizer handles dotted search terms correctly. Previously a search like `google.com` crashed with `fts5: syntax error near "."`. The sanitizer splits on non-alphanumerics and prefix-stars the last token: `google.com` → `google com*`, `www.youtube.com` → `www youtube com*`.
+  - Client hostname search routing heuristic eliminates the slow `LIKE … OR FTS …` combo. Previously a client hostname search with dedup on triggered a full table scan regardless of how fast the FTS side resolved. Hostname-shaped terms now go through FTS only; IP-literal terms stay on LIKE. Typical client searches that were taking multiple seconds now complete in sub-second.
+  - Added `AFTER UPDATE` trigger on `query_log_entries` so PTR hostname backfills (which run periodically as the resolver catches up for previously-unknown clients) properly re-index the FTS shadow. Previously, rows whose hostnames were filled in after initial insert retained stale tokens, causing substring searches to miss most of them.
+  - Correct ordering between auto_vacuum migration and FTS5 init. `VACUUM` rewrites rowids on composite-primary-key tables; if FTS5 shadow was built before VACUUM, it silently desynced and corrupted on the next retention DELETE. Migration now runs first, FTS builds on post-VACUUM rowids.
+  - Uses the SQLite FTS5 `'rebuild'` command for external-content backfills (a manual `INSERT INTO fts SELECT FROM base` registers rowids but doesn't actually tokenize content — resulting in an index where row counts looked correct but most MATCH queries returned zero).
+  - Schema-version marker (`PRAGMA user_version`) ensures any FTS schema or tokenizer change forces a one-time rebuild on upgrade, even for DBs whose previous FTS state was corrupted by the pre-v1.6.2 bugs.
+
+### Testing
+
+- 6 new unit tests covering the FTS MATCH sanitizer (dotted terms, multi-dot terms, empty-after-sanitize) and client routing heuristic (hostname-only via FTS, IP-literal via LIKE, ambiguous fallback).
+- Benchmark suite expanded from 13 → 16 query cases, adding dotted-domain search (regression repro), client-with-dedup-on (real-UI repro), and a rare-hostname variant. All pass clean on the post-fix code path.
+
 ## [1.6.1] - 2026-04-14
 
 ### Added

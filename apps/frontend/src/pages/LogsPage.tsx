@@ -186,6 +186,8 @@ const TAIL_BUFFER_SIZE_STORAGE_KEY = "technitiumLogs.tailBufferSize";
 const PAGINATED_ROWS_PER_PAGE_STORAGE_KEY =
   "technitiumLogs.paginatedRowsPerPage";
 const DEDUPLICATE_DOMAINS_STORAGE_KEY = "technitiumLogs.deduplicateDomains";
+const DEDUPLICATE_PER_CLIENT_STORAGE_KEY =
+  "technitiumLogs.deduplicatePerClient";
 const DOMAIN_EXCLUSION_LIST_STORAGE_KEY = "technitiumLogs.domainExclusionList";
 const FILTER_TIP_DISMISSED_KEY = "technitiumLogs.filterTipDismissed";
 const SELECTION_TIP_DISMISSED_KEY = "technitiumLogs.selectionTipDismissed";
@@ -1649,6 +1651,22 @@ const loadDeduplicateDomains = (): boolean => {
     return stored === "true";
   } catch (error) {
     console.warn("Failed to load deduplicate domains setting", error);
+    return false;
+  }
+};
+
+const loadDeduplicatePerClient = (): boolean => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(
+      DEDUPLICATE_PER_CLIENT_STORAGE_KEY,
+    );
+    return stored === "true";
+  } catch (error) {
+    console.warn("Failed to load deduplicate-per-client setting", error);
     return false;
   }
 };
@@ -3595,6 +3613,9 @@ export function LogsPage() {
   const [deduplicateDomains, setDeduplicateDomains] = useState<boolean>(
     loadDeduplicateDomains,
   );
+  const [deduplicatePerClient, setDeduplicatePerClient] = useState<boolean>(
+    loadDeduplicatePerClient,
+  );
 
   // After the first successful load, keep the existing table visible during subsequent loads.
   // This avoids window scroll jumps when paging (Prev/Next) by preventing large layout shrink.
@@ -4409,6 +4430,24 @@ export function LogsPage() {
       // Reset QTYPE filter when enabling deduplication (since filter becomes hidden)
       if (next) {
         setQtypeFilter("all");
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleDeduplicatePerClient = useCallback(() => {
+    setDeduplicatePerClient((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(
+          DEDUPLICATE_PER_CLIENT_STORAGE_KEY,
+          String(next),
+        );
+      } catch (error) {
+        console.warn(
+          "Failed to save deduplicate-per-client setting to localStorage",
+          error,
+        );
       }
       return next;
     });
@@ -5545,6 +5584,7 @@ export function LogsPage() {
               displayMode === "tail" ? tailBufferSize : paginatedRowsPerPage,
             descendingOrder: true,
             deduplicateDomains,
+            deduplicatePerClient,
             // Only bypass backend caching in tail mode (real-time view).
             // For paginated browsing, allowing backend caching avoids expensive recomputation on every refresh.
             disableCache: displayMode === "tail" ? true : undefined,
@@ -5639,6 +5679,7 @@ export function LogsPage() {
                 displayMode === "tail" ? tailBufferSize : paginatedRowsPerPage,
               descendingOrder: true,
               deduplicateDomains,
+              deduplicatePerClient,
               // Only bypass backend caching in tail mode (real-time view).
               disableCache: displayMode === "tail" ? true : undefined,
               // In tail mode, fetch all entries without filters (client-side filtering applied later)
@@ -5798,6 +5839,7 @@ export function LogsPage() {
     responseFilter,
     qtypeFilter,
     deduplicateDomains,
+    deduplicatePerClient,
   ]);
 
   const displayEntries: TechnitiumCombinedQueryLogEntry[] = useMemo(() => {
@@ -7476,9 +7518,14 @@ export function LogsPage() {
                         {duplicatesRemoved > 0 && (
                           <span
                             className="logs-page__meta-pill logs-page__meta-pill--dedupe"
-                            title="Duplicates removed by domain deduplication"
+                            title={
+                              deduplicatePerClient
+                                ? `${totalMatchingEntries.toLocaleString()} unique (domain, client) pairs; ${duplicatesRemoved.toLocaleString()} duplicates collapsed.`
+                                : `${totalMatchingEntries.toLocaleString()} unique domains; ${duplicatesRemoved.toLocaleString()} duplicates collapsed.`
+                            }
                           >
-                            Deduped {duplicatesRemoved.toLocaleString()}
+                            {totalMatchingEntries.toLocaleString()} unique (
+                            {duplicatesRemoved.toLocaleString()} dupes)
                           </span>
                         )}
                       </span>
@@ -7546,9 +7593,14 @@ export function LogsPage() {
                         {duplicatesRemoved > 0 && (
                           <span
                             className="logs-page__meta-pill logs-page__meta-pill--dedupe"
-                            title="Duplicates removed by domain deduplication"
+                            title={
+                              deduplicatePerClient
+                                ? `${totalMatchingEntries.toLocaleString()} unique (domain, client) pairs; ${duplicatesRemoved.toLocaleString()} duplicates collapsed.`
+                                : `${totalMatchingEntries.toLocaleString()} unique domains; ${duplicatesRemoved.toLocaleString()} duplicates collapsed.`
+                            }
                           >
-                            Deduped {duplicatesRemoved.toLocaleString()}
+                            {totalMatchingEntries.toLocaleString()} unique (
+                            {duplicatesRemoved.toLocaleString()} dupes)
                           </span>
                         )}
                       </span>
@@ -8259,6 +8311,33 @@ export function LogsPage() {
                                   Show only the latest query for each unique
                                   domain. Useful for quickly scanning recent
                                   activity without duplicate entries.
+                                </span>
+                              </div>
+                            </label>
+                            <label
+                              className="logs-page__settings-option"
+                              style={{
+                                marginLeft: "1.5rem",
+                                opacity: deduplicateDomains ? 1 : 0.5,
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={deduplicatePerClient}
+                                onChange={toggleDeduplicatePerClient}
+                                disabled={!deduplicateDomains}
+                                className="logs-page__settings-checkbox"
+                              />
+                              <div>
+                                <span className="logs-page__settings-option-label">
+                                  Include client in dedup key
+                                </span>
+                                <span className="logs-page__settings-option-description">
+                                  Dedup by (domain, client) instead of just
+                                  domain. Useful for parental-controls audits
+                                  where you care <em>who</em> queried a domain,
+                                  not just <em>whether someone</em> did. Only
+                                  active when Deduplicate Domains is on.
                                 </span>
                               </div>
                             </label>

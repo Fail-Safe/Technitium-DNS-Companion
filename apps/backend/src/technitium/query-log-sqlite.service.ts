@@ -57,6 +57,10 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
   private pollTimer: NodeJS.Timeout | null = null;
   private retentionTimer: NodeJS.Timeout | null = null;
   private maintenanceTimer: NodeJS.Timeout | null = null;
+  // Set true by initializeFtsIndex() on successful FTS5 setup. When true,
+  // buildWhereClause routes substring filters through FTS5 MATCH instead of
+  // unsargable LIKE when the caller has dedup enabled.
+  private ftsEnabled = false;
 
   private readonly enabled = process.env.QUERY_LOG_SQLITE_ENABLED === "true";
   private readonly retentionHours = Math.max(
@@ -198,9 +202,23 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     this.db.exec("PRAGMA journal_mode=WAL;");
     this.db.exec("PRAGMA synchronous=NORMAL;");
     this.db.exec("PRAGMA temp_store=MEMORY;");
+    // Tier 1 perf tunables (benchmarked ~20-25% win on dedup/LIKE queries):
+    // - mmap_size: let SQLite memory-map up to 256 MB of the DB file so the
+    //   OS page cache backs repeated scans instead of SQLite's own smaller cache.
+    // - cache_size: bump from the 2 MB default to 64 MB; helps the window
+    //   function and other sort-heavy ops stay in memory instead of spilling.
+    this.db.exec("PRAGMA mmap_size=268435456;");
+    this.db.exec("PRAGMA cache_size=-65536;");
 
     this.initializeSchema();
+    // Order matters: auto_vacuum migration runs VACUUM which rewrites all
+    // rowids on the composite-PK `query_log_entries` table. If FTS5 shadow
+    // init happened first, the backfilled FTS index would reference the
+    // pre-VACUUM rowids and silently diverge, corrupting on next retention
+    // DELETE. Run VACUUM first (no-op on empty DBs, one-time cost on
+    // existing installs), then build FTS against post-VACUUM rowids.
     this.maybeMigrateAutoVacuum();
+    this.initializeFtsIndex();
 
     this.logger.log(
       `SQLite query log storage enabled (path=${dbPath}, retention=${this.retentionHours}h, poll=${this.pollIntervalMs}ms).`,
@@ -310,6 +328,192 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     `);
   }
 
+  /**
+   * FTS5 contentless-shadow index over `qnameLc` and `clientNameLc`.
+   *
+   * Substring filters on these columns historically used `LIKE '%needle%'`,
+   * which is not sargable and forces a scan over every row in the time
+   * window. Benchmarks on a 1M-row synthetic DB showed worst-case LIKE
+   * queries taking ~1.4s; the same queries via FTS5 drop to <1ms when
+   * results are rare, and flatten to ~200ms even for abundant matches.
+   *
+   * We route to FTS only when `deduplicateDomains` is true (the window
+   * function defeats LIKE's short-circuit anyway, so FTS wins). Plain
+   * paginated LIKE keeps its <1ms best case for popular substrings when
+   * dedup is off.
+   *
+   * Contentless schema means the FTS table stores only the tokenized
+   * index, not duplicate column data — keeps disk overhead minimal.
+   * Triggers below keep it in sync with INSERT/DELETE on the base table.
+   */
+  private initializeFtsIndex(): void {
+    if (!this.db) return;
+
+    const migrationEnabled =
+      (process.env.QUERY_LOG_SQLITE_FTS_MIGRATION ?? "true").toLowerCase() !==
+      "false";
+    if (!migrationEnabled) {
+      this.logger.warn(
+        "SQLite FTS5 index migration disabled by QUERY_LOG_SQLITE_FTS_MIGRATION=false. " +
+          "Substring filters will fall back to LIKE scans.",
+      );
+      return;
+    }
+
+    try {
+      // Schema-version guard for the FTS index. Bumped whenever the FTS
+      // implementation changes in a way that invalidates existing DBs:
+      //   v1 = initial FTS5 with INSERT/DELETE triggers only (buggy — missed
+      //        UPDATE path, and used broken manual backfill syntax).
+      //   v2 = added AFTER UPDATE trigger and (intended to) switch to the
+      //        FTS5 'rebuild' command — but the rebuild was guarded by a
+      //        count-based needsBackfill check that always returned false
+      //        because COUNT(*) on external-content FTS5 delegates to the
+      //        content table. Result: DBs stamped v2 may still have sparse
+      //        token indexes. Force another pass.
+      //   v3 = unconditional 'rebuild' when legacy-upgrade fires, removing
+      //        the broken count heuristic. All pre-v3 DBs get one more
+      //        forced rebuild; after that they stay stamped.
+      // Stored in PRAGMA user_version (SQLite header, survives VACUUM).
+      const CURRENT_FTS_SCHEMA_VERSION = 3;
+      const versionRow = this.db.prepare("PRAGMA user_version").get() as
+        | { user_version?: number }
+        | undefined;
+      const storedVersion = versionRow?.user_version ?? 0;
+      const baseCountProbe = this.db
+        .prepare("SELECT COUNT(*) AS count FROM query_log_entries")
+        .get() as { count?: number } | undefined;
+      const ftsTableExistedBefore = !!this.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='query_log_fts'",
+        )
+        .get();
+      const needsLegacyRebuild =
+        ftsTableExistedBefore &&
+        storedVersion < CURRENT_FTS_SCHEMA_VERSION &&
+        (baseCountProbe?.count ?? 0) > 0;
+      if (needsLegacyRebuild) {
+        this.logger.warn(
+          `Upgrading FTS index: stored schema version ${storedVersion} < ` +
+            `current ${CURRENT_FTS_SCHEMA_VERSION}. Dropping and rebuilding ` +
+            "via FTS5 'rebuild' command to repopulate any rows whose tokens " +
+            "got lost to the earlier buggy backfill path.",
+        );
+        this.db.exec("DROP TABLE IF EXISTS query_log_fts");
+      }
+
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS query_log_fts USING fts5(
+          qnameLc, clientNameLc,
+          content='query_log_entries', content_rowid='rowid',
+          tokenize='unicode61 remove_diacritics 2'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS query_log_ai AFTER INSERT ON query_log_entries BEGIN
+          INSERT INTO query_log_fts (rowid, qnameLc, clientNameLc)
+          VALUES (new.rowid, new.qnameLc, new.clientNameLc);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS query_log_ad AFTER DELETE ON query_log_entries BEGIN
+          INSERT INTO query_log_fts (query_log_fts, rowid, qnameLc, clientNameLc)
+          VALUES ('delete', old.rowid, old.qnameLc, old.clientNameLc);
+        END;
+
+        -- Re-index on UPDATE so hostname-resolution backfills stay in sync.
+        -- Delete the old tokens for the row, then re-insert the new content.
+        CREATE TRIGGER IF NOT EXISTS query_log_au AFTER UPDATE ON query_log_entries BEGIN
+          INSERT INTO query_log_fts (query_log_fts, rowid, qnameLc, clientNameLc)
+          VALUES ('delete', old.rowid, old.qnameLc, old.clientNameLc);
+          INSERT INTO query_log_fts (rowid, qnameLc, clientNameLc)
+          VALUES (new.rowid, new.qnameLc, new.clientNameLc);
+        END;
+      `);
+
+      // Sanity-check FTS vs base rowcounts. Any material skew means the
+      // shadow index has drifted (could be a legacy DB from before the
+      // auto_vacuum ordering fix, or an unclean shutdown between insert
+      // trigger and base commit). Drop and rebuild rather than ship with
+      // a stale index that will either return wrong results or corrupt
+      // the DB on the next retention DELETE.
+      const baseCountRow = this.db
+        .prepare("SELECT COUNT(*) AS count FROM query_log_entries")
+        .get() as { count?: number } | undefined;
+      const baseCount = baseCountRow?.count ?? 0;
+
+      // NOTE: `SELECT COUNT(*) FROM query_log_fts` on external-content FTS5
+      // delegates to the content table and returns the base row count — NOT
+      // the count of indexed rows. A count-based skew check can't detect
+      // "shadow index is sparse" because the count always matches base.
+      // That's why earlier heuristics didn't force the needed rebuild.
+      //
+      // Instead: when `needsLegacyRebuild` fires, we always run the FTS5
+      // 'rebuild' command unconditionally. It's idempotent, fast on empty
+      // DBs, and guaranteed to correctly populate the token index from
+      // content. No heuristic can be more reliable than just running it.
+      if (needsLegacyRebuild && baseCount > 0) {
+        const startedAt = Date.now();
+        this.logger.warn(
+          `Backfilling SQLite FTS5 index from ${baseCount.toLocaleString()} existing rows. ` +
+            "This may take a few seconds on large DBs.",
+        );
+        this.db.exec(
+          `INSERT INTO query_log_fts(query_log_fts) VALUES('rebuild')`,
+        );
+        const elapsedMs = Date.now() - startedAt;
+        this.logger.warn(
+          `FTS5 backfill complete in ${elapsedMs}ms (${baseCount.toLocaleString()} rows).`,
+        );
+      }
+
+      // Stamp the version so future boots skip the rebuild. Done even when
+      // no rebuild happened this boot (fresh install or already-current DB)
+      // so the version is always in sync with the running code's schema.
+      if (storedVersion !== CURRENT_FTS_SCHEMA_VERSION) {
+        this.db.exec(`PRAGMA user_version = ${CURRENT_FTS_SCHEMA_VERSION}`);
+      }
+
+      this.ftsEnabled = true;
+    } catch (error) {
+      this.logger.warn(
+        `SQLite FTS5 index initialization failed: ${error instanceof Error ? error.message : String(error)}. ` +
+          "Continuing without FTS5; substring filters will use LIKE scans.",
+      );
+      this.ftsEnabled = false;
+    }
+  }
+
+  /**
+   * Safely converts a user-entered search term into an FTS5 MATCH expression.
+   *
+   * FTS5 MATCH syntax treats `.`, `-`, `:`, etc. as special / punctuation.
+   * Passing a raw `"google.com*"` string crashes with `fts5: syntax error
+   * near "."`. unicode61 tokenizes on those same characters when indexing,
+   * so what the user really means by "google.com" is "find rows where the
+   * tokens `google` AND `com` both appear" — plus a prefix wildcard on the
+   * last token so partial entries (`googleapi`, `commanded`) still match.
+   *
+   * Returns a space-separated token expression with `*` appended to the
+   * last token. Empty string if the input has no alphanumeric content (the
+   * caller should then skip the FTS clause entirely).
+   *
+   * Examples:
+   *   "flore"            -> "flore*"
+   *   "google.com"       -> "google com*"
+   *   "www.youtube.com"  -> "www youtube com*"
+   *   "10.0.1"           -> "10 0 1*"      (unusual but valid)
+   *   "!!!"              -> ""             (caller: skip filter)
+   */
+  private buildFtsMatchExpression(input: string): string {
+    const tokens = input
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 0);
+    if (tokens.length === 0) return "";
+    const last = tokens[tokens.length - 1];
+    const rest = tokens.slice(0, -1);
+    return [...rest, `${last}*`].join(" ");
+  }
+
   private safeApplyRetention(): void {
     try {
       this.applyRetention();
@@ -382,9 +586,18 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       const elapsedMs = Date.now() - startedAt;
 
       const afterPages = this.readPageCount();
+      const delta = beforePages - afterPages;
+      const deltaDescription =
+        delta > 0
+          ? `reclaimed ${delta}`
+          : delta < 0
+            ? // INCREMENTAL mode adds bookkeeping pages; tiny near-empty DBs
+              // net-grow by ~1 page from this migration.
+              `+${-delta} bookkeeping page${-delta === 1 ? "" : "s"}`
+            : "no change";
       this.logger.warn(
         `Migration complete in ${elapsedMs}ms. Pages: ${beforePages} → ${afterPages} ` +
-          `(reclaimed ${beforePages - afterPages}). Future maintenance will be incremental.`,
+          `(${deltaDescription}). Future maintenance will be incremental.`,
       );
     } catch (error) {
       this.logger.warn(
@@ -787,18 +1000,73 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     clauses.push("ts <= ?");
     params.push(window.endTs);
 
+    // Route substring filters through FTS5 when dedup is on — the window
+    // function defeats LIKE's LIMIT short-circuit so FTS5 wins cleanly.
+    // When dedup is off, keep LIKE for its <1ms best case on popular
+    // substrings. See query-log-sqlite.bench.spec.ts for the data.
+    const useFtsForSubstring =
+      this.ftsEnabled && filters.deduplicateDomains === true;
+
     const qname = filters.qname?.trim();
     if (qname) {
-      clauses.push("qnameLc LIKE ?");
-      params.push(`%${qname.toLowerCase()}%`);
+      if (useFtsForSubstring) {
+        // buildFtsMatchExpression splits on punctuation and prefix-stars the
+        // last token so `"google.com"` becomes `"google com*"` instead of
+        // crashing FTS5's parser. Empty expression (no alphanumerics in the
+        // input) means we skip the filter entirely rather than producing an
+        // invalid clause.
+        const matchExpr = this.buildFtsMatchExpression(qname);
+        if (matchExpr.length > 0) {
+          clauses.push(
+            "rowid IN (SELECT rowid FROM query_log_fts WHERE qnameLc MATCH ?)",
+          );
+          params.push(matchExpr);
+        }
+      } else {
+        clauses.push("qnameLc LIKE ?");
+        params.push(`%${qname.toLowerCase()}%`);
+      }
     }
 
     const client = filters.clientIpAddress?.trim();
     if (client) {
-      // Match either client IP or hostname.
-      clauses.push("(clientIpLc LIKE ? OR clientNameLc LIKE ?)");
-      const needle = `%${client.toLowerCase()}%`;
-      params.push(needle, needle);
+      const lowerClient = client.toLowerCase();
+      const needle = `%${lowerClient}%`;
+      // Heuristic to avoid `LIKE … OR FTS …`. The OR forces SQLite to
+      // evaluate both sides per row — the unsargable LIKE scan then
+      // dominates even when FTS would be fast. Instead, pick the branch
+      // the search term is actually asking about:
+      //   - term contains letters → hostname search (FTS when dedup is on)
+      //   - term is purely digits/dots/colons → IP-literal search (LIKE)
+      //   - ambiguous → fall back to the original OR (rare)
+      const hasLetter = /[a-z]/.test(lowerClient);
+      const looksLikeIpLiteral = /^[0-9a-f.:]+$/.test(lowerClient) && !hasLetter;
+
+      if (useFtsForSubstring) {
+        if (looksLikeIpLiteral) {
+          clauses.push("clientIpLc LIKE ?");
+          params.push(needle);
+        } else if (hasLetter) {
+          const matchExpr = this.buildFtsMatchExpression(lowerClient);
+          if (matchExpr.length > 0) {
+            clauses.push(
+              "rowid IN (SELECT rowid FROM query_log_fts WHERE clientNameLc MATCH ?)",
+            );
+            params.push(matchExpr);
+          }
+        } else {
+          // Ambiguous (e.g. only-punctuation input). Fall back to IP LIKE
+          // — FTS would have no non-empty match expression to use anyway.
+          clauses.push("clientIpLc LIKE ?");
+          params.push(needle);
+        }
+      } else {
+        // Dedup off path: LIKE's LIMIT+ORDER-BY short-circuit is usually
+        // fast for popular hostnames. Keep the original OR so IP lookups
+        // still work without a routing change.
+        clauses.push("(clientIpLc LIKE ? OR clientNameLc LIKE ?)");
+        params.push(needle, needle);
+      }
     }
 
     if (filters.protocol) {
@@ -982,6 +1250,14 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const base = this.buildWhereClause(filters, window);
 
     const deduplicateDomains = !!filters.deduplicateDomains;
+    // When true, dedup key = (qnameLc, clientIpLc). Each (domain, client)
+    // pair becomes its own row in the result — answers "which client looked
+    // up what?" instead of "what domains showed up?".
+    const deduplicatePerClient =
+      deduplicateDomains && !!filters.deduplicatePerClient;
+    const dedupPartition = deduplicatePerClient
+      ? "qnameLc, clientIpLc"
+      : "qnameLc";
 
     let totalMatchingEntries = 0;
     let duplicatesRemoved: number | undefined;
@@ -994,15 +1270,15 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
         .get(...base.params) as { count: number };
       totalMatchingEntries = countRow?.count ?? 0;
     } else {
-      // Count of unique domains in the filtered set (ignoring NULL qname).
+      // Count of unique (domain [, client]) keys in the filtered set.
       const countRow = this.db
         .prepare(
           `SELECT COUNT(*) AS count FROM (
-            SELECT qnameLc
+            SELECT ${dedupPartition}
             FROM query_log_entries
             ${base.whereSql}
             AND qnameLc IS NOT NULL
-            GROUP BY qnameLc
+            GROUP BY ${dedupPartition}
           )`,
         )
         .get(...base.params) as { count: number };
@@ -1043,14 +1319,16 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           offset,
         ) as StoredLogRowWithClient[];
     } else {
-      // Deduplicate by domain using a rank that approximates existing behavior:
+      // Deduplicate using a rank that approximates existing behavior:
       // 1) blocked over allowed, 2) A over non-A, 3) newest timestamp.
+      // Partition key is either qnameLc alone (by-domain) or
+      // (qnameLc, clientIpLc) (per-client) depending on the caller's choice.
       rows = this.db
         .prepare(
           `WITH ranked AS (
             SELECT nodeId, baseUrl, clientIpAddress, clientName, data, ts,
               ROW_NUMBER() OVER (
-                PARTITION BY qnameLc
+                PARTITION BY ${dedupPartition}
                 ORDER BY blockedRank DESC, aRank DESC, ts DESC
               ) AS rn
             FROM query_log_entries
@@ -1167,6 +1445,11 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const base = this.buildWhereClause(filters, window, nodeId);
 
     const deduplicateDomains = !!filters.deduplicateDomains;
+    const deduplicatePerClient =
+      deduplicateDomains && !!filters.deduplicatePerClient;
+    const dedupPartition = deduplicatePerClient
+      ? "qnameLc, clientIpLc"
+      : "qnameLc";
 
     let totalMatchingEntries = 0;
     let duplicatesRemoved: number | undefined;
@@ -1182,11 +1465,11 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       const countRow = this.db
         .prepare(
           `SELECT COUNT(*) AS count FROM (
-            SELECT qnameLc
+            SELECT ${dedupPartition}
             FROM query_log_entries
             ${base.whereSql}
             AND qnameLc IS NOT NULL
-            GROUP BY qnameLc
+            GROUP BY ${dedupPartition}
           )`,
         )
         .get(...base.params) as { count: number };
@@ -1232,7 +1515,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           `WITH ranked AS (
             SELECT nodeId, baseUrl, clientIpAddress, clientName, data, ts,
               ROW_NUMBER() OVER (
-                PARTITION BY qnameLc
+                PARTITION BY ${dedupPartition}
                 ORDER BY blockedRank DESC, aRank DESC, ts DESC
               ) AS rn
             FROM query_log_entries

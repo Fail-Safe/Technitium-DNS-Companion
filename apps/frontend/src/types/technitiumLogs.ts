@@ -13,6 +13,11 @@ export interface TechnitiumQueryLogFilters {
   qclass?: string;
   statusFilter?: "blocked" | "allowed";
   deduplicateDomains?: boolean;
+  // Only meaningful when deduplicateDomains is true. When true, dedup key
+  // becomes (domain, client) instead of just domain — one row per unique
+  // (domain, client) pair. Useful for parental-controls audits where you
+  // care *who* queried a domain, not just whether *someone* did.
+  deduplicatePerClient?: boolean;
   disableCache?: boolean;
 }
 

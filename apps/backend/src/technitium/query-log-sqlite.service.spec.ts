@@ -135,3 +135,197 @@ describe("QueryLogSqliteService — SQLite maintenance", () => {
     expect(internal.logger.warn).not.toHaveBeenCalled();
   });
 });
+
+// ── buildWhereClause — LIKE vs FTS5 routing based on dedup flag ──────────
+// Pins the Tier-2 conditional routing. When dedup is on and FTS is enabled,
+// substring filters go through `rowid IN (SELECT rowid FROM query_log_fts
+// WHERE … MATCH ?)`. When dedup is off, they stay on unsargable-but-fast-
+// with-LIMIT `LIKE '%x%'`. Neither path is universally faster — the
+// bench shows FTS wins for dedup-combined queries and LIKE wins for
+// popular-substring queries with LIMIT short-circuit.
+
+describe("QueryLogSqliteService — buildWhereClause FTS5 routing", () => {
+  interface BuildShape {
+    ftsEnabled: boolean;
+    buildWhereClause: (
+      filters: Record<string, unknown>,
+      window: { startTs: number; endTs: number },
+      nodeId?: string,
+    ) => { whereSql: string; params: Array<string | number> };
+  }
+
+  let service: QueryLogSqliteService;
+  let internal: BuildShape;
+
+  beforeEach(() => {
+    process.env.NODE_ENV = "test";
+    service = new QueryLogSqliteService({} as never, [] as never);
+    internal = service as unknown as BuildShape;
+  });
+
+  const window = { startTs: 1_700_000_000_000, endTs: 1_700_100_000_000 };
+
+  it("uses LIKE for qname when dedup is off (preserves fast LIMIT short-circuit)", () => {
+    internal.ftsEnabled = true;
+    const { whereSql, params } = internal.buildWhereClause(
+      { qname: "youtube", deduplicateDomains: false },
+      window,
+    );
+    expect(whereSql).toContain("qnameLc LIKE ?");
+    expect(whereSql).not.toContain("query_log_fts");
+    expect(params).toContain("%youtube%");
+  });
+
+  it("uses FTS5 MATCH for qname when dedup is on AND fts is enabled", () => {
+    internal.ftsEnabled = true;
+    const { whereSql, params } = internal.buildWhereClause(
+      { qname: "youtube", deduplicateDomains: true },
+      window,
+    );
+    expect(whereSql).toContain(
+      "rowid IN (SELECT rowid FROM query_log_fts WHERE qnameLc MATCH ?)",
+    );
+    expect(whereSql).not.toContain("qnameLc LIKE");
+    expect(params).toContain("youtube*"); // FTS5 prefix match
+  });
+
+  it("falls back to LIKE when dedup is on but fts is unavailable", () => {
+    internal.ftsEnabled = false;
+    const { whereSql, params } = internal.buildWhereClause(
+      { qname: "youtube", deduplicateDomains: true },
+      window,
+    );
+    expect(whereSql).toContain("qnameLc LIKE ?");
+    expect(whereSql).not.toContain("query_log_fts");
+    expect(params).toContain("%youtube%");
+  });
+
+  it("routes hostname-like client search through FTS only (no unsargable LIKE scan)", () => {
+    internal.ftsEnabled = true;
+    const { whereSql, params } = internal.buildWhereClause(
+      { clientIpAddress: "flore", deduplicateDomains: true },
+      window,
+    );
+    // Hostname-looking term: only FTS, no IP-LIKE full scan.
+    expect(whereSql).toContain(
+      "rowid IN (SELECT rowid FROM query_log_fts WHERE clientNameLc MATCH ?)",
+    );
+    expect(whereSql).not.toContain("clientIpLc LIKE");
+    expect(params).toContain("flore*");
+    expect(params).not.toContain("%flore%");
+  });
+
+  it("routes IP-literal client search through LIKE only (no FTS lookup)", () => {
+    internal.ftsEnabled = true;
+    const { whereSql, params } = internal.buildWhereClause(
+      { clientIpAddress: "10.0.1", deduplicateDomains: true },
+      window,
+    );
+    expect(whereSql).toContain("clientIpLc LIKE ?");
+    expect(whereSql).not.toContain("query_log_fts");
+    expect(params).toContain("%10.0.1%");
+  });
+
+  it("keeps dedup-off client search on the original LIKE OR LIKE (fast via LIMIT short-circuit)", () => {
+    internal.ftsEnabled = true;
+    const { whereSql, params } = internal.buildWhereClause(
+      { clientIpAddress: "flore", deduplicateDomains: false },
+      window,
+    );
+    expect(whereSql).toContain("(clientIpLc LIKE ? OR clientNameLc LIKE ?)");
+    expect(whereSql).not.toContain("query_log_fts");
+    expect(params.filter((p) => p === "%flore%").length).toBe(2);
+  });
+
+  it("leaves non-substring filters (qtype, rcode, etc.) untouched regardless of fts", () => {
+    internal.ftsEnabled = true;
+    const { whereSql } = internal.buildWhereClause(
+      { qtype: "AAAA", deduplicateDomains: true },
+      window,
+    );
+    expect(whereSql).toContain("qtype = ?");
+    expect(whereSql).not.toContain("query_log_fts");
+  });
+
+  // ── FTS5 MATCH sanitizer: dotted terms + empty-after-sanitize ─────────
+  // Previously `${term}*` was passed verbatim, so "google.com" became
+  // `google.com*` and crashed with `fts5: syntax error near "."`. The
+  // sanitizer splits on non-alphanumerics and prefix-stars the last token.
+
+  it("sanitizes dotted qname terms into valid FTS5 MATCH syntax", () => {
+    internal.ftsEnabled = true;
+    const { whereSql, params } = internal.buildWhereClause(
+      { qname: "google.com", deduplicateDomains: true },
+      window,
+    );
+    expect(whereSql).toContain(
+      "rowid IN (SELECT rowid FROM query_log_fts WHERE qnameLc MATCH ?)",
+    );
+    // "google.com" → tokens ["google", "com"] → "google com*"
+    expect(params).toContain("google com*");
+    // Must NOT pass the raw dotted form that crashes FTS5.
+    expect(params).not.toContain("google.com*");
+  });
+
+  it("sanitizes multi-dot qname terms (www.youtube.com)", () => {
+    internal.ftsEnabled = true;
+    const { params } = internal.buildWhereClause(
+      { qname: "www.youtube.com", deduplicateDomains: true },
+      window,
+    );
+    expect(params).toContain("www youtube com*");
+  });
+
+  it("skips qname FTS clause entirely when term has no alphanumeric content", () => {
+    internal.ftsEnabled = true;
+    const { whereSql, params } = internal.buildWhereClause(
+      { qname: "!!!", deduplicateDomains: true },
+      window,
+    );
+    // Nothing to search for → no FTS clause at all (just the ts window).
+    expect(whereSql).not.toContain("query_log_fts");
+    expect(whereSql).not.toContain("qnameLc LIKE");
+    expect(params.every((p) => typeof p !== "string" || !p.includes("*"))).toBe(true);
+  });
+
+  it("sanitizes dotted hostname-like client terms (kid-phone)", () => {
+    internal.ftsEnabled = true;
+    const { params } = internal.buildWhereClause(
+      { clientIpAddress: "kid-phone", deduplicateDomains: true },
+      window,
+    );
+    // Hyphen is a non-alphanumeric separator → tokens ["kid", "phone"]
+    expect(params).toContain("kid phone*");
+  });
+
+  // ── Client heuristic: no more OR-with-LIKE-scan ──────────────────────
+  // Last night's 7-8s regression came from an OR between FTS and unsargable
+  // LIKE on clientIpLc. These pin the single-branch behavior.
+
+  it("routes hostname-like client search through FTS only (no IP-LIKE OR)", () => {
+    internal.ftsEnabled = true;
+    const { whereSql } = internal.buildWhereClause(
+      { clientIpAddress: "flore", deduplicateDomains: true },
+      window,
+    );
+    // FTS clause present, IP LIKE absent.
+    expect(whereSql).toContain(
+      "rowid IN (SELECT rowid FROM query_log_fts WHERE clientNameLc MATCH ?)",
+    );
+    expect(whereSql).not.toContain("clientIpLc LIKE");
+  });
+
+  it("ambiguous-input client search falls back to IP LIKE only, not OR", () => {
+    internal.ftsEnabled = true;
+    // Pure punctuation: no letters, no digits. FTS expression would be empty.
+    const { whereSql, params } = internal.buildWhereClause(
+      { clientIpAddress: "!!!", deduplicateDomains: true },
+      window,
+    );
+    // Falls back to IP LIKE branch (single clause, no OR, no FTS).
+    expect(whereSql).toContain("clientIpLc LIKE ?");
+    expect(whereSql).not.toContain("query_log_fts");
+    expect(whereSql).not.toContain("clientNameLc LIKE");
+    expect(params).toContain("%!!!%");
+  });
+});
