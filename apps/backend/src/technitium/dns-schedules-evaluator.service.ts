@@ -168,8 +168,24 @@ export class DnsSchedulesEvaluatorService
         .listSchedules()
         .filter((s) => s.enabled);
 
-      const allNodes = await this.technitiumService.listNodes();
+      // Use schedule auth for the cluster probe so cluster topology is
+      // resolvable in this background timer context. With the default session
+      // auth, `AuthRequestContext.getSession()` returns undefined here and
+      // every node would appear Standalone — defeating Primary-only routing.
+      const allNodes = await this.technitiumService.listNodes({
+        authMode: "schedule",
+      });
       const allNodeIds = allNodes.map((n) => n.id);
+
+      // In a Technitium native cluster, only the Primary accepts config writes.
+      // Resolve every candidate node to (writeTarget, flushNodes) once so the
+      // tick writes Advanced Blocking config once per cluster Primary and
+      // still flushes DNS resolver caches on every physical node.
+      const { perCandidate } =
+        await this.technitiumService.resolveClusterWriteTargets(
+          allNodeIds,
+          allNodes,
+        );
 
       const now = new Date();
       const results: DnsScheduleApplicationResult[] = [];
@@ -207,29 +223,39 @@ export class DnsSchedulesEvaluatorService
             });
             continue;
           }
+          // State rows may predate the cluster-Primary routing change, meaning
+          // `entry.nodeId` could be a secondary. Resolve it so the remove goes
+          // to the cluster Primary (writes to secondaries race replication and
+          // get reverted). Cache flush still hits all physical nodes.
+          const resolved = perCandidate.get(entry.nodeId) ?? {
+            writeTarget: entry.nodeId,
+            flushNodes: [entry.nodeId],
+          };
           try {
-            await this.removeScheduleFromNode(schedule, entry.nodeId);
+            await this.removeScheduleFromNode(schedule, resolved.writeTarget);
             this.schedulesService.markRemoved(schedule.id, entry.nodeId);
             if (schedule.flushCacheOnChange) {
-              await this.flushDomainsCache(schedule, entry.nodeId);
+              for (const flushNodeId of resolved.flushNodes) {
+                await this.flushDomainsCache(schedule, flushNodeId);
+              }
             }
             this.logger.log(
-              `Cleaned up stale entries for disabled schedule "${schedule.name}" from node "${entry.nodeId}".`,
+              `Cleaned up stale entries for disabled schedule "${schedule.name}" from node "${resolved.writeTarget}".`,
             );
             results.push({
               scheduleId: schedule.id,
               scheduleName: schedule.name,
-              nodeId: entry.nodeId,
+              nodeId: resolved.writeTarget,
               action: "removed",
             });
           } catch (error) {
             this.logger.warn(
-              `Failed to clean up stale entries for disabled schedule "${schedule.name}" on node "${entry.nodeId}": ${error instanceof Error ? error.message : String(error)}`,
+              `Failed to clean up stale entries for disabled schedule "${schedule.name}" on node "${resolved.writeTarget}": ${error instanceof Error ? error.message : String(error)}`,
             );
             results.push({
               scheduleId: schedule.id,
               scheduleName: schedule.name,
-              nodeId: entry.nodeId,
+              nodeId: resolved.writeTarget,
               action: "error",
               error: error instanceof Error ? error.message : String(error),
             });
@@ -238,15 +264,32 @@ export class DnsSchedulesEvaluatorService
       }
 
       for (const schedule of schedules) {
-        const targetNodeIds =
+        const candidateNodeIds =
           schedule.nodeIds.length > 0
             ? schedule.nodeIds.filter((id) => allNodeIds.includes(id))
             : allNodeIds;
 
-        for (const nodeId of targetNodeIds) {
+        // Collapse candidates to unique write targets. In a cluster, multiple
+        // candidate secondaries map to the same Primary — dedupe so we write
+        // only once per cluster per tick.
+        const seenWriteTargets = new Set<string>();
+        const operations: Array<{ writeTarget: string; flushNodes: string[] }> =
+          [];
+        for (const candidateId of candidateNodeIds) {
+          const resolved = perCandidate.get(candidateId) ?? {
+            writeTarget: candidateId,
+            flushNodes: [candidateId],
+          };
+          if (seenWriteTargets.has(resolved.writeTarget)) continue;
+          seenWriteTargets.add(resolved.writeTarget);
+          operations.push(resolved);
+        }
+
+        for (const op of operations) {
           const result = await this.evaluateScheduleForNode(
             schedule,
-            nodeId,
+            op.writeTarget,
+            op.flushNodes,
             now,
             options.dryRun,
           );
@@ -297,6 +340,7 @@ export class DnsSchedulesEvaluatorService
   private async evaluateScheduleForNode(
     schedule: DnsSchedule,
     nodeId: string,
+    flushNodeIds: string[],
     now: Date,
     dryRun: boolean,
   ): Promise<DnsScheduleApplicationResult> {
@@ -360,7 +404,9 @@ export class DnsSchedulesEvaluatorService
           );
         }
         if (changed && schedule.flushCacheOnChange) {
-          await this.flushDomainsCache(schedule, nodeId);
+          for (const flushNodeId of flushNodeIds) {
+            await this.flushDomainsCache(schedule, flushNodeId);
+          }
         }
         if (!isCurrentlyApplied || changed) {
           return {
@@ -384,7 +430,9 @@ export class DnsSchedulesEvaluatorService
           `Removed schedule "${schedule.name}" from node "${nodeId}".`,
         );
         if (schedule.flushCacheOnChange) {
-          await this.flushDomainsCache(schedule, nodeId);
+          for (const flushNodeId of flushNodeIds) {
+            await this.flushDomainsCache(schedule, flushNodeId);
+          }
         }
         return {
           scheduleId: schedule.id,
@@ -454,16 +502,44 @@ export class DnsSchedulesEvaluatorService
       `Deactivating disabled schedule "${schedule.name}" from ${applied.length} node(s).`,
     );
 
+    // Resolve every applied node to its cluster write target + flush nodes.
+    // State rows may predate Primary routing (legacy secondary entries), so we
+    // can't assume `entry.nodeId` is the write-addressable node.
+    // Use schedule auth so cluster topology is resolvable even when this is
+    // called outside a request context (e.g. from a future timer-driven path).
+    const appliedNodeIds = applied.map((e) => e.nodeId);
+    const allNodes = await this.technitiumService.listNodes({
+      authMode: "schedule",
+    });
+    const { perCandidate } =
+      await this.technitiumService.resolveClusterWriteTargets(
+        appliedNodeIds,
+        allNodes,
+      );
+
+    const seenWriteTargets = new Set<string>();
     for (const entry of applied) {
+      const resolved = perCandidate.get(entry.nodeId) ?? {
+        writeTarget: entry.nodeId,
+        flushNodes: [entry.nodeId],
+      };
+      // Skip duplicate Primary writes when multiple secondaries of the same
+      // cluster have legacy state rows for this schedule.
+      const skipWrite = seenWriteTargets.has(resolved.writeTarget);
+      seenWriteTargets.add(resolved.writeTarget);
       try {
-        await this.removeScheduleFromNode(schedule, entry.nodeId);
+        if (!skipWrite) {
+          await this.removeScheduleFromNode(schedule, resolved.writeTarget);
+        }
         this.schedulesService.markRemoved(schedule.id, entry.nodeId);
-        if (schedule.flushCacheOnChange) {
-          await this.flushDomainsCache(schedule, entry.nodeId);
+        if (!skipWrite && schedule.flushCacheOnChange) {
+          for (const flushNodeId of resolved.flushNodes) {
+            await this.flushDomainsCache(schedule, flushNodeId);
+          }
         }
       } catch (error) {
         this.logger.warn(
-          `Failed to deactivate schedule "${schedule.name}" on node "${entry.nodeId}": ${error instanceof Error ? error.message : String(error)}`,
+          `Failed to deactivate schedule "${schedule.name}" on node "${resolved.writeTarget}": ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -548,12 +624,12 @@ export class DnsSchedulesEvaluatorService
       nodeId,
       "schedule",
     );
-    const config = snapshot.config;
-    if (!config) {
+    if (snapshot.error || !snapshot.config) {
       throw new Error(
-        `No Advanced Blocking config available on node "${nodeId}".`,
+        `Unable to load Advanced Blocking config from node "${nodeId}": ${snapshot.error ?? "no config in response"}`,
       );
     }
+    const config = snapshot.config;
 
     const resolvedEntries = this.resolveDomainEntries(schedule);
     const listKey: keyof Pick<AdvancedBlockingGroup, "blocked" | "allowed"> =
@@ -601,11 +677,15 @@ export class DnsSchedulesEvaluatorService
       nodeId,
       "schedule",
     );
-    const config = snapshot.config;
-    if (!config) {
-      // Config gone — treat as already removed
-      return;
+    // loadSnapshot populates `error` on caught failures and leaves `config`
+    // undefined. Propagating the error keeps the caller from calling
+    // markRemoved and orphaning entries that are still live in Technitium.
+    if (snapshot.error || !snapshot.config) {
+      throw new Error(
+        `Unable to load Advanced Blocking config from node "${nodeId}": ${snapshot.error ?? "no config in response"}`,
+      );
     }
+    const config = snapshot.config;
 
     const scheduleEntrySet = new Set(this.resolveDomainEntries(schedule));
     const listKey: keyof Pick<AdvancedBlockingGroup, "blocked" | "allowed"> =

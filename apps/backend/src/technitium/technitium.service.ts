@@ -264,6 +264,7 @@ export class TechnitiumService {
         hasCacheModify: boolean;
         username?: string;
         reason?: string;
+        transient?: boolean;
       }
     | { validated: false } = { validated: false };
   private readonly queryLoggerCache = new Map<
@@ -364,11 +365,29 @@ export class TechnitiumService {
 
       // In session-auth mode we return early because PTR timers are conditionally started above.
       if (this.sessionAuthEnabled) {
+        this.scheduleEagerScheduleTokenValidation();
         return;
       }
     }
 
+    this.scheduleEagerScheduleTokenValidation();
     this.startPtrTimer();
+  }
+
+  /**
+   * Eagerly validates TECHNITIUM_SCHEDULE_TOKEN at startup so operators see
+   * permission or connectivity problems in the boot log instead of discovering
+   * them when a schedule first fires. Fire-and-forget — failures never block
+   * bootstrap. Lazy-validation callers (`getScheduleTokenStatus()`) short-circuit
+   * on the cached result.
+   */
+  private scheduleEagerScheduleTokenValidation(): void {
+    if (!this.scheduleToken) return;
+    this.validateScheduleToken().catch((error) => {
+      this.logger.warn(
+        `TECHNITIUM_SCHEDULE_TOKEN validation threw: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
   }
 
   private startPtrTimer(): void {
@@ -576,9 +595,12 @@ export class TechnitiumService {
     );
   }
 
-  async listNodes(): Promise<TechnitiumNodeSummary[]> {
+  async listNodes(opts?: {
+    authMode?: "session" | "background" | "schedule";
+  }): Promise<TechnitiumNodeSummary[]> {
     // OPTIMIZATION: Only query ONE node for cluster state since any node can tell us about the entire cluster
     // This reduces N API calls to 1, dramatically improving performance (e.g., 3 nodes: 3x faster)
+    const authMode = opts?.authMode ?? "session";
     let sharedClusterInfo: {
       initialized: boolean;
       domain?: string;
@@ -593,12 +615,23 @@ export class TechnitiumService {
     } | null = null;
 
     // Try to get cluster info from a node we are authenticated to.
-    // In session-auth mode we may only have tokens for a subset of nodes.
+    // - "session" mode (default, request-scoped): require a per-user session
+    //   token for the probe target. This is the original behavior and is
+    //   correct for interactive HTTP calls.
+    // - "background" / "schedule" mode (timer-scoped): no per-user session
+    //   exists; pick any configured node and let `request()` pull the
+    //   appropriate env token. Without this fallback, every background call
+    //   would see all nodes as Standalone and skip cluster-aware behavior.
     if (this.nodeConfigs.length > 0) {
       const session = AuthRequestContext.getSession();
-      const probeNode = this.sessionAuthEnabled
-        ? this.nodeConfigs.find((node) => !!session?.tokensByNodeId?.[node.id])
-        : this.nodeConfigs[0];
+      const probeNode =
+        authMode === "session"
+          ? this.sessionAuthEnabled
+            ? this.nodeConfigs.find(
+                (node) => !!session?.tokensByNodeId?.[node.id],
+              )
+            : this.nodeConfigs[0]
+          : this.nodeConfigs[0];
 
       if (!probeNode) {
         // No authenticated nodes available (or no nodes configured)
@@ -624,11 +657,15 @@ export class TechnitiumService {
               }>;
             };
             server?: string;
-          }>(probeNode, {
-            method: "GET",
-            url: "/api/user/session/get",
-            params: {},
-          });
+          }>(
+            probeNode,
+            {
+              method: "GET",
+              url: "/api/user/session/get",
+              params: {},
+            },
+            { authMode },
+          );
 
           if (response.status === "ok" && response.info?.clusterInitialized) {
             const clusterNodes = response.info.clusterNodes || [];
@@ -828,6 +865,115 @@ export class TechnitiumService {
   }
 
   /**
+   * For a set of candidate node IDs, resolves each to the node that should
+   * receive config writes and the physical nodes that should receive cache
+   * flush calls.
+   *
+   * In a Technitium native cluster, only the Primary accepts config writes;
+   * writes to secondaries race cluster replication and get reverted on the
+   * next sync round. Cache flush is a per-node runtime op (not replicated) so
+   * every physical node in the cluster still needs its own flush to avoid
+   * serving stale blocked-domain answers from its resolver cache.
+   *
+   * For each cluster group this returns:
+   *   writeTarget = the Primary's node ID (writes are idempotent and replicated)
+   *   flushNodes  = every physical node in the cluster (Primary + secondaries)
+   *
+   * Standalone candidates are passed through unchanged (write == flush == self).
+   * If a candidate is part of a cluster but no Primary is discoverable, falls
+   * back to direct-write with a WARN so the caller still makes progress.
+   *
+   * Pre-fetched `summaries` can be passed to avoid a duplicate `listNodes()`
+   * call when the caller already has them.
+   */
+  async resolveClusterWriteTargets(
+    candidateNodeIds: string[],
+    summaries?: TechnitiumNodeSummary[],
+  ): Promise<{
+    perCandidate: Map<string, { writeTarget: string; flushNodes: string[] }>;
+    writeTargets: string[];
+  }> {
+    const nodes = summaries ?? (await this.listNodes());
+    const byId = new Map(nodes.map((s) => [s.id, s]));
+
+    // Index: clusterDomain → Primary summary. Multiple Primaries per domain
+    // shouldn't happen; we take the first one encountered.
+    const primaryByDomain = new Map<string, TechnitiumNodeSummary>();
+    // Index: clusterDomain → all physical node IDs in that cluster.
+    const clusterMembers = new Map<string, string[]>();
+    for (const s of nodes) {
+      const domain = s.clusterState?.domain;
+      if (!s.clusterState?.initialized || !domain) continue;
+      if (s.isPrimary && !primaryByDomain.has(domain)) {
+        primaryByDomain.set(domain, s);
+      }
+      if (!clusterMembers.has(domain)) clusterMembers.set(domain, []);
+      clusterMembers.get(domain)!.push(s.id);
+    }
+
+    const perCandidate = new Map<
+      string,
+      { writeTarget: string; flushNodes: string[] }
+    >();
+    const writeTargetSet = new Set<string>();
+
+    for (const nodeId of candidateNodeIds) {
+      const summary = byId.get(nodeId);
+      // Unknown node: pass through — legacy behavior, will error at request time
+      // if truly invalid. Callers can decide what to do with the result.
+      if (!summary) {
+        perCandidate.set(nodeId, {
+          writeTarget: nodeId,
+          flushNodes: [nodeId],
+        });
+        writeTargetSet.add(nodeId);
+        continue;
+      }
+
+      const domain = summary.clusterState?.domain;
+      const clustered = summary.clusterState?.initialized === true;
+
+      if (!clustered || !domain) {
+        // Standalone — self-write, self-flush.
+        perCandidate.set(nodeId, {
+          writeTarget: nodeId,
+          flushNodes: [nodeId],
+        });
+        writeTargetSet.add(nodeId);
+        continue;
+      }
+
+      const primary = primaryByDomain.get(domain);
+      if (!primary) {
+        // Clustered but Primary wasn't discoverable (probe failed, or this
+        // node's cluster has no node marked Primary in our summaries).
+        // Fall back to direct write so we make progress; warn once.
+        this.logger.warn(
+          `Cluster "${domain}" has no discoverable Primary — falling back to direct write on "${nodeId}".`,
+        );
+        perCandidate.set(nodeId, {
+          writeTarget: nodeId,
+          flushNodes: [nodeId],
+        });
+        writeTargetSet.add(nodeId);
+        continue;
+      }
+
+      const flushNodes = clusterMembers.get(domain) ?? [nodeId];
+      perCandidate.set(nodeId, {
+        writeTarget: primary.id,
+        flushNodes,
+      });
+      writeTargetSet.add(primary.id);
+    }
+
+    return {
+      perCandidate,
+      writeTargets: [...writeTargetSet],
+    };
+  }
+
+  /**
    * Get cluster state for a specific node.
    * Returns cluster initialization status and node role (Primary/Secondary/Standalone).
    */
@@ -999,16 +1145,27 @@ export class TechnitiumService {
         }
       }
 
-      // Expected / non-critical cases:
-      // - 401/403: token lacks admin permission for /api/admin/*
-      // - 404: older Technitium versions or endpoint not exposed
-      // - 400: node not Primary / not in a cluster / other Technitium validation
-      if (
+      // Guard against empty `detail` (some network errors surface with empty
+      // `error.message` and no response body) so the log never renders as
+      // `…: . Using default polling intervals.`
+      if (!detail) {
+        detail = "no error detail available";
+      }
+
+      // Expected / non-critical cases — route to DEBUG (silent in prod):
+      // - 400/401/403/404: token lacks admin permission, older Technitium,
+      //   not-primary / not-clustered, other Technitium-side validation.
+      // - status === undefined: no HTTP response received at all (transient
+      //   network blip). The old "admin permissions may be required" WARN
+      //   was misleading in that case — it has nothing to do with perms.
+      const isExpectedFailure =
+        status === undefined ||
+        status === 400 ||
         status === 401 ||
         status === 403 ||
-        status === 404 ||
-        status === 400
-      ) {
+        status === 404;
+
+      if (isExpectedFailure) {
         this.logger.debug(
           `Skipping cluster timing settings for ${nodeId}: ${detail}. Using default polling intervals.`,
         );
@@ -1697,6 +1854,7 @@ export class TechnitiumService {
         hasCacheModify: false,
         reason: "No nodes are configured; cannot validate TECHNITIUM_SCHEDULE_TOKEN.",
       };
+      this.logScheduleTokenValidationOutcome();
       return;
     }
 
@@ -1725,8 +1883,10 @@ export class TechnitiumService {
         valid: false,
         hasAppsModify: false,
         hasCacheModify: false,
+        transient: true,
         reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN against node "${node.id}": ${message}`,
       };
+      this.logScheduleTokenValidationOutcome();
       return;
     }
 
@@ -1743,6 +1903,7 @@ export class TechnitiumService {
         hasCacheModify: false,
         reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN: unexpected response from node "${node.id}".`,
       };
+      this.logScheduleTokenValidationOutcome();
       return;
     }
 
@@ -1757,6 +1918,7 @@ export class TechnitiumService {
             ? `TECHNITIUM_SCHEDULE_TOKEN was rejected by node "${node.id}": invalid token.`
             : `TECHNITIUM_SCHEDULE_TOKEN validation failed on node "${node.id}": ${envelopeObj.errorMessage ?? "unknown error"}.`,
       };
+      this.logScheduleTokenValidationOutcome();
       return;
     }
 
@@ -1783,8 +1945,45 @@ export class TechnitiumService {
         : "Token authenticated but lacks Apps: Modify permission needed to update Advanced Blocking config.",
     };
 
+    this.logScheduleTokenValidationOutcome();
+  }
+
+  /**
+   * Emits a single LOG/WARN line summarising the current schedule-token
+   * validation state. Called at the end of every `validateScheduleToken`
+   * branch that reaches a decision. Uses WARN for anything operators need
+   * to act on (invalid token, missing permissions, network failure) and LOG
+   * only for the fully-healthy case. Callers silent-skip when the token is
+   * simply not set — that's an opt-out, not an error.
+   */
+  private logScheduleTokenValidationOutcome(): void {
+    const v = this.scheduleTokenValidation;
+    if (!v.validated) return;
+    if (!v.valid) {
+      // Silently ignore the opt-out case — "token not set" is not a warning.
+      if (v.reason === "TECHNITIUM_SCHEDULE_TOKEN is not set.") return;
+      const suffix = v.transient
+        ? " Will re-validate the next time the Automation UI is opened."
+        : "";
+      this.logger.warn(
+        `TECHNITIUM_SCHEDULE_TOKEN validation failed: ${v.reason ?? "unknown reason"}.${suffix}`,
+      );
+      return;
+    }
+    if (!v.hasAppsModify) {
+      this.logger.warn(
+        `TECHNITIUM_SCHEDULE_TOKEN is missing Apps: Modify permission — DNS Schedules cannot update Advanced Blocking config and every window transition will log an error. ${v.reason ?? ""}`.trim(),
+      );
+      return;
+    }
+    if (!v.hasCacheModify) {
+      this.logger.warn(
+        `TECHNITIUM_SCHEDULE_TOKEN is missing Cache: Modify permission — schedules with flushCacheOnChange=true will log warnings at window transitions, but apply/remove will otherwise work.`,
+      );
+      return;
+    }
     this.logger.log(
-      `Validated TECHNITIUM_SCHEDULE_TOKEN (user: ${sessionInfo?.username ?? "unknown"}, Apps:Modify=${String(hasAppsModify)}, Cache:Modify=${String(hasCacheModify)}).`,
+      `Validated TECHNITIUM_SCHEDULE_TOKEN (user: ${v.username ?? "unknown"}, Apps:Modify=true, Cache:Modify=true).`,
     );
   }
 

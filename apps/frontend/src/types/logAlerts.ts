@@ -4,6 +4,9 @@ export type LogAlertDomainPatternType = "exact" | "wildcard" | "regex";
 
 export interface LogAlertRuleDraft {
   name: string;
+  // Optional friendly label. Schedule-linked rules use this to carry a
+  // human-readable name while the `name` field stays as the link key.
+  displayName?: string;
   enabled: boolean;
   outcomeMode: LogAlertOutcomeMode;
   domainPattern: string;

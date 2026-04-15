@@ -56,6 +56,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
   private db: DatabaseSync | null = null;
   private pollTimer: NodeJS.Timeout | null = null;
   private retentionTimer: NodeJS.Timeout | null = null;
+  private maintenanceTimer: NodeJS.Timeout | null = null;
 
   private readonly enabled = process.env.QUERY_LOG_SQLITE_ENABLED === "true";
   private readonly retentionHours = Math.max(
@@ -199,6 +200,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     this.db.exec("PRAGMA temp_store=MEMORY;");
 
     this.initializeSchema();
+    this.maybeMigrateAutoVacuum();
 
     this.logger.log(
       `SQLite query log storage enabled (path=${dbPath}, retention=${this.retentionHours}h, poll=${this.pollIntervalMs}ms).`,
@@ -215,6 +217,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     this.retentionTimer = setInterval(() => {
       this.safeApplyRetention();
     }, retentionIntervalMs);
+
+    // Daily SQLite maintenance: WAL truncate + incremental vacuum.
+    this.scheduleNextMaintenance();
   }
 
   private getWriteabilityProblem(dbPath: string): string | null {
@@ -251,6 +256,11 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     if (this.retentionTimer) {
       clearInterval(this.retentionTimer);
       this.retentionTimer = null;
+    }
+
+    if (this.maintenanceTimer) {
+      clearTimeout(this.maintenanceTimer);
+      this.maintenanceTimer = null;
     }
 
     if (this.db) {
@@ -325,6 +335,138 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
         `SQLite retention deleted ${maybeChanges} rows older than ${this.retentionHours}h.`,
       );
     }
+  }
+
+  /**
+   * Switches the DB to auto_vacuum=INCREMENTAL on first encounter so periodic
+   * `incremental_vacuum` calls can return free pages to the OS. The mode change
+   * requires a full VACUUM to take effect on existing data — fast on small DBs,
+   * potentially minutes on multi-GB ones. Operators with very large existing
+   * DBs can defer the migration by setting QUERY_LOG_SQLITE_AUTO_VACUUM_MIGRATION=false
+   * and running VACUUM manually during a maintenance window.
+   */
+  private maybeMigrateAutoVacuum(): void {
+    if (!this.db) return;
+
+    const migrationEnabled =
+      (process.env.QUERY_LOG_SQLITE_AUTO_VACUUM_MIGRATION ?? "true").toLowerCase() !==
+      "false";
+    if (!migrationEnabled) {
+      this.logger.warn(
+        "SQLite auto_vacuum migration disabled by QUERY_LOG_SQLITE_AUTO_VACUUM_MIGRATION=false. " +
+          "Periodic incremental_vacuum will be a no-op until the DB is migrated to auto_vacuum=INCREMENTAL.",
+      );
+      return;
+    }
+
+    try {
+      const row = this.db
+        .prepare("PRAGMA auto_vacuum")
+        .get() as { auto_vacuum?: number } | undefined;
+      const currentMode = row?.auto_vacuum ?? 0;
+      if (currentMode === 2) {
+        // Already INCREMENTAL — nothing to do.
+        return;
+      }
+
+      const beforePages = this.readPageCount();
+      this.logger.warn(
+        `Migrating query-logs SQLite to auto_vacuum=INCREMENTAL (current mode=${currentMode}). ` +
+          `This requires a one-time VACUUM and may take 30s–2min on multi-GB databases. ` +
+          `Set QUERY_LOG_SQLITE_AUTO_VACUUM_MIGRATION=false to skip and migrate manually.`,
+      );
+
+      const startedAt = Date.now();
+      this.db.exec("PRAGMA auto_vacuum=INCREMENTAL;");
+      this.db.exec("VACUUM;");
+      const elapsedMs = Date.now() - startedAt;
+
+      const afterPages = this.readPageCount();
+      this.logger.warn(
+        `Migration complete in ${elapsedMs}ms. Pages: ${beforePages} → ${afterPages} ` +
+          `(reclaimed ${beforePages - afterPages}). Future maintenance will be incremental.`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `SQLite auto_vacuum migration failed: ${error instanceof Error ? error.message : String(error)}. ` +
+          "Continuing without migration; periodic incremental_vacuum will be a no-op.",
+      );
+    }
+  }
+
+  /**
+   * Schedules the next maintenance run for ~3:30 AM local time (with a small
+   * random offset so multiple instances don't pile up at the exact same minute).
+   * After the run, schedules another 24h out via the same helper.
+   */
+  private scheduleNextMaintenance(): void {
+    const now = new Date();
+    const target = new Date(now);
+    target.setHours(3, 30, 0, 0);
+    // Random offset of ±10 minutes so coincident deployments don't synchronize.
+    const offsetMs = Math.floor((Math.random() - 0.5) * 20 * 60_000);
+    target.setTime(target.getTime() + offsetMs);
+    if (target.getTime() <= now.getTime()) {
+      target.setDate(target.getDate() + 1);
+    }
+    const delayMs = target.getTime() - now.getTime();
+    this.maintenanceTimer = setTimeout(() => {
+      this.safeRunMaintenance();
+      this.scheduleNextMaintenance();
+    }, delayMs);
+  }
+
+  private safeRunMaintenance(): void {
+    try {
+      this.runMaintenance();
+    } catch (error) {
+      this.logger.warn(
+        `SQLite maintenance run failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Periodic maintenance: truncate the WAL (which can grow unbounded if
+   * long-held read transactions defer the auto-checkpointer), then incrementally
+   * reclaim free pages back to the OS. Both PRAGMAs are non-destructive.
+   */
+  private runMaintenance(): void {
+    if (!this.db) return;
+    const startedAt = Date.now();
+    const beforePages = this.readPageCount();
+    const beforeFree = this.readFreelistCount();
+
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+    // Reclaim up to ~4 MB worth of free pages per pass (1000 pages × 4096B).
+    // If more pages are free the next nightly pass picks them up.
+    this.db.exec("PRAGMA incremental_vacuum(1000);");
+
+    const afterPages = this.readPageCount();
+    const afterFree = this.readFreelistCount();
+    const elapsedMs = Date.now() - startedAt;
+
+    this.logger.warn(
+      `SQLite maintenance complete in ${elapsedMs}ms. ` +
+        `Pages: ${beforePages} → ${afterPages} (free ${beforeFree} → ${afterFree}). ` +
+        `WAL truncated.`,
+    );
+  }
+
+  private readPageCount(): number {
+    if (!this.db) return 0;
+    const row = this.db.prepare("PRAGMA page_count").get() as
+      | { page_count?: number }
+      | undefined;
+    return row?.page_count ?? 0;
+  }
+
+  private readFreelistCount(): number {
+    if (!this.db) return 0;
+    const row = this.db.prepare("PRAGMA freelist_count").get() as
+      | { freelist_count?: number }
+      | undefined;
+    return row?.freelist_count ?? 0;
   }
 
   private async safePollOnce(): Promise<void> {

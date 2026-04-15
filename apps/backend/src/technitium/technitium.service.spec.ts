@@ -6,7 +6,11 @@ import path from "path";
 import { AuthRequestContext } from "../auth/auth-request-context";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { TechnitiumService } from "./technitium.service";
-import { TechnitiumDhcpScope, TechnitiumNodeConfig } from "./technitium.types";
+import {
+  TechnitiumDhcpScope,
+  TechnitiumNodeConfig,
+  TechnitiumNodeSummary,
+} from "./technitium.types";
 
 describe("TechnitiumService buildDhcpScopeFormData", () => {
   let service: TechnitiumService;
@@ -632,5 +636,392 @@ describe("TechnitiumService request (session auth)", () => {
     });
 
     expect(session.tokensByNodeId.node1).toBeUndefined();
+  });
+});
+
+// ── Eager TECHNITIUM_SCHEDULE_TOKEN validation outcome logging ──────────────
+// Operators need to see permission / connectivity problems in the boot log
+// instead of discovering them when a schedule first fires. These tests pin
+// which state -> log level -> message shape, so the eager-startup path stays
+// consistent with what `getScheduleTokenStatus()` callers will also observe.
+
+describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
+  type OutcomeFn = () => void;
+  type InternalShape = {
+    scheduleTokenValidation:
+      | {
+          validated: true;
+          valid: boolean;
+          hasAppsModify: boolean;
+          hasCacheModify: boolean;
+          username?: string;
+          reason?: string;
+          transient?: boolean;
+        }
+      | { validated: false };
+    logger: { warn: jest.Mock; log: jest.Mock };
+    logScheduleTokenValidationOutcome: OutcomeFn;
+  };
+
+  function build(): InternalShape {
+    const service = new TechnitiumService([], new DhcpSnapshotService());
+    const internal = service as unknown as InternalShape;
+    internal.logger = { warn: jest.fn(), log: jest.fn() };
+    return internal;
+  }
+
+  it("logs success at LOG level when the token is valid with full permissions", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: true,
+      hasAppsModify: true,
+      hasCacheModify: true,
+      username: "companion-schedule",
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.warn).not.toHaveBeenCalled();
+    expect(s.logger.log).toHaveBeenCalledTimes(1);
+    expect(s.logger.log.mock.calls[0][0]).toContain(
+      "Validated TECHNITIUM_SCHEDULE_TOKEN (user: companion-schedule",
+    );
+  });
+
+  it("warns when Apps: Modify is missing (fatal for schedule apply)", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: true,
+      hasAppsModify: false,
+      hasCacheModify: true,
+      username: "low-priv",
+      reason: "Token authenticated but lacks Apps: Modify permission needed to update Advanced Blocking config.",
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.log).not.toHaveBeenCalled();
+    expect(s.logger.warn).toHaveBeenCalledTimes(1);
+    const msg = s.logger.warn.mock.calls[0][0];
+    expect(msg).toContain("missing Apps: Modify");
+    expect(msg).toContain("DNS Schedules cannot update Advanced Blocking config");
+  });
+
+  it("warns when Cache: Modify is missing (flushCacheOnChange will fail)", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: true,
+      hasAppsModify: true,
+      hasCacheModify: false,
+      username: "apps-only",
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.log).not.toHaveBeenCalled();
+    expect(s.logger.warn).toHaveBeenCalledTimes(1);
+    const msg = s.logger.warn.mock.calls[0][0];
+    expect(msg).toContain("missing Cache: Modify");
+    expect(msg).toContain("flushCacheOnChange=true");
+    expect(msg).toContain("apply/remove will otherwise work");
+  });
+
+  it("warns with transient-retry hint when validation hit a network error", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: false,
+      hasAppsModify: false,
+      hasCacheModify: false,
+      transient: true,
+      reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN against node "eq12": read ECONNRESET`,
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.log).not.toHaveBeenCalled();
+    expect(s.logger.warn).toHaveBeenCalledTimes(1);
+    const msg = s.logger.warn.mock.calls[0][0];
+    expect(msg).toContain("ECONNRESET");
+    expect(msg).toContain("Will re-validate the next time the Automation UI is opened");
+  });
+
+  it("warns without retry hint when validation hit a config error (invalid-token)", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: false,
+      hasAppsModify: false,
+      hasCacheModify: false,
+      reason: `TECHNITIUM_SCHEDULE_TOKEN was rejected by node "eq12": invalid token.`,
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.log).not.toHaveBeenCalled();
+    expect(s.logger.warn).toHaveBeenCalledTimes(1);
+    const msg = s.logger.warn.mock.calls[0][0];
+    expect(msg).toContain("invalid token");
+    expect(msg).not.toContain("re-validate");
+  });
+
+  it("stays silent for the opt-out case (TECHNITIUM_SCHEDULE_TOKEN is not set)", () => {
+    const s = build();
+    s.scheduleTokenValidation = {
+      validated: true,
+      valid: false,
+      hasAppsModify: false,
+      hasCacheModify: false,
+      reason: "TECHNITIUM_SCHEDULE_TOKEN is not set.",
+    };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.warn).not.toHaveBeenCalled();
+    expect(s.logger.log).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when validation has not yet completed", () => {
+    const s = build();
+    s.scheduleTokenValidation = { validated: false };
+    s.logScheduleTokenValidationOutcome();
+    expect(s.logger.warn).not.toHaveBeenCalled();
+    expect(s.logger.log).not.toHaveBeenCalled();
+  });
+});
+
+// ── getClusterSettings error classification ────────────────────────────────
+// The /api/admin/cluster/state/get endpoint is admin-only. Non-admin tokens,
+// non-primary nodes, and network blips all cause errors here. Classifying all
+// non-HTTP-response errors as "admin permissions may be required" WARNs was
+// misleading (a network blip has nothing to do with permissions) and produced
+// `…: . Using default polling intervals.` lines when error.message was empty.
+
+describe("TechnitiumService — getClusterSettings error classification", () => {
+  const node: TechnitiumNodeConfig = {
+    id: "eq14",
+    name: "eq14",
+    baseUrl: "https://eq14.test",
+    token: "t",
+  };
+  type InjectableLogger = { warn: jest.Mock; log: jest.Mock; debug: jest.Mock };
+  let service: TechnitiumService;
+  let logger: InjectableLogger;
+
+  beforeEach(() => {
+    process.env.NODE_ENV = "test";
+    service = new TechnitiumService([node], new DhcpSnapshotService());
+    logger = { warn: jest.fn(), log: jest.fn(), debug: jest.fn() };
+    (service as unknown as { logger: InjectableLogger }).logger = logger;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    service.onModuleDestroy();
+  });
+
+  it("routes network errors (no HTTP response) to DEBUG, not WARN", async () => {
+    const netErr = Object.assign(new Error("read ECONNRESET"), {
+      isAxiosError: true,
+      response: undefined,
+    });
+    jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
+    jest.spyOn(service, "request").mockRejectedValue(netErr);
+
+    await service.getClusterSettings("eq14");
+
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.debug).toHaveBeenCalledTimes(1);
+    expect(logger.debug.mock.calls[0][0]).toContain("read ECONNRESET");
+    expect(logger.debug.mock.calls[0][0]).toContain("Skipping cluster timing settings for eq14");
+  });
+
+  it("routes 403 permission errors to DEBUG (expected for low-priv tokens)", async () => {
+    const permErr = Object.assign(new Error("Request failed"), {
+      isAxiosError: true,
+      response: { status: 403, data: { message: "Forbidden" } },
+    });
+    jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
+    jest.spyOn(service, "request").mockRejectedValue(permErr);
+
+    await service.getClusterSettings("eq14");
+
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.debug).toHaveBeenCalledTimes(1);
+    expect(logger.debug.mock.calls[0][0]).toContain("HTTP 403");
+  });
+
+  it("routes unexpected 5xx errors to WARN (genuine server failure)", async () => {
+    const serverErr = Object.assign(new Error("Request failed"), {
+      isAxiosError: true,
+      response: { status: 500, data: { message: "server exploded" } },
+    });
+    jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
+    jest.spyOn(service, "request").mockRejectedValue(serverErr);
+
+    await service.getClusterSettings("eq14");
+
+    expect(logger.debug).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0][0]).toContain("HTTP 500");
+    expect(logger.warn.mock.calls[0][0]).toContain("server exploded");
+  });
+
+  it("falls back to a non-empty detail string when error.message is empty", async () => {
+    // Reproduces the `: . Using default polling intervals.` bug — an axios
+    // network error with empty `error.message` and no response body.
+    const emptyErr = Object.assign(new Error(""), {
+      isAxiosError: true,
+      response: undefined,
+    });
+    jest.spyOn(axios, "isAxiosError").mockReturnValue(true);
+    jest.spyOn(service, "request").mockRejectedValue(emptyErr);
+
+    await service.getClusterSettings("eq14");
+
+    // Network-error classification → DEBUG branch
+    expect(logger.debug).toHaveBeenCalledTimes(1);
+    const line = logger.debug.mock.calls[0][0];
+    expect(line).toContain("no error detail available");
+    // The exact ugly pattern we're fixing: `: . Using default…`
+    expect(line).not.toMatch(/:\s*\.\s+Using/);
+  });
+});
+
+// ── resolveClusterWriteTargets — cluster-Primary routing ────────────────────
+// In a Technitium native cluster, only the Primary accepts config writes.
+// Writes to secondaries race the cluster's own config replication and get
+// reverted on the next sync. These tests pin the resolver's collapse logic so
+// the schedule evaluator routes one write per cluster Primary while still
+// flushing the DNS resolver cache on every physical node.
+
+describe("TechnitiumService — resolveClusterWriteTargets", () => {
+  let service: TechnitiumService;
+
+  beforeEach(() => {
+    process.env.NODE_ENV = "test";
+    service = new TechnitiumService([], new DhcpSnapshotService());
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    service.onModuleDestroy();
+  });
+
+  function summary(
+    id: string,
+    opts: { domain?: string; primary?: boolean; clustered?: boolean } = {},
+  ): TechnitiumNodeSummary {
+    const clustered = opts.clustered ?? !!opts.domain;
+    return {
+      id,
+      baseUrl: `https://${id}.test`,
+      clusterState: clustered
+        ? {
+            initialized: true,
+            domain: opts.domain,
+            type: opts.primary ? "Primary" : "Secondary",
+          }
+        : { initialized: false, type: "Standalone" },
+      isPrimary: !!opts.primary,
+    };
+  }
+
+  it("passes standalone nodes through unchanged (write == flush == self)", async () => {
+    const nodes = [summary("a"), summary("b")];
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(["a", "b"], nodes);
+    expect(writeTargets.sort()).toEqual(["a", "b"]);
+    expect(perCandidate.get("a")).toEqual({
+      writeTarget: "a",
+      flushNodes: ["a"],
+    });
+    expect(perCandidate.get("b")).toEqual({
+      writeTarget: "b",
+      flushNodes: ["b"],
+    });
+  });
+
+  it("collapses a 3-node cluster to a single Primary write target with all nodes as flush targets", async () => {
+    const nodes = [
+      summary("eq14", { domain: "home-dns.com", primary: true }),
+      summary("eq12", { domain: "home-dns.com" }),
+      summary("eq10", { domain: "home-dns.com" }),
+    ];
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(
+        ["eq14", "eq12", "eq10"],
+        nodes,
+      );
+    expect(writeTargets).toEqual(["eq14"]);
+    for (const id of ["eq14", "eq12", "eq10"]) {
+      const op = perCandidate.get(id);
+      expect(op?.writeTarget).toBe("eq14");
+      expect(op?.flushNodes.sort()).toEqual(["eq10", "eq12", "eq14"]);
+    }
+  });
+
+  it("handles two independent clusters — each writes to its own Primary", async () => {
+    const nodes = [
+      summary("a1", { domain: "A", primary: true }),
+      summary("a2", { domain: "A" }),
+      summary("b1", { domain: "B", primary: true }),
+      summary("b2", { domain: "B" }),
+    ];
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(
+        ["a1", "a2", "b1", "b2"],
+        nodes,
+      );
+    expect(writeTargets.sort()).toEqual(["a1", "b1"]);
+    expect(perCandidate.get("a2")?.writeTarget).toBe("a1");
+    expect(perCandidate.get("b2")?.writeTarget).toBe("b1");
+    expect(perCandidate.get("a2")?.flushNodes.sort()).toEqual(["a1", "a2"]);
+    expect(perCandidate.get("b2")?.flushNodes.sort()).toEqual(["b1", "b2"]);
+  });
+
+  it("mixes standalone and clustered candidates without crosstalk", async () => {
+    const nodes = [
+      summary("solo"),
+      summary("eq14", { domain: "home-dns.com", primary: true }),
+      summary("eq12", { domain: "home-dns.com" }),
+    ];
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(
+        ["solo", "eq14", "eq12"],
+        nodes,
+      );
+    expect(writeTargets.sort()).toEqual(["eq14", "solo"]);
+    expect(perCandidate.get("solo")).toEqual({
+      writeTarget: "solo",
+      flushNodes: ["solo"],
+    });
+    expect(perCandidate.get("eq12")?.writeTarget).toBe("eq14");
+  });
+
+  it("falls back to direct write with WARN when a cluster has no discoverable Primary", async () => {
+    const nodes = [
+      summary("x", { domain: "X" }),
+      summary("y", { domain: "X" }),
+    ];
+    const warnSpy = jest.fn();
+    (service as unknown as { logger: { warn: jest.Mock } }).logger = {
+      warn: warnSpy,
+    } as never;
+
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(["x", "y"], nodes);
+    expect(perCandidate.get("x")).toEqual({
+      writeTarget: "x",
+      flushNodes: ["x"],
+    });
+    expect(perCandidate.get("y")).toEqual({
+      writeTarget: "y",
+      flushNodes: ["y"],
+    });
+    expect(writeTargets.sort()).toEqual(["x", "y"]);
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy.mock.calls[0][0]).toContain("no discoverable Primary");
+  });
+
+  it("passes unknown node IDs through untouched (legacy compat)", async () => {
+    const { perCandidate, writeTargets } =
+      await service.resolveClusterWriteTargets(["ghost"], []);
+    expect(perCandidate.get("ghost")).toEqual({
+      writeTarget: "ghost",
+      flushNodes: ["ghost"],
+    });
+    expect(writeTargets).toEqual(["ghost"]);
   });
 });
