@@ -1134,7 +1134,7 @@ export function AutomationPage() {
           apiFetch("/nodes/dns-schedules/rules"),
           apiFetch("/nodes/dns-schedules/state"),
           apiFetch("/domain-groups"),
-          apiFetch("/log-alerts/smtp/status"),
+          apiFetch("/nodes/log-alerts/smtp/status"),
         ]);
 
       if (!mountedRef.current) return;
