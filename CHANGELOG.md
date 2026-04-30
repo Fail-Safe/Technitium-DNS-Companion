@@ -9,6 +9,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.6.4] - 2026-04-30
+
+### Fixed
+
+- **DNS Logs: Live Tail and Live/Pause buttons appeared clickable when an End Date/Time filter was set.** Two guard effects in `LogsPage.tsx` silently reverted any attempt to enter Live Tail or resume auto-refresh while End Date is non-empty (because a fixed-end-time window is inherently a historical view, not a live stream). The buttons remained visually active, so clicking them produced an aborted-fetch (red `combined` entry in devtools' network panel) and no UI change. Both buttons are now `disabled` while End Date is set, with a tooltip explaining the reason. Clearing End Date re-enables them immediately.
+
 ## [1.6.3] - 2026-04-15
 
 ### Added
