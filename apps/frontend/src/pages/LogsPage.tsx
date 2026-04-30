@@ -8005,6 +8005,12 @@ export function LogsPage() {
                           : "toggle-button"
                       }
                       onClick={() => handleDisplayModeChange("tail")}
+                      disabled={endDate.trim().length > 0}
+                      title={
+                        endDate.trim().length > 0
+                          ? "Disabled while End Date/Time is set — clear it to switch to Live Tail."
+                          : undefined
+                      }
                     >
                       📡 Live Tail
                     </button>
@@ -8147,6 +8153,7 @@ export function LogsPage() {
                   <div className="logs-page__refresh-controls">
                     <button
                       type="button"
+                      disabled={endDate.trim().length > 0}
                       className={
                         refreshSeconds === 0
                           ? "logs-page__live-toggle paused"
