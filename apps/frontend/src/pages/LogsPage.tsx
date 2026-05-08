@@ -6319,6 +6319,7 @@ export function LogsPage() {
         place="top"
         className="domain-tooltip"
         clickable
+        delayShow={500}
         afterShow={() => {
           const anchor = domainTooltipAnchorRef.current;
           if (!anchor) {
