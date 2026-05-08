@@ -9,6 +9,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.6.5] - 2026-05-08
+
+### Fixed
+
+- **DNS Logs: domain hover tooltip popped up instantly and overlapped the Block/Allow buttons.** The shared `domain-tooltip-shared` Tooltip in `LogsPage.tsx` had no show-delay, so a cursor merely transiting the domain cell on its way to a button would surface the (large) details tooltip and obscure the action target. Added `delayShow={500}` so passing-through hovers no longer trigger the tooltip; intentional hovers still resolve quickly.
+
+### Changed
+
+- Bumped `axios` from 1.15.0 to 1.15.2 (npm_and_yarn group, dependabot #64).
+- CI workflows updated to GitHub Actions majors compatible with Node 24.
+
 ## [1.6.4] - 2026-04-30
 
 ### Fixed
