@@ -6,14 +6,14 @@ ARG NPM_VERSION=11.11.0
 
 
 # Stage 0: Shared manifest context (reduces repeated COPY invalidations)
-FROM --platform=$BUILDPLATFORM node:22-alpine3.21 AS manifest-context
+FROM --platform=$BUILDPLATFORM node:24-alpine3.22 AS manifest-context
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/backend/package.json ./apps/backend/
 COPY apps/frontend/package.json ./apps/frontend/
 
 # Stage 1: Build frontend
-FROM --platform=$BUILDPLATFORM node:22-alpine3.21 AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:24-alpine3.22 AS frontend-builder
 ARG BUILDPLATFORM
 ARG NPM_VERSION
 
@@ -41,7 +41,7 @@ COPY apps/frontend/ ./apps/frontend/
 RUN npm run build --workspace=apps/frontend
 
 # Stage 2: Build backend
-FROM --platform=$BUILDPLATFORM node:22-alpine3.21 AS backend-builder
+FROM --platform=$BUILDPLATFORM node:24-alpine3.22 AS backend-builder
 ARG NPM_VERSION
 
 WORKDIR /app
@@ -62,7 +62,7 @@ COPY apps/backend/ ./apps/backend/
 RUN npm run build --workspace=apps/backend
 
 # Stage 2b: Install backend production dependencies only
-FROM --platform=$BUILDPLATFORM node:22-alpine3.21 AS backend-runtime-deps
+FROM --platform=$BUILDPLATFORM node:24-alpine3.22 AS backend-runtime-deps
 ARG NPM_VERSION
 
 WORKDIR /app
@@ -76,7 +76,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev --no-fund --no-audit --workspace=apps/backend
 
 # Stage 3: Production image
-FROM node:22-alpine3.21
+FROM node:24-alpine3.22
 
 ARG BUILD_VERSION=unknown
 ARG BUILD_REVISION=unknown
