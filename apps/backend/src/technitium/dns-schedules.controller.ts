@@ -29,6 +29,18 @@ const ACTIONS = ["block", "allow"] as const;
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
+/**
+ * Replace CR/LF/tab with single spaces and collapse internal whitespace.
+ * Applied to single-line fields (name, subject template) and to free-text
+ * fields that flow into email headers via token substitution. Defense in
+ * depth: nodemailer 8.x rejects CRLF in headers and would throw rather than
+ * inject, but rejecting silently aborts notification delivery. Stripping
+ * here keeps both delivery and headers safe.
+ */
+function stripNewlines(value: string): string {
+  return value.replace(/[\r\n\t]+/g, " ").replace(/ {2,}/g, " ").trim();
+}
+
 function formatDaysOfWeekForTemplate(days: number[]): string {
   if (!Array.isArray(days) || days.length === 0 || days.length === 7) {
     return "every day";
@@ -213,7 +225,7 @@ export class DnsSchedulesController {
     const input = body as Record<string, unknown>;
 
     const name =
-      typeof input.name === "string" ? input.name.trim() : undefined;
+      typeof input.name === "string" ? stripNewlines(input.name) : undefined;
     if (!name) {
       throw new BadRequestException("name is required.");
     }
@@ -301,6 +313,13 @@ export class DnsSchedulesController {
         ? Math.round(notifyDebounceSecondsRaw)
         : 300;
 
+    // notifyMessage keeps internal newlines (it's body text and can be
+    // multi-line) but token substitutions from this value flow into the
+    // body only — never into headers — so CRLF in the message itself is
+    // safe. We DO sanitize the values that feed token substitution at
+    // their respective input boundaries (name above, subject template
+    // below) so the rendered subject can never carry attacker-controlled
+    // CRLF regardless of what notifyMessage contains.
     const notifyMessageRaw = typeof input.notifyMessage === "string"
       ? input.notifyMessage.trim()
       : undefined;
@@ -311,8 +330,12 @@ export class DnsSchedulesController {
     const notifyMessageOnly =
       targetType !== "built-in" && !!notifyMessage && input.notifyMessageOnly === true;
 
+    // Subject template flows into an email header at send time; CRLF here
+    // would either be rejected by nodemailer (silent notification loss) or
+    // injected as additional headers in non-sanitizing transports. Strip
+    // unconditionally; the field is single-line by intent anyway.
     const notifySubjectTemplateRaw = typeof input.notifySubjectTemplate === "string"
-      ? input.notifySubjectTemplate.trim()
+      ? stripNewlines(input.notifySubjectTemplate)
       : undefined;
     const notifySubjectTemplate = notifySubjectTemplateRaw && targetType !== "built-in"
       ? notifySubjectTemplateRaw

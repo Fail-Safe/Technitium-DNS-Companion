@@ -62,13 +62,19 @@ export function computeRootDomain(domain: string): string {
  * (`"<ts> | <node> | <client> | <domain> | <outcome>"`) into dynamic template
  * tokens. Returns an empty object when no sample is available, leaving the
  * corresponding `{domain}` etc. tokens un-substituted in the rendered output.
+ *
+ * The strict `!== EXPECTED_FIELD_COUNT` check (rather than `< 5`) means we
+ * fail loudly if `formatSampleLine`'s schema ever drifts to more fields, so
+ * the wrong values can't silently end up in alert emails.
  */
+const EXPECTED_SAMPLE_FIELD_COUNT = 5;
+
 export function extractDynamicTokensFromSample(
   sampleLine: string | undefined,
 ): Record<string, string> {
   if (!sampleLine) return {};
   const parts = sampleLine.split(" | ").map((p) => p.trim());
-  if (parts.length < 5) return {};
+  if (parts.length !== EXPECTED_SAMPLE_FIELD_COUNT) return {};
   const [, nodeId, client, domain] = parts;
   const out: Record<string, string> = {};
   if (nodeId && nodeId !== "unknown-node") out.nodeId = nodeId;

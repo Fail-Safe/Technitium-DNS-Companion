@@ -899,16 +899,51 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
       expect(clearAppliedEntries).toHaveBeenCalledTimes(1);
     });
 
-    it("is a no-op when tracking is empty (nothing to clean up)", async () => {
+    it("legacy fallback: empty tracking + non-empty schedule definition removes via resolve-from-definition", async () => {
+      // Migration path: user upgrades while a schedule is currently applied.
+      // Tracking is empty (was never populated by the old code) but the
+      // schedule's domain set is non-empty. We must fall back to the legacy
+      // "re-resolve current definition" cleanup, otherwise the previously-
+      // written entries leak forever.
+      const { service, setConfigWithAuth, clearAppliedEntries } = makeService({
+        groups: [makeGroup("Parents", ["youtube.com", "untouched.com"], [])],
+        trackedEntries: [],
+      });
+
+      await remove(
+        service,
+        makeSchedule({
+          advancedBlockingGroupNames: ["Parents"],
+          action: "block",
+          domainEntries: ["youtube.com"],
+          domainGroupNames: [],
+        }),
+      );
+
+      // youtube.com (resolvable from current definition) stripped;
+      // untouched.com (not part of the schedule) preserved.
+      const [, nextConfig] = setConfigWithAuth.mock.calls[0];
+      expect(nextConfig.groups[0].blocked).toEqual(["untouched.com"]);
+      expect(clearAppliedEntries).toHaveBeenCalledTimes(1);
+    });
+
+    it("is a true no-op when both tracking and resolved set are empty", async () => {
+      // Schedule has no domain entries and no domain groups, and we have
+      // no tracking. There's genuinely nothing to clean up.
       const { service, setConfigWithAuth, clearAppliedEntries } = makeService({
         groups: [makeGroup("Parents", ["pre-existing.com"], [])],
         trackedEntries: [],
       });
 
-      await remove(service, makeSchedule({ advancedBlockingGroupNames: ["Parents"] }));
+      await remove(
+        service,
+        makeSchedule({
+          advancedBlockingGroupNames: ["Parents"],
+          domainEntries: [],
+          domainGroupNames: [],
+        }),
+      );
 
-      // No tracking → no snapshot fetch needed, no setConfig call, but
-      // safe to clear (no-op) tracking just to be defensive.
       expect(setConfigWithAuth).not.toHaveBeenCalled();
       expect(clearAppliedEntries).not.toHaveBeenCalled();
     });
