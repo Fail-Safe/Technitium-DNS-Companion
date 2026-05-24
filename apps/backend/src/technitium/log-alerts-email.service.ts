@@ -4,6 +4,7 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common";
 import nodemailer, { type SendMailOptions, type Transporter } from "nodemailer";
+import { getDomain } from "tldts";
 import type {
   LogAlertRule,
   LogAlertsSendTestEmailRequest,
@@ -20,6 +21,64 @@ type SmtpConfig = {
   from?: string;
   replyTo?: string;
 };
+
+/**
+ * Replaces `{token}` occurrences in `template` with values from `context`.
+ * Unknown tokens are left literal (e.g. `{statTime}` if mis-typed) so users
+ * see the typo in the delivered email rather than getting a silent blank.
+ *
+ * Tokens are matched as `{<identifier>}` with identifiers limited to
+ * `[A-Za-z0-9_]+` — anything else is treated as plain text so JSON snippets
+ * and CSS-like braces in user content don't get clobbered.
+ */
+export function renderTemplate(
+  template: string,
+  context: Record<string, string>,
+): string {
+  return template.replace(/\{([A-Za-z0-9_]+)\}/g, (match, key: string) => {
+    return Object.prototype.hasOwnProperty.call(context, key)
+      ? context[key]
+      : match;
+  });
+}
+
+/**
+ * Compute the registrable domain (eTLD+1) using the Public Suffix List.
+ * For `rr1---sn-aigl6nsd.googlevideo.com` → `googlevideo.com`, for
+ * `bbc.co.uk` → `bbc.co.uk` (because `co.uk` is a public suffix), etc.
+ *
+ * Returns the input unchanged when PSL parsing yields null (IP literals,
+ * single-label hostnames, malformed input) so the template never substitutes
+ * an empty value into a notification.
+ */
+export function computeRootDomain(domain: string): string {
+  if (!domain) return domain;
+  const registrable = getDomain(domain);
+  return registrable ?? domain;
+}
+
+/**
+ * Parses the first sample line emitted by the evaluator
+ * (`"<ts> | <node> | <client> | <domain> | <outcome>"`) into dynamic template
+ * tokens. Returns an empty object when no sample is available, leaving the
+ * corresponding `{domain}` etc. tokens un-substituted in the rendered output.
+ */
+export function extractDynamicTokensFromSample(
+  sampleLine: string | undefined,
+): Record<string, string> {
+  if (!sampleLine) return {};
+  const parts = sampleLine.split(" | ").map((p) => p.trim());
+  if (parts.length < 5) return {};
+  const [, nodeId, client, domain] = parts;
+  const out: Record<string, string> = {};
+  if (nodeId && nodeId !== "unknown-node") out.nodeId = nodeId;
+  if (client && client !== "unknown-client") out.client = client;
+  if (domain && domain !== "unknown-domain") {
+    out.domain = domain;
+    out.rootDomain = computeRootDomain(domain);
+  }
+  return out;
+}
 
 @Injectable()
 export class LogAlertsEmailService {
@@ -72,14 +131,29 @@ export class LogAlertsEmailService {
     const { rule } = params;
     const displayName = rule.displayName ?? rule.name;
     const label = rule.displayName ? "Schedule" : "Rule";
-    const subject = `[Technitium DNS Companion] ${rule.displayName ? "DNS Schedule alert" : "Log alert"}: ${displayName}`;
+    const defaultSubject = `[Technitium DNS Companion] ${rule.displayName ? "DNS Schedule alert" : "Log alert"}: ${displayName}`;
+
+    const templateContext = this.buildAlertTemplateContext({
+      rule,
+      matchedCount: params.matchedCount,
+      latestMatchAt: timestamp,
+      sampleLines: params.sampleLines,
+    });
+
+    const subject = rule.notifySubjectTemplate
+      ? renderTemplate(rule.notifySubjectTemplate, templateContext)
+      : defaultSubject;
+
+    const renderedMessage = rule.notifyMessage
+      ? renderTemplate(rule.notifyMessage, templateContext)
+      : undefined;
 
     const lines: string[] = [];
-    if (rule.notifyMessage && rule.notifyMessageOnly) {
-      lines.push(rule.notifyMessage);
+    if (renderedMessage && rule.notifyMessageOnly) {
+      lines.push(renderedMessage);
     } else {
-      if (rule.notifyMessage) {
-        lines.push(rule.notifyMessage, "", "---", "");
+      if (renderedMessage) {
+        lines.push(renderedMessage, "", "---", "");
       }
       lines.push(
         `${label}: ${displayName}`,
@@ -106,6 +180,21 @@ export class LogAlertsEmailService {
       subject,
       text: lines.join("\n"),
     });
+  }
+
+  private buildAlertTemplateContext(params: {
+    rule: LogAlertRule;
+    matchedCount: number;
+    latestMatchAt: string;
+    sampleLines: string[];
+  }): Record<string, string> {
+    const dynamic = extractDynamicTokensFromSample(params.sampleLines[0]);
+    return {
+      ...(params.rule.templateContext ?? {}),
+      matchedCount: String(params.matchedCount),
+      latestMatchAt: params.latestMatchAt,
+      ...dynamic,
+    };
   }
 
   // Drift alerts are operator-only: recipients come from an admin env var,

@@ -7,6 +7,17 @@ export interface LogAlertRuleDraft {
   displayName?: string;
   notifyMessage?: string;
   notifyMessageOnly?: boolean;
+  /**
+   * Optional subject-line template. When set, supersedes the hardcoded subject.
+   * Substituted via the same `{token}` rules as notifyMessage.
+   */
+  notifySubjectTemplate?: string;
+  /**
+   * Static token values denormalized onto the rule by upstream callers (e.g.
+   * the DNS Schedules controller). Merged with per-alert dynamic tokens at
+   * send time. Empty/undefined for rules that don't come from a schedule.
+   */
+  templateContext?: Record<string, string>;
   enabled: boolean;
   outcomeMode: LogAlertOutcomeMode;
   domainPattern: string;

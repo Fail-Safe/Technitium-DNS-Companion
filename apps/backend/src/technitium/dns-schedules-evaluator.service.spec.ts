@@ -243,16 +243,45 @@ describe("DnsSchedulesEvaluatorService — isWindowActive", () => {
 // already threw in this case; these tests pin both paths to the same behavior.
 
 describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
-  function makeService(getSnapshotWithAuth: jest.Mock) {
+  function makeService(
+    getSnapshotWithAuth: jest.Mock,
+    options: {
+      trackedEntries?: Array<{
+        advancedBlockingGroupName: string;
+        action: "block" | "allow";
+        domain: string;
+      }>;
+    } = {},
+  ) {
     const setConfigWithAuth = jest.fn();
+    const listAppliedEntries = jest.fn().mockReturnValue(
+      (options.trackedEntries ?? []).map((e) => ({
+        scheduleId: "test-id",
+        nodeId: "nodeA",
+        ...e,
+        appliedAt: "2024-01-15T00:00:00Z",
+      })),
+    );
+    const setAppliedEntries = jest.fn();
+    const clearAppliedEntries = jest.fn();
     const service = new DnsSchedulesEvaluatorService(
-      {} as never,
+      {
+        listAppliedEntries,
+        setAppliedEntries,
+        clearAppliedEntries,
+      } as never,
       { getSnapshotWithAuth, setConfigWithAuth } as never,
       {} as never,
       { getExactEntriesByGroupNames: () => [] } as never,
       {} as never,
     );
-    return { service, setConfigWithAuth };
+    return {
+      service,
+      setConfigWithAuth,
+      listAppliedEntries,
+      setAppliedEntries,
+      clearAppliedEntries,
+    };
   }
 
   const failingSnapshot = {
@@ -265,7 +294,17 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
 
   it("remove throws when snapshot has an error (no silent markRemoved)", async () => {
     const getSnapshotWithAuth = jest.fn().mockResolvedValue(failingSnapshot);
-    const { service, setConfigWithAuth } = makeService(getSnapshotWithAuth);
+    // Tracking populated so the refactored code actually consults the
+    // snapshot (empty tracking takes an early-return no-op path).
+    const { service, setConfigWithAuth } = makeService(getSnapshotWithAuth, {
+      trackedEntries: [
+        {
+          advancedBlockingGroupName: "social",
+          action: "block",
+          domain: "example.com",
+        },
+      ],
+    });
 
     await expect(
       // Private method under test — the evaluator's own try/catch in
@@ -324,7 +363,18 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
         ],
       },
     });
-    const { service, setConfigWithAuth } = makeService(getSnapshotWithAuth);
+    // Tracking records that this schedule previously wrote example.com to
+    // social.blocked. Remove flow now reads from tracking, not from the
+    // schedule's current resolved set.
+    const { service, setConfigWithAuth } = makeService(getSnapshotWithAuth, {
+      trackedEntries: [
+        {
+          advancedBlockingGroupName: "social",
+          action: "block",
+          domain: "example.com",
+        },
+      ],
+    });
 
     await (service as unknown as {
       removeAdvancedBlockingScheduleFromNode: (
@@ -502,5 +552,461 @@ describe("DnsSchedulesEvaluatorService — drift detection", () => {
     internal.recordDriftTick(schedule, "nodeA"); // crosses threshold on nodeA only
     expect(emailMock).toHaveBeenCalledTimes(1);
     expect(emailMock.mock.calls[0][0].nodeId).toBe("nodeA");
+  });
+});
+
+// ── Orphan prevention (per-entry tracking + apply/remove diff) ───────────────
+//
+// The four trigger vectors that historically orphaned entries when a schedule
+// was edited mid-window:
+//   1. domainGroupNames swap (e.g. YouTube → Spotify)
+//   2. advancedBlockingGroupNames swap (target Parents → Kids)
+//   3. action flip (block ↔ allow)
+//   4. domainEntries edit (manual list change)
+//
+// In every case the OLD behavior re-resolved the schedule's *current*
+// definition on remove, so anything written under the previous definition
+// became unreachable garbage. These tests pin the NEW behavior: the apply
+// diff cleans the old tuples first, then writes the new ones.
+
+describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
+  type Tracked = {
+    advancedBlockingGroupName: string;
+    action: "block" | "allow";
+    domain: string;
+  };
+
+  function makeGroup(
+    name: string,
+    blocked: string[] = [],
+    allowed: string[] = [],
+  ) {
+    return {
+      name,
+      blockingAddresses: [],
+      allowed,
+      blocked,
+      allowListUrls: [],
+      blockListUrls: [],
+      allowedRegex: [],
+      blockedRegex: [],
+      regexAllowListUrls: [],
+      regexBlockListUrls: [],
+      adblockListUrls: [],
+    };
+  }
+
+  function makeService(
+    options: {
+      groups: ReturnType<typeof makeGroup>[];
+      trackedEntries?: Tracked[];
+      domainGroupsLookup?: (names: string[]) => string[];
+    },
+  ) {
+    const setConfigWithAuth = jest.fn();
+    const getSnapshotWithAuth = jest.fn().mockResolvedValue({
+      nodeId: "nodeA",
+      baseUrl: "https://nodeA.test",
+      fetchedAt: "2024-01-15T00:00:00Z",
+      metrics: {},
+      config: {
+        enableBlocking: true,
+        localEndPointGroupMap: {},
+        networkGroupMap: {},
+        groups: options.groups,
+      },
+    });
+    const listAppliedEntries = jest.fn().mockReturnValue(
+      (options.trackedEntries ?? []).map((e) => ({
+        scheduleId: "test-id",
+        nodeId: "nodeA",
+        ...e,
+        appliedAt: "2024-01-15T00:00:00Z",
+      })),
+    );
+    const setAppliedEntries = jest.fn();
+    const clearAppliedEntries = jest.fn();
+    const service = new DnsSchedulesEvaluatorService(
+      {
+        listAppliedEntries,
+        setAppliedEntries,
+        clearAppliedEntries,
+      } as never,
+      { getSnapshotWithAuth, setConfigWithAuth } as never,
+      {} as never,
+      {
+        getExactEntriesByGroupNames:
+          options.domainGroupsLookup ?? (() => []),
+      } as never,
+      {} as never,
+    );
+    return {
+      service,
+      setConfigWithAuth,
+      listAppliedEntries,
+      setAppliedEntries,
+      clearAppliedEntries,
+    };
+  }
+
+  async function apply(
+    service: DnsSchedulesEvaluatorService,
+    schedule: DnsSchedule,
+  ): Promise<boolean> {
+    return (service as unknown as {
+      applyAdvancedBlockingScheduleToNode: (
+        s: DnsSchedule,
+        n: string,
+      ) => Promise<boolean>;
+    }).applyAdvancedBlockingScheduleToNode(schedule, "nodeA");
+  }
+
+  async function remove(
+    service: DnsSchedulesEvaluatorService,
+    schedule: DnsSchedule,
+  ): Promise<void> {
+    return (service as unknown as {
+      removeAdvancedBlockingScheduleFromNode: (
+        s: DnsSchedule,
+        n: string,
+      ) => Promise<void>;
+    }).removeAdvancedBlockingScheduleFromNode(schedule, "nodeA");
+  }
+
+  describe("vector 1: domainGroupNames swap (YouTube → Spotify)", () => {
+    it("removes old DG entries and adds new DG entries in one apply pass", async () => {
+      // Tracking records the schedule previously wrote YouTube entries to
+      // Parents.blocked. Now the schedule's domainGroupNames is ["Spotify"];
+      // the DG lookup resolves to spotify entries.
+      const { service, setConfigWithAuth, setAppliedEntries } = makeService({
+        groups: [
+          makeGroup(
+            "Parents",
+            ["youtube.com", "googlevideo.com", "manually-added.com"],
+            [],
+          ),
+        ],
+        trackedEntries: [
+          {
+            advancedBlockingGroupName: "Parents",
+            action: "block",
+            domain: "youtube.com",
+          },
+          {
+            advancedBlockingGroupName: "Parents",
+            action: "block",
+            domain: "googlevideo.com",
+          },
+        ],
+        domainGroupsLookup: (names) =>
+          names.includes("Spotify") ? ["spotify.com", "scdn.co"] : [],
+      });
+
+      const updatedSchedule = makeSchedule({
+        advancedBlockingGroupNames: ["Parents"],
+        action: "block",
+        domainGroupNames: ["Spotify"],
+        domainEntries: [],
+      });
+      const changed = await apply(service, updatedSchedule);
+
+      expect(changed).toBe(true);
+      expect(setConfigWithAuth).toHaveBeenCalledTimes(1);
+      const [, nextConfig] = setConfigWithAuth.mock.calls[0];
+      const parents = nextConfig.groups.find(
+        (g: { name: string }) => g.name === "Parents",
+      );
+      // YouTube/googlevideo orphans gone, manually-added.com preserved,
+      // Spotify entries added.
+      expect(parents.blocked.sort()).toEqual(
+        ["manually-added.com", "scdn.co", "spotify.com"].sort(),
+      );
+      // Tracking now reflects the new desired state.
+      expect(setAppliedEntries).toHaveBeenCalledTimes(1);
+      const [, , newTracking] = setAppliedEntries.mock.calls[0];
+      expect(newTracking).toEqual(
+        expect.arrayContaining([
+          { advancedBlockingGroupName: "Parents", action: "block", domain: "spotify.com" },
+          { advancedBlockingGroupName: "Parents", action: "block", domain: "scdn.co" },
+        ]),
+      );
+      expect(newTracking).toHaveLength(2);
+    });
+  });
+
+  describe("vector 2: advancedBlockingGroupNames swap (Parents → Kids)", () => {
+    it("removes entries from old AB group and adds to new AB group", async () => {
+      const { service, setConfigWithAuth } = makeService({
+        groups: [
+          makeGroup("Parents", ["youtube.com", "keep.me"], []),
+          makeGroup("Kids", ["pre-existing.com"], []),
+        ],
+        trackedEntries: [
+          {
+            advancedBlockingGroupName: "Parents",
+            action: "block",
+            domain: "youtube.com",
+          },
+        ],
+      });
+
+      const updatedSchedule = makeSchedule({
+        advancedBlockingGroupNames: ["Kids"],
+        action: "block",
+        domainEntries: ["youtube.com"],
+        domainGroupNames: [],
+      });
+      await apply(service, updatedSchedule);
+
+      const [, nextConfig] = setConfigWithAuth.mock.calls[0];
+      const parents = nextConfig.groups.find(
+        (g: { name: string }) => g.name === "Parents",
+      );
+      const kids = nextConfig.groups.find(
+        (g: { name: string }) => g.name === "Kids",
+      );
+      // Orphan stripped from Parents, fresh write to Kids preserving its
+      // pre-existing entry.
+      expect(parents.blocked).toEqual(["keep.me"]);
+      expect(kids.blocked.sort()).toEqual(["pre-existing.com", "youtube.com"]);
+    });
+  });
+
+  describe("vector 3: action flip (block → allow)", () => {
+    it("removes from blocked list and adds to allowed list of same group", async () => {
+      const { service, setConfigWithAuth } = makeService({
+        groups: [makeGroup("Parents", ["youtube.com"], [])],
+        trackedEntries: [
+          {
+            advancedBlockingGroupName: "Parents",
+            action: "block",
+            domain: "youtube.com",
+          },
+        ],
+      });
+
+      const updatedSchedule = makeSchedule({
+        advancedBlockingGroupNames: ["Parents"],
+        action: "allow",
+        domainEntries: ["youtube.com"],
+        domainGroupNames: [],
+      });
+      await apply(service, updatedSchedule);
+
+      const [, nextConfig] = setConfigWithAuth.mock.calls[0];
+      const parents = nextConfig.groups[0];
+      expect(parents.blocked).toEqual([]);
+      expect(parents.allowed).toEqual(["youtube.com"]);
+    });
+  });
+
+  describe("vector 4: domainEntries edit", () => {
+    it("removes dropped entries and keeps still-desired ones", async () => {
+      const { service, setConfigWithAuth } = makeService({
+        groups: [
+          makeGroup(
+            "Parents",
+            ["youtube.com", "tiktok.com", "untouched.com"],
+            [],
+          ),
+        ],
+        trackedEntries: [
+          { advancedBlockingGroupName: "Parents", action: "block", domain: "youtube.com" },
+          { advancedBlockingGroupName: "Parents", action: "block", domain: "tiktok.com" },
+        ],
+      });
+
+      const updatedSchedule = makeSchedule({
+        advancedBlockingGroupNames: ["Parents"],
+        action: "block",
+        domainEntries: ["youtube.com"], // dropped tiktok.com
+        domainGroupNames: [],
+      });
+      await apply(service, updatedSchedule);
+
+      const [, nextConfig] = setConfigWithAuth.mock.calls[0];
+      const parents = nextConfig.groups[0];
+      // tiktok.com (no longer desired) removed; youtube.com (still desired)
+      // and untouched.com (never ours) both preserved.
+      expect(parents.blocked.sort()).toEqual(["untouched.com", "youtube.com"]);
+    });
+  });
+
+  describe("migration safety: first apply with empty tracking", () => {
+    it("writes new entries without removing anything, even if old entries match", async () => {
+      // Simulates a deployment upgrade: schedule was applied under the old
+      // (untracked) code, leaving entries in Technitium. First apply under
+      // the new code has prev=[] tracking. It must add (or skip already-
+      // present) but must NEVER remove the existing entries.
+      const { service, setConfigWithAuth, setAppliedEntries } = makeService({
+        groups: [
+          makeGroup("Parents", ["youtube.com", "pre-existing.com"], []),
+        ],
+        trackedEntries: [], // empty — pre-tracking-table state
+      });
+
+      const schedule = makeSchedule({
+        advancedBlockingGroupNames: ["Parents"],
+        action: "block",
+        domainEntries: ["youtube.com"],
+        domainGroupNames: [],
+      });
+      const changed = await apply(service, schedule);
+
+      // youtube.com already there, no write needed; pre-existing.com left
+      // alone because we have no record of having written it.
+      expect(changed).toBe(false);
+      expect(setConfigWithAuth).not.toHaveBeenCalled();
+      // Tracking now seeded with the desired state going forward.
+      const [, , newTracking] = setAppliedEntries.mock.calls[0];
+      expect(newTracking).toEqual([
+        { advancedBlockingGroupName: "Parents", action: "block", domain: "youtube.com" },
+      ]);
+    });
+  });
+
+  describe("window-close remove uses tracking not current definition", () => {
+    it("strips entries the schedule WROTE even after definition changed mid-window", async () => {
+      // Simulates the user's bug: window-close triggers remove after a
+      // mid-window domainGroupNames swap. Schedule.domainGroupNames is now
+      // ["Spotify"], but the entries actually in Technitium (and tracked)
+      // are YouTube domains from before the swap.
+      const { service, setConfigWithAuth, clearAppliedEntries } = makeService({
+        groups: [
+          makeGroup("Parents", ["youtube.com", "googlevideo.com"], []),
+        ],
+        trackedEntries: [
+          { advancedBlockingGroupName: "Parents", action: "block", domain: "youtube.com" },
+          { advancedBlockingGroupName: "Parents", action: "block", domain: "googlevideo.com" },
+        ],
+        domainGroupsLookup: (names) =>
+          names.includes("Spotify") ? ["spotify.com"] : [],
+      });
+
+      const scheduleAfterEdit = makeSchedule({
+        advancedBlockingGroupNames: ["Parents"],
+        action: "block",
+        domainGroupNames: ["Spotify"],
+        domainEntries: [],
+      });
+      await remove(service, scheduleAfterEdit);
+
+      // Remove cleans up what we ACTUALLY wrote (YouTube tuples), not what
+      // the current definition resolves to (Spotify).
+      const [, nextConfig] = setConfigWithAuth.mock.calls[0];
+      expect(nextConfig.groups[0].blocked).toEqual([]);
+      // Tracking cleared so the next apply starts from empty baseline.
+      expect(clearAppliedEntries).toHaveBeenCalledTimes(1);
+    });
+
+    it("is a no-op when tracking is empty (nothing to clean up)", async () => {
+      const { service, setConfigWithAuth, clearAppliedEntries } = makeService({
+        groups: [makeGroup("Parents", ["pre-existing.com"], [])],
+        trackedEntries: [],
+      });
+
+      await remove(service, makeSchedule({ advancedBlockingGroupNames: ["Parents"] }));
+
+      // No tracking → no snapshot fetch needed, no setConfig call, but
+      // safe to clear (no-op) tracking just to be defensive.
+      expect(setConfigWithAuth).not.toHaveBeenCalled();
+      expect(clearAppliedEntries).not.toHaveBeenCalled();
+    });
+  });
+});
+
+// ── buildAlertDomainPattern length handling ─────────────────────────────────
+//
+// Previously, the auto-generated regex of all schedule domains exceeded the
+// linked alert rule's 300-char pattern cap for large Domain Groups (e.g.
+// YouTube), causing syncLinkedAlertRule to fail and silently suppress
+// notifications. Two fixes: cap raised to 8000 in the rule storage, and a
+// wildcard fallback here for the rare case where even 8000 is exceeded.
+
+describe("DnsSchedulesEvaluatorService — buildAlertDomainPattern", () => {
+  function makeServiceWithDomainGroups(
+    dgLookup: (names: string[]) => string[],
+  ): DnsSchedulesEvaluatorService {
+    return new DnsSchedulesEvaluatorService(
+      {} as never,
+      {} as never,
+      {} as never,
+      { getExactEntriesByGroupNames: dgLookup } as never,
+      {} as never,
+    );
+  }
+
+  it("returns wildcard for an empty schedule (no manual entries, no DGs)", () => {
+    const service = makeServiceWithDomainGroups(() => []);
+    const result = service.buildAlertDomainPattern(
+      makeSchedule({ domainEntries: [], domainGroupNames: [] }),
+    );
+    expect(result).toEqual({ pattern: "*", type: "wildcard" });
+  });
+
+  it("returns a precise regex for a few manual entries", () => {
+    const service = makeServiceWithDomainGroups(() => []);
+    const result = service.buildAlertDomainPattern(
+      makeSchedule({
+        domainEntries: ["youtube.com", "googlevideo.com"],
+        domainGroupNames: [],
+      }),
+    );
+    expect(result.type).toBe("regex");
+    expect(result.pattern).toContain("youtube\\.com");
+    expect(result.pattern).toContain("googlevideo\\.com");
+    expect(result.pattern.length).toBeLessThan(100);
+  });
+
+  it("accepts a moderately large DG (200 domains) as a single regex", () => {
+    // 200 distinct ~20-char domains → ~4500-char pattern, comfortably
+    // under both the 7500 internal cap and the 8000 storage cap.
+    const domains = Array.from(
+      { length: 200 },
+      (_, i) => `subdomain${i}-of-example.com`,
+    );
+    const service = makeServiceWithDomainGroups(() => domains);
+    const result = service.buildAlertDomainPattern(
+      makeSchedule({
+        domainEntries: [],
+        domainGroupNames: ["BigDG"],
+      }),
+    );
+    expect(result.type).toBe("regex");
+    expect(result.pattern.length).toBeLessThan(8000);
+    // Sanity: still contains a sample of the encoded domains
+    expect(result.pattern).toContain("subdomain0-of-example\\.com");
+    expect(result.pattern).toContain("subdomain199-of-example\\.com");
+  });
+
+  it("falls back to wildcard when the regex would exceed the safety cap", () => {
+    // 1000 domains × ~30 chars each → ~30,000-char pattern, well over 7500.
+    const domains = Array.from(
+      { length: 1000 },
+      (_, i) => `very-long-subdomain-name-${i}.example.com`,
+    );
+    const service = makeServiceWithDomainGroups(() => domains);
+    const result = service.buildAlertDomainPattern(
+      makeSchedule({
+        domainEntries: [],
+        domainGroupNames: ["HugeDG"],
+      }),
+    );
+    expect(result).toEqual({ pattern: "*", type: "wildcard" });
+  });
+
+  it("deduplicates entries before building the regex", () => {
+    const service = makeServiceWithDomainGroups(() => ["youtube.com"]);
+    const result = service.buildAlertDomainPattern(
+      makeSchedule({
+        // youtube.com appears in both sources — should only show up once
+        domainEntries: ["youtube.com"],
+        domainGroupNames: ["SomeDG"],
+      }),
+    );
+    expect(result.type).toBe("regex");
+    // Only one occurrence of the escaped domain
+    const matches = result.pattern.split("youtube\\.com").length - 1;
+    expect(matches).toBe(1);
   });
 });

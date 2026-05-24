@@ -21,6 +21,8 @@ type LogAlertRuleRow = {
   display_name: string | null;
   notify_message: string | null;
   notify_message_only: number;
+  notify_subject_template: string | null;
+  template_context_json: string | null;
   enabled: number;
   outcome_mode: LogAlertRuleDraft["outcomeMode"];
   domain_pattern: string;
@@ -105,6 +107,8 @@ export class LogAlertsRulesService implements OnModuleInit {
           display_name,
           notify_message,
           notify_message_only,
+          notify_subject_template,
+          template_context_json,
           enabled,
           outcome_mode,
           domain_pattern,
@@ -141,6 +145,8 @@ export class LogAlertsRulesService implements OnModuleInit {
           display_name,
           notify_message,
           notify_message_only,
+          notify_subject_template,
+          template_context_json,
           enabled,
           outcome_mode,
           domain_pattern,
@@ -151,7 +157,7 @@ export class LogAlertsRulesService implements OnModuleInit {
           email_recipients_json,
           created_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       ).run(
         id,
@@ -160,6 +166,10 @@ export class LogAlertsRulesService implements OnModuleInit {
         rule.displayName?.trim() || null,
         rule.notifyMessage?.trim() || null,
         rule.notifyMessageOnly ? 1 : 0,
+        rule.notifySubjectTemplate?.trim() || null,
+        rule.templateContext && Object.keys(rule.templateContext).length > 0
+          ? JSON.stringify(rule.templateContext)
+          : null,
         rule.enabled ? 1 : 0,
         rule.outcomeMode,
         rule.domainPattern,
@@ -202,6 +212,8 @@ export class LogAlertsRulesService implements OnModuleInit {
               display_name = ?,
               notify_message = ?,
               notify_message_only = ?,
+              notify_subject_template = ?,
+              template_context_json = ?,
               enabled = ?,
               outcome_mode = ?,
               domain_pattern = ?,
@@ -220,6 +232,10 @@ export class LogAlertsRulesService implements OnModuleInit {
           rule.displayName?.trim() || null,
           rule.notifyMessage?.trim() || null,
           rule.notifyMessageOnly ? 1 : 0,
+          rule.notifySubjectTemplate?.trim() || null,
+          rule.templateContext && Object.keys(rule.templateContext).length > 0
+            ? JSON.stringify(rule.templateContext)
+            : null,
           rule.enabled ? 1 : 0,
           rule.outcomeMode,
           rule.domainPattern,
@@ -320,6 +336,8 @@ export class LogAlertsRulesService implements OnModuleInit {
       `ALTER TABLE log_alert_rules ADD COLUMN display_name TEXT`,
       `ALTER TABLE log_alert_rules ADD COLUMN notify_message TEXT`,
       `ALTER TABLE log_alert_rules ADD COLUMN notify_message_only INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE log_alert_rules ADD COLUMN notify_subject_template TEXT`,
+      `ALTER TABLE log_alert_rules ADD COLUMN template_context_json TEXT`,
     ];
     for (const sql of newColumns) {
       try {
@@ -340,6 +358,8 @@ export class LogAlertsRulesService implements OnModuleInit {
         display_name TEXT,
         notify_message TEXT,
         notify_message_only INTEGER NOT NULL DEFAULT 0,
+        notify_subject_template TEXT,
+        template_context_json TEXT,
         enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
         outcome_mode TEXT NOT NULL CHECK (outcome_mode IN ('blocked-only', 'all-outcomes')),
         domain_pattern TEXT NOT NULL,
@@ -439,6 +459,27 @@ export class LogAlertsRulesService implements OnModuleInit {
     ).run(String(seconds));
   }
 
+  private parseTemplateContext(
+    raw: string | null,
+  ): Record<string, string> | undefined {
+    if (!raw) return undefined;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const result: Record<string, string> = {};
+        for (const [key, value] of Object.entries(parsed)) {
+          if (typeof value === "string") {
+            result[key] = value;
+          }
+        }
+        return Object.keys(result).length > 0 ? result : undefined;
+      }
+    } catch {
+      // fall through
+    }
+    return undefined;
+  }
+
   private parseGroupNames(raw: string | null): string[] | undefined {
     if (!raw) return undefined;
     // Try JSON array first (new format: ["Group1","Group2"])
@@ -487,6 +528,8 @@ export class LogAlertsRulesService implements OnModuleInit {
       displayName: row.display_name ?? undefined,
       notifyMessage: row.notify_message ?? undefined,
       notifyMessageOnly: row.notify_message_only === 1,
+      notifySubjectTemplate: row.notify_subject_template ?? undefined,
+      templateContext: this.parseTemplateContext(row.template_context_json),
       enabled: row.enabled === 1,
       outcomeMode: row.outcome_mode,
       domainPattern: row.domain_pattern,
@@ -513,6 +556,8 @@ export class LogAlertsRulesService implements OnModuleInit {
           display_name,
           notify_message,
           notify_message_only,
+          notify_subject_template,
+          template_context_json,
           enabled,
           outcome_mode,
           domain_pattern,
@@ -539,9 +584,22 @@ export class LogAlertsRulesService implements OnModuleInit {
   private assertRuleMaxLengths(rule: LogAlertRuleDraft): void {
     this.assertMaxLength("Rule name", rule.name, 120);
     this.assertMaxLength("Display name", rule.displayName, 120);
-    this.assertMaxLength("Domain pattern", rule.domainPattern, 300);
+    // Schedule-linked rules generate this pattern automatically as a regex
+    // of every domain the schedule resolves to (manual entries + DG entries).
+    // For a typical Domain Group like "YouTube" this easily exceeds the old
+    // 300-char cap, which previously caused syncLinkedAlertRule to fail and
+    // silently suppress notifications. 8000 chars comfortably accommodates
+    // a few hundred domains while keeping the cap bounded against runaway
+    // inputs. Larger schedules fall back to a wildcard pattern in
+    // buildAlertDomainPattern() so the rule still syncs.
+    this.assertMaxLength("Domain pattern", rule.domainPattern, 8000);
     this.assertMaxLength("Client identifier", rule.clientIdentifier, 200);
     this.assertMaxLength("Notify message", rule.notifyMessage, 2000);
+    this.assertMaxLength(
+      "Notify subject template",
+      rule.notifySubjectTemplate,
+      200,
+    );
     for (const groupName of rule.advancedBlockingGroupNames ?? []) {
       this.assertMaxLength("Advanced Blocking group", groupName, 200);
     }
