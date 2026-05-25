@@ -832,6 +832,72 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
     });
   });
 
+  describe("multi-schedule overlap (live-state self-heal)", () => {
+    it("re-adds desired tuples missing from live state, even when prev tracking matches desired", async () => {
+      // Scenario from production incident: two schedules ("Nighttime Block (Ed)"
+      // and "Copy of Nighttime Block (Ed)") both target Edison.blocked with the
+      // same YouTube Domain Group. Both have tracking populated with the same
+      // YouTube tuples. The "Copy of" schedule's remove pass stripped those
+      // entries from Edison.blocked. Now the "Ed" schedule's tick runs:
+      //   - prev (tracking) = YouTube tuples  ← still believes applied
+      //   - desired         = YouTube tuples  ← schedule unchanged
+      //   - live state      = []              ← other schedule removed them
+      // Pre-fix: toAdd = desired \ prev = ∅ → nothing re-added → YouTube
+      //         stays unblocked → 7:58 AM Allowed in the user's DNS log.
+      // Post-fix: toAdd = desired \ live = YouTube tuples → re-added.
+      const { service, setConfigWithAuth, setAppliedEntries } = makeService({
+        groups: [makeGroup("Edison", [], [])], // emptied by other schedule
+        trackedEntries: [
+          { advancedBlockingGroupName: "Edison", action: "block", domain: "youtube.com" },
+          { advancedBlockingGroupName: "Edison", action: "block", domain: "googlevideo.com" },
+        ],
+      });
+
+      const schedule = makeSchedule({
+        advancedBlockingGroupNames: ["Edison"],
+        action: "block",
+        domainEntries: ["youtube.com", "googlevideo.com"],
+        domainGroupNames: [],
+      });
+      const changed = await apply(service, schedule);
+
+      // Live state restored
+      expect(changed).toBe(true);
+      const [, nextConfig] = setConfigWithAuth.mock.calls[0];
+      expect(nextConfig.groups[0].blocked.sort()).toEqual(
+        ["googlevideo.com", "youtube.com"].sort(),
+      );
+      // Tracking write skipped — prev already matches desired, so no SQL
+      // churn just because we had to do a live re-add.
+      expect(setAppliedEntries).not.toHaveBeenCalled();
+    });
+
+    it("does not duplicate when desired tuples are already live", async () => {
+      // Steady state: tracking matches desired, live matches desired. Pure
+      // no-op tick — no setConfig, no setAppliedEntries.
+      const { service, setConfigWithAuth, setAppliedEntries } = makeService({
+        groups: [makeGroup("Edison", ["youtube.com"], [])],
+        trackedEntries: [
+          { advancedBlockingGroupName: "Edison", action: "block", domain: "youtube.com" },
+        ],
+      });
+
+      const changed = await apply(
+        service,
+        makeSchedule({
+          advancedBlockingGroupNames: ["Edison"],
+          action: "block",
+          domainEntries: ["youtube.com"],
+          domainGroupNames: [],
+        }),
+      );
+
+      expect(changed).toBe(false);
+      expect(setConfigWithAuth).not.toHaveBeenCalled();
+      expect(setAppliedEntries).not.toHaveBeenCalled();
+    });
+  });
+
   describe("migration safety: first apply with empty tracking", () => {
     it("writes new entries without removing anything, even if old entries match", async () => {
       // Simulates a deployment upgrade: schedule was applied under the old
