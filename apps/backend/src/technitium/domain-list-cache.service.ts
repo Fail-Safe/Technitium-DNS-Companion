@@ -80,6 +80,96 @@ export interface ListSearchResult {
   isRegex?: boolean;
 }
 
+// ===== INTERNAL HELPERS =====
+
+/**
+ * Build `If-None-Match` / `If-Modified-Since` headers from a cached entry's
+ * validator metadata. Sending these on refresh lets upstream return
+ * `304 Not Modified` for unchanged lists — near-zero bandwidth, and (for
+ * many CDNs, oisd.nl included) not counted against per-IP rate limits.
+ *
+ * Returns an empty object when no validators are available (first fetch or
+ * upstream that doesn't emit them); axios treats this as no extra headers.
+ */
+export function buildConditionalHeaders(
+  cached: { etag?: string; lastModified?: string } | undefined,
+): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (cached?.etag) headers["If-None-Match"] = cached.etag;
+  if (cached?.lastModified) headers["If-Modified-Since"] = cached.lastModified;
+  return headers;
+}
+
+/**
+ * Run an async worker over `items` with a bounded number of concurrent
+ * executions, applying a small random jitter (0..jitterMs) before each
+ * start. Replaces a naive `Promise.all(items.map(worker))` burst — which
+ * fires every request simultaneously — with a smoother profile that
+ * doesn't trip CDN per-IP burst limits (e.g. Cloudflare in front of
+ * oisd.nl) when several blocklist URLs are refreshed at once.
+ *
+ * Preserves input order in the returned array.
+ */
+export async function runWithConcurrencyLimit<T, R>(
+  items: T[],
+  worker: (item: T) => Promise<R>,
+  maxConcurrent: number,
+  jitterMs: number,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const workerCount = Math.min(Math.max(1, maxConcurrent), items.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const idx = cursor++;
+      if (idx >= items.length) return;
+      if (jitterMs > 0) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.floor(Math.random() * jitterMs)),
+        );
+      }
+      results[idx] = await worker(items[idx]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/** Default fetch concurrency: bounded enough to never overwhelm a typical
+ *  CDN per-IP burst window, large enough that a handful of URLs still
+ *  refresh in a reasonable wall-clock time. */
+const DEFAULT_FETCH_CONCURRENCY = 3;
+/** Default per-fetch jitter window in milliseconds. */
+const DEFAULT_FETCH_JITTER_MS = 300;
+/** Fallback back-off when a 429/503 has no Retry-After header. */
+const DEFAULT_RATE_LIMIT_BACKOFF_MS = 60 * 60 * 1000; // 1 hour
+
+/**
+ * Parse an HTTP `Retry-After` header value into an absolute Date. Per
+ * RFC 9110 the value is either a non-negative decimal integer of seconds
+ * to wait or an HTTP-date. Returns null when the value can't be parsed.
+ */
+export function parseRetryAfter(value: string | undefined): Date | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  // Seconds-from-now form — must be a non-negative integer per RFC 9110.
+  // Match the integer shape first so values like "-10" don't accidentally
+  // fall through to date parsing (where `new Date("-10")` returns a
+  // year-2001 date and would otherwise produce a stale back-off).
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isFinite(seconds) ? new Date(Date.now() + seconds * 1000) : null;
+  }
+  // Reject any other integer-shaped values (e.g. "-10", "+10") rather
+  // than treating them as HTTP-dates.
+  if (/^[+-]?\d+$/.test(trimmed)) return null;
+  // HTTP-date form
+  const date = new Date(trimmed);
+  if (!Number.isNaN(date.getTime())) return date;
+  return null;
+}
+
 // ===== INTERNAL TYPES =====
 
 interface CachedList {
@@ -90,6 +180,11 @@ interface CachedList {
   lineCount: number;
   commentCount: number;
   errorMessage?: string;
+  /** HTTP validator headers from the last successful fetch; re-sent on the
+   *  next refresh as `If-None-Match` / `If-Modified-Since` so upstream can
+   *  return `304 Not Modified` when the list hasn't changed. */
+  etag?: string;
+  lastModified?: string;
 }
 
 interface CachedRegexList {
@@ -101,6 +196,33 @@ interface CachedRegexList {
   lineCount: number;
   commentCount: number;
   errorMessage?: string;
+  etag?: string;
+  lastModified?: string;
+}
+
+/** Result of a single (deduplicated) HTTP fetch for a domain list URL. */
+interface DomainFetchResult {
+  notModified: boolean;
+  parsed?: {
+    domains: Set<string>;
+    lineCount: number;
+    commentCount: number;
+  };
+  etag?: string;
+  lastModified?: string;
+}
+
+/** Result of a single (deduplicated) HTTP fetch for a regex list URL. */
+interface RegexFetchResult {
+  notModified: boolean;
+  parsed?: {
+    patterns: RegExp[];
+    rawPatterns: string[];
+    lineCount: number;
+    commentCount: number;
+  };
+  etag?: string;
+  lastModified?: string;
 }
 
 @Injectable()
@@ -112,6 +234,25 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
   private readonly refreshTimers = new Map<string, NodeJS.Timeout>(); // nodeId -> timer
   private readonly lastRefreshTimes = new Map<string, Date>(); // nodeId -> last refresh timestamp
   private readonly configHashes = new Map<string, string>(); // nodeId -> config hash (to detect changes)
+  // In-flight request coalescing: when the same URL is requested from
+  // multiple nodes (or concurrent code paths) at the same time, dedupe to a
+  // single HTTP fetch. Eliminates the N-nodes-same-URL traffic burst that
+  // can trip per-IP rate limits at upstream (e.g. Cloudflare in front of
+  // oisd.nl). Keyed by URL hash, not nodeId — the upstream content is
+  // identical regardless of which node is asking.
+  private readonly inFlightDomainFetches = new Map<
+    string,
+    Promise<DomainFetchResult>
+  >();
+  private readonly inFlightRegexFetches = new Map<
+    string,
+    Promise<RegexFetchResult>
+  >();
+  // Per-URL back-off timestamps from upstream 429/503 responses. While the
+  // back-off is active we skip the HTTP fetch entirely (callers fall back to
+  // cached content via their existing catch path). Cleared when the deadline
+  // passes or when a subsequent fetch succeeds.
+  private readonly rateLimitedUntil = new Map<string, Date>();
   private initializationTimer?: NodeJS.Timeout; // deferred startup timer
 
   private readonly defaultAuthMode: "session" | "background" = "session";
@@ -284,6 +425,8 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
                 lineCount: cached.lineCount,
                 commentCount: cached.commentCount,
                 errorMessage: cached.errorMessage,
+                etag: cached.etag,
+                lastModified: cached.lastModified,
               });
 
               totalLoaded++;
@@ -314,6 +457,8 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
                 lineCount: cached.lineCount,
                 commentCount: cached.commentCount,
                 errorMessage: cached.errorMessage,
+                etag: cached.etag,
+                lastModified: cached.lastModified,
               });
 
               totalLoaded++;
@@ -1474,7 +1619,182 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     nodeId: string,
     urls: string[],
   ): Promise<CachedList[]> {
-    return Promise.all(urls.map((url) => this.getOrFetchList(nodeId, url)));
+    return runWithConcurrencyLimit(
+      urls,
+      (url) => this.getOrFetchList(nodeId, url),
+      DEFAULT_FETCH_CONCURRENCY,
+      DEFAULT_FETCH_JITTER_MS,
+    );
+  }
+
+  /**
+   * Coalesce concurrent HTTP fetches for the same URL into a single
+   * in-flight request. When two nodes (or two code paths on the same node)
+   * ask for the same URL at the same time, only one network request goes
+   * out — both callers await the same Promise and update their per-node
+   * caches from the shared result.
+   *
+   * The conditional headers from the *initiating* caller's cached entry
+   * are used. In steady state all nodes converge on the same validators,
+   * so this is correct; on cold start no validators are sent and the
+   * unconditional GET serves all callers.
+   */
+  private async fetchDomainListOnce(
+    url: string,
+    hash: string,
+    cached: CachedList | undefined,
+  ): Promise<DomainFetchResult> {
+    this.enforceRateLimitBackoff(url, hash);
+    const inFlight = this.inFlightDomainFetches.get(hash);
+    if (inFlight) return inFlight;
+    const promise = this.executeDomainFetch(url, hash, cached).finally(() => {
+      this.inFlightDomainFetches.delete(hash);
+    });
+    this.inFlightDomainFetches.set(hash, promise);
+    return promise;
+  }
+
+  private async executeDomainFetch(
+    url: string,
+    hash: string,
+    cached: CachedList | undefined,
+  ): Promise<DomainFetchResult> {
+    const conditionalHeaders = buildConditionalHeaders(cached);
+    const response = await firstValueFrom(
+      this.httpService.get(url, {
+        timeout: 30000,
+        responseType: "text",
+        headers: conditionalHeaders,
+        validateStatus: (status) =>
+          status === 200 || status === 304 || status === 429 || status === 503,
+      }),
+    );
+    if (response.status === 429 || response.status === 503) {
+      this.recordRateLimit(url, hash, response.status, response.headers);
+      throw new Error(
+        `Upstream rate limit (HTTP ${response.status}) for ${url}`,
+      );
+    }
+    if (response.status === 304) {
+      this.logger.log(`Blocklist unchanged at ${url} (304 Not Modified)`);
+      // Success — clear any stale back-off from a previous failed attempt
+      this.rateLimitedUntil.delete(hash);
+      return { notModified: true };
+    }
+    const content = response.data as string;
+    const { domains, lineCount, commentCount } = this.parseDomains(content);
+    this.rateLimitedUntil.delete(hash);
+    return {
+      notModified: false,
+      parsed: { domains, lineCount, commentCount },
+      etag: response.headers?.["etag"] as string | undefined,
+      lastModified: response.headers?.["last-modified"] as string | undefined,
+    };
+  }
+
+  private async fetchRegexListOnce(
+    url: string,
+    hash: string,
+    cached: CachedRegexList | undefined,
+  ): Promise<RegexFetchResult> {
+    this.enforceRateLimitBackoff(url, hash);
+    const inFlight = this.inFlightRegexFetches.get(hash);
+    if (inFlight) return inFlight;
+    const promise = this.executeRegexFetch(url, hash, cached).finally(() => {
+      this.inFlightRegexFetches.delete(hash);
+    });
+    this.inFlightRegexFetches.set(hash, promise);
+    return promise;
+  }
+
+  private async executeRegexFetch(
+    url: string,
+    hash: string,
+    cached: CachedRegexList | undefined,
+  ): Promise<RegexFetchResult> {
+    const conditionalHeaders = buildConditionalHeaders(cached);
+    const response = await firstValueFrom(
+      this.httpService.get(url, {
+        timeout: 30000,
+        responseType: "text",
+        headers: conditionalHeaders,
+        validateStatus: (status) =>
+          status === 200 || status === 304 || status === 429 || status === 503,
+      }),
+    );
+    if (response.status === 429 || response.status === 503) {
+      this.recordRateLimit(url, hash, response.status, response.headers);
+      throw new Error(
+        `Upstream rate limit (HTTP ${response.status}) for ${url}`,
+      );
+    }
+    if (response.status === 304) {
+      this.logger.log(`Regex blocklist unchanged at ${url} (304 Not Modified)`);
+      this.rateLimitedUntil.delete(hash);
+      return { notModified: true };
+    }
+    const content = response.data as string;
+    const { patterns, rawPatterns, lineCount, commentCount } =
+      this.parseRegexPatterns(content);
+    this.rateLimitedUntil.delete(hash);
+    return {
+      notModified: false,
+      parsed: { patterns, rawPatterns, lineCount, commentCount },
+      etag: response.headers?.["etag"] as string | undefined,
+      lastModified: response.headers?.["last-modified"] as string | undefined,
+    };
+  }
+
+  /**
+   * Throw if a previously-observed Retry-After back-off is still active for
+   * this URL. The caller's existing catch path then returns the cached entry
+   * or an error stub — same as any other transient fetch failure.
+   */
+  private enforceRateLimitBackoff(url: string, hash: string): void {
+    const backoffUntil = this.rateLimitedUntil.get(hash);
+    if (!backoffUntil) return;
+    const now = Date.now();
+    if (backoffUntil.getTime() <= now) {
+      // Back-off expired — clear and proceed
+      this.rateLimitedUntil.delete(hash);
+      return;
+    }
+    const secondsLeft = Math.ceil((backoffUntil.getTime() - now) / 1000);
+    this.logger.warn(
+      `Skipping fetch for ${url}; upstream back-off active for ${secondsLeft}s more (until ${backoffUntil.toISOString()})`,
+    );
+    throw new Error(
+      `Rate-limit back-off active for ${url} (${secondsLeft}s remaining)`,
+    );
+  }
+
+  /**
+   * Record an upstream rate-limit response. Reads Retry-After when present,
+   * falls back to a 1-hour back-off otherwise. Logged at WARN so operators
+   * can see the back-off engaging — same severity as the other transient
+   * fetch failures in this service.
+   */
+  private recordRateLimit(
+    url: string,
+    hash: string,
+    status: number,
+    headers: Record<string, unknown> | undefined,
+  ): void {
+    const retryAfterHeader = headers?.["retry-after"] as string | undefined;
+    const parsed = parseRetryAfter(retryAfterHeader);
+    const backoffUntil =
+      parsed ?? new Date(Date.now() + DEFAULT_RATE_LIMIT_BACKOFF_MS);
+    this.rateLimitedUntil.set(hash, backoffUntil);
+    const secondsLeft = Math.max(
+      1,
+      Math.ceil((backoffUntil.getTime() - Date.now()) / 1000),
+    );
+    this.logger.warn(
+      `Upstream HTTP ${status} for ${url}; backing off ${secondsLeft}s` +
+        (parsed
+          ? ` per Retry-After header (until ${backoffUntil.toISOString()})`
+          : ` (no Retry-After header; using default ${DEFAULT_RATE_LIMIT_BACKOFF_MS / 1000}s)`),
+    );
   }
 
   private async getOrFetchList(
@@ -1498,12 +1818,50 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
     this.logger.log(`Fetching blocklist from ${url}`);
     try {
-      const response = await firstValueFrom(
-        this.httpService.get(url, { timeout: 30000, responseType: "text" }),
-      );
+      const result = await this.fetchDomainListOnce(url, hash, cached);
 
-      const content = response.data as string;
-      const { domains, lineCount, commentCount } = this.parseDomains(content);
+      // 304 Not Modified: upstream confirms the cached content is current.
+      // Refresh fetchedAt (so the next interval check starts from now) and
+      // persist the new timestamp; data + validators stay the same.
+      if (result.notModified && cached) {
+        const refreshed: CachedList = { ...cached, fetchedAt: new Date() };
+        nodeCache.set(hash, refreshed);
+        void this.persistenceService
+          .saveCache(
+            nodeId,
+            url,
+            hash,
+            Array.from(cached.domains),
+            null,
+            cached.lineCount,
+            cached.commentCount,
+            cached.etag,
+            cached.lastModified,
+          )
+          .catch((err) => {
+            this.logger.error(`Failed to persist 304 refresh for ${url}:`, err);
+          });
+        return refreshed;
+      }
+
+      // Defensive: 304 came back but THIS node had no cached entry to
+      // refresh (e.g. another node initiated the conditional GET with its
+      // validators, but ours was empty). Treat as a cache miss and fall
+      // through to re-fetch unconditionally on the next tick. Returning a
+      // stub here is preferable to throwing — the rest of the apply flow
+      // tolerates empty cached entries.
+      if (result.notModified) {
+        return {
+          url,
+          hash,
+          domains: new Set(),
+          fetchedAt: new Date(0),
+          lineCount: 0,
+          commentCount: 0,
+        };
+      }
+
+      const { domains, lineCount, commentCount } = result.parsed!;
 
       const cachedList: CachedList = {
         url,
@@ -1512,6 +1870,8 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
         fetchedAt: new Date(),
         lineCount,
         commentCount,
+        etag: result.etag,
+        lastModified: result.lastModified,
       };
 
       nodeCache.set(hash, cachedList);
@@ -1529,8 +1889,8 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
           null, // Not a regex list
           lineCount,
           commentCount,
-          response.headers?.["etag"] as string | undefined,
-          response.headers?.["last-modified"] as string | undefined,
+          result.etag,
+          result.lastModified,
         )
         .catch((err) => {
           this.logger.error(`Failed to persist cache for ${url}:`, err);
@@ -1586,8 +1946,11 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     nodeId: string,
     urls: string[],
   ): Promise<CachedRegexList[]> {
-    return Promise.all(
-      urls.map((url) => this.getOrFetchRegexList(nodeId, url)),
+    return runWithConcurrencyLimit(
+      urls,
+      (url) => this.getOrFetchRegexList(nodeId, url),
+      DEFAULT_FETCH_CONCURRENCY,
+      DEFAULT_FETCH_JITTER_MS,
     );
   }
 
@@ -1616,13 +1979,47 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
     this.logger.log(`Fetching regex blocklist from ${url}`);
     try {
-      const response = await firstValueFrom(
-        this.httpService.get(url, { timeout: 30000, responseType: "text" }),
-      );
+      const result = await this.fetchRegexListOnce(url, hash, cached);
 
-      const content = response.data as string;
-      const { patterns, rawPatterns, lineCount, commentCount } =
-        this.parseRegexPatterns(content);
+      if (result.notModified && cached) {
+        const refreshed: CachedRegexList = { ...cached, fetchedAt: new Date() };
+        nodeCache.set(hash, refreshed);
+        void this.persistenceService
+          .saveCache(
+            nodeId,
+            url,
+            hash,
+            null,
+            cached.rawPatterns,
+            cached.lineCount,
+            cached.commentCount,
+            cached.etag,
+            cached.lastModified,
+          )
+          .catch((err) => {
+            this.logger.error(
+              `Failed to persist 304 refresh for regex ${url}:`,
+              err,
+            );
+          });
+        return refreshed;
+      }
+
+      if (result.notModified) {
+        // Defensive: 304 came back but this node had no cached entry to
+        // refresh. Return a stub; next tick will retry without validators.
+        return {
+          url,
+          hash,
+          patterns: [],
+          rawPatterns: [],
+          fetchedAt: new Date(0),
+          lineCount: 0,
+          commentCount: 0,
+        };
+      }
+
+      const { patterns, rawPatterns, lineCount, commentCount } = result.parsed!;
 
       const cachedList: CachedRegexList = {
         url,
@@ -1632,6 +2029,8 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
         fetchedAt: new Date(),
         lineCount,
         commentCount,
+        etag: result.etag,
+        lastModified: result.lastModified,
       };
 
       nodeCache.set(hash, cachedList);
@@ -1649,8 +2048,8 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
           rawPatterns,
           lineCount,
           commentCount,
-          response.headers?.["etag"] as string | undefined,
-          response.headers?.["last-modified"] as string | undefined,
+          result.etag,
+          result.lastModified,
         )
         .catch((err) => {
           this.logger.error(`Failed to persist regex cache for ${url}:`, err);
