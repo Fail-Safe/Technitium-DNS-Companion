@@ -9,6 +9,41 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.6.6] - 2026-05-25
+
+### Added
+
+- **Notification email templating for DNS Schedules.** Both the (new) subject template field and the existing `notifyMessage` body now support `{token}` substitution. Tokens are documented inline in the form via a chip palette that supports drag-and-drop into either field and click-to-insert at the last-focused field's cursor. A live preview pane below the chips renders against sample values derived from the current draft so the operator can see exactly how the email will look before saving.
+- **15 substitution tokens**, split between static (snapshotted from the schedule at sync time) and dynamic (rendered at email send): `{scheduleName}`, `{scheduleId}`, `{startTime}`/`{startTime12}`, `{endTime}`/`{endTime12}`, `{timezone}`, `{daysOfWeek}`, `{action}`, `{groups}`, `{matchedCount}`, `{latestMatchAt}`, `{domain}`, `{rootDomain}`, `{client}`, `{nodeId}`. The `*12` time variants render 12-hour clock with AM/PM (e.g. "10:00 PM") alongside the 24-hour `{startTime}`/`{endTime}`. Unknown tokens like `{statTime}` are left literal in the delivered email so typos are visible.
+- **`{rootDomain}` token** computes the registrable domain via the Public Suffix List (`tldts ^7.1.2`). For an alert on `rr1---sn-aigl6nsd.googlevideo.com`, the substitution renders `googlevideo.com`; for `news.bbc.co.uk` it correctly preserves `bbc.co.uk` since `co.uk` is a public suffix. Cleans up long, machine-generated subdomains in notification copy without losing the registrable identity.
+
+### Fixed
+
+- **DNS Schedules orphaned entries when the schedule's domain source changed mid-window.** Swapping a schedule's Domain Group (e.g. YouTube → Spotify) on the same target AB group caused the previously-written YouTube entries to remain in `Parents.blocked` indefinitely — the remove path re-resolved the schedule's *current* definition instead of cleaning up what was actually written. Fixed via a new `dns_schedule_applied_entries` table that records every `(schedule, node, AB group, action, domain)` tuple at apply time. The apply pass is now diff-driven: prev-tracked vs now-resolved computes additions and removals atomically, then commits tracking after a successful `setConfig`. Handles all four trigger vectors (domain-group swap, target-AB-group swap, action flip, manual entries edit) cleanly. Pre-existing orphans from earlier versions need to be removed manually via the Technitium UI.
+- **Silent notification suppression for schedules targeting large Domain Groups.** The auto-generated regex pattern on the linked Log Alert rule (one alternation per resolved domain) easily exceeded the 300-character cap for a Domain Group like YouTube, so `syncLinkedAlertRule` failed and notifications never fired during the schedule's active window. The cap is now 8000 chars; for genuinely huge groups (>~300 domains, regex > 7500 chars) `buildAlertDomainPattern` falls back to wildcard `*` and a backend WARN logs that the alert scope has widened to "any blocked query in the target group during the active window." Both behaviors are correct since the linked rule is also gated by group selector + active-window enable/disable.
+- **Email header injection defense-in-depth.** Internal CR/LF/tab characters are now stripped from schedule names and notification subject templates at the API input boundary. Nodemailer 8.x rejects CRLF in subject headers (silent notification loss); sanitizing here keeps delivery working regardless of transport behavior.
+- **Migration-window cleanup gap.** Pre-tracking-table schedules that hit their first window-close after upgrade fall back to the legacy resolve-from-schedule-definition cleanup instead of silently returning. Logs a one-time `LOG` line per (schedule, node) when the legacy path engages.
+
+### Changed
+
+- **Per-tick tracking write churn eliminated.** `setAppliedEntries` now only fires when the desired set actually differs from prev (toRemove/toAdd non-empty OR size mismatch). Steady-state schedules no longer run a `DELETE` + N×`INSERT` replace cycle on every 60s tick.
+- **Docker base image** bumped from `node:22-alpine3.21` to `node:24-alpine3.22`. Aligns the production multi-stage build with the recent CI bump to Node 24-compatible action majors. Alpine 3.22 (May 2025) brings OpenSSL 3.3 and musl 1.2.5 with security fixes since 3.21. The `node` user (uid 1000) is unchanged across Node majors, so existing `--chown=node:node` directives continue to work.
+- **`AppInput` / `AppTextarea` wrapped in `forwardRef`.** Required for the new chip-cursor-insertion logic in `AutomationPage.tsx`. Audited all consumers via grep — no pre-existing call sites were passing `ref`, so the migration has zero blast radius elsewhere.
+
+### Security
+
+- **5 transitive vulnerabilities resolved** via `npm audit fix` (lockfile-only, no `package.json` changes):
+  - `@babel/plugin-transform-modules-systemjs` 7.29.0 → 7.29.4 (high, CVSS 8.2 — arbitrary code generation on malicious input, GHSA-fv7c-fp4j-7gwp)
+  - `fast-uri` 3.1.0 → 3.1.2 (high — path traversal via percent-encoded dot segments, GHSA-q3j6-qgpj-74h6 and GHSA-v39h-62p7-jpjc)
+  - `qs` 6.15.1 → 6.15.2 (moderate — `qs.stringify` DoS on null entries in comma-format arrays with `encodeValuesOnly`, GHSA-q8mj-m7cp-5q26)
+  - `ws` 8.20.0 → 8.21.0 (moderate — uninitialized memory disclosure, GHSA-58qx-3vcg-4xpx)
+  - `brace-expansion` 5.0.5 → 5.0.6 in 4 locations: eslint, glob, test-exclude, workbox-build (moderate — numeric range DoS bypass, GHSA-jxxr-4gwj-5jf2)
+
+### Testing
+
+- **27 new backend tests** (303 total, up from 273): orphan-prevention across all four trigger vectors, migration safety for empty-tracking apply and remove, pattern-length handling including wildcard fallback, `renderTemplate` substitution semantics, `extractDynamicTokensFromSample` parser (including sentinel-value filtering), `computeRootDomain` PSL coverage (multi-part ICANN suffixes, private-suffix collapse, IP/single-label fallback), `notifySubjectTemplate` parseDraft handling (trim, normalize, built-in-mode rejection).
+- **`extractDynamicTokensFromSample`** uses strict `!== EXPECTED_SAMPLE_FIELD_COUNT` instead of `< 5` so the wrong values can't silently end up in alert emails if `formatSampleLine`'s schema ever drifts.
+
 ## [1.6.5] - 2026-05-08
 
 ### Fixed
