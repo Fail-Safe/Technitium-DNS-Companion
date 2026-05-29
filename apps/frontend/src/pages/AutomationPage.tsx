@@ -757,7 +757,15 @@ function ScheduleForm({
   knownEmails,
   tokenStatus,
 }: ScheduleFormProps) {
-  const domainEntriesText = draft.domainEntries.join("\n");
+  // Both textareas keep their raw text in local state so blank lines (the
+  // empty trailing line that gets created the moment the user presses Enter)
+  // survive while typing. If we derived these from the committed draft
+  // arrays, the array→string round-trip would drop the trailing empty line
+  // every keystroke and the cursor would snap back to the previous row,
+  // preventing multi-line input. Parsing + commit happens on blur.
+  const [domainEntriesText, setDomainEntriesText] = useState(() =>
+    draft.domainEntries.join("\n"),
+  );
   const [emailText, setEmailText] = useState(() => draft.notifyEmails.join("\n"));
 
   // Drag-and-drop / click-to-insert state for template token chips.
@@ -841,11 +849,12 @@ function ScheduleForm({
     insertTokenIntoField("body", token, e.currentTarget);
   };
 
-  const handleDomainEntriesChange = (text: string) => {
+  const commitDomainEntriesText = (text: string) => {
     const entries = text
-      .split("\n")
+      .split(/[\n,]/)
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
+    setDomainEntriesText(entries.join("\n"));
     onChange({ ...draft, domainEntries: entries });
   };
 
@@ -1058,7 +1067,8 @@ function ScheduleForm({
           </label>
           <AppTextarea
             value={domainEntriesText}
-            onChange={(e) => handleDomainEntriesChange(e.target.value)}
+            onChange={(e) => setDomainEntriesText(e.target.value)}
+            onBlur={() => commitDomainEntriesText(domainEntriesText)}
             placeholder={"social.example.com\ngaming.example.com"}
             rows={4}
             disabled={submitting}

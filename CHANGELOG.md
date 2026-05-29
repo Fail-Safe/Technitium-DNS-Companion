@@ -9,6 +9,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.6.8] - 2026-05-29
+
+### Fixed
+
+- **DNS Schedules: cannot enter multiple domain entries** (closes #69). The "Domain entries" textarea on the DNS Schedules form derived its `value` prop from `draft.domainEntries.join("\n")` while the onChange handler stripped empty lines (`.filter((line) => line.length > 0)`) before round-tripping back through the same join. The result: the moment a user pressed Enter to start a new line, the empty trailing line got filtered out, the array→string re-render dropped it, and the cursor snapped back to the end of the previous entry — making multi-line input impossible. Fixed by mirroring the existing pattern already used by the email-recipients textarea: keep the raw textarea text in local `useState`, parse + commit to the parent draft on blur. Pasted comma-separated lists are now accepted too (same split regex as emails — `/[\n,]/`). Reported by @haroldm against v1.6.5; the regression actually pre-dates v1.6.5 and existed since the schedule UI was introduced in v1.6.0.
+
 ## [1.6.7] - 2026-05-29
 
 ### Security
