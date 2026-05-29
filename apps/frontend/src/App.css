@@ -1151,6 +1151,109 @@ html {
   cursor: not-allowed;
 }
 
+.app-header__pause-wrapper {
+  position: relative;
+}
+
+.app-header__pause {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 36px;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-header__pause:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.app-header__pause:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.app-header__pause--active {
+  color: var(--color-success, #16a34a);
+  border-color: color-mix(in srgb, var(--color-success, #16a34a) 35%, transparent);
+  background: color-mix(in srgb, var(--color-success, #16a34a) 10%, transparent);
+}
+
+.app-header__pause--active:hover:not(:disabled) {
+  border-color: var(--color-success, #16a34a);
+  background: color-mix(in srgb, var(--color-success, #16a34a) 18%, transparent);
+}
+
+.app-header__pause--paused {
+  color: var(--color-warning, #d97706);
+  border-color: color-mix(in srgb, var(--color-warning, #d97706) 50%, transparent);
+  background: color-mix(in srgb, var(--color-warning, #d97706) 14%, transparent);
+  animation: pause-blocking-pulse 2.4s ease-in-out infinite;
+}
+
+.app-header__pause--paused:hover:not(:disabled) {
+  border-color: var(--color-warning, #d97706);
+  background: color-mix(in srgb, var(--color-warning, #d97706) 22%, transparent);
+}
+
+@keyframes pause-blocking-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-warning, #d97706) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-warning, #d97706) 0%, transparent);
+  }
+}
+
+.app-header__pause-label {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.app-header__pause-caret {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  transition: transform 0.2s ease;
+}
+
+.app-header__pause--open .app-header__pause-caret {
+  transform: rotate(180deg);
+}
+
+.app-header__pause-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 0.4rem;
+  box-shadow: var(--shadow-lg);
+  z-index: 130;
+}
+
+@media (max-width: 640px) {
+  .app-header__pause-label {
+    display: none;
+  }
+  .app-header__pause {
+    padding: 0 0.6rem;
+  }
+}
+
 .app-header__mobile-toggle {
   display: none;
   align-items: center;

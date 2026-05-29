@@ -23,6 +23,7 @@ import { useTheme } from "../../context/theme-context";
 import { useAuth } from "../../context/useAuth";
 import { useOptionalTechnitiumState } from "../../context/useTechnitiumState";
 import { AboutModal } from "../common/AboutModal";
+import { PauseBlockingButton } from "./PauseBlockingButton";
 
 export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -188,6 +189,7 @@ export function Header() {
         ))}
       </nav>
       <div className="app-header__controls">
+        <PauseBlockingButton />
         <div className="app-header__actions" ref={actionsMenuRef}>
           <button
             className="app-header__actions-toggle"
