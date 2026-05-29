@@ -9,6 +9,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.6.7] - 2026-05-29
+
+### Security
+
+- **AuthSessionService now enforces absolute + idle session expiration.** Previously, server-side session entries in the in-memory `Map` had no TTL — they remained valid for the lifetime of the Node process, even after the 8-hour browser cookie expired or the user logged out. A captured session ID (via shared workstation, server-side log leak, future-XSS chain, etc.) could be replayed indefinitely until container restart. `AuthSessionService.get()` now lazily evicts on read, and a periodic sweep timer (5 min interval) bounds memory under steady-state. Defaults: 24h absolute lifetime + 8h idle (matches the cookie `maxAge`). Configurable via `AUTH_SESSION_MAX_AGE_HOURS` and `AUTH_SESSION_IDLE_HOURS`. `onModuleDestroy` stops the timer on shutdown. Identified during the post-v1.6.6 codebase-wide security audit. 14 new unit tests cover lazy eviction, sweep behavior, env overrides, and the rolling-activity case.
+
 ## [1.6.6] - 2026-05-25
 
 ### Added
