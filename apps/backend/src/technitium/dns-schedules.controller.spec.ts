@@ -462,4 +462,57 @@ describe("DnsSchedulesController — parseDraft", () => {
       expect(result.notifyDebounceSeconds).toBe(0);
     });
   });
+
+  describe("notifySubjectTemplate field", () => {
+    function validBody() {
+      return {
+        name: "Schedule",
+        advancedBlockingGroupNames: ["Kids"],
+        action: "block",
+        domainEntries: ["example.com"],
+        startTime: "22:00",
+        endTime: "06:00",
+        targetType: "advanced-blocking",
+      };
+    }
+
+    it("is undefined when omitted", () => {
+      const result = parseDraft(validBody());
+      expect(result.notifySubjectTemplate).toBeUndefined();
+    });
+
+    it("trims whitespace", () => {
+      const result = parseDraft({
+        ...validBody(),
+        notifySubjectTemplate: "  [Bedtime] {scheduleName}  ",
+      });
+      expect(result.notifySubjectTemplate).toBe("[Bedtime] {scheduleName}");
+    });
+
+    it("normalizes empty string to undefined", () => {
+      const result = parseDraft({
+        ...validBody(),
+        notifySubjectTemplate: "   ",
+      });
+      expect(result.notifySubjectTemplate).toBeUndefined();
+    });
+
+    it("is dropped for built-in target mode", () => {
+      const result = parseDraft({
+        ...validBody(),
+        targetType: "built-in",
+        advancedBlockingGroupNames: [],
+        notifySubjectTemplate: "{scheduleName}",
+      });
+      expect(result.notifySubjectTemplate).toBeUndefined();
+    });
+
+    it("preserves token syntax literally (substitution happens at send time)", () => {
+      const result = parseDraft({
+        ...validBody(),
+        notifySubjectTemplate: "Alert: {domain} for {client}",
+      });
+      expect(result.notifySubjectTemplate).toBe("Alert: {domain} for {client}");
+    });
+  });
 });

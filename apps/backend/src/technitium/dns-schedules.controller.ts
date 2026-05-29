@@ -27,6 +27,49 @@ import { TechnitiumService } from "./technitium.service";
 
 const ACTIONS = ["block", "allow"] as const;
 
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+/**
+ * Replace CR/LF/tab with single spaces and collapse internal whitespace.
+ * Applied to single-line fields (name, subject template) and to free-text
+ * fields that flow into email headers via token substitution. Defense in
+ * depth: nodemailer 8.x rejects CRLF in headers and would throw rather than
+ * inject, but rejecting silently aborts notification delivery. Stripping
+ * here keeps both delivery and headers safe.
+ */
+function stripNewlines(value: string): string {
+  return value.replace(/[\r\n\t]+/g, " ").replace(/ {2,}/g, " ").trim();
+}
+
+function formatDaysOfWeekForTemplate(days: number[]): string {
+  if (!Array.isArray(days) || days.length === 0 || days.length === 7) {
+    return "every day";
+  }
+  return [...days]
+    .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+    .sort((a, b) => a - b)
+    .map((d) => DAY_NAMES[d])
+    .join(", ");
+}
+
+/**
+ * Convert a 24-hour HH:MM string into a 12-hour h:MM AM/PM string.
+ * Returns the input unchanged on parse failure so a malformed value never
+ * substitutes garbage into a notification.
+ */
+function to12Hour(hhmm: string): string {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm?.trim() ?? "");
+  if (!match) return hhmm;
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+    return hhmm;
+  }
+  const period = h >= 12 ? "PM" : "AM";
+  const hr12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hr12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
 @Controller("nodes/dns-schedules")
 export class DnsSchedulesController {
   private readonly logger = new Logger(DnsSchedulesController.name);
@@ -182,7 +225,7 @@ export class DnsSchedulesController {
     const input = body as Record<string, unknown>;
 
     const name =
-      typeof input.name === "string" ? input.name.trim() : undefined;
+      typeof input.name === "string" ? stripNewlines(input.name) : undefined;
     if (!name) {
       throw new BadRequestException("name is required.");
     }
@@ -270,6 +313,13 @@ export class DnsSchedulesController {
         ? Math.round(notifyDebounceSecondsRaw)
         : 300;
 
+    // notifyMessage keeps internal newlines (it's body text and can be
+    // multi-line) but token substitutions from this value flow into the
+    // body only — never into headers — so CRLF in the message itself is
+    // safe. We DO sanitize the values that feed token substitution at
+    // their respective input boundaries (name above, subject template
+    // below) so the rendered subject can never carry attacker-controlled
+    // CRLF regardless of what notifyMessage contains.
     const notifyMessageRaw = typeof input.notifyMessage === "string"
       ? input.notifyMessage.trim()
       : undefined;
@@ -279,6 +329,17 @@ export class DnsSchedulesController {
 
     const notifyMessageOnly =
       targetType !== "built-in" && !!notifyMessage && input.notifyMessageOnly === true;
+
+    // Subject template flows into an email header at send time; CRLF here
+    // would either be rejected by nodemailer (silent notification loss) or
+    // injected as additional headers in non-sanitizing transports. Strip
+    // unconditionally; the field is single-line by intent anyway.
+    const notifySubjectTemplateRaw = typeof input.notifySubjectTemplate === "string"
+      ? stripNewlines(input.notifySubjectTemplate)
+      : undefined;
+    const notifySubjectTemplate = notifySubjectTemplateRaw && targetType !== "built-in"
+      ? notifySubjectTemplateRaw
+      : undefined;
 
     return {
       name,
@@ -298,6 +359,7 @@ export class DnsSchedulesController {
       notifyDebounceSeconds,
       notifyMessage,
       notifyMessageOnly,
+      notifySubjectTemplate,
     };
   }
 
@@ -334,6 +396,8 @@ export class DnsSchedulesController {
         debounceSeconds: schedule.notifyDebounceSeconds,
         emailRecipients: schedule.notifyEmails,
         notifyMessageOnly: schedule.notifyMessageOnly,
+        notifySubjectTemplate: schedule.notifySubjectTemplate,
+        templateContext: this.buildScheduleTemplateContext(schedule),
       };
 
       const existing = this.logAlertsRulesService
@@ -351,6 +415,28 @@ export class DnsSchedulesController {
           `${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  /**
+   * Snapshot of schedule-time facts denormalized onto the linked alert rule so
+   * the email service can substitute static tokens without reaching back into
+   * the schedules table. Re-written every sync.
+   */
+  private buildScheduleTemplateContext(
+    schedule: DnsSchedule,
+  ): Record<string, string> {
+    return {
+      scheduleId: schedule.id,
+      scheduleName: schedule.name,
+      startTime: schedule.startTime,
+      startTime12: to12Hour(schedule.startTime),
+      endTime: schedule.endTime,
+      endTime12: to12Hour(schedule.endTime),
+      timezone: schedule.timezone,
+      daysOfWeek: formatDaysOfWeekForTemplate(schedule.daysOfWeek),
+      action: schedule.action,
+      groups: schedule.advancedBlockingGroupNames.join(", "),
+    };
   }
 
   /**

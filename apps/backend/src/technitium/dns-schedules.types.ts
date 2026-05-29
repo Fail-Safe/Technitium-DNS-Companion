@@ -89,6 +89,23 @@ export interface DnsScheduleDraft {
    * Default false.
    */
   notifyMessageOnly?: boolean;
+  /**
+   * Optional subject-line template for alert emails. When empty/undefined, the
+   * default hardcoded subject is used. Both this and `notifyMessage` support
+   * `{token}` substitution at send time. Unknown tokens are left literal so
+   * typos surface in the delivered email.
+   *
+   * Supported tokens:
+   * - Static (snapshot at sync time): {scheduleName}, {scheduleId}, {startTime},
+   *   {startTime12}, {endTime}, {endTime12}, {timezone}, {daysOfWeek}, {action},
+   *   {groups}
+   * - Dynamic (per alert): {matchedCount}, {latestMatchAt}, {domain},
+   *   {rootDomain}, {client}, {nodeId}
+   *
+   * The `*12` variants render as 12-hour clock with AM/PM (e.g. "10:00 PM");
+   * the unsuffixed variants stay 24-hour (e.g. "22:00").
+   */
+  notifySubjectTemplate?: string;
 }
 
 export interface DnsSchedule extends DnsScheduleDraft {
@@ -167,5 +184,22 @@ export interface RunDnsScheduleEvaluatorResponse {
 export interface DnsScheduleStateEntry {
   scheduleId: string;
   nodeId: string;
+  appliedAt: string;
+}
+
+/**
+ * Row-level record of every (AB group, action, domain) tuple a schedule has
+ * written to a specific node. Drives reconciliation: on each apply, the
+ * evaluator diffs prev-tracked tuples vs. now-resolved tuples to compute
+ * what to add and what to remove. Without this, swapping a schedule's
+ * Domain Group / target AB group / action / explicit domain list would
+ * orphan the previously-written entries.
+ */
+export interface DnsScheduleAppliedEntry {
+  scheduleId: string;
+  nodeId: string;
+  advancedBlockingGroupName: string;
+  action: DnsScheduleAction;
+  domain: string;
   appliedAt: string;
 }

@@ -14,7 +14,7 @@ import {
   faTrash,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { AppInput, AppTextarea } from "../components/common/AppInput";
 import { ConfirmModal } from "../components/common/ConfirmModal";
 import { apiFetch, apiFetchStatus } from "../config";
@@ -61,6 +61,7 @@ const DEFAULT_DRAFT: DnsScheduleDraft = {
   notifyDebounceSeconds: 300,
   notifyMessage: undefined,
   notifyMessageOnly: undefined,
+  notifySubjectTemplate: undefined,
   daysOfWeek: [],
   startTime: "22:00",
   endTime: "06:00",
@@ -472,6 +473,261 @@ function TimeWindowArc({
   );
 }
 
+// ── Notification template preview ──────────────────────────────────────────
+
+/**
+ * Custom MIME type for template token drags. Distinct from `text/plain` so
+ * arbitrary text drops still behave normally — only chips dragged from the
+ * token palette match this type, which scopes our drop-handler logic.
+ */
+const TOKEN_MIME = "application/x-template-token";
+
+const TEMPLATE_TOKEN_DOCS: Array<{ token: string; description: string }> = [
+  { token: "{scheduleName}", description: "The schedule's display name" },
+  { token: "{scheduleId}", description: "Internal schedule UUID" },
+  { token: "{startTime}", description: 'Window start, 24-hour (e.g. "22:00")' },
+  {
+    token: "{startTime12}",
+    description: 'Window start, 12-hour (e.g. "10:00 PM")',
+  },
+  { token: "{endTime}", description: 'Window end, 24-hour (e.g. "06:00")' },
+  {
+    token: "{endTime12}",
+    description: 'Window end, 12-hour (e.g. "6:00 AM")',
+  },
+  { token: "{timezone}", description: "IANA timezone" },
+  {
+    token: "{daysOfWeek}",
+    description: 'Days when active (e.g. "Mon, Wed, Fri" or "every day")',
+  },
+  { token: "{action}", description: '"block" or "allow"' },
+  { token: "{groups}", description: "Comma-separated AB group names" },
+  {
+    token: "{matchedCount}",
+    description: "Number of matching log entries since last alert",
+  },
+  { token: "{latestMatchAt}", description: "ISO timestamp of most recent match" },
+  { token: "{domain}", description: "Domain from the first matching query" },
+  {
+    token: "{rootDomain}",
+    description:
+      'Registrable domain only (e.g. "googlevideo.com" for "rr1---x.googlevideo.com") — uses the Public Suffix List, so "bbc.co.uk" stays "bbc.co.uk"',
+  },
+  { token: "{client}", description: "Client (name or IP) from first match" },
+  { token: "{nodeId}", description: "DNS node where the match occurred" },
+];
+
+const DAY_NAMES_FRONTEND = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function to12HourFrontend(hhmm: string): string {
+  const m = (hhmm ?? "").trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return hhmm;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isInteger(h) || h < 0 || h > 23 || min < 0 || min > 59)
+    return hhmm;
+  const period = h >= 12 ? "PM" : "AM";
+  const hr12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hr12}:${String(min).padStart(2, "0")} ${period}`;
+}
+
+function previewContextFromDraft(
+  draft: DnsScheduleDraft,
+): Record<string, string> {
+  const days =
+    !draft.daysOfWeek || draft.daysOfWeek.length === 0 || draft.daysOfWeek.length === 7
+      ? "every day"
+      : [...draft.daysOfWeek]
+          .sort((a, b) => a - b)
+          .map((d) => DAY_NAMES_FRONTEND[d])
+          .join(", ");
+  return {
+    scheduleName: draft.name || "(unnamed schedule)",
+    scheduleId: "00000000-preview",
+    startTime: draft.startTime,
+    startTime12: to12HourFrontend(draft.startTime),
+    endTime: draft.endTime,
+    endTime12: to12HourFrontend(draft.endTime),
+    timezone: draft.timezone,
+    daysOfWeek: days,
+    action: draft.action,
+    groups: draft.advancedBlockingGroupNames.join(", ") || "(no groups)",
+    matchedCount: "3",
+    latestMatchAt: new Date().toISOString(),
+    domain: draft.domainEntries[0] ?? "example.com",
+    // The live preview uses sample values, which are typically already
+    // root-form (e.g. "example.com"). At send time the backend computes the
+    // real {rootDomain} via the Public Suffix List on the matched query.
+    rootDomain: draft.domainEntries[0] ?? "example.com",
+    client: "192.168.1.42",
+    nodeId: draft.nodeIds[0] ?? "node-1",
+  };
+}
+
+function renderTemplatePreview(
+  template: string,
+  context: Record<string, string>,
+): string {
+  return template.replace(/\{([A-Za-z0-9_]+)\}/g, (match, key: string) => {
+    return Object.prototype.hasOwnProperty.call(context, key)
+      ? context[key]
+      : match;
+  });
+}
+
+function TokenChip({
+  token,
+  description,
+  onChipClick,
+}: {
+  token: string;
+  description: string;
+  onChipClick: (token: string) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const handleDragStart = (e: DragEvent<HTMLSpanElement>) => {
+    e.dataTransfer.setData(TOKEN_MIME, token);
+    // text/plain fallback lets the chip be dragged into non-template inputs
+    // (e.g. an external editor) as a sensible default.
+    e.dataTransfer.setData("text/plain", token);
+    e.dataTransfer.effectAllowed = "copy";
+    setDragging(true);
+  };
+  return (
+    <span
+      draggable
+      onDragStart={handleDragStart}
+      onDragEnd={() => setDragging(false)}
+      onClick={() => onChipClick(token)}
+      title={`${description} — drag into a field, or click to insert at cursor`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "0.15rem 0.5rem",
+        margin: "0.15rem",
+        borderRadius: "999px",
+        background: dragging
+          ? "var(--color-accent, #4a90e2)"
+          : "var(--color-bg-subtle, #eef2f7)",
+        color: dragging ? "#fff" : "var(--color-fg, inherit)",
+        border: "1px solid var(--color-border, #d0d7de)",
+        fontFamily: "monospace",
+        fontSize: "0.8rem",
+        cursor: dragging ? "grabbing" : "grab",
+        userSelect: "none",
+        transition: "background 0.1s, transform 0.1s",
+        transform: dragging ? "scale(0.97)" : "none",
+      }}
+    >
+      {token}
+    </span>
+  );
+}
+
+function NotificationTemplatePreview({
+  draft,
+  onChipClick,
+}: {
+  draft: DnsScheduleDraft;
+  onChipClick: (token: string) => void;
+}) {
+  const context = previewContextFromDraft(draft);
+  const renderedSubject = draft.notifySubjectTemplate
+    ? renderTemplatePreview(draft.notifySubjectTemplate, context)
+    : null;
+  const renderedBody = draft.notifyMessage
+    ? renderTemplatePreview(draft.notifyMessage, context)
+    : null;
+
+  return (
+    <div style={{ marginTop: "0.5rem", fontSize: "0.85rem" }}>
+      <div style={{ marginBottom: "0.75rem" }}>
+        <div style={{ marginBottom: "0.35rem" }}>
+          <strong>Tokens</strong>
+          <span
+            style={{
+              marginLeft: "0.5rem",
+              color: "var(--color-fg-muted, #888)",
+              fontSize: "0.8rem",
+            }}
+          >
+            drag a chip into the subject/message above, or click to insert at
+            the cursor of the last-focused field
+          </span>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "0.1rem",
+          }}
+        >
+          {TEMPLATE_TOKEN_DOCS.map((doc) => (
+            <TokenChip
+              key={doc.token}
+              token={doc.token}
+              description={doc.description}
+              onChipClick={onChipClick}
+            />
+          ))}
+        </div>
+        <p
+          style={{
+            margin: "0.5rem 0 0",
+            color: "var(--color-fg-muted, #888)",
+            fontSize: "0.8rem",
+          }}
+        >
+          Hover a chip to see what it expands to. Unknown tokens like{" "}
+          <code>{"{statTime}"}</code> are left literal in the delivered email
+          so typos are visible.
+        </p>
+      </div>
+      {(renderedSubject || renderedBody) && (
+        <div
+          style={{
+            border: "1px solid var(--color-border, #ccc)",
+            borderRadius: "4px",
+            padding: "0.5rem 0.75rem",
+            background: "var(--color-bg-subtle, #f5f5f5)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "0.75rem",
+              color: "var(--color-fg-muted, #888)",
+              marginBottom: "0.25rem",
+            }}
+          >
+            Live preview (sample values)
+          </div>
+          {renderedSubject && (
+            <div style={{ marginBottom: renderedBody ? "0.5rem" : 0 }}>
+              <strong>Subject:</strong>{" "}
+              <span style={{ fontFamily: "monospace" }}>{renderedSubject}</span>
+            </div>
+          )}
+          {renderedBody && (
+            <div>
+              <strong>Body:</strong>
+              <pre
+                style={{
+                  margin: "0.25rem 0 0",
+                  whiteSpace: "pre-wrap",
+                  fontFamily: "monospace",
+                  fontSize: "0.85rem",
+                }}
+              >
+                {renderedBody}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ScheduleFormProps {
   draft: DnsScheduleDraft;
   onChange: (draft: DnsScheduleDraft) => void;
@@ -503,6 +759,87 @@ function ScheduleForm({
 }: ScheduleFormProps) {
   const domainEntriesText = draft.domainEntries.join("\n");
   const [emailText, setEmailText] = useState(() => draft.notifyEmails.join("\n"));
+
+  // Drag-and-drop / click-to-insert state for template token chips.
+  // We track which template field was most recently focused so a chip click
+  // (no drop position) inserts at that field's cursor instead of guessing.
+  const subjectInputRef = useRef<HTMLInputElement | null>(null);
+  const messageTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [lastFocusedTemplateField, setLastFocusedTemplateField] = useState<
+    "subject" | "body" | null
+  >(null);
+
+  const insertTokenIntoField = useCallback(
+    (field: "subject" | "body", token: string, dropTarget?: HTMLElement) => {
+      if (field === "subject") {
+        const el =
+          (dropTarget as HTMLInputElement | undefined) ??
+          subjectInputRef.current;
+        const current = draft.notifySubjectTemplate ?? "";
+        const start = el?.selectionStart ?? current.length;
+        const end = el?.selectionEnd ?? start;
+        const next = current.slice(0, start) + token + current.slice(end);
+        onChange({ ...draft, notifySubjectTemplate: next || undefined });
+        queueMicrotask(() => {
+          const node = subjectInputRef.current;
+          if (!node) return;
+          node.focus();
+          const pos = start + token.length;
+          node.setSelectionRange(pos, pos);
+        });
+      } else {
+        const el =
+          (dropTarget as HTMLTextAreaElement | undefined) ??
+          messageTextareaRef.current;
+        const current = draft.notifyMessage ?? "";
+        const start = el?.selectionStart ?? current.length;
+        const end = el?.selectionEnd ?? start;
+        const next = current.slice(0, start) + token + current.slice(end);
+        onChange({
+          ...draft,
+          notifyMessage: next || undefined,
+          notifyMessageOnly: next ? draft.notifyMessageOnly : false,
+        });
+        queueMicrotask(() => {
+          const node = messageTextareaRef.current;
+          if (!node) return;
+          node.focus();
+          const pos = start + token.length;
+          node.setSelectionRange(pos, pos);
+        });
+      }
+    },
+    [draft, onChange],
+  );
+
+  const handleChipClick = useCallback(
+    (token: string) => {
+      const target = lastFocusedTemplateField ?? "body";
+      insertTokenIntoField(target, token);
+    },
+    [insertTokenIntoField, lastFocusedTemplateField],
+  );
+
+  const handleTemplateFieldDragOver = (e: DragEvent) => {
+    if (e.dataTransfer.types.includes(TOKEN_MIME)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  const handleSubjectDrop = (e: DragEvent<HTMLInputElement>) => {
+    const token = e.dataTransfer.getData(TOKEN_MIME);
+    if (!token) return;
+    e.preventDefault();
+    insertTokenIntoField("subject", token, e.currentTarget);
+  };
+
+  const handleMessageDrop = (e: DragEvent<HTMLTextAreaElement>) => {
+    const token = e.dataTransfer.getData(TOKEN_MIME);
+    if (!token) return;
+    e.preventDefault();
+    insertTokenIntoField("body", token, e.currentTarget);
+  };
 
   const handleDomainEntriesChange = (text: string) => {
     const entries = text
@@ -934,14 +1271,45 @@ function ScheduleForm({
           </div>
         )}
 
+        {/* Custom email subject template */}
+        {draft.targetType !== "built-in" && draft.notifyEmails.length > 0 && (
+          <div className="log-alerts__form-field log-alerts__form-field--wide">
+            <label className="log-alerts__form-label">
+              Email subject template{" "}
+              <span className="log-alerts__form-hint">
+                (optional — supports {"{token}"} substitution)
+              </span>
+            </label>
+            <AppInput
+              ref={subjectInputRef}
+              value={draft.notifySubjectTemplate ?? ""}
+              onChange={(e) =>
+                onChange({
+                  ...draft,
+                  notifySubjectTemplate: e.target.value || undefined,
+                })
+              }
+              onFocus={() => setLastFocusedTemplateField("subject")}
+              onDragOver={handleTemplateFieldDragOver}
+              onDrop={handleSubjectDrop}
+              placeholder="[Bedtime] {scheduleName} alert: {domain} blocked for {client}"
+              disabled={submitting}
+              maxLength={200}
+            />
+          </div>
+        )}
+
         {/* Custom email message (only when emails are set and not built-in mode) */}
         {draft.targetType !== "built-in" && draft.notifyEmails.length > 0 && (
           <div className="log-alerts__form-field log-alerts__form-field--wide">
             <label className="log-alerts__form-label">
               Email message{" "}
-              <span className="log-alerts__form-hint">(optional)</span>
+              <span className="log-alerts__form-hint">
+                (optional — supports {"{token}"} substitution)
+              </span>
             </label>
             <AppTextarea
+              ref={messageTextareaRef}
               value={draft.notifyMessage ?? ""}
               onChange={(e) =>
                 onChange({
@@ -950,10 +1318,37 @@ function ScheduleForm({
                   notifyMessageOnly: e.target.value ? draft.notifyMessageOnly : false,
                 })
               }
-              placeholder="Optional note to include at the top of alert emails, e.g. 'Bedtime rule — kids should be offline.'"
+              onFocus={() => setLastFocusedTemplateField("body")}
+              onDragOver={handleTemplateFieldDragOver}
+              onDrop={handleMessageDrop}
+              placeholder="Optional note to include at the top of alert emails, e.g. 'Bedtime rule — kids should be offline. {client} queried {domain} at {latestMatchAt}.'"
               rows={3}
               disabled={submitting}
             />
+          </div>
+        )}
+
+        {/* Template token palette (drag chips into the fields above, or click
+            to insert at the last-focused field's cursor) + live preview */}
+        {draft.targetType !== "built-in" && draft.notifyEmails.length > 0 && (
+          <div className="log-alerts__form-field log-alerts__form-field--wide">
+            <details
+              open={!!(draft.notifySubjectTemplate || draft.notifyMessage)}
+            >
+              <summary
+                style={{
+                  cursor: "pointer",
+                  fontSize: "0.85rem",
+                  color: "var(--color-fg-muted, #888)",
+                }}
+              >
+                Template tokens & live preview
+              </summary>
+              <NotificationTemplatePreview
+                draft={draft}
+                onChipClick={handleChipClick}
+              />
+            </details>
           </div>
         )}
 
@@ -1240,6 +1635,7 @@ export function AutomationPage() {
       notifyDebounceSeconds: schedule.notifyDebounceSeconds ?? 300,
       notifyMessage: schedule.notifyMessage,
       notifyMessageOnly: schedule.notifyMessageOnly,
+      notifySubjectTemplate: schedule.notifySubjectTemplate,
       daysOfWeek: schedule.daysOfWeek,
       startTime: schedule.startTime,
       endTime: schedule.endTime,
@@ -1436,6 +1832,7 @@ export function AutomationPage() {
         notifyDebounceSeconds: schedule.notifyDebounceSeconds,
         notifyMessage: schedule.notifyMessage,
         notifyMessageOnly: schedule.notifyMessageOnly,
+        notifySubjectTemplate: schedule.notifySubjectTemplate,
       };
       const res = await apiFetch("/nodes/dns-schedules/rules", {
         method: "POST",

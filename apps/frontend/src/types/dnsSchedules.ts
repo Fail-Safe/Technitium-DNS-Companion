@@ -18,6 +18,11 @@ export interface DnsScheduleDraft {
   notifyMessage?: string;
   /** When true and notifyMessage is set, the email body is only the custom message (no technical details). */
   notifyMessageOnly?: boolean;
+  /**
+   * Optional subject-line template for alert emails. Supports `{token}` substitution
+   * (same tokens as notifyMessage). Empty/undefined uses the default subject.
+   */
+  notifySubjectTemplate?: string;
   /** 0=Sun, 1=Mon, ..., 6=Sat. Empty = every day. */
   daysOfWeek: number[];
   startTime: string; // "HH:MM"

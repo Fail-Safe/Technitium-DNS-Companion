@@ -11,6 +11,7 @@ import { DatabaseSync } from "node:sqlite";
 import { CompanionDbService } from "./companion-db.service";
 import type {
   DnsSchedule,
+  DnsScheduleAppliedEntry,
   DnsScheduleDraft,
   DnsScheduleStateEntry,
   DnsSchedulesStorageStatus,
@@ -35,6 +36,7 @@ type DnsScheduleRow = {
   notify_debounce_seconds: number;
   notify_message: string;
   notify_message_only: number;
+  notify_subject_template: string;
   created_at: string;
   updated_at: string;
 };
@@ -42,6 +44,15 @@ type DnsScheduleRow = {
 type DnsScheduleStateRow = {
   schedule_id: string;
   node_id: string;
+  applied_at: string;
+};
+
+type DnsScheduleAppliedEntryRow = {
+  schedule_id: string;
+  node_id: string;
+  advanced_blocking_group_name: string;
+  action: DnsScheduleDraft["action"];
+  domain: string;
   applied_at: string;
 };
 
@@ -106,7 +117,8 @@ export class DnsSchedulesService implements OnModuleInit {
         `SELECT id, name, enabled, target_type, advanced_blocking_group_names, action,
                 domain_entries_json, domain_group_names_json, days_of_week_json, start_time, end_time,
                 timezone, node_ids_json, flush_cache_on_change,
-                notify_emails_json, notify_debounce_seconds, notify_message, notify_message_only, created_at, updated_at
+                notify_emails_json, notify_debounce_seconds, notify_message, notify_message_only,
+                notify_subject_template, created_at, updated_at
          FROM dns_schedules
          ORDER BY updated_at DESC, created_at DESC`,
       )
@@ -127,8 +139,9 @@ export class DnsSchedulesService implements OnModuleInit {
            id, name, name_lc, enabled, target_type, advanced_blocking_group_names, action,
            domain_entries_json, domain_group_names_json, days_of_week_json, start_time, end_time,
            timezone, node_ids_json, flush_cache_on_change,
-           notify_emails_json, notify_debounce_seconds, notify_message, notify_message_only, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           notify_emails_json, notify_debounce_seconds, notify_message, notify_message_only,
+           notify_subject_template, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         draft.name,
@@ -149,6 +162,7 @@ export class DnsSchedulesService implements OnModuleInit {
         draft.notifyDebounceSeconds ?? 300,
         draft.notifyMessage?.trim() ?? "",
         draft.notifyMessageOnly ? 1 : 0,
+        draft.notifySubjectTemplate?.trim() ?? "",
         now,
         now,
       );
@@ -178,6 +192,7 @@ export class DnsSchedulesService implements OnModuleInit {
                start_time = ?, end_time = ?, timezone = ?,
                node_ids_json = ?, flush_cache_on_change = ?,
                notify_emails_json = ?, notify_debounce_seconds = ?, notify_message = ?, notify_message_only = ?,
+               notify_subject_template = ?,
                updated_at = ?
            WHERE id = ?`,
         )
@@ -200,6 +215,7 @@ export class DnsSchedulesService implements OnModuleInit {
           draft.notifyDebounceSeconds ?? 300,
           draft.notifyMessage?.trim() ?? "",
           draft.notifyMessageOnly ? 1 : 0,
+          draft.notifySubjectTemplate?.trim() ?? "",
           now,
           scheduleId,
         );
@@ -236,8 +252,12 @@ export class DnsSchedulesService implements OnModuleInit {
 
   deleteSchedule(scheduleId: string): { deleted: true; scheduleId: string } {
     const db = this.getDb();
-    // Also clear any tracked state for this schedule
+    // Cascade: clear schedule-state and per-entry tracking rows. The latter
+    // matters even when the schedule is currently inactive — if a delete
+    // races with a tick that hasn't run cleanup yet, leftover tracking would
+    // become orphaned references to a schedule that no longer exists.
     db.prepare(`DELETE FROM dns_schedule_state WHERE schedule_id = ?`).run(scheduleId);
+    db.prepare(`DELETE FROM dns_schedule_applied_entries WHERE schedule_id = ?`).run(scheduleId);
     const result = db
       .prepare(`DELETE FROM dns_schedules WHERE id = ?`)
       .run(scheduleId);
@@ -297,6 +317,100 @@ export class DnsSchedulesService implements OnModuleInit {
     this.ensureSchema();
     db.prepare(
       `DELETE FROM dns_schedule_state WHERE schedule_id = ? AND node_id = ?`,
+    ).run(scheduleId, nodeId);
+  }
+
+  // ── Per-entry tracking (orphan prevention) ─────────────────────────────────
+
+  /**
+   * Returns the set of (AB group, action, domain) tuples this schedule wrote
+   * to the given node on its most recent apply. Used by the evaluator's
+   * reconciliation pass to compute additions/removals when the schedule's
+   * definition changes between ticks (domain groups swapped, target AB
+   * group changed, action flipped, manual entries edited).
+   */
+  listAppliedEntries(
+    scheduleId: string,
+    nodeId: string,
+  ): DnsScheduleAppliedEntry[] {
+    const db = this.companionDb.db;
+    if (!db) return [];
+    this.ensureSchema();
+    const rows = db
+      .prepare(
+        `SELECT schedule_id, node_id, advanced_blocking_group_name, action, domain, applied_at
+         FROM dns_schedule_applied_entries
+         WHERE schedule_id = ? AND node_id = ?`,
+      )
+      .all(scheduleId, nodeId) as DnsScheduleAppliedEntryRow[];
+    return rows.map((row) => ({
+      scheduleId: row.schedule_id,
+      nodeId: row.node_id,
+      advancedBlockingGroupName: row.advanced_blocking_group_name,
+      action: row.action,
+      domain: row.domain,
+      appliedAt: row.applied_at,
+    }));
+  }
+
+  /**
+   * Atomic replace of the tracked entries for a (schedule, node) pair.
+   * Called by the evaluator AFTER a successful `setConfig` so failed writes
+   * never leave tracking out of sync with Technitium's actual state.
+   */
+  setAppliedEntries(
+    scheduleId: string,
+    nodeId: string,
+    entries: Array<{
+      advancedBlockingGroupName: string;
+      action: DnsScheduleDraft["action"];
+      domain: string;
+    }>,
+  ): void {
+    const db = this.getDb();
+    const now = new Date().toISOString();
+    const deleteStmt = db.prepare(
+      `DELETE FROM dns_schedule_applied_entries WHERE schedule_id = ? AND node_id = ?`,
+    );
+    const insertStmt = db.prepare(
+      `INSERT INTO dns_schedule_applied_entries
+         (schedule_id, node_id, advanced_blocking_group_name, action, domain, applied_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    const tx = db.prepare("BEGIN");
+    const commit = db.prepare("COMMIT");
+    const rollback = db.prepare("ROLLBACK");
+    tx.run();
+    try {
+      deleteStmt.run(scheduleId, nodeId);
+      for (const e of entries) {
+        insertStmt.run(
+          scheduleId,
+          nodeId,
+          e.advancedBlockingGroupName,
+          e.action,
+          e.domain,
+          now,
+        );
+      }
+      commit.run();
+    } catch (error) {
+      rollback.run();
+      throw error;
+    }
+  }
+
+  /**
+   * Clears all tracked entries for a (schedule, node) pair. Called after a
+   * successful schedule removal so the next tick starts from an empty
+   * baseline.
+   */
+  clearAppliedEntries(scheduleId: string, nodeId: string): void {
+    const db = this.companionDb.db;
+    if (!db) return;
+    this.ensureSchema();
+    db.prepare(
+      `DELETE FROM dns_schedule_applied_entries WHERE schedule_id = ? AND node_id = ?`,
     ).run(scheduleId, nodeId);
   }
 
@@ -384,6 +498,7 @@ export class DnsSchedulesService implements OnModuleInit {
         notify_debounce_seconds INTEGER NOT NULL DEFAULT 300,
         notify_message TEXT NOT NULL DEFAULT '',
         notify_message_only INTEGER NOT NULL DEFAULT 0,
+        notify_subject_template TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -398,6 +513,19 @@ export class DnsSchedulesService implements OnModuleInit {
         PRIMARY KEY (schedule_id, node_id)
       );
 
+      CREATE TABLE IF NOT EXISTS dns_schedule_applied_entries (
+        schedule_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        advanced_blocking_group_name TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('block', 'allow')),
+        domain TEXT NOT NULL,
+        applied_at TEXT NOT NULL,
+        PRIMARY KEY (schedule_id, node_id, advanced_blocking_group_name, action, domain)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_dns_schedule_applied_entries_lookup
+        ON dns_schedule_applied_entries(schedule_id, node_id);
+
       CREATE TABLE IF NOT EXISTS dns_schedule_settings (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -411,6 +539,7 @@ export class DnsSchedulesService implements OnModuleInit {
       `ALTER TABLE dns_schedules ADD COLUMN notify_debounce_seconds INTEGER NOT NULL DEFAULT 300`,
       `ALTER TABLE dns_schedules ADD COLUMN notify_message TEXT NOT NULL DEFAULT ''`,
       `ALTER TABLE dns_schedules ADD COLUMN notify_message_only INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE dns_schedules ADD COLUMN notify_subject_template TEXT NOT NULL DEFAULT ''`,
       `ALTER TABLE dns_schedules ADD COLUMN target_type TEXT NOT NULL DEFAULT 'advanced-blocking'`,
       // Rename single-group column to multi-group (SQLite 3.25+). No-op on fresh installs.
       `ALTER TABLE dns_schedules RENAME COLUMN advanced_blocking_group_name TO advanced_blocking_group_names`,
@@ -432,7 +561,8 @@ export class DnsSchedulesService implements OnModuleInit {
         `SELECT id, name, enabled, target_type, advanced_blocking_group_names, action,
                 domain_entries_json, domain_group_names_json, days_of_week_json, start_time, end_time,
                 timezone, node_ids_json, flush_cache_on_change,
-                notify_emails_json, notify_debounce_seconds, notify_message, notify_message_only, created_at, updated_at
+                notify_emails_json, notify_debounce_seconds, notify_message, notify_message_only,
+                notify_subject_template, created_at, updated_at
          FROM dns_schedules WHERE id = ?`,
       )
       .get(scheduleId) as DnsScheduleRow | undefined;
@@ -465,6 +595,7 @@ export class DnsSchedulesService implements OnModuleInit {
       notifyDebounceSeconds: row.notify_debounce_seconds ?? 300,
       notifyMessage: row.notify_message || undefined,
       notifyMessageOnly: (row.notify_message_only ?? 0) === 1,
+      notifySubjectTemplate: row.notify_subject_template || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -561,6 +692,16 @@ export class DnsSchedulesService implements OnModuleInit {
     }
     if (!Array.isArray(draft.nodeIds)) {
       throw new BadRequestException("nodeIds must be an array.");
+    }
+    if (draft.notifySubjectTemplate && draft.notifySubjectTemplate.length > 200) {
+      throw new BadRequestException(
+        "notifySubjectTemplate cannot exceed 200 characters.",
+      );
+    }
+    if (draft.notifyMessage && draft.notifyMessage.length > 2000) {
+      throw new BadRequestException(
+        "notifyMessage cannot exceed 2000 characters.",
+      );
     }
   }
 
