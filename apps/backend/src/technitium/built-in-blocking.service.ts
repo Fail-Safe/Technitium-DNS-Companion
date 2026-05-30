@@ -805,6 +805,7 @@ export class BuiltInBlockingService {
             blockedResponse.totalEntries ?? blockedResponse.domains.length,
           blockListUrlCount: settings.blockListUrls?.length ?? 0,
           blockingEnabled: settings.enableBlocking ?? false,
+          temporaryDisableBlockingTill: settings.temporaryDisableBlockingTill,
         },
         isHealthy: true,
       };

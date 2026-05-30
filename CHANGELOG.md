@@ -7,7 +7,15 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.6.9] - 2026-05-30
+
+### Added
+
+- **Pause built-in blocking from the header** (closes #55). New persistent pill in the app header surfaces Technitium's existing temporary-disable timer at the top level of the UI instead of buried inside Built-In Blocking → Settings. Pill shows `Active` (green) when blocking is on and `Paused · MMm SSs` (amber, pulsing) with a live per-second countdown while paused; click opens a menu with preset durations (1m / 5m / 15m / 30m / 1h / 4h). When paused, the menu also surfaces `Resume now` and re-labels the presets as `Extend pause`. Multi-node clusters fan out: the pause action applies to every node where built-in blocking is currently enabled, the resume action applies to every node currently paused, and either reports a per-node toast on partial failure. The countdown is driven entirely by the `temporaryDisableBlockingTill` ISO timestamp returned in the existing `BuiltInBlockingMetrics` snapshot (one new optional field) plus a local 1-second `setInterval`, so no extra backend polling is needed for the tick. Pill is hidden entirely on nodes where built-in blocking isn't enabled, so Advanced-Blocking-only deployments don't see a non-functional control.
+
+### Known limitations
+
+- **The pause pill does not affect Advanced Blocking.** Technitium exposes a native timed-disable endpoint for Built-In Blocking (`/api/settings/temporaryDisableBlocking?minutes=N`) but offers only a boolean `enableBlocking` for Advanced Blocking with no timer. Supporting a true timed pause for AB would require companion-managed state (a SQLite table tracking `pausedUntil` + `priorEnabled` per node) and a background evaluator to flip `enableBlocking` back on at expiry — modelled on the existing `DnsSchedulesEvaluatorService`. Tracked as a follow-up.
 
 ## [1.6.8] - 2026-05-29
 

@@ -99,6 +99,8 @@ export interface BuiltInBlockingMetrics {
   blockListUrlCount: number;
   /** Whether blocking is enabled globally */
   blockingEnabled: boolean;
+  /** ISO 8601 timestamp until which blocking is temporarily disabled, if any */
+  temporaryDisableBlockingTill?: string;
 }
 
 /**
