@@ -1,5 +1,10 @@
 # Release Notes
 
+> **Canonical changelog:** For all releases **v1.5.0 and later** — Domain Groups, Log Alerts,
+> DNS Schedules, the built-in blocking pause pill (v1.6.9), and the session-security fixes —
+> see the complete, continuously-maintained [CHANGELOG.md](../CHANGELOG.md) at the repo root.
+> The curated notes below are retained as historical narrative for **v1.4.0 and earlier**.
+
 ## 1.4.0
 
 - **Authentication model finalized**:
