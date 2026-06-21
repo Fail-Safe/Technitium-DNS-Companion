@@ -29,7 +29,7 @@
     "@fortawesome/react-fontawesome": "^3.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^6.28.0",
+    "react-router-dom": "^7.18.0",
     "react-tooltip": "^5.30.0",
     "react-window": "^2.2.2",
     "yaml": "^2.8.3"
@@ -55,9 +55,9 @@
     "sharp": "^0.34.4",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.45.0",
-    "vite": "^7.1.7",
+    "vite": "^7.3.5",
     "vite-plugin-pwa": "^1.1.0",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.6"
   },
   "optionalDependencies": {
     "@esbuild/linux-x64": "^0.27.2",
