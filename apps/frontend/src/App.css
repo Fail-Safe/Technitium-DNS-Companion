@@ -12899,6 +12899,110 @@ button.danger:disabled {
 
 /* === DNS Schedules specific === */
 
+.dns-overrides__tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 0.625rem;
+  width: fit-content;
+}
+
+.dns-overrides__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.8rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.dns-overrides__tab:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.dns-overrides__tab--active {
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+}
+
+.dns-overrides__tab span {
+  display: inline-flex;
+  min-width: 1.4rem;
+  justify-content: center;
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  background: var(--color-bg-tertiary);
+  color: inherit;
+  font-size: 0.75rem;
+}
+
+.dns-overrides__behavior-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--color-info-border, var(--color-border));
+  border-radius: 0.625rem;
+  background: var(--color-info-bg);
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.dns-overrides__behavior-note-icon {
+  margin-top: 0.15rem;
+  color: var(--color-info);
+  flex: 0 0 auto;
+}
+
+.dns-overrides__behavior-note-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.dns-overrides__behavior-note strong {
+  color: var(--color-text-primary);
+}
+
+.dns-overrides__behavior-note-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.dns-overrides__behavior-note-dismiss:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.dns-overrides__expired-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-dark);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .dns-schedules__dow-grid {
   display: flex;
   flex-wrap: wrap;
@@ -13033,13 +13137,30 @@ button.danger:disabled {
 
 .dns-schedules__applied-nodes {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   font-size: 0.875rem;
   color: var(--color-success-text);
   background: var(--color-success-bg);
   padding: 0.5rem 0.75rem;
   border-radius: 0.5rem;
+}
+
+.dns-schedules__applied-nodes-icon {
+  margin-top: 0.15rem;
+  flex: 0 0 auto;
+}
+
+.dns-schedules__applied-nodes-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.dns-schedules__applied-via {
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
 }
 
 /* Run result panel */

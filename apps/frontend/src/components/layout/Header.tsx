@@ -120,7 +120,7 @@ export function Header() {
     { to: "/", label: "Overview", end: true, icon: faChartLine },
     { to: "/logs", label: "DNS Logs", icon: faFileLines },
     { to: "/configuration", label: "DNS Filtering", icon: faShield },
-    { to: "/automation", label: "DNS Schedules", icon: faCalendarDays },
+    { to: "/automation", label: "DNS Overrides", icon: faCalendarDays },
     ...(canShowDnsRuleOptimizer ?
       [
         {

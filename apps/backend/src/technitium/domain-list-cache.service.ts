@@ -100,6 +100,111 @@ export function buildConditionalHeaders(
   return headers;
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatNestedNetworkError(error: unknown): string | undefined {
+  if (!isObjectRecord(error)) return undefined;
+
+  const code = typeof error.code === "string" ? error.code : undefined;
+  const address = typeof error.address === "string" ? error.address : undefined;
+  const port =
+    typeof error.port === "number" || typeof error.port === "string"
+      ? String(error.port)
+      : undefined;
+
+  if (code && address && port) return `${code} ${address}:${port}`;
+  if (code && address) return `${code} ${address}`;
+  if (code) return code;
+  if (error instanceof Error) return error.message;
+  return undefined;
+}
+
+export function formatFetchErrorForLog(error: unknown): string {
+  const parts: string[] = [];
+
+  if (error instanceof Error) {
+    parts.push(`${error.name}: ${error.message}`);
+  } else if (typeof error === "string") {
+    parts.push(error);
+  }
+
+  if (isObjectRecord(error)) {
+    const code = typeof error.code === "string" ? error.code : undefined;
+    if (code) parts.push(`code=${code}`);
+
+    const response = error.response;
+    if (isObjectRecord(response)) {
+      const status = response.status;
+      if (typeof status === "number" || typeof status === "string") {
+        parts.push(`status=${String(status)}`);
+      }
+    }
+
+    const cause = error.cause;
+    if (isObjectRecord(cause)) {
+      const nested = Array.isArray(cause.errors)
+        ? cause.errors
+            .map(formatNestedNetworkError)
+            .filter((value): value is string => Boolean(value))
+        : [];
+      if (nested.length > 0) {
+        parts.push(`causes=${nested.join(", ")}`);
+      } else {
+        const causeSummary = formatNestedNetworkError(cause);
+        if (causeSummary) parts.push(`cause=${causeSummary}`);
+      }
+    }
+  }
+
+  return parts.length > 0 ? parts.join("; ") : String(error);
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  if (!isObjectRecord(error)) return undefined;
+  return typeof error.code === "string" ? error.code : undefined;
+}
+
+function hasHttpResponse(error: unknown): boolean {
+  return isObjectRecord(error) && isObjectRecord(error.response);
+}
+
+function isTransientFetchError(error: unknown): boolean {
+  if (hasHttpResponse(error)) return false;
+
+  const retryableCodes = new Set([
+    "ECONNABORTED",
+    "ECONNRESET",
+    "EAI_AGAIN",
+    "ENETUNREACH",
+    "ENOTFOUND",
+    "ETIMEDOUT",
+  ]);
+  const code = getErrorCode(error);
+  if (code && retryableCodes.has(code)) return true;
+
+  if (isObjectRecord(error) && isObjectRecord(error.cause)) {
+    const causeCode = getErrorCode(error.cause);
+    if (causeCode && retryableCodes.has(causeCode)) return true;
+  }
+
+  return false;
+}
+
+function isFetchBackoffError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message.startsWith("Upstream rate limit") ||
+      error.message.startsWith("Rate-limit back-off active") ||
+      error.message.startsWith("Transient fetch back-off active"))
+  );
+}
+
 /**
  * Run an async worker over `items` with a bounded number of concurrent
  * executions, applying a small random jitter (0..jitterMs) before each
@@ -144,6 +249,10 @@ const DEFAULT_FETCH_CONCURRENCY = 3;
 const DEFAULT_FETCH_JITTER_MS = 300;
 /** Fallback back-off when a 429/503 has no Retry-After header. */
 const DEFAULT_RATE_LIMIT_BACKOFF_MS = 60 * 60 * 1000; // 1 hour
+/** Bounded retries for transient transport failures before falling back to cache. */
+const DEFAULT_FETCH_RETRY_DELAYS_MS = [1000, 3000] as const;
+/** Short cooldown after all transient retries fail. */
+const DEFAULT_TRANSIENT_FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 
 /**
  * Parse an HTTP `Retry-After` header value into an absolute Date. Per
@@ -159,7 +268,9 @@ export function parseRetryAfter(value: string | undefined): Date | null {
   // year-2001 date and would otherwise produce a stale back-off).
   if (/^\d+$/.test(trimmed)) {
     const seconds = Number(trimmed);
-    return Number.isFinite(seconds) ? new Date(Date.now() + seconds * 1000) : null;
+    return Number.isFinite(seconds)
+      ? new Date(Date.now() + seconds * 1000)
+      : null;
   }
   // Reject any other integer-shaped values (e.g. "-10", "+10") rather
   // than treating them as HTTP-dates.
@@ -248,11 +359,20 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     string,
     Promise<RegexFetchResult>
   >();
+  private readonly inFlightDomainCacheWrites = new Map<
+    string,
+    Promise<CachedList>
+  >();
+  private readonly inFlightRegexCacheWrites = new Map<
+    string,
+    Promise<CachedRegexList>
+  >();
   // Per-URL back-off timestamps from upstream 429/503 responses. While the
   // back-off is active we skip the HTTP fetch entirely (callers fall back to
   // cached content via their existing catch path). Cleared when the deadline
   // passes or when a subsequent fetch succeeds.
   private readonly rateLimitedUntil = new Map<string, Date>();
+  private readonly transientFailureUntil = new Map<string, Date>();
   private initializationTimer?: NodeJS.Timeout; // deferred startup timer
 
   private readonly defaultAuthMode: "session" | "background" = "session";
@@ -1660,15 +1780,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     cached: CachedList | undefined,
   ): Promise<DomainFetchResult> {
     const conditionalHeaders = buildConditionalHeaders(cached);
-    const response = await firstValueFrom(
-      this.httpService.get(url, {
-        timeout: 30000,
-        responseType: "text",
-        headers: conditionalHeaders,
-        validateStatus: (status) =>
-          status === 200 || status === 304 || status === 429 || status === 503,
-      }),
-    );
+    const response = await this.fetchTextWithRetries(url, conditionalHeaders);
     if (response.status === 429 || response.status === 503) {
       this.recordRateLimit(url, hash, response.status, response.headers);
       throw new Error(
@@ -1679,11 +1791,13 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`Blocklist unchanged at ${url} (304 Not Modified)`);
       // Success — clear any stale back-off from a previous failed attempt
       this.rateLimitedUntil.delete(hash);
+      this.transientFailureUntil.delete(hash);
       return { notModified: true };
     }
-    const content = response.data as string;
+    const content = response.data;
     const { domains, lineCount, commentCount } = this.parseDomains(content);
     this.rateLimitedUntil.delete(hash);
+    this.transientFailureUntil.delete(hash);
     return {
       notModified: false,
       parsed: { domains, lineCount, commentCount },
@@ -1713,15 +1827,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     cached: CachedRegexList | undefined,
   ): Promise<RegexFetchResult> {
     const conditionalHeaders = buildConditionalHeaders(cached);
-    const response = await firstValueFrom(
-      this.httpService.get(url, {
-        timeout: 30000,
-        responseType: "text",
-        headers: conditionalHeaders,
-        validateStatus: (status) =>
-          status === 200 || status === 304 || status === 429 || status === 503,
-      }),
-    );
+    const response = await this.fetchTextWithRetries(url, conditionalHeaders);
     if (response.status === 429 || response.status === 503) {
       this.recordRateLimit(url, hash, response.status, response.headers);
       throw new Error(
@@ -1731,12 +1837,14 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     if (response.status === 304) {
       this.logger.log(`Regex blocklist unchanged at ${url} (304 Not Modified)`);
       this.rateLimitedUntil.delete(hash);
+      this.transientFailureUntil.delete(hash);
       return { notModified: true };
     }
-    const content = response.data as string;
+    const content = response.data;
     const { patterns, rawPatterns, lineCount, commentCount } =
       this.parseRegexPatterns(content);
     this.rateLimitedUntil.delete(hash);
+    this.transientFailureUntil.delete(hash);
     return {
       notModified: false,
       parsed: { patterns, rawPatterns, lineCount, commentCount },
@@ -1766,6 +1874,84 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     throw new Error(
       `Rate-limit back-off active for ${url} (${secondsLeft}s remaining)`,
     );
+  }
+
+  private enforceTransientFailureBackoff(url: string, hash: string): void {
+    const backoffUntil = this.transientFailureUntil.get(hash);
+    if (!backoffUntil) return;
+    const now = Date.now();
+    if (backoffUntil.getTime() <= now) {
+      this.transientFailureUntil.delete(hash);
+      return;
+    }
+    const secondsLeft = Math.ceil((backoffUntil.getTime() - now) / 1000);
+    throw new Error(
+      `Transient fetch back-off active for ${url} (${secondsLeft}s remaining)`,
+    );
+  }
+
+  private recordTransientFailure(hash: string, error: unknown): void {
+    if (isFetchBackoffError(error)) return;
+    if (!isTransientFetchError(error)) return;
+    this.transientFailureUntil.set(
+      hash,
+      new Date(Date.now() + DEFAULT_TRANSIENT_FAILURE_BACKOFF_MS),
+    );
+  }
+
+  private isCachedEntryFresh(
+    hash: string,
+    cached: { fetchedAt: Date; errorMessage?: string },
+  ): boolean {
+    if (cached.errorMessage) {
+      const retryAt = this.transientFailureUntil.get(hash);
+      return retryAt ? retryAt.getTime() > Date.now() : false;
+    }
+    return Date.now() - cached.fetchedAt.getTime() < this.refreshInterval;
+  }
+
+  private async fetchTextWithRetries(
+    url: string,
+    conditionalHeaders: Record<string, string>,
+  ): Promise<{
+    status: number;
+    headers: Record<string, unknown> | undefined;
+    data: string;
+  }> {
+    let attempt = 0;
+
+    while (true) {
+      try {
+        const response = await firstValueFrom(
+          this.httpService.get(url, {
+            timeout: 30000,
+            responseType: "text",
+            headers: conditionalHeaders,
+            validateStatus: (status) =>
+              status === 200 ||
+              status === 304 ||
+              status === 429 ||
+              status === 503,
+          }),
+        );
+        return {
+          status: response.status,
+          headers: response.headers as Record<string, unknown> | undefined,
+          data: response.data as string,
+        };
+      } catch (error) {
+        const retryDelay = DEFAULT_FETCH_RETRY_DELAYS_MS[attempt];
+        if (!isTransientFetchError(error) || retryDelay === undefined) {
+          throw error;
+        }
+
+        attempt++;
+        this.logger.warn(
+          `Transient fetch failure for ${url}; retrying in ${retryDelay}ms (attempt ${attempt + 1}/${DEFAULT_FETCH_RETRY_DELAYS_MS.length + 1}): ${formatFetchErrorForLog(error)}`,
+        );
+        await delay(retryDelay);
+      }
+    }
   }
 
   /**
@@ -1809,15 +1995,37 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     const cached = nodeCache.get(hash);
-    if (
-      cached &&
-      Date.now() - cached.fetchedAt.getTime() < this.refreshInterval
-    ) {
+    if (cached && this.isCachedEntryFresh(hash, cached)) {
       return cached;
     }
 
+    const inFlightKey = this.nodeHashKey(nodeId, hash);
+    const inFlight = this.inFlightDomainCacheWrites.get(inFlightKey);
+    if (inFlight) return inFlight;
+
+    const promise = this.fetchAndStoreList(
+      nodeId,
+      url,
+      hash,
+      nodeCache,
+      cached,
+    ).finally(() => {
+      this.inFlightDomainCacheWrites.delete(inFlightKey);
+    });
+    this.inFlightDomainCacheWrites.set(inFlightKey, promise);
+    return promise;
+  }
+
+  private async fetchAndStoreList(
+    nodeId: string,
+    url: string,
+    hash: string,
+    nodeCache: Map<string, CachedList>,
+    cached: CachedList | undefined,
+  ): Promise<CachedList> {
     this.logger.log(`Fetching blocklist from ${url}`);
     try {
+      this.enforceTransientFailureBackoff(url, hash);
       const result = await this.fetchDomainListOnce(url, hash, cached);
 
       // 304 Not Modified: upstream confirms the cached content is current.
@@ -1898,7 +2106,10 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
       return cachedList;
     } catch (error) {
-      this.logger.error(`Failed to fetch blocklist from ${url}`, error);
+      this.logger.error(
+        `Failed to fetch blocklist from ${url}: ${formatFetchErrorForLog(error)}`,
+      );
+      this.recordTransientFailure(hash, error);
 
       // Return cached version even if expired, or create empty error entry
       if (cached) {
@@ -1970,15 +2181,37 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
 
     const cached = nodeCache.get(hash);
-    if (
-      cached &&
-      Date.now() - cached.fetchedAt.getTime() < this.refreshInterval
-    ) {
+    if (cached && this.isCachedEntryFresh(hash, cached)) {
       return cached;
     }
 
+    const inFlightKey = this.nodeHashKey(nodeId, hash);
+    const inFlight = this.inFlightRegexCacheWrites.get(inFlightKey);
+    if (inFlight) return inFlight;
+
+    const promise = this.fetchAndStoreRegexList(
+      nodeId,
+      url,
+      hash,
+      nodeCache,
+      cached,
+    ).finally(() => {
+      this.inFlightRegexCacheWrites.delete(inFlightKey);
+    });
+    this.inFlightRegexCacheWrites.set(inFlightKey, promise);
+    return promise;
+  }
+
+  private async fetchAndStoreRegexList(
+    nodeId: string,
+    url: string,
+    hash: string,
+    nodeCache: Map<string, CachedRegexList>,
+    cached: CachedRegexList | undefined,
+  ): Promise<CachedRegexList> {
     this.logger.log(`Fetching regex blocklist from ${url}`);
     try {
+      this.enforceTransientFailureBackoff(url, hash);
       const result = await this.fetchRegexListOnce(url, hash, cached);
 
       if (result.notModified && cached) {
@@ -2057,7 +2290,10 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
       return cachedList;
     } catch (error) {
-      this.logger.error(`Failed to fetch regex blocklist from ${url}`, error);
+      this.logger.error(
+        `Failed to fetch regex blocklist from ${url}: ${formatFetchErrorForLog(error)}`,
+      );
+      this.recordTransientFailure(hash, error);
 
       // Return cached version even if expired, or create empty error entry
       if (cached) {
@@ -2102,6 +2338,10 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private nodeHashKey(nodeId: string, hash: string): string {
+    return `${nodeId}\0${hash}`;
+  }
+
   private parseDomains(content: string): {
     domains: Set<string>;
     lineCount: number;
@@ -2126,7 +2366,9 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
       // Parse hosts file format: "127.0.0.1 domain.com" or "0.0.0.0 domain.com"
       // Or plain domain format: "domain.com"
       const parts = trimmed.split(/\s+/);
-      const domain = parts.length > 1 ? parts[1] : parts[0];
+      const domain = this.normalizeListEntryDomain(
+        parts.length > 1 ? parts[1] : parts[0],
+      );
 
       if (domain && this.isValidDomain(domain)) {
         domains.add(this.normalizeDomain(domain));
@@ -2263,6 +2505,17 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
 
   private normalizeDomain(domain: string): string {
     return domain.toLowerCase().trim();
+  }
+
+  private normalizeListEntryDomain(domain: string): string {
+    let normalized = this.normalizeDomain(domain);
+    if (normalized.startsWith("*.")) {
+      normalized = normalized.slice(2);
+    }
+    if (normalized.startsWith(".")) {
+      normalized = normalized.slice(1);
+    }
+    return normalized;
   }
 
   private isValidDomain(domain: string): boolean {

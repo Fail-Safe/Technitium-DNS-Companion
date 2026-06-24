@@ -7,6 +7,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.0] - 2026-06-24
+
+### Added
+
+- **DNS Overrides page with temporary exception workflows.** The former DNS Schedules page is now an **DNS Overrides** page with a two-tab flow: long-lived **Schedules** (recurring windows) and ad-hoc **Temporary Overrides**.
+- **Temporary Overrides for immediate policy changes.** Operators can create temporary overrides that force an action on an Advanced Blocking group for any selected window until a configured expiry, independent of schedule windows.
+- **Clear precedence model for blocking behavior.** A dedicated note explains precedence now (active temporary overrides take priority over matching schedules). The note is dismissible per session.
+- **Temporary override copy/edit/delete and override lifecycle controls.** Temporary entries support duplication, immediate enable/disable, and expiry-aware cleanup so ad-hoc controls can be short-lived without touching recurring schedule definitions.
+
+### Changed
+
+- **DNS Schedules UX cleanup.** The page label and navigation now use **DNS Overrides**, with schedules grouped under the existing schedule workflow and a dedicated temporary override tab.
+- **Schedule delete safety.** Schedule deletion is now disabled while a schedule is actively enabled, matching existing override safety expectations and preventing accidental removal of currently active policy.
+
+### Fixed
+
+- **Schedule vs. temporary override ambiguity.** The system now applies temporary overrides with explicit precedence and state handling, preventing confusion between scheduled blocks and one-off override windows.
+
 ## [1.6.9] - 2026-05-30
 
 ### Added

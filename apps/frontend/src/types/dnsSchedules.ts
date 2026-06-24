@@ -37,6 +37,24 @@ export interface DnsSchedule extends DnsScheduleDraft {
   updatedAt: string;
 }
 
+export interface DnsTemporaryOverrideDraft {
+  name: string;
+  enabled: boolean;
+  advancedBlockingGroupNames: string[];
+  action: DnsScheduleAction;
+  domainEntries: string[];
+  domainGroupNames: string[];
+  flushCacheOnChange: boolean;
+  nodeIds: string[];
+  expiresAt?: string | null;
+}
+
+export interface DnsTemporaryOverride extends DnsTemporaryOverrideDraft {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DnsSchedulesStorageStatus {
   enabled: boolean;
   ready: boolean;

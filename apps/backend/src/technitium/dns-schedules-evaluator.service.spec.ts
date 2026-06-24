@@ -63,23 +63,33 @@ describe("DnsSchedulesEvaluatorService — isWindowActive", () => {
       makeSchedule({ startTime: "09:00", endTime: "17:00", timezone: "UTC" });
 
     it("returns true inside the window", () => {
-      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 12, 0))).toBe(true);
+      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 12, 0))).toBe(
+        true,
+      );
     });
 
     it("returns true at the exact start boundary (inclusive)", () => {
-      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 9, 0))).toBe(true);
+      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 9, 0))).toBe(
+        true,
+      );
     });
 
     it("returns false at the exact end boundary (exclusive)", () => {
-      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 17, 0))).toBe(false);
+      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 17, 0))).toBe(
+        false,
+      );
     });
 
     it("returns false one minute before the window", () => {
-      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 8, 59))).toBe(false);
+      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 8, 59))).toBe(
+        false,
+      );
     });
 
     it("returns false one minute after the window", () => {
-      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 17, 1))).toBe(false);
+      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 17, 1))).toBe(
+        false,
+      );
     });
   });
 
@@ -90,27 +100,39 @@ describe("DnsSchedulesEvaluatorService — isWindowActive", () => {
       makeSchedule({ startTime: "22:00", endTime: "06:00", timezone: "UTC" });
 
     it("returns true at the exact start boundary (22:00)", () => {
-      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 22, 0))).toBe(true);
+      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 22, 0))).toBe(
+        true,
+      );
     });
 
     it("returns true just after start (pre-midnight)", () => {
-      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 23, 30))).toBe(true);
+      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 23, 30))).toBe(
+        true,
+      );
     });
 
     it("returns true just before end (post-midnight)", () => {
-      expect(service.isWindowActive(s(), utcDate(2024, 1, 16, 5, 59))).toBe(true);
+      expect(service.isWindowActive(s(), utcDate(2024, 1, 16, 5, 59))).toBe(
+        true,
+      );
     });
 
     it("returns false at the exact end boundary (06:00 is exclusive)", () => {
-      expect(service.isWindowActive(s(), utcDate(2024, 1, 16, 6, 0))).toBe(false);
+      expect(service.isWindowActive(s(), utcDate(2024, 1, 16, 6, 0))).toBe(
+        false,
+      );
     });
 
     it("returns false in the inactive gap between 06:00 and 22:00", () => {
-      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 12, 0))).toBe(false);
+      expect(service.isWindowActive(s(), utcDate(2024, 1, 15, 12, 0))).toBe(
+        false,
+      );
     });
 
     it("returns false one minute after end (06:01)", () => {
-      expect(service.isWindowActive(s(), utcDate(2024, 1, 16, 6, 1))).toBe(false);
+      expect(service.isWindowActive(s(), utcDate(2024, 1, 16, 6, 1))).toBe(
+        false,
+      );
     });
   });
 
@@ -121,22 +143,38 @@ describe("DnsSchedulesEvaluatorService — isWindowActive", () => {
     const monday = utcDate(2024, 1, 15, 12, 0);
 
     it("returns true when daysOfWeek is empty (every day)", () => {
-      const s = makeSchedule({ startTime: "09:00", endTime: "17:00", daysOfWeek: [] });
+      const s = makeSchedule({
+        startTime: "09:00",
+        endTime: "17:00",
+        daysOfWeek: [],
+      });
       expect(service.isWindowActive(s, monday)).toBe(true);
     });
 
     it("returns true when current day is in the list", () => {
-      const s = makeSchedule({ startTime: "09:00", endTime: "17:00", daysOfWeek: [1] }); // Mon
+      const s = makeSchedule({
+        startTime: "09:00",
+        endTime: "17:00",
+        daysOfWeek: [1],
+      }); // Mon
       expect(service.isWindowActive(s, monday)).toBe(true);
     });
 
     it("returns false when current day is not in the list", () => {
-      const s = makeSchedule({ startTime: "09:00", endTime: "17:00", daysOfWeek: [0, 6] }); // Sat+Sun
+      const s = makeSchedule({
+        startTime: "09:00",
+        endTime: "17:00",
+        daysOfWeek: [0, 6],
+      }); // Sat+Sun
       expect(service.isWindowActive(s, monday)).toBe(false);
     });
 
     it("returns false even inside the time window when day does not match", () => {
-      const s = makeSchedule({ startTime: "09:00", endTime: "17:00", daysOfWeek: [2, 3, 4] }); // Tue–Thu
+      const s = makeSchedule({
+        startTime: "09:00",
+        endTime: "17:00",
+        daysOfWeek: [2, 3, 4],
+      }); // Tue–Thu
       expect(service.isWindowActive(s, monday)).toBe(false);
     });
   });
@@ -163,7 +201,9 @@ describe("DnsSchedulesEvaluatorService — isWindowActive", () => {
     });
 
     it("inactive at Tuesday 23:00 — activeDow=Tue=2, does not match [1]", () => {
-      expect(service.isWindowActive(s, utcDate(2024, 1, 16, 23, 0))).toBe(false);
+      expect(service.isWindowActive(s, utcDate(2024, 1, 16, 23, 0))).toBe(
+        false,
+      );
     });
 
     it("inactive at Wednesday 02:00 — activeDow=Tue=2, does not match [1]", () => {
@@ -179,9 +219,13 @@ describe("DnsSchedulesEvaluatorService — isWindowActive", () => {
         timezone: "UTC",
       });
       // Monday 02:00: before end, activeDow = yesterday = Sunday (0) ✓
-      expect(service.isWindowActive(sunToMon, utcDate(2024, 1, 15, 2, 0))).toBe(true);
+      expect(service.isWindowActive(sunToMon, utcDate(2024, 1, 15, 2, 0))).toBe(
+        true,
+      );
       // Sunday 22:00: after start, activeDow = Sunday (0) ✓
-      expect(service.isWindowActive(sunToMon, utcDate(2024, 1, 14, 22, 0))).toBe(true);
+      expect(
+        service.isWindowActive(sunToMon, utcDate(2024, 1, 14, 22, 0)),
+      ).toBe(true);
     });
   });
 
@@ -207,7 +251,9 @@ describe("DnsSchedulesEvaluatorService — isWindowActive", () => {
         timezone: "America/New_York",
         daysOfWeek: [],
       });
-      expect(service.isWindowActive(s, utcDate(2024, 1, 15, 13, 0))).toBe(false);
+      expect(service.isWindowActive(s, utcDate(2024, 1, 15, 13, 0))).toBe(
+        false,
+      );
     });
 
     it("falls back to UTC on an invalid timezone without throwing", () => {
@@ -218,7 +264,9 @@ describe("DnsSchedulesEvaluatorService — isWindowActive", () => {
         daysOfWeek: [],
       });
       // Should not throw
-      expect(() => service.isWindowActive(s, utcDate(2024, 1, 15, 12, 0))).not.toThrow();
+      expect(() =>
+        service.isWindowActive(s, utcDate(2024, 1, 15, 12, 0)),
+      ).not.toThrow();
       // 12:00 UTC falls inside 09:00–17:00 UTC (fallback behavior)
       expect(service.isWindowActive(s, utcDate(2024, 1, 15, 12, 0))).toBe(true);
     });
@@ -230,8 +278,12 @@ describe("DnsSchedulesEvaluatorService — isWindowActive", () => {
         timezone: "UTC",
         daysOfWeek: [],
       });
-      expect(service.isWindowActive(s, utcDate(2024, 1, 15, 10, 30))).toBe(true);
-      expect(service.isWindowActive(s, utcDate(2024, 1, 15, 9, 59))).toBe(false);
+      expect(service.isWindowActive(s, utcDate(2024, 1, 15, 10, 30))).toBe(
+        true,
+      );
+      expect(service.isWindowActive(s, utcDate(2024, 1, 15, 9, 59))).toBe(
+        false,
+      );
     });
   });
 });
@@ -309,12 +361,14 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
     await expect(
       // Private method under test — the evaluator's own try/catch in
       // evaluateScheduleForNode will observe the throw and skip markRemoved.
-      (service as unknown as {
-        removeAdvancedBlockingScheduleFromNode: (
-          s: DnsSchedule,
-          n: string,
-        ) => Promise<void>;
-      }).removeAdvancedBlockingScheduleFromNode(makeSchedule(), "nodeA"),
+      (
+        service as unknown as {
+          removeAdvancedBlockingScheduleFromNode: (
+            s: DnsSchedule,
+            n: string,
+          ) => Promise<void>;
+        }
+      ).removeAdvancedBlockingScheduleFromNode(makeSchedule(), "nodeA"),
     ).rejects.toThrow(/nodeA.*ECONNRESET/);
 
     expect(setConfigWithAuth).not.toHaveBeenCalled();
@@ -325,12 +379,14 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
     const { service, setConfigWithAuth } = makeService(getSnapshotWithAuth);
 
     await expect(
-      (service as unknown as {
-        applyAdvancedBlockingScheduleToNode: (
-          s: DnsSchedule,
-          n: string,
-        ) => Promise<boolean>;
-      }).applyAdvancedBlockingScheduleToNode(makeSchedule(), "nodeA"),
+      (
+        service as unknown as {
+          applyAdvancedBlockingScheduleToNode: (
+            s: DnsSchedule,
+            n: string,
+          ) => Promise<boolean>;
+        }
+      ).applyAdvancedBlockingScheduleToNode(makeSchedule(), "nodeA"),
     ).rejects.toThrow(/nodeA.*ECONNRESET/);
 
     expect(setConfigWithAuth).not.toHaveBeenCalled();
@@ -376,12 +432,14 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
       ],
     });
 
-    await (service as unknown as {
-      removeAdvancedBlockingScheduleFromNode: (
-        s: DnsSchedule,
-        n: string,
-      ) => Promise<void>;
-    }).removeAdvancedBlockingScheduleFromNode(
+    await (
+      service as unknown as {
+        removeAdvancedBlockingScheduleFromNode: (
+          s: DnsSchedule,
+          n: string,
+        ) => Promise<void>;
+      }
+    ).removeAdvancedBlockingScheduleFromNode(
       makeSchedule({
         advancedBlockingGroupNames: ["social"],
         domainEntries: ["example.com"],
@@ -392,6 +450,238 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
     expect(setConfigWithAuth).toHaveBeenCalledTimes(1);
     const [, nextConfig] = setConfigWithAuth.mock.calls[0];
     expect(nextConfig.groups[0].blocked).toEqual(["keep.me"]);
+  });
+});
+
+describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
+  function makeGroup(
+    name: string,
+    blocked: string[] = [],
+    allowed: string[] = [],
+  ) {
+    return {
+      name,
+      blockingAddresses: [],
+      allowed,
+      blocked,
+      allowListUrls: [],
+      blockListUrls: [],
+      allowedRegex: [],
+      blockedRegex: [],
+      regexAllowListUrls: [],
+      regexBlockListUrls: [],
+      adblockListUrls: [],
+    };
+  }
+
+  function makeService(options: {
+    appliedNodeIds: string[];
+    trackedEntries?: Array<{
+      nodeId: string;
+      advancedBlockingGroupName: string;
+      action: "block" | "allow";
+      domain: string;
+    }>;
+  }) {
+    const markApplied = jest.fn();
+    const markRemoved = jest.fn();
+    const clearAppliedEntries = jest.fn();
+    const setAppliedEntries = jest.fn();
+    const listAppliedEntries = jest.fn((scheduleId: string, nodeId: string) =>
+      (options.trackedEntries ?? [])
+        .filter((e) => e.nodeId === nodeId)
+        .map((e) => ({
+          scheduleId,
+          nodeId,
+          advancedBlockingGroupName: e.advancedBlockingGroupName,
+          action: e.action,
+          domain: e.domain,
+          appliedAt: "2026-06-24T01:00:00.000Z",
+        })),
+    );
+    const isApplied = jest.fn((_scheduleId: string, nodeId: string) =>
+      options.appliedNodeIds.includes(nodeId),
+    );
+    const setConfigWithAuth = jest.fn();
+    const getSnapshotWithAuth = jest.fn().mockResolvedValue({
+      nodeId: "eq14",
+      baseUrl: "https://eq14.test",
+      fetchedAt: "2026-06-25T00:15:00.000Z",
+      metrics: {},
+      config: {
+        enableBlocking: true,
+        localEndPointGroupMap: {},
+        networkGroupMap: {},
+        groups: [makeGroup("Florence", ["youtube.com", "keep.me"], [])],
+      },
+    });
+    const service = new DnsSchedulesEvaluatorService(
+      {
+        isApplied,
+        markApplied,
+        markRemoved,
+        listAppliedEntries,
+        setAppliedEntries,
+        clearAppliedEntries,
+      } as never,
+      { getSnapshotWithAuth, setConfigWithAuth } as never,
+      {} as never,
+      { getExactEntriesByGroupNames: () => ["youtube.com"] } as never,
+      {} as never,
+    );
+    return {
+      service,
+      markApplied,
+      markRemoved,
+      clearAppliedEntries,
+      setAppliedEntries,
+      setConfigWithAuth,
+    };
+  }
+
+  it("inactive window removes once from the write target and clears legacy state aliases", async () => {
+    const { service, markRemoved, clearAppliedEntries, setConfigWithAuth } =
+      makeService({
+        appliedNodeIds: ["eq14", "eq12"],
+        trackedEntries: [
+          {
+            nodeId: "eq14",
+            advancedBlockingGroupName: "Florence",
+            action: "block",
+            domain: "youtube.com",
+          },
+        ],
+      });
+
+    const result = await (
+      service as unknown as {
+        evaluateScheduleForNode: (
+          s: DnsSchedule,
+          n: string,
+          flushNodeIds: string[],
+          stateNodeIds: string[],
+          now: Date,
+          dryRun: boolean,
+        ) => Promise<{ action: string }>;
+      }
+    ).evaluateScheduleForNode(
+      makeSchedule({
+        name: "Nighttime Block (Flo)",
+        advancedBlockingGroupNames: ["Florence"],
+        domainEntries: [],
+        domainGroupNames: ["YouTube"],
+        startTime: "21:00",
+        endTime: "08:00",
+        timezone: "America/New_York",
+      }),
+      "eq14",
+      ["eq14", "eq12", "eq10"],
+      ["eq14", "eq12"],
+      new Date("2026-06-25T00:15:00.000Z"),
+      false,
+    );
+
+    expect(result.action).toBe("removed");
+    expect(setConfigWithAuth).toHaveBeenCalledTimes(1);
+    const [, nextConfig] = setConfigWithAuth.mock.calls[0];
+    expect(nextConfig.groups[0].blocked).toEqual(["keep.me"]);
+    expect(markRemoved).toHaveBeenCalledWith("test-id", "eq14");
+    expect(markRemoved).toHaveBeenCalledWith("test-id", "eq12");
+    expect(clearAppliedEntries).toHaveBeenCalledWith("test-id", "eq14");
+    expect(clearAppliedEntries).toHaveBeenCalledWith("test-id", "eq12");
+  });
+
+  it("active window migrates legacy state aliases onto the canonical write target", async () => {
+    const { service, markApplied, markRemoved, setAppliedEntries } =
+      makeService({
+        appliedNodeIds: ["eq12"],
+        trackedEntries: [
+          {
+            nodeId: "eq12",
+            advancedBlockingGroupName: "Florence",
+            action: "block",
+            domain: "youtube.com",
+          },
+        ],
+      });
+
+    const result = await (
+      service as unknown as {
+        evaluateScheduleForNode: (
+          s: DnsSchedule,
+          n: string,
+          flushNodeIds: string[],
+          stateNodeIds: string[],
+          now: Date,
+          dryRun: boolean,
+        ) => Promise<{ action: string; reason?: string }>;
+      }
+    ).evaluateScheduleForNode(
+      makeSchedule({
+        name: "Nighttime Block (Flo)",
+        advancedBlockingGroupNames: ["Florence"],
+        domainEntries: [],
+        domainGroupNames: ["YouTube"],
+        startTime: "21:00",
+        endTime: "08:00",
+        timezone: "America/New_York",
+      }),
+      "eq14",
+      ["eq14", "eq12", "eq10"],
+      ["eq14", "eq12"],
+      new Date("2026-06-25T01:15:00.000Z"),
+      false,
+    );
+
+    expect(result).toMatchObject({
+      action: "skipped",
+      reason: "already-applied",
+    });
+    expect(markApplied).toHaveBeenCalledWith("test-id", "eq14");
+    expect(markRemoved).toHaveBeenCalledWith("test-id", "eq12");
+    expect(setAppliedEntries).toHaveBeenCalledWith("test-id", "eq14", [
+      {
+        advancedBlockingGroupName: "Florence",
+        action: "block",
+        domain: "youtube.com",
+      },
+    ]);
+  });
+
+  it("does not remove entries still required by another active source", async () => {
+    const { service, clearAppliedEntries, setConfigWithAuth } = makeService({
+      appliedNodeIds: ["eq14"],
+      trackedEntries: [
+        {
+          nodeId: "eq14",
+          advancedBlockingGroupName: "Florence",
+          action: "block",
+          domain: "youtube.com",
+        },
+      ],
+    });
+
+    await (
+      service as unknown as {
+        removeAdvancedBlockingScheduleFromNode: (
+          s: DnsSchedule,
+          n: string,
+          protectedTupleKeys: Set<string>,
+        ) => Promise<void>;
+      }
+    ).removeAdvancedBlockingScheduleFromNode(
+      makeSchedule({
+        advancedBlockingGroupNames: ["Florence"],
+        action: "block",
+        domainEntries: ["youtube.com"],
+        domainGroupNames: [],
+      }),
+      "eq14",
+      new Set(["Florence\0block\0youtube.com"]),
+    );
+
+    expect(setConfigWithAuth).not.toHaveBeenCalled();
+    expect(clearAppliedEntries).toHaveBeenCalledWith("test-id", "eq14");
   });
 });
 
@@ -596,13 +886,11 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
     };
   }
 
-  function makeService(
-    options: {
-      groups: ReturnType<typeof makeGroup>[];
-      trackedEntries?: Tracked[];
-      domainGroupsLookup?: (names: string[]) => string[];
-    },
-  ) {
+  function makeService(options: {
+    groups: ReturnType<typeof makeGroup>[];
+    trackedEntries?: Tracked[];
+    domainGroupsLookup?: (names: string[]) => string[];
+  }) {
     const setConfigWithAuth = jest.fn();
     const getSnapshotWithAuth = jest.fn().mockResolvedValue({
       nodeId: "nodeA",
@@ -635,8 +923,7 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
       { getSnapshotWithAuth, setConfigWithAuth } as never,
       {} as never,
       {
-        getExactEntriesByGroupNames:
-          options.domainGroupsLookup ?? (() => []),
+        getExactEntriesByGroupNames: options.domainGroupsLookup ?? (() => []),
       } as never,
       {} as never,
     );
@@ -653,24 +940,28 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
     service: DnsSchedulesEvaluatorService,
     schedule: DnsSchedule,
   ): Promise<boolean> {
-    return (service as unknown as {
-      applyAdvancedBlockingScheduleToNode: (
-        s: DnsSchedule,
-        n: string,
-      ) => Promise<boolean>;
-    }).applyAdvancedBlockingScheduleToNode(schedule, "nodeA");
+    return (
+      service as unknown as {
+        applyAdvancedBlockingScheduleToNode: (
+          s: DnsSchedule,
+          n: string,
+        ) => Promise<boolean>;
+      }
+    ).applyAdvancedBlockingScheduleToNode(schedule, "nodeA");
   }
 
   async function remove(
     service: DnsSchedulesEvaluatorService,
     schedule: DnsSchedule,
   ): Promise<void> {
-    return (service as unknown as {
-      removeAdvancedBlockingScheduleFromNode: (
-        s: DnsSchedule,
-        n: string,
-      ) => Promise<void>;
-    }).removeAdvancedBlockingScheduleFromNode(schedule, "nodeA");
+    return (
+      service as unknown as {
+        removeAdvancedBlockingScheduleFromNode: (
+          s: DnsSchedule,
+          n: string,
+        ) => Promise<void>;
+      }
+    ).removeAdvancedBlockingScheduleFromNode(schedule, "nodeA");
   }
 
   describe("vector 1: domainGroupNames swap (YouTube → Spotify)", () => {
@@ -726,8 +1017,16 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
       const [, , newTracking] = setAppliedEntries.mock.calls[0];
       expect(newTracking).toEqual(
         expect.arrayContaining([
-          { advancedBlockingGroupName: "Parents", action: "block", domain: "spotify.com" },
-          { advancedBlockingGroupName: "Parents", action: "block", domain: "scdn.co" },
+          {
+            advancedBlockingGroupName: "Parents",
+            action: "block",
+            domain: "spotify.com",
+          },
+          {
+            advancedBlockingGroupName: "Parents",
+            action: "block",
+            domain: "scdn.co",
+          },
         ]),
       );
       expect(newTracking).toHaveLength(2);
@@ -811,8 +1110,16 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
           ),
         ],
         trackedEntries: [
-          { advancedBlockingGroupName: "Parents", action: "block", domain: "youtube.com" },
-          { advancedBlockingGroupName: "Parents", action: "block", domain: "tiktok.com" },
+          {
+            advancedBlockingGroupName: "Parents",
+            action: "block",
+            domain: "youtube.com",
+          },
+          {
+            advancedBlockingGroupName: "Parents",
+            action: "block",
+            domain: "tiktok.com",
+          },
         ],
       });
 
@@ -848,8 +1155,16 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
       const { service, setConfigWithAuth, setAppliedEntries } = makeService({
         groups: [makeGroup("Edison", [], [])], // emptied by other schedule
         trackedEntries: [
-          { advancedBlockingGroupName: "Edison", action: "block", domain: "youtube.com" },
-          { advancedBlockingGroupName: "Edison", action: "block", domain: "googlevideo.com" },
+          {
+            advancedBlockingGroupName: "Edison",
+            action: "block",
+            domain: "youtube.com",
+          },
+          {
+            advancedBlockingGroupName: "Edison",
+            action: "block",
+            domain: "googlevideo.com",
+          },
         ],
       });
 
@@ -878,7 +1193,11 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
       const { service, setConfigWithAuth, setAppliedEntries } = makeService({
         groups: [makeGroup("Edison", ["youtube.com"], [])],
         trackedEntries: [
-          { advancedBlockingGroupName: "Edison", action: "block", domain: "youtube.com" },
+          {
+            advancedBlockingGroupName: "Edison",
+            action: "block",
+            domain: "youtube.com",
+          },
         ],
       });
 
@@ -905,9 +1224,7 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
       // the new code has prev=[] tracking. It must add (or skip already-
       // present) but must NEVER remove the existing entries.
       const { service, setConfigWithAuth, setAppliedEntries } = makeService({
-        groups: [
-          makeGroup("Parents", ["youtube.com", "pre-existing.com"], []),
-        ],
+        groups: [makeGroup("Parents", ["youtube.com", "pre-existing.com"], [])],
         trackedEntries: [], // empty — pre-tracking-table state
       });
 
@@ -926,7 +1243,11 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
       // Tracking now seeded with the desired state going forward.
       const [, , newTracking] = setAppliedEntries.mock.calls[0];
       expect(newTracking).toEqual([
-        { advancedBlockingGroupName: "Parents", action: "block", domain: "youtube.com" },
+        {
+          advancedBlockingGroupName: "Parents",
+          action: "block",
+          domain: "youtube.com",
+        },
       ]);
     });
   });
@@ -938,12 +1259,18 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
       // ["Spotify"], but the entries actually in Technitium (and tracked)
       // are YouTube domains from before the swap.
       const { service, setConfigWithAuth, clearAppliedEntries } = makeService({
-        groups: [
-          makeGroup("Parents", ["youtube.com", "googlevideo.com"], []),
-        ],
+        groups: [makeGroup("Parents", ["youtube.com", "googlevideo.com"], [])],
         trackedEntries: [
-          { advancedBlockingGroupName: "Parents", action: "block", domain: "youtube.com" },
-          { advancedBlockingGroupName: "Parents", action: "block", domain: "googlevideo.com" },
+          {
+            advancedBlockingGroupName: "Parents",
+            action: "block",
+            domain: "youtube.com",
+          },
+          {
+            advancedBlockingGroupName: "Parents",
+            action: "block",
+            domain: "googlevideo.com",
+          },
         ],
         domainGroupsLookup: (names) =>
           names.includes("Spotify") ? ["spotify.com"] : [],

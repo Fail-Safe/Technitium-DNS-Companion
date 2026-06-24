@@ -12,6 +12,7 @@ import {
   faToggleOff,
   faToggleOn,
   faTrash,
+  faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
@@ -28,6 +29,8 @@ import type {
   DnsScheduleEvaluatorStatus,
   DnsScheduleStateEntry,
   DnsScheduleTokenStatus,
+  DnsTemporaryOverride,
+  DnsTemporaryOverrideDraft,
   DnsSchedulesStorageStatus,
   LogAlertsSmtpStatus,
   RunDnsScheduleEvaluatorResponse,
@@ -67,6 +70,18 @@ const DEFAULT_DRAFT: DnsScheduleDraft = {
   endTime: "06:00",
   timezone: BROWSER_TIMEZONE,
   nodeIds: [],
+};
+
+const DEFAULT_OVERRIDE_DRAFT: DnsTemporaryOverrideDraft = {
+  name: "",
+  enabled: true,
+  advancedBlockingGroupNames: [],
+  action: "block",
+  domainEntries: [],
+  domainGroupNames: [],
+  flushCacheOnChange: true,
+  nodeIds: [],
+  expiresAt: null,
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -114,6 +129,46 @@ function formatLocalDateTime(iso: string | undefined | null): string {
   }
 }
 
+function toDateTimeLocalValue(iso: string | undefined | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function fromDateTimeLocalValue(value: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function getPresetExpiration(preset: string): string | null {
+  const now = new Date();
+  if (preset === "one-hour") {
+    return new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+  }
+  if (preset === "two-hours") {
+    return new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
+  }
+  if (preset === "until-tomorrow") {
+    const tomorrowMorning = new Date(now);
+    tomorrowMorning.setDate(tomorrowMorning.getDate() + 1);
+    tomorrowMorning.setHours(8, 0, 0, 0);
+    return tomorrowMorning.toISOString();
+  }
+  if (preset === "until-turned-off") {
+    return null;
+  }
+  return null;
+}
+
+function isExpired(expiresAt: string | undefined | null): boolean {
+  if (!expiresAt) return false;
+  const expires = new Date(expiresAt).getTime();
+  return !Number.isNaN(expires) && expires <= Date.now();
+}
+
 function formatDaysOfWeek(days: number[]): string {
   if (days.length === 0) return "Every day";
   if (days.length === 7) return "Every day";
@@ -127,6 +182,25 @@ function formatDaysOfWeek(days: number[]): string {
 function formatTimeWindow(startTime: string, endTime: string): string {
   const isOvernight = startTime > endTime;
   return `${startTime} – ${endTime}${isOvernight ? " (+1 day)" : ""}`;
+}
+
+function formatNodeScope(nodeIds: string[]): string {
+  return nodeIds.length > 0 ? nodeIds.join(", ") : "All nodes";
+}
+
+function areStringSetsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const bSet = new Set(b);
+  return a.every((value) => bSet.has(value));
+}
+
+function shouldShowAppliedVia(
+  scheduleNodeIds: string[],
+  appliedNodeIds: string[],
+): boolean {
+  if (appliedNodeIds.length === 0) return false;
+  if (scheduleNodeIds.length === 0) return true;
+  return !areStringSetsEqual(scheduleNodeIds, appliedNodeIds);
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
@@ -1432,6 +1506,339 @@ function ScheduleForm({
   );
 }
 
+function TemporaryOverrideForm({
+  draft,
+  onChange,
+  onSave,
+  onCancel,
+  submitting,
+  isNew,
+  availableNodeIds,
+  availableAbGroups,
+  availableDomainGroups,
+  tokenStatus,
+}: {
+  draft: DnsTemporaryOverrideDraft;
+  onChange: (draft: DnsTemporaryOverrideDraft) => void;
+  onSave: (draft: DnsTemporaryOverrideDraft) => void;
+  onCancel: () => void;
+  submitting: boolean;
+  isNew: boolean;
+  availableNodeIds: string[];
+  availableAbGroups: string[];
+  availableDomainGroups: DomainGroup[];
+  tokenStatus: DnsScheduleTokenStatus | null;
+}) {
+  const [domainEntriesText, setDomainEntriesText] = useState(
+    draft.domainEntries.join("\n"),
+  );
+  const [durationPreset, setDurationPreset] = useState(
+    draft.expiresAt ? "custom" : "until-turned-off",
+  );
+
+  useEffect(() => {
+    setDomainEntriesText(draft.domainEntries.join("\n"));
+  }, [draft.domainEntries]);
+
+  const commitDomainEntriesText = (text: string) => {
+    const entries = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    setDomainEntriesText(entries.join("\n"));
+    onChange({ ...draft, domainEntries: entries });
+  };
+
+  const handleNodeToggle = (nodeId: string) => {
+    const next = draft.nodeIds.includes(nodeId)
+      ? draft.nodeIds.filter((id) => id !== nodeId)
+      : [...draft.nodeIds, nodeId];
+    onChange({ ...draft, nodeIds: next });
+  };
+
+  const handleDurationPreset = (preset: string) => {
+    setDurationPreset(preset);
+    if (preset === "custom") {
+      const expiresAt =
+        draft.expiresAt ??
+        new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+      onChange({ ...draft, expiresAt });
+      return;
+    }
+    onChange({ ...draft, expiresAt: getPresetExpiration(preset) });
+  };
+
+  return (
+    <div className="log-alerts__rule-form">
+      <div className="log-alerts__form-grid">
+        <div className="log-alerts__form-field">
+          <label className="log-alerts__form-label">Override name</label>
+          <AppInput
+            value={draft.name}
+            onChange={(e) => onChange({ ...draft, name: e.target.value })}
+            placeholder="e.g. YouTube break"
+            disabled={submitting}
+          />
+        </div>
+
+        <div className="log-alerts__form-field">
+          <label className="log-alerts__form-label">Enabled</label>
+          <button
+            type="button"
+            className={`log-alerts__toggle-btn ${draft.enabled ? "log-alerts__toggle-btn--on" : "log-alerts__toggle-btn--off"}`}
+            onClick={() => onChange({ ...draft, enabled: !draft.enabled })}
+            disabled={submitting}
+          >
+            <FontAwesomeIcon
+              icon={draft.enabled ? faToggleOn : faToggleOff}
+            />
+            <span>{draft.enabled ? "Enabled" : "Disabled"}</span>
+          </button>
+        </div>
+
+        <div className="log-alerts__form-field log-alerts__form-field--wide">
+          <label className="log-alerts__form-label">
+            Advanced Blocking group
+            {availableAbGroups.length === 0 && (
+              <span className="log-alerts__form-hint">
+                {" "}(case-sensitive, must match exactly)
+              </span>
+            )}
+          </label>
+          {availableAbGroups.length > 0 ? (
+            <div className="logs-page__ab-group-pills">
+              {availableAbGroups.map((name) => {
+                const selected = draft.advancedBlockingGroupNames.includes(name);
+                return (
+                  <label
+                    key={name}
+                    className={`logs-page__ab-group-pill${selected ? " logs-page__ab-group-pill--selected" : ""}`}
+                  >
+                    <input
+                      className="logs-page__ab-group-pill__checkbox"
+                      type="checkbox"
+                      checked={selected}
+                      disabled={submitting}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? [...draft.advancedBlockingGroupNames, name]
+                          : draft.advancedBlockingGroupNames.filter((g) => g !== name);
+                        onChange({ ...draft, advancedBlockingGroupNames: next });
+                      }}
+                    />
+                    <span className="logs-page__ab-group-pill__label">
+                      {name}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          ) : (
+            <AppInput
+              value={draft.advancedBlockingGroupNames.join(", ")}
+              onChange={(e) =>
+                onChange({
+                  ...draft,
+                  advancedBlockingGroupNames: e.target.value
+                    .split(",")
+                    .map((v) => v.trim())
+                    .filter((v) => v.length > 0),
+                })
+              }
+              placeholder="e.g. Florence"
+              disabled={submitting}
+            />
+          )}
+        </div>
+
+        <div className="log-alerts__form-field">
+          <label className="log-alerts__form-label">Action</label>
+          <div className="log-alerts__radio-group">
+            {(["block", "allow"] as DnsScheduleAction[]).map((action) => (
+              <label key={action} className="log-alerts__radio-label">
+                <input
+                  type="radio"
+                  name="temporary-override-action"
+                  value={action}
+                  checked={draft.action === action}
+                  onChange={() => onChange({ ...draft, action })}
+                  disabled={submitting}
+                />
+                <span>
+                  {action === "block" ? "Block" : "Allow"}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="log-alerts__form-field">
+          <label className="log-alerts__form-label">Duration</label>
+          <select
+            value={durationPreset}
+            onChange={(e) => handleDurationPreset(e.target.value)}
+            disabled={submitting}
+          >
+            <option value="one-hour">1 hour</option>
+            <option value="two-hours">2 hours</option>
+            <option value="until-tomorrow">Until tomorrow morning</option>
+            <option value="until-turned-off">Until turned off</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+
+        {durationPreset === "custom" && (
+          <div className="log-alerts__form-field">
+            <label className="log-alerts__form-label">Expires at</label>
+            <AppInput
+              type="datetime-local"
+              value={toDateTimeLocalValue(draft.expiresAt)}
+              onChange={(e) =>
+                onChange({
+                  ...draft,
+                  expiresAt: fromDateTimeLocalValue(e.target.value),
+                })
+              }
+              disabled={submitting}
+            />
+          </div>
+        )}
+
+        {availableDomainGroups.length > 0 && (
+          <div className="log-alerts__form-field log-alerts__form-field--wide">
+            <label className="log-alerts__form-label">
+              Domain Groups{" "}
+              <span className="log-alerts__form-hint">
+                (resolved when the evaluator applies the override)
+              </span>
+            </label>
+            <div className="logs-page__ab-group-pills">
+              {availableDomainGroups.map((dg) => {
+                const selected = draft.domainGroupNames.includes(dg.name);
+                return (
+                  <label
+                    key={dg.id}
+                    className={`logs-page__ab-group-pill${selected ? " logs-page__ab-group-pill--selected" : ""}`}
+                  >
+                    <input
+                      className="logs-page__ab-group-pill__checkbox"
+                      type="checkbox"
+                      checked={selected}
+                      disabled={submitting}
+                      onChange={() => {
+                        const next = selected
+                          ? draft.domainGroupNames.filter((n) => n !== dg.name)
+                          : [...draft.domainGroupNames, dg.name];
+                        onChange({ ...draft, domainGroupNames: next });
+                      }}
+                    />
+                    <span className="logs-page__ab-group-pill__label">
+                      {dg.name}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="log-alerts__form-field log-alerts__form-field--wide">
+          <label className="log-alerts__form-label">
+            Domain entries{" "}
+            <span className="log-alerts__form-hint">(one per line)</span>
+          </label>
+          <AppTextarea
+            value={domainEntriesText}
+            onChange={(e) => setDomainEntriesText(e.target.value)}
+            onBlur={() => commitDomainEntriesText(domainEntriesText)}
+            placeholder={"youtube.com\nm.youtube.com"}
+            rows={4}
+            disabled={submitting}
+            className="log-alerts__domain-textarea"
+          />
+        </div>
+
+        <div className="log-alerts__form-field log-alerts__form-field--wide">
+          <label className="log-alerts__form-label">DNS cache flush</label>
+          <label className="log-alerts__radio-label">
+            <input
+              type="checkbox"
+              checked={draft.flushCacheOnChange}
+              onChange={(e) =>
+                onChange({ ...draft, flushCacheOnChange: e.target.checked })
+              }
+              disabled={submitting}
+            />
+            <span>Flush DNS cache when the override applies or ends</span>
+          </label>
+          {draft.flushCacheOnChange && tokenStatus?.hasCacheModify === false && (
+            <p className="log-alerts__form-hint log-alerts__form-hint--warn">
+              The companion-scheduler token does not have Cache: Modify
+              permission. Cache flush will be skipped.
+            </p>
+          )}
+        </div>
+
+        {availableNodeIds.length > 1 && (
+          <div className="log-alerts__form-field log-alerts__form-field--wide">
+            <label className="log-alerts__form-label">
+              Target nodes{" "}
+              <span className="log-alerts__form-hint">
+                (empty = all nodes)
+              </span>
+            </label>
+            <div className="dns-schedules__dow-grid">
+              {availableNodeIds.map((nodeId) => (
+                <label key={nodeId} className="dns-schedules__dow-label">
+                  <input
+                    type="checkbox"
+                    checked={draft.nodeIds.includes(nodeId)}
+                    onChange={() => handleNodeToggle(nodeId)}
+                    disabled={submitting}
+                  />
+                  <span>{nodeId}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="log-alerts__form-actions">
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={() => {
+            const entries = domainEntriesText
+              .split(/\r?\n/)
+              .map((line) => line.trim())
+              .filter((line) => line.length > 0);
+            const nextDraft = { ...draft, domainEntries: entries };
+            setDomainEntriesText(entries.join("\n"));
+            onChange(nextDraft);
+            onSave(nextDraft);
+          }}
+          disabled={submitting}
+        >
+          {submitting
+            ? "Saving..."
+            : isNew
+              ? "Create Override"
+              : "Save Changes"}
+        </button>
+        <button
+          type="button"
+          className="btn btn--secondary"
+          onClick={onCancel}
+          disabled={submitting}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export function AutomationPage() {
@@ -1495,6 +1902,9 @@ export function AutomationPage() {
   const [evaluatorStatus, setEvaluatorStatus] =
     useState<DnsScheduleEvaluatorStatus | null>(null);
   const [schedules, setSchedules] = useState<DnsSchedule[]>([]);
+  const [temporaryOverrides, setTemporaryOverrides] = useState<
+    DnsTemporaryOverride[]
+  >([]);
   const knownEmails = Array.from(
     new Set(schedules.flatMap((s) => s.notifyEmails)),
   ).sort();
@@ -1507,18 +1917,35 @@ export function AutomationPage() {
     string | "new" | null
   >(null);
   const [formDraft, setFormDraft] = useState<DnsScheduleDraft>(DEFAULT_DRAFT);
+  const [activeTab, setActiveTab] = useState<"schedules" | "temporary">(
+    "schedules",
+  );
+  const [editingOverrideId, setEditingOverrideId] = useState<
+    string | "new" | null
+  >(null);
+  const [overrideDraft, setOverrideDraft] =
+    useState<DnsTemporaryOverrideDraft>(DEFAULT_OVERRIDE_DRAFT);
   const [submitting, setSubmitting] = useState(false);
 
   // Action state
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [togglingOverrideId, setTogglingOverrideId] = useState<string | null>(
+    null,
+  );
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingOverrideId, setDeletingOverrideId] = useState<string | null>(
+    null,
+  );
   const [cloningId, setCloningId] = useState<string | null>(null);
   const [deleteConfirmSchedule, setDeleteConfirmSchedule] = useState<DnsSchedule | null>(null);
+  const [deleteConfirmOverride, setDeleteConfirmOverride] =
+    useState<DnsTemporaryOverride | null>(null);
   const [evaluatorToggling, setEvaluatorToggling] = useState(false);
   const [evaluatorRunning, setEvaluatorRunning] = useState(false);
   const [lastRunResult, setLastRunResult] =
     useState<RunDnsScheduleEvaluatorResponse | null>(null);
   const [showRunResult, setShowRunResult] = useState(false);
+  const [showPrecedenceNote, setShowPrecedenceNote] = useState(true);
 
   // Expanded schedule cards
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -1531,12 +1958,22 @@ export function AutomationPage() {
     setLoading(true);
     setError(null);
     try {
-      const [tokenRes, storageRes, evalRes, schedulesRes, stateRes, dgRes, smtpRes] =
+      const [
+        tokenRes,
+        storageRes,
+        evalRes,
+        schedulesRes,
+        overridesRes,
+        stateRes,
+        dgRes,
+        smtpRes,
+      ] =
         await Promise.all([
           apiFetchStatus("/nodes/dns-schedules/token/status"),
           apiFetchStatus("/nodes/dns-schedules/storage/status"),
           apiFetchStatus("/nodes/dns-schedules/evaluator/status"),
           apiFetch("/nodes/dns-schedules/rules"),
+          apiFetch("/nodes/dns-overrides/temporary"),
           apiFetchStatus("/nodes/dns-schedules/state"),
           apiFetch("/domain-groups"),
           apiFetchStatus("/nodes/log-alerts/smtp/status"),
@@ -1554,6 +1991,10 @@ export function AutomationPage() {
         );
       if (schedulesRes.ok)
         setSchedules((await schedulesRes.json()) as DnsSchedule[]);
+      if (overridesRes.ok)
+        setTemporaryOverrides(
+          (await overridesRes.json()) as DnsTemporaryOverride[],
+        );
       if (stateRes.ok)
         setAppliedState((await stateRes.json()) as DnsScheduleStateEntry[]);
       if (dgRes.ok)
@@ -1627,6 +2068,8 @@ export function AutomationPage() {
   // ── Form handlers ─────────────────────────────────────────────────────────
 
   const handleNewSchedule = () => {
+    setEditingOverrideId(null);
+    setActiveTab("schedules");
     setFormDraft({ ...DEFAULT_DRAFT });
     setEditingScheduleId("new");
   };
@@ -1662,6 +2105,42 @@ export function AutomationPage() {
 
   const handleCancelForm = () => {
     setEditingScheduleId(null);
+  };
+
+  const handleNewOverride = () => {
+    setEditingScheduleId(null);
+    setActiveTab("temporary");
+    setOverrideDraft({
+      ...DEFAULT_OVERRIDE_DRAFT,
+      expiresAt: getPresetExpiration("two-hours"),
+    });
+    setEditingOverrideId("new");
+  };
+
+  const handleEditOverride = (override: DnsTemporaryOverride) => {
+    setEditingScheduleId(null);
+    setActiveTab("temporary");
+    setOverrideDraft({
+      name: override.name,
+      enabled: override.enabled,
+      advancedBlockingGroupNames: override.advancedBlockingGroupNames ?? [],
+      action: override.action,
+      domainEntries: override.domainEntries ?? [],
+      domainGroupNames: override.domainGroupNames ?? [],
+      flushCacheOnChange: override.flushCacheOnChange ?? true,
+      nodeIds: override.nodeIds ?? [],
+      expiresAt: override.expiresAt ?? null,
+    });
+    setEditingOverrideId(override.id);
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      next.add(override.id);
+      return next;
+    });
+  };
+
+  const handleCancelOverrideForm = () => {
+    setEditingOverrideId(null);
   };
 
   const handleSaveSchedule = async () => {
@@ -1742,6 +2221,82 @@ export function AutomationPage() {
     }
   };
 
+  const handleSaveOverride = async (draft: DnsTemporaryOverrideDraft) => {
+    if (!draft.name.trim()) {
+      pushToast({ message: "Override name is required.", tone: "info", timeout: 4000 });
+      return;
+    }
+    if (draft.advancedBlockingGroupNames.length === 0) {
+      pushToast({
+        message: "At least one Advanced Blocking group is required.",
+        tone: "info",
+        timeout: 4000,
+      });
+      return;
+    }
+    if (draft.domainEntries.length === 0 && draft.domainGroupNames.length === 0) {
+      pushToast({
+        message: "At least one domain entry or Domain Group is required.",
+        tone: "info",
+        timeout: 4000,
+      });
+      return;
+    }
+    if (draft.expiresAt && isExpired(draft.expiresAt)) {
+      pushToast({
+        message: "Expiration must be in the future.",
+        tone: "info",
+        timeout: 4000,
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const isNew = editingOverrideId === "new";
+      const url = isNew
+        ? "/nodes/dns-overrides/temporary"
+        : `/nodes/dns-overrides/temporary/${editingOverrideId}`;
+      const method = isNew ? "POST" : "PATCH";
+
+      const res = await apiFetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+
+      if (!res.ok) {
+        const msg = await readApiErrorMessage(
+          res,
+          `Failed to ${isNew ? "create" : "update"} override (${res.status}).`,
+        );
+        throw new Error(msg);
+      }
+
+      const saved = (await res.json()) as DnsTemporaryOverride;
+      if (isNew) {
+        setTemporaryOverrides((prev) => [saved, ...prev]);
+      } else {
+        setTemporaryOverrides((prev) =>
+          prev.map((o) => (o.id === saved.id ? saved : o)),
+        );
+      }
+
+      setEditingOverrideId(null);
+      await runEvaluatorForMutation();
+      pushToast({
+        message: `Override "${saved.name}" ${isNew ? "created" : "updated"} and applied.`,
+        tone: "success",
+        timeout: 3500,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Save failed.";
+      pushToast({ message: msg, tone: "error", timeout: 6000 });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // ── Toggle enabled ────────────────────────────────────────────────────────
 
   const handleToggleEnabled = async (schedule: DnsSchedule) => {
@@ -1777,10 +2332,62 @@ export function AutomationPage() {
     }
   };
 
+  const handleToggleOverrideEnabled = async (
+    override: DnsTemporaryOverride,
+    nextEnabled = !override.enabled,
+  ) => {
+    setTogglingOverrideId(override.id);
+    try {
+      const res = await apiFetch(
+        `/nodes/dns-overrides/temporary/${override.id}/enabled`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: nextEnabled }),
+        },
+      );
+      if (!res.ok) {
+        const msg = await readApiErrorMessage(res, "Failed to toggle override.");
+        throw new Error(msg);
+      }
+      const updated = (await res.json()) as DnsTemporaryOverride;
+      setTemporaryOverrides((prev) =>
+        prev.map((o) => (o.id === updated.id ? updated : o)),
+      );
+      await runEvaluatorForMutation();
+      pushToast({
+        message: `"${updated.name}" ${updated.enabled ? "enabled" : "ended"}.`,
+        tone: "success",
+        timeout: 3000,
+      });
+    } catch (e) {
+      pushToast({
+        message: e instanceof Error ? e.message : "Toggle failed.",
+        tone: "error",
+        timeout: 4000,
+      });
+    } finally {
+      setTogglingOverrideId(null);
+    }
+  };
+
   // ── Delete ────────────────────────────────────────────────────────────────
 
   const handleDeleteSchedule = (schedule: DnsSchedule) => {
     setDeleteConfirmSchedule(schedule);
+  };
+
+  const handleDeleteOverride = (override: DnsTemporaryOverride) => {
+    if (appliedScheduleIds.has(override.id)) {
+      pushToast({
+        message:
+          "End the override first so the evaluator can remove its applied entries, then delete it.",
+        tone: "info",
+        timeout: 5000,
+      });
+      return;
+    }
+    setDeleteConfirmOverride(override);
   };
 
   const executeDeleteSchedule = async () => {
@@ -1816,6 +2423,42 @@ export function AutomationPage() {
       });
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const executeDeleteOverride = async () => {
+    const override = deleteConfirmOverride;
+    if (!override) return;
+    setDeleteConfirmOverride(null);
+    setDeletingOverrideId(override.id);
+    try {
+      const res = await apiFetch(
+        `/nodes/dns-overrides/temporary/${override.id}`,
+        {
+          method: "DELETE",
+        },
+      );
+      if (!res.ok) {
+        const msg = await readApiErrorMessage(res, "Delete failed.");
+        throw new Error(msg);
+      }
+      setTemporaryOverrides((prev) => prev.filter((o) => o.id !== override.id));
+      if (editingOverrideId === override.id) {
+        setEditingOverrideId(null);
+      }
+      pushToast({
+        message: `Override "${override.name}" deleted.`,
+        tone: "success",
+        timeout: 3000,
+      });
+    } catch (e) {
+      pushToast({
+        message: e instanceof Error ? e.message : "Delete failed.",
+        tone: "error",
+        timeout: 4000,
+      });
+    } finally {
+      setDeletingOverrideId(null);
     }
   };
 
@@ -1856,6 +2499,50 @@ export function AutomationPage() {
       const cloned = (await res.json()) as DnsSchedule;
       setSchedules((prev) => [cloned, ...prev]);
       handleEditSchedule(cloned);
+      pushToast({
+        message: `Cloned as "${cloned.name}". Rename and save to keep changes.`,
+        tone: "success",
+        timeout: 4000,
+      });
+    } catch (e) {
+      pushToast({
+        message: e instanceof Error ? e.message : "Clone failed.",
+        tone: "error",
+        timeout: 4000,
+      });
+    } finally {
+      setCloningId(null);
+    }
+  };
+
+  const handleCloneOverride = async (override: DnsTemporaryOverride) => {
+    setCloningId(override.id);
+    try {
+      const draft: DnsTemporaryOverrideDraft = {
+        name: `Copy of ${override.name}`,
+        enabled: false,
+        advancedBlockingGroupNames: [
+          ...(override.advancedBlockingGroupNames ?? []),
+        ],
+        action: override.action,
+        domainEntries: [...(override.domainEntries ?? [])],
+        domainGroupNames: [...(override.domainGroupNames ?? [])],
+        nodeIds: [...(override.nodeIds ?? [])],
+        flushCacheOnChange: override.flushCacheOnChange,
+        expiresAt: override.expiresAt ?? null,
+      };
+      const res = await apiFetch("/nodes/dns-overrides/temporary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      if (!res.ok) {
+        const msg = await readApiErrorMessage(res, "Clone failed.");
+        throw new Error(msg);
+      }
+      const cloned = (await res.json()) as DnsTemporaryOverride;
+      setTemporaryOverrides((prev) => [cloned, ...prev]);
+      handleEditOverride(cloned);
       pushToast({
         message: `Cloned as "${cloned.name}". Rename and save to keep changes.`,
         tone: "success",
@@ -1918,7 +2605,7 @@ export function AutomationPage() {
       setShowRunResult(true);
       pushToast({
         message: dryRun
-          ? `Dry run complete: ${result.evaluatedSchedules} schedule(s) evaluated.`
+          ? `Dry run complete: ${result.evaluatedSchedules} source(s) evaluated.`
           : `Evaluator ran: ${result.applied} applied, ${result.removed} removed.`,
         tone: "success",
         timeout: 4000,
@@ -1935,6 +2622,22 @@ export function AutomationPage() {
     }
   };
 
+  const runEvaluatorForMutation = async () => {
+    const res = await apiFetch("/nodes/dns-schedules/evaluator/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dryRun: false }),
+    });
+    if (!res.ok) {
+      const msg = await readApiErrorMessage(res, "Evaluator run failed.");
+      throw new Error(msg);
+    }
+    const result = (await res.json()) as RunDnsScheduleEvaluatorResponse;
+    setLastRunResult(result);
+    setShowRunResult(true);
+    await Promise.all([refreshEvaluatorStatus(), refreshAppliedState()]);
+  };
+
   // ── Derived ──────────────────────────────────────────────────────────────
 
   const appliedScheduleIds = new Set(appliedState.map((e) => e.scheduleId));
@@ -1947,12 +2650,12 @@ export function AutomationPage() {
         <div className="log-alerts__header-title">
           <h1>
             <FontAwesomeIcon icon={faBolt} className="log-alerts__header-icon" />
-            DNS Schedules
+            DNS Overrides
           </h1>
           <p className="log-alerts__header-desc">
-            Time-based rules that automatically add or remove Advanced Blocking
-            entries on a schedule — great for parental controls, quiet hours, or
-            network policy windows.
+            Recurring schedules and temporary overrides that add or remove
+            Advanced Blocking entries for parental controls, quiet hours, and
+            one-off policy changes.
           </p>
         </div>
         <div className="log-alerts__header-actions">
@@ -1969,14 +2672,16 @@ export function AutomationPage() {
             />
             Refresh
           </button>
-          {editingScheduleId === null && (
+          {editingScheduleId === null && editingOverrideId === null && (
             <button
               type="button"
               className="btn btn--primary btn--sm"
-              onClick={handleNewSchedule}
+              onClick={
+                activeTab === "schedules" ? handleNewSchedule : handleNewOverride
+              }
             >
               <FontAwesomeIcon icon={faPlus} />
-              New Schedule
+              {activeTab === "schedules" ? "New Schedule" : "New Override"}
             </button>
           )}
         </div>
@@ -1995,10 +2700,58 @@ export function AutomationPage() {
         revalidating={revalidatingToken}
       />
 
+      <div className="dns-overrides__tabs" role="tablist" aria-label="DNS Overrides">
+        <button
+          type="button"
+          className={`dns-overrides__tab ${activeTab === "schedules" ? "dns-overrides__tab--active" : ""}`}
+          onClick={() => {
+            setActiveTab("schedules");
+            setEditingOverrideId(null);
+          }}
+        >
+          Schedules <span>{schedules.length}</span>
+        </button>
+        <button
+          type="button"
+          className={`dns-overrides__tab ${activeTab === "temporary" ? "dns-overrides__tab--active" : ""}`}
+          onClick={() => {
+            setActiveTab("temporary");
+            setEditingScheduleId(null);
+          }}
+        >
+          Temporary <span>{temporaryOverrides.length}</span>
+        </button>
+      </div>
+
+      {showPrecedenceNote && (
+        <div className="dns-overrides__behavior-note">
+          <FontAwesomeIcon
+            icon={faCircleInfo}
+            className="dns-overrides__behavior-note-icon"
+          />
+          <div className="dns-overrides__behavior-note-body">
+            <strong>How precedence works:</strong> Schedules are the recurring
+            baseline. Temporary overrides apply immediately and stay active
+            until they expire or you end them. The evaluator removes an entry
+            only when no active schedule or temporary override still requires
+            that same group, action, and domain.
+          </div>
+          <button
+            type="button"
+            className="dns-overrides__behavior-note-dismiss"
+            onClick={() => setShowPrecedenceNote(false)}
+            aria-label="Dismiss precedence note"
+            title="Dismiss"
+          >
+            <FontAwesomeIcon icon={faXmark} />
+          </button>
+        </div>
+      )}
+
       {/* Evaluator panel */}
       <div className="log-alerts__evaluator-card">
         <div className="log-alerts__evaluator-header">
-          <h2 className="log-alerts__evaluator-title">Schedule Evaluator</h2>
+          <h2 className="log-alerts__evaluator-title">Override Evaluator</h2>
           <div className="log-alerts__evaluator-controls">
             <button
               type="button"
@@ -2017,7 +2770,7 @@ export function AutomationPage() {
               className="btn btn--secondary btn--sm"
               onClick={() => void handleRunEvaluator(true)}
               disabled={evaluatorRunning || !evaluatorStatus}
-              title="Dry run — checks which schedules would change without making any changes"
+              title="Dry run — checks which override sources would change without making any changes"
             >
               <FontAwesomeIcon icon={evaluatorRunning ? faRotate : faPlay} className={evaluatorRunning ? "fa-spin" : ""} />
               Dry Run
@@ -2069,7 +2822,7 @@ export function AutomationPage() {
           <div className="dns-schedules__run-result">
             <div className="dns-schedules__run-result-summary">
               {lastRunResult.dryRun && <span className="dns-schedules__dry-run-badge">Dry Run</span>}
-              <span>{lastRunResult.evaluatedSchedules} schedule(s) evaluated</span>
+              <span>{lastRunResult.evaluatedSchedules} source(s) evaluated</span>
               <span>{lastRunResult.applied} applied</span>
               <span>{lastRunResult.removed} removed</span>
               <span>{lastRunResult.skipped} skipped</span>
@@ -2081,7 +2834,7 @@ export function AutomationPage() {
               <table className="dns-schedules__run-table">
                 <thead>
                   <tr>
-                    <th>Schedule</th>
+                    <th>Source</th>
                     <th>Node</th>
                     <th>Action</th>
                     <th>Detail</th>
@@ -2116,29 +2869,31 @@ export function AutomationPage() {
         )}
       </div>
 
-      {/* New schedule form */}
-      {editingScheduleId === "new" && (
-        <div className="log-alerts__rule-card log-alerts__rule-card--new">
-          <h3 className="log-alerts__rule-card-title">New Schedule</h3>
-          <ScheduleForm
-            draft={formDraft}
-            onChange={setFormDraft}
-            onSave={() => void handleSaveSchedule()}
-            onCancel={handleCancelForm}
-            submitting={submitting}
-            isNew={true}
-            availableNodeIds={availableNodeIds}
-            availableAbGroups={availableAbGroups}
-            availableDomainGroups={availableDomainGroups}
-            smtpStatus={smtpStatus}
-            knownEmails={knownEmails}
-            tokenStatus={tokenStatus}
-          />
-        </div>
-      )}
+      {activeTab === "schedules" && (
+        <>
+          {/* New schedule form */}
+          {editingScheduleId === "new" && (
+            <div className="log-alerts__rule-card log-alerts__rule-card--new">
+              <h3 className="log-alerts__rule-card-title">New Schedule</h3>
+              <ScheduleForm
+                draft={formDraft}
+                onChange={setFormDraft}
+                onSave={() => void handleSaveSchedule()}
+                onCancel={handleCancelForm}
+                submitting={submitting}
+                isNew={true}
+                availableNodeIds={availableNodeIds}
+                availableAbGroups={availableAbGroups}
+                availableDomainGroups={availableDomainGroups}
+                smtpStatus={smtpStatus}
+                knownEmails={knownEmails}
+                tokenStatus={tokenStatus}
+              />
+            </div>
+          )}
 
-      {/* Schedules list */}
-      <div className="log-alerts__rules-section">
+          {/* Schedules list */}
+          <div className="log-alerts__rules-section">
         <div className="log-alerts__rules-header">
           <h2 className="log-alerts__rules-title">
             Schedules ({schedules.length})
@@ -2163,6 +2918,11 @@ export function AutomationPage() {
           const appliedNodes = appliedState
             .filter((e) => e.scheduleId === schedule.id)
             .map((e) => e.nodeId);
+          const activeNodeScope = formatNodeScope(schedule.nodeIds);
+          const showAppliedVia = shouldShowAppliedVia(
+            schedule.nodeIds,
+            appliedNodes,
+          );
 
           return (
             <div
@@ -2173,7 +2933,14 @@ export function AutomationPage() {
                 <div className="log-alerts__rule-card-info">
                   <span className="log-alerts__rule-name">{schedule.name}</span>
                   {isApplied && (
-                    <span className="dns-schedules__active-badge" title={`Applied on: ${appliedNodes.join(", ")}`}>
+                    <span
+                      className="dns-schedules__active-badge"
+                      title={
+                        showAppliedVia
+                          ? `Active for: ${activeNodeScope}; applied via: ${appliedNodes.join(", ")}`
+                          : `Active for: ${activeNodeScope}`
+                      }
+                    >
                       <FontAwesomeIcon icon={faBolt} /> Active
                     </span>
                   )}
@@ -2258,8 +3025,16 @@ export function AutomationPage() {
                     type="button"
                     className="btn btn--ghost btn--sm"
                     onClick={() => void handleDeleteSchedule(schedule)}
-                    disabled={deletingId === schedule.id}
-                    title="Delete schedule"
+                    disabled={
+                      deletingId === schedule.id ||
+                      schedule.enabled ||
+                      appliedScheduleIds.has(schedule.id)
+                    }
+                    title={
+                      schedule.enabled || appliedScheduleIds.has(schedule.id)
+                        ? "Disable the schedule and let the evaluator remove it before deleting"
+                        : "Delete schedule"
+                    }
                   >
                     <FontAwesomeIcon
                       icon={deletingId === schedule.id ? faRotate : faTrash}
@@ -2315,10 +3090,7 @@ export function AutomationPage() {
                       <strong>Timezone:</strong> {schedule.timezone}
                     </div>
                     <div>
-                      <strong>Nodes:</strong>{" "}
-                      {schedule.nodeIds.length > 0
-                        ? schedule.nodeIds.join(", ")
-                        : "All nodes"}
+                      <strong>Nodes:</strong> {activeNodeScope}
                     </div>
                     <div>
                       <strong>Cache flush:</strong>{" "}
@@ -2374,9 +3146,22 @@ export function AutomationPage() {
                   </div>
                   {isApplied && (
                     <div className="dns-schedules__applied-nodes">
-                      <FontAwesomeIcon icon={faBolt} />
-                      <strong>Currently active on:</strong>{" "}
-                      {appliedNodes.join(", ")}
+                      <FontAwesomeIcon
+                        icon={faBolt}
+                        className="dns-schedules__applied-nodes-icon"
+                      />
+                      <div className="dns-schedules__applied-nodes-body">
+                        <div>
+                          <strong>Currently active for:</strong>{" "}
+                          {activeNodeScope}
+                        </div>
+                        {showAppliedVia && (
+                          <div className="dns-schedules__applied-via">
+                            <strong>Applied via:</strong>{" "}
+                            {appliedNodes.join(", ")}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2401,7 +3186,320 @@ export function AutomationPage() {
             </div>
           );
         })}
-      </div>
+          </div>
+        </>
+      )}
+
+      {activeTab === "temporary" && (
+        <div className="log-alerts__rules-section">
+          {editingOverrideId === "new" && (
+            <div className="log-alerts__rule-card log-alerts__rule-card--new">
+              <h3 className="log-alerts__rule-card-title">New Temporary Override</h3>
+              <TemporaryOverrideForm
+                draft={overrideDraft}
+                onChange={setOverrideDraft}
+                onSave={(draft) => void handleSaveOverride(draft)}
+                onCancel={handleCancelOverrideForm}
+                submitting={submitting}
+                isNew={true}
+                availableNodeIds={availableNodeIds}
+                availableAbGroups={availableAbGroups}
+                availableDomainGroups={availableDomainGroups}
+                tokenStatus={tokenStatus}
+              />
+            </div>
+          )}
+
+          <div className="log-alerts__rules-header">
+            <h2 className="log-alerts__rules-title">
+              Temporary Overrides ({temporaryOverrides.length})
+            </h2>
+          </div>
+
+          {loading && (
+            <div className="log-alerts__loading">Loading overrides...</div>
+          )}
+
+          {!loading &&
+            temporaryOverrides.length === 0 &&
+            editingOverrideId !== "new" && (
+              <div className="log-alerts__empty">
+                <FontAwesomeIcon icon={faCircleInfo} />
+                <p>No temporary overrides configured yet.</p>
+              </div>
+            )}
+
+          {temporaryOverrides.map((override) => {
+            const isExpanded = expandedIds.has(override.id);
+            const isEditing = editingOverrideId === override.id;
+            const isApplied = appliedScheduleIds.has(override.id);
+            const overrideExpired = isExpired(override.expiresAt);
+            const appliedNodes = appliedState
+              .filter((e) => e.scheduleId === override.id)
+              .map((e) => e.nodeId);
+            const activeNodeScope = formatNodeScope(override.nodeIds);
+            const showAppliedVia = shouldShowAppliedVia(
+              override.nodeIds,
+              appliedNodes,
+            );
+
+            return (
+              <div
+                key={override.id}
+                className={`log-alerts__rule-card ${isApplied ? "dns-schedules__rule-card--active" : ""}`}
+              >
+                <div className="log-alerts__rule-card-header">
+                  <div className="log-alerts__rule-card-info">
+                    <span className="log-alerts__rule-name">{override.name}</span>
+                    {isApplied && (
+                      <span
+                        className="dns-schedules__active-badge"
+                        title={
+                          showAppliedVia
+                            ? `Active for: ${activeNodeScope}; applied via: ${appliedNodes.join(", ")}`
+                            : `Active for: ${activeNodeScope}`
+                        }
+                      >
+                        <FontAwesomeIcon icon={faBolt} /> Active
+                      </span>
+                    )}
+                    {overrideExpired && (
+                      <span className="dns-overrides__expired-badge">Expired</span>
+                    )}
+                    <span className="log-alerts__rule-meta">
+                      {(override.advancedBlockingGroupNames ?? []).join(", ") || "—"}{" "}
+                      &middot; {override.action === "block" ? "Block" : "Allow"}
+                      {(override.domainGroupNames?.length ?? 0) > 0
+                        ? ` · ${override.domainGroupNames.length} group${override.domainGroupNames.length === 1 ? "" : "s"}`
+                        : ""}
+                      {override.domainEntries.length > 0
+                        ? ` · ${override.domainEntries.length} entr${override.domainEntries.length === 1 ? "y" : "ies"}`
+                        : ""}
+                      {" · "}
+                      {override.expiresAt
+                        ? `expires ${formatLocalDateTime(override.expiresAt)}`
+                        : "until turned off"}
+                    </span>
+                  </div>
+
+                  <div className="log-alerts__rule-card-actions">
+                    <button
+                      type="button"
+                      className={`log-alerts__toggle-btn log-alerts__toggle-btn--sm ${override.enabled && !overrideExpired ? "log-alerts__toggle-btn--on" : "log-alerts__toggle-btn--off"}`}
+                      onClick={() => void handleToggleOverrideEnabled(override)}
+                      disabled={togglingOverrideId === override.id || overrideExpired}
+                      title={
+                        override.enabled
+                          ? "End override now"
+                          : "Enable override"
+                      }
+                    >
+                      <FontAwesomeIcon
+                        icon={
+                          togglingOverrideId === override.id
+                            ? faRotate
+                            : override.enabled && !overrideExpired
+                              ? faToggleOn
+                              : faToggleOff
+                        }
+                        className={
+                          togglingOverrideId === override.id ? "fa-spin" : ""
+                        }
+                      />{" "}
+                      <span className="dns-schedules__toggle-label">
+                        {togglingOverrideId === override.id
+                          ? ""
+                          : override.enabled && !overrideExpired
+                            ? "Active"
+                            : "Ended"}
+                      </span>
+                    </button>
+
+                    {override.enabled && !overrideExpired && (
+                      <button
+                        type="button"
+                        className="btn btn--secondary btn--sm"
+                        onClick={() =>
+                          void handleToggleOverrideEnabled(override, false)
+                        }
+                        disabled={togglingOverrideId === override.id}
+                      >
+                        End Now
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => {
+                        if (isEditing) {
+                          handleCancelOverrideForm();
+                        } else {
+                          handleEditOverride(override);
+                        }
+                      }}
+                    >
+                      {isEditing ? "Cancel" : "Edit"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => void handleCloneOverride(override)}
+                      disabled={
+                        cloningId === override.id ||
+                        (override.enabled && !overrideExpired)
+                      }
+                      title={
+                        override.enabled && !overrideExpired
+                          ? "End the override before cloning it"
+                          : "Clone override"
+                      }
+                    >
+                      <FontAwesomeIcon
+                        icon={cloningId === override.id ? faRotate : faCopy}
+                        className={cloningId === override.id ? "fa-spin" : ""}
+                      />
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => void handleDeleteOverride(override)}
+                      disabled={
+                        deletingOverrideId === override.id ||
+                        appliedScheduleIds.has(override.id)
+                      }
+                      title={
+                        appliedScheduleIds.has(override.id)
+                          ? "End the override before deleting it"
+                          : "Delete override"
+                      }
+                    >
+                      <FontAwesomeIcon
+                        icon={
+                          deletingOverrideId === override.id
+                            ? faRotate
+                            : faTrash
+                        }
+                        className={
+                          deletingOverrideId === override.id ? "fa-spin" : ""
+                        }
+                      />
+                    </button>
+
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => {
+                        setExpandedIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(override.id)) {
+                            next.delete(override.id);
+                          } else {
+                            next.add(override.id);
+                          }
+                          return next;
+                        });
+                      }}
+                      title={isExpanded ? "Collapse" : "Expand"}
+                    >
+                      <FontAwesomeIcon
+                        icon={isExpanded ? faChevronUp : faChevronDown}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {isExpanded && !isEditing && (
+                  <div className="dns-schedules__rule-detail">
+                    <div className="dns-schedules__detail-grid">
+                      <div>
+                        <strong>Group{override.advancedBlockingGroupNames.length > 1 ? "s" : ""}:</strong>{" "}
+                        {override.advancedBlockingGroupNames.join(", ") || "—"}
+                      </div>
+                      <div>
+                        <strong>Action:</strong>{" "}
+                        {override.action === "block" ? "Block" : "Allow"}
+                      </div>
+                      <div>
+                        <strong>Expires:</strong>{" "}
+                        {override.expiresAt
+                          ? formatLocalDateTime(override.expiresAt)
+                          : "When turned off"}
+                      </div>
+                      <div>
+                        <strong>Nodes:</strong> {activeNodeScope}
+                      </div>
+                      <div>
+                        <strong>Cache flush:</strong>{" "}
+                        {override.flushCacheOnChange ? "On change" : "Disabled"}
+                      </div>
+                    </div>
+                    {(override.domainGroupNames?.length ?? 0) > 0 && (
+                      <div className="dns-schedules__entries-list">
+                        <strong>Domain Groups ({override.domainGroupNames.length}):</strong>
+                        <ul>
+                          {override.domainGroupNames.map((name) => (
+                            <li key={name}>
+                              <code>{name}</code>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <div className="dns-schedules__entries-list">
+                      <strong>Domain entries ({override.domainEntries.length}):</strong>
+                      <ul>
+                        {override.domainEntries.map((entry) => (
+                          <li key={entry}>
+                            <code>{entry}</code>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    {isApplied && (
+                      <div className="dns-schedules__applied-nodes">
+                        <FontAwesomeIcon
+                          icon={faBolt}
+                          className="dns-schedules__applied-nodes-icon"
+                        />
+                        <div className="dns-schedules__applied-nodes-body">
+                          <div>
+                            <strong>Currently active for:</strong>{" "}
+                            {activeNodeScope}
+                          </div>
+                          {showAppliedVia && (
+                            <div className="dns-schedules__applied-via">
+                              <strong>Applied via:</strong>{" "}
+                              {appliedNodes.join(", ")}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {isEditing && (
+                  <TemporaryOverrideForm
+                    draft={overrideDraft}
+                    onChange={setOverrideDraft}
+                    onSave={(draft) => void handleSaveOverride(draft)}
+                    onCancel={handleCancelOverrideForm}
+                    submitting={submitting}
+                    isNew={false}
+                    availableNodeIds={availableNodeIds}
+                    availableAbGroups={availableAbGroups}
+                    availableDomainGroups={availableDomainGroups}
+                    tokenStatus={tokenStatus}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <ConfirmModal
         isOpen={deleteConfirmSchedule !== null}
@@ -2411,6 +3509,16 @@ export function AutomationPage() {
         variant="danger"
         onConfirm={() => void executeDeleteSchedule()}
         onCancel={() => setDeleteConfirmSchedule(null)}
+      />
+
+      <ConfirmModal
+        isOpen={deleteConfirmOverride !== null}
+        title="Delete temporary override"
+        message={`Delete "${deleteConfirmOverride?.name}"? Active overrides must be ended before deletion so their applied entries can be removed cleanly.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => void executeDeleteOverride()}
+        onCancel={() => setDeleteConfirmOverride(null)}
       />
     </section>
   );
