@@ -40,6 +40,7 @@ type ClusterWriteOperation = {
 type ActiveOverrideSource = {
   schedule: DnsSchedule;
   alwaysActive: boolean;
+  linkedAlertRulePrefix: "__schedule" | "__temporary-override";
 };
 
 function tupleKey(t: AppliedEntryTuple): string {
@@ -265,10 +266,15 @@ export class DnsSchedulesEvaluatorService
       const temporaryOverrides =
         this.temporaryOverridesService?.listActiveOverrides(now) ?? [];
       const activeSources: ActiveOverrideSource[] = [
-        ...schedules.map((schedule) => ({ schedule, alwaysActive: false })),
+        ...schedules.map((schedule) => ({
+          schedule,
+          alwaysActive: false,
+          linkedAlertRulePrefix: "__schedule" as const,
+        })),
         ...temporaryOverrides.map((override) => ({
           schedule: this.temporaryOverrideToSchedule(override),
           alwaysActive: true,
+          linkedAlertRulePrefix: "__temporary-override" as const,
         })),
       ];
 
@@ -309,6 +315,10 @@ export class DnsSchedulesEvaluatorService
               .map((override) => this.temporaryOverrideToSchedule(override)) ??
               []),
           ].map((s) => [s.id, s]),
+        );
+        const temporaryOverrideIds = new Set(
+          this.temporaryOverridesService?.listOverrides().map((o) => o.id) ??
+            [],
         );
         const activeSourceIds = new Set(
           activeSources.map((s) => s.schedule.id),
@@ -359,6 +369,14 @@ export class DnsSchedulesEvaluatorService
                 await this.flushDomainsCache(schedule, flushNodeId);
               }
             }
+            this.syncAlertRuleWindow(
+              schedule.id,
+              schedule.name,
+              false,
+              temporaryOverrideIds.has(schedule.id)
+                ? "__temporary-override"
+                : "__schedule",
+            );
             this.logger.log(
               `Cleaned up stale entries for disabled schedule "${schedule.name}" from node "${resolved.writeTarget}".`,
             );
@@ -379,6 +397,19 @@ export class DnsSchedulesEvaluatorService
               action: "error",
               error: error instanceof Error ? error.message : String(error),
             });
+          }
+        }
+
+        if (!options.dryRun) {
+          for (const override of this.temporaryOverridesService?.listOverrides() ??
+            []) {
+            if (activeSourceIds.has(override.id)) continue;
+            this.syncAlertRuleWindow(
+              override.id,
+              override.name,
+              false,
+              "__temporary-override",
+            );
           }
         }
       }
@@ -424,11 +455,12 @@ export class DnsSchedulesEvaluatorService
           results.push(result);
         }
 
-        if (!options.dryRun && !source.alwaysActive) {
+        if (!options.dryRun) {
           this.syncAlertRuleWindow(
             schedule.id,
             schedule.name,
-            this.isWindowActive(schedule, now),
+            source.alwaysActive || this.isWindowActive(schedule, now),
+            source.linkedAlertRulePrefix,
           );
         }
       }
@@ -521,7 +553,7 @@ export class DnsSchedulesEvaluatorService
     return tuples;
   }
 
-  private temporaryOverrideToSchedule(
+  temporaryOverrideToSchedule(
     override: DnsTemporaryOverride,
   ): DnsSchedule {
     return {
@@ -539,8 +571,11 @@ export class DnsSchedulesEvaluatorService
       timezone: "UTC",
       nodeIds: override.nodeIds,
       flushCacheOnChange: override.flushCacheOnChange,
-      notifyEmails: [],
-      notifyDebounceSeconds: 300,
+      notifyEmails: override.notifyEmails,
+      notifyDebounceSeconds: override.notifyDebounceSeconds,
+      notifyMessage: override.notifyMessage,
+      notifyMessageOnly: override.notifyMessageOnly,
+      notifySubjectTemplate: override.notifySubjectTemplate,
       createdAt: override.createdAt,
       updatedAt: override.updatedAt,
     };
@@ -783,12 +818,14 @@ export class DnsSchedulesEvaluatorService
           .map((activeSchedule) => ({
             schedule: activeSchedule,
             alwaysActive: false,
+            linkedAlertRulePrefix: "__schedule" as const,
           })),
         ...(this.temporaryOverridesService
           ?.listActiveOverrides(now)
           .map((override) => ({
             schedule: this.temporaryOverrideToSchedule(override),
             alwaysActive: true,
+            linkedAlertRulePrefix: "__temporary-override" as const,
           })) ?? []),
       ],
       now,
@@ -1256,9 +1293,10 @@ export class DnsSchedulesEvaluatorService
     scheduleId: string,
     scheduleName: string,
     shouldBeActive: boolean,
+    rulePrefix: "__schedule" | "__temporary-override" = "__schedule",
   ): void {
     try {
-      const ruleName = `__schedule:${scheduleId}__`;
+      const ruleName = `${rulePrefix}:${scheduleId}__`;
       const existing = this.logAlertsRulesService
         .listRules()
         .find((r) => r.name === ruleName);

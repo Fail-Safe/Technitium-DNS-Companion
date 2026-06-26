@@ -45,6 +45,16 @@ export interface DnsTemporaryOverrideDraft {
   domainEntries: string[];
   domainGroupNames: string[];
   flushCacheOnChange: boolean;
+  /** Email addresses to notify when blocked domains are queried while the override is active. */
+  notifyEmails: string[];
+  /** Minimum seconds between repeat alert emails. Default 300. */
+  notifyDebounceSeconds: number;
+  /** Optional free-text message prepended to alert email bodies for this override. */
+  notifyMessage?: string;
+  /** When true and notifyMessage is set, the email body is only the custom message. */
+  notifyMessageOnly?: boolean;
+  /** Optional subject-line template for alert emails. */
+  notifySubjectTemplate?: string;
   nodeIds: string[];
   expiresAt?: string | null;
 }

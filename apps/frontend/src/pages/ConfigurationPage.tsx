@@ -1901,7 +1901,6 @@ export function ConfigurationPage() {
       // Add domain if not already present
       if (!targetArray.includes(domain)) {
         targetArray.push(domain);
-        targetArray.sort();
         groupsModified.push(targetGroup);
       }
     });
@@ -2384,7 +2383,6 @@ export function ConfigurationPage() {
       const index = targetArray.indexOf(oldDomain);
       if (index !== -1) {
         targetArray[index] = newDomain;
-        targetArray.sort();
       }
     });
 

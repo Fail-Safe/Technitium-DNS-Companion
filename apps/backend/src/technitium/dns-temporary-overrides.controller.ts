@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   Param,
   Patch,
   Post,
@@ -13,6 +14,9 @@ import type {
   DnsTemporaryOverride,
   DnsTemporaryOverrideDraft,
 } from "./dns-temporary-overrides.types";
+import { DnsSchedulesEvaluatorService } from "./dns-schedules-evaluator.service";
+import type { LogAlertRuleDraft } from "./log-alerts.types";
+import { LogAlertsRulesService } from "./log-alerts-rules.service";
 
 const ACTIONS = ["block", "allow"] as const;
 
@@ -25,8 +29,12 @@ function stripNewlines(value: string): string {
 
 @Controller("nodes/dns-overrides/temporary")
 export class DnsTemporaryOverridesController {
+  private readonly logger = new Logger(DnsTemporaryOverridesController.name);
+
   constructor(
     private readonly temporaryOverridesService: DnsTemporaryOverridesService,
+    private readonly evaluatorService: DnsSchedulesEvaluatorService,
+    private readonly logAlertsRulesService: LogAlertsRulesService,
   ) {}
 
   @Get()
@@ -36,7 +44,11 @@ export class DnsTemporaryOverridesController {
 
   @Post()
   createOverride(@Body() body: unknown): DnsTemporaryOverride {
-    return this.temporaryOverridesService.createOverride(this.parseDraft(body));
+    const override = this.temporaryOverridesService.createOverride(
+      this.parseDraft(body),
+    );
+    this.syncLinkedAlertRule(override);
+    return override;
   }
 
   @Patch(":overrideId")
@@ -44,10 +56,12 @@ export class DnsTemporaryOverridesController {
     @Param("overrideId") overrideId: string,
     @Body() body: unknown,
   ): DnsTemporaryOverride {
-    return this.temporaryOverridesService.updateOverride(
+    const override = this.temporaryOverridesService.updateOverride(
       overrideId,
       this.parseDraft(body),
     );
+    this.syncLinkedAlertRule(override);
+    return override;
   }
 
   @Patch(":overrideId/enabled")
@@ -58,10 +72,12 @@ export class DnsTemporaryOverridesController {
     if (typeof body?.enabled !== "boolean") {
       throw new BadRequestException("enabled must be provided as a boolean.");
     }
-    return this.temporaryOverridesService.setOverrideEnabled(
+    const override = this.temporaryOverridesService.setOverrideEnabled(
       overrideId,
       body.enabled,
     );
+    this.syncLinkedAlertRule(override);
+    return override;
   }
 
   @Delete(":overrideId")
@@ -69,7 +85,9 @@ export class DnsTemporaryOverridesController {
     deleted: true;
     overrideId: string;
   } {
-    return this.temporaryOverridesService.deleteOverride(overrideId);
+    const result = this.temporaryOverridesService.deleteOverride(overrideId);
+    this.deleteLinkedAlertRule(overrideId);
+    return result;
   }
 
   private parseDraft(body: unknown): DnsTemporaryOverrideDraft {
@@ -92,6 +110,27 @@ export class DnsTemporaryOverridesController {
     const domainEntries = this.normalizeStringArray(input.domainEntries);
     const domainGroupNames = this.normalizeStringArray(input.domainGroupNames);
     const nodeIds = this.normalizeStringArray(input.nodeIds);
+    const notifyEmails = this.normalizeStringArray(input.notifyEmails);
+    const notifyDebounceSecondsRaw = Number(
+      input.notifyDebounceSeconds ?? 300,
+    );
+    const notifyDebounceSeconds =
+      Number.isFinite(notifyDebounceSecondsRaw) &&
+      notifyDebounceSecondsRaw >= 0
+        ? Math.round(notifyDebounceSecondsRaw)
+        : 300;
+    const notifyMessageRaw =
+      typeof input.notifyMessage === "string"
+        ? input.notifyMessage.trim()
+        : undefined;
+    const notifyMessage = notifyMessageRaw || undefined;
+    const notifyMessageOnly =
+      !!notifyMessage && input.notifyMessageOnly === true;
+    const notifySubjectTemplateRaw =
+      typeof input.notifySubjectTemplate === "string"
+        ? stripNewlines(input.notifySubjectTemplate)
+        : undefined;
+    const notifySubjectTemplate = notifySubjectTemplateRaw || undefined;
     const expiresAt =
       typeof input.expiresAt === "string" && input.expiresAt.trim()
         ? input.expiresAt.trim()
@@ -106,6 +145,11 @@ export class DnsTemporaryOverridesController {
       domainGroupNames,
       nodeIds,
       flushCacheOnChange: input.flushCacheOnChange !== false,
+      notifyEmails,
+      notifyDebounceSeconds,
+      notifyMessage,
+      notifyMessageOnly,
+      notifySubjectTemplate,
       expiresAt,
     };
   }
@@ -120,5 +164,79 @@ export class DnsTemporaryOverridesController {
           .filter((v) => v.length > 0),
       ),
     ];
+  }
+
+  private syncLinkedAlertRule(override: DnsTemporaryOverride): void {
+    try {
+      if (override.notifyEmails.length === 0) {
+        this.deleteLinkedAlertRule(override.id);
+        return;
+      }
+
+      const ruleName = `__temporary-override:${override.id}__`;
+      const { pattern: domainPattern, type: domainPatternType } =
+        this.evaluatorService.buildAlertDomainPattern(
+          this.evaluatorService.temporaryOverrideToSchedule(override),
+        );
+      const draft: LogAlertRuleDraft = {
+        name: ruleName,
+        displayName: override.name,
+        notifyMessage: override.notifyMessage,
+        enabled: false,
+        outcomeMode: "blocked-only",
+        domainPattern,
+        domainPatternType,
+        advancedBlockingGroupNames: override.advancedBlockingGroupNames,
+        debounceSeconds: override.notifyDebounceSeconds,
+        emailRecipients: override.notifyEmails,
+        notifyMessageOnly: override.notifyMessageOnly,
+        notifySubjectTemplate: override.notifySubjectTemplate,
+        templateContext: this.buildOverrideTemplateContext(override),
+      };
+
+      const existing = this.logAlertsRulesService
+        .listRules()
+        .find((r) => r.name === ruleName);
+
+      if (existing) {
+        this.logAlertsRulesService.updateRule(existing.id, draft);
+      } else {
+        this.logAlertsRulesService.createRule(draft);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to sync linked alert rule for temporary override "${override.name}": ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private buildOverrideTemplateContext(
+    override: DnsTemporaryOverride,
+  ): Record<string, string> {
+    return {
+      overrideId: override.id,
+      overrideName: override.name,
+      action: override.action,
+      groups: override.advancedBlockingGroupNames.join(", "),
+      expiresAt: override.expiresAt ?? "When turned off",
+    };
+  }
+
+  private deleteLinkedAlertRule(overrideId: string): void {
+    const ruleName = `__temporary-override:${overrideId}__`;
+    try {
+      const existing = this.logAlertsRulesService
+        .listRules()
+        .find((r) => r.name === ruleName);
+      if (existing) {
+        this.logAlertsRulesService.deleteRule(existing.id);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to delete linked alert rule for temporary override "${overrideId}": ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 }

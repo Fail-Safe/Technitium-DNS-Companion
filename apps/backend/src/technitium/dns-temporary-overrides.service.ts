@@ -22,9 +22,18 @@ type DnsTemporaryOverrideRow = {
   domain_group_names_json: string;
   node_ids_json: string;
   flush_cache_on_change: number;
+  notify_emails_json: string;
+  notify_debounce_seconds: number;
+  notify_message: string;
+  notify_message_only: number;
+  notify_subject_template: string;
   expires_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type SqliteTableInfoRow = {
+  name: string;
 };
 
 @Injectable()
@@ -64,11 +73,41 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
         domain_group_names_json TEXT NOT NULL,
         node_ids_json TEXT NOT NULL,
         flush_cache_on_change INTEGER NOT NULL DEFAULT 1,
+        notify_emails_json TEXT NOT NULL DEFAULT '[]',
+        notify_debounce_seconds INTEGER NOT NULL DEFAULT 300,
+        notify_message TEXT NOT NULL DEFAULT '',
+        notify_message_only INTEGER NOT NULL DEFAULT 0,
+        notify_subject_template TEXT NOT NULL DEFAULT '',
         expires_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
     `);
+    const existingColumns = new Set(
+      (
+        db
+          .prepare(`PRAGMA table_info(dns_temporary_overrides)`)
+          .all() as SqliteTableInfoRow[]
+      ).map((row) => row.name),
+    );
+    const addColumnIfMissing = (name: string, definition: string) => {
+      if (existingColumns.has(name)) return;
+      db.exec(
+        `ALTER TABLE dns_temporary_overrides ADD COLUMN ${name} ${definition}`,
+      );
+      existingColumns.add(name);
+    };
+    addColumnIfMissing("notify_emails_json", `TEXT NOT NULL DEFAULT '[]'`);
+    addColumnIfMissing(
+      "notify_debounce_seconds",
+      `INTEGER NOT NULL DEFAULT 300`,
+    );
+    addColumnIfMissing("notify_message", `TEXT NOT NULL DEFAULT ''`);
+    addColumnIfMissing("notify_message_only", `INTEGER NOT NULL DEFAULT 0`);
+    addColumnIfMissing(
+      "notify_subject_template",
+      `TEXT NOT NULL DEFAULT ''`,
+    );
     this.schemaReady = true;
   }
 
@@ -80,7 +119,9 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
       .prepare(
         `SELECT id, name, enabled, advanced_blocking_group_names_json, action,
                 domain_entries_json, domain_group_names_json, node_ids_json,
-                flush_cache_on_change, expires_at, created_at, updated_at
+                flush_cache_on_change, notify_emails_json,
+                notify_debounce_seconds, notify_message, notify_message_only,
+                notify_subject_template, expires_at, created_at, updated_at
          FROM dns_temporary_overrides
          ORDER BY enabled DESC, updated_at DESC, created_at DESC`,
       )
@@ -105,7 +146,9 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
       .prepare(
         `SELECT id, name, enabled, advanced_blocking_group_names_json, action,
                 domain_entries_json, domain_group_names_json, node_ids_json,
-                flush_cache_on_change, expires_at, created_at, updated_at
+                flush_cache_on_change, notify_emails_json,
+                notify_debounce_seconds, notify_message, notify_message_only,
+                notify_subject_template, expires_at, created_at, updated_at
          FROM dns_temporary_overrides
          WHERE id = ?`,
       )
@@ -124,8 +167,10 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
         `INSERT INTO dns_temporary_overrides (
            id, name, name_lc, enabled, advanced_blocking_group_names_json, action,
            domain_entries_json, domain_group_names_json, node_ids_json,
-           flush_cache_on_change, expires_at, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           flush_cache_on_change, notify_emails_json, notify_debounce_seconds,
+           notify_message, notify_message_only, notify_subject_template,
+           expires_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         draft.name,
@@ -137,6 +182,11 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
         JSON.stringify(draft.domainGroupNames),
         JSON.stringify(draft.nodeIds),
         draft.flushCacheOnChange ? 1 : 0,
+        JSON.stringify(draft.notifyEmails),
+        draft.notifyDebounceSeconds,
+        draft.notifyMessage ?? "",
+        draft.notifyMessageOnly ? 1 : 0,
+        draft.notifySubjectTemplate ?? "",
         draft.expiresAt ?? null,
         now,
         now,
@@ -167,8 +217,10 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
          SET name = ?, name_lc = ?, enabled = ?,
              advanced_blocking_group_names_json = ?, action = ?,
              domain_entries_json = ?, domain_group_names_json = ?,
-             node_ids_json = ?, flush_cache_on_change = ?, expires_at = ?,
-             updated_at = ?
+             node_ids_json = ?, flush_cache_on_change = ?,
+             notify_emails_json = ?, notify_debounce_seconds = ?,
+             notify_message = ?, notify_message_only = ?,
+             notify_subject_template = ?, expires_at = ?, updated_at = ?
          WHERE id = ?`,
         )
         .run(
@@ -181,6 +233,11 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
           JSON.stringify(draft.domainGroupNames),
           JSON.stringify(draft.nodeIds),
           draft.flushCacheOnChange ? 1 : 0,
+          JSON.stringify(draft.notifyEmails),
+          draft.notifyDebounceSeconds,
+          draft.notifyMessage ?? "",
+          draft.notifyMessageOnly ? 1 : 0,
+          draft.notifySubjectTemplate ?? "",
           draft.expiresAt ?? null,
           now,
           id,
@@ -215,10 +272,19 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
 
   deleteOverride(id: string): { deleted: true; overrideId: string } {
     const db = this.getDb();
-    db.prepare(`DELETE FROM dns_schedule_state WHERE schedule_id = ?`).run(id);
-    db.prepare(
-      `DELETE FROM dns_schedule_applied_entries WHERE schedule_id = ?`,
-    ).run(id);
+    const activeState = db
+      .prepare(`SELECT 1 FROM dns_schedule_state WHERE schedule_id = ? LIMIT 1`)
+      .get(id);
+    if (activeState) {
+      throw new BadRequestException(
+        "End the temporary override before deleting it.",
+      );
+    }
+    db
+      .prepare(
+        `DELETE FROM dns_schedule_applied_entries WHERE schedule_id = ?`,
+      )
+      .run(id);
     const result = db
       .prepare(`DELETE FROM dns_temporary_overrides WHERE id = ?`)
       .run(id);
@@ -241,6 +307,11 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
       domainGroupNames: this.parseJsonStringArray(row.domain_group_names_json),
       nodeIds: this.parseJsonStringArray(row.node_ids_json),
       flushCacheOnChange: row.flush_cache_on_change === 1,
+      notifyEmails: this.parseJsonStringArray(row.notify_emails_json),
+      notifyDebounceSeconds: row.notify_debounce_seconds,
+      notifyMessage: row.notify_message || undefined,
+      notifyMessageOnly: row.notify_message_only === 1,
+      notifySubjectTemplate: row.notify_subject_template || undefined,
       expiresAt: row.expires_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -282,6 +353,15 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
     }
     if (!Array.isArray(draft.nodeIds)) {
       throw new BadRequestException("nodeIds must be an array.");
+    }
+    if (!Array.isArray(draft.notifyEmails)) {
+      throw new BadRequestException("notifyEmails must be an array.");
+    }
+    if (
+      !Number.isFinite(draft.notifyDebounceSeconds) ||
+      draft.notifyDebounceSeconds < 0
+    ) {
+      throw new BadRequestException("notifyDebounceSeconds must be >= 0.");
     }
     if (draft.expiresAt) {
       const expiresMs = Date.parse(draft.expiresAt);

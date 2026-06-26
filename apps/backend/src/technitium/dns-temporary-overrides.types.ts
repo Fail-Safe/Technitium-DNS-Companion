@@ -16,6 +16,11 @@ export interface DnsTemporaryOverrideDraft {
   domainGroupNames: string[];
   nodeIds: string[];
   flushCacheOnChange: boolean;
+  notifyEmails: string[];
+  notifyDebounceSeconds: number;
+  notifyMessage?: string;
+  notifyMessageOnly?: boolean;
+  notifySubjectTemplate?: string;
   expiresAt?: string | null;
 }
 

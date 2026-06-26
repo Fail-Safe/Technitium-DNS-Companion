@@ -7,12 +7,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.7.0] - 2026-06-24
+## [1.7.0] - 2026-06-26
 
 ### Added
 
-- **DNS Overrides page with temporary exception workflows.** The former DNS Schedules page is now an **DNS Overrides** page with a two-tab flow: long-lived **Schedules** (recurring windows) and ad-hoc **Temporary Overrides**.
+- **DNS Overrides page with temporary exception workflows.** The former DNS Schedules page is now a **DNS Overrides** page with a two-tab flow: long-lived **Schedules** (recurring windows) and ad-hoc **Temporary Overrides**.
 - **Temporary Overrides for immediate policy changes.** Operators can create temporary overrides that force an action on an Advanced Blocking group for any selected window until a configured expiry, independent of schedule windows.
+- **Email notifications for Temporary Overrides.** Temporary overrides can now create linked Log Alert email rules with the same lifecycle guarantees as schedules: rules are created/updated with the override, enabled only while active, disabled when ended or expired, and deleted safely with the override.
 - **Clear precedence model for blocking behavior.** A dedicated note explains precedence now (active temporary overrides take priority over matching schedules). The note is dismissible per session.
 - **Temporary override copy/edit/delete and override lifecycle controls.** Temporary entries support duplication, immediate enable/disable, and expiry-aware cleanup so ad-hoc controls can be short-lived without touching recurring schedule definitions.
 
@@ -24,6 +25,13 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - **Schedule vs. temporary override ambiguity.** The system now applies temporary overrides with explicit precedence and state handling, preventing confusion between scheduled blocks and one-off override windows.
+- **Temporary Override notification lifecycle.** Temporary Override-linked Log Alert rules are now created, updated, enabled only while the override is active, disabled when the override ends or expires, and deleted with the override.
+- **DNS Filtering source-order display.** The Domains tab's **Entry sort** selector now works for expanded **Groups - Drag & Drop** lists. `Alpha` display-sorts entries, while `Source Order` preserves the underlying Advanced Blocking order, including Domain Group materialization order and manual drag/drop insertion order.
+- **Temporary Override delete safety.** Active temporary overrides must be ended before deletion, preventing live Advanced Blocking entries from being orphaned while state still exists.
+
+### Testing
+
+- Added backend coverage for Temporary Override alert-rule syncing, active-override cleanup behavior, and Domain Group materialization source-order preservation.
 
 ## [1.6.9] - 2026-05-30
 

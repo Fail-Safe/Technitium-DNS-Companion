@@ -767,6 +767,7 @@ export class DomainGroupsService implements OnModuleInit {
             ON b.domain_group_id = g.id
           JOIN domain_group_entries e
             ON e.domain_group_id = g.id
+          ORDER BY b.advanced_blocking_group_name_lc ASC, b.rowid ASC, e.rowid ASC
         `,
       )
       .all() as MaterializationRow[];
@@ -927,14 +928,10 @@ export class DomainGroupsService implements OnModuleInit {
       groups: [...groupsByName.values()]
         .map((group) => ({
           advancedBlockingGroupName: group.advancedBlockingGroupName,
-          allowed: [...group.allowed].sort((a, b) => a.localeCompare(b)),
-          blocked: [...group.blocked].sort((a, b) => a.localeCompare(b)),
-          allowedRegex: [...group.allowedRegex].sort((a, b) =>
-            a.localeCompare(b),
-          ),
-          blockedRegex: [...group.blockedRegex].sort((a, b) =>
-            a.localeCompare(b),
-          ),
+          allowed: [...group.allowed],
+          blocked: [...group.blocked],
+          allowedRegex: [...group.allowedRegex],
+          blockedRegex: [...group.blockedRegex],
         }))
         .sort((a, b) =>
           a.advancedBlockingGroupName.localeCompare(

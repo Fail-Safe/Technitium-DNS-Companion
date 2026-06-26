@@ -80,6 +80,11 @@ const DEFAULT_OVERRIDE_DRAFT: DnsTemporaryOverrideDraft = {
   domainEntries: [],
   domainGroupNames: [],
   flushCacheOnChange: true,
+  notifyEmails: [],
+  notifyDebounceSeconds: 300,
+  notifyMessage: undefined,
+  notifyMessageOnly: undefined,
+  notifySubjectTemplate: undefined,
   nodeIds: [],
   expiresAt: null,
 };
@@ -559,6 +564,9 @@ const TOKEN_MIME = "application/x-template-token";
 const TEMPLATE_TOKEN_DOCS: Array<{ token: string; description: string }> = [
   { token: "{scheduleName}", description: "The schedule's display name" },
   { token: "{scheduleId}", description: "Internal schedule UUID" },
+  { token: "{overrideName}", description: "The temporary override's display name" },
+  { token: "{overrideId}", description: "Internal temporary override UUID" },
+  { token: "{expiresAt}", description: "Temporary override expiry, or 'When turned off'" },
   { token: "{startTime}", description: 'Window start, 24-hour (e.g. "22:00")' },
   {
     token: "{startTime12}",
@@ -605,8 +613,24 @@ function to12HourFrontend(hhmm: string): string {
   return `${hr12}:${String(min).padStart(2, "0")} ${period}`;
 }
 
+type NotificationPreviewDraft = Pick<
+  DnsScheduleDraft,
+  | "name"
+  | "advancedBlockingGroupNames"
+  | "action"
+  | "domainEntries"
+  | "nodeIds"
+  | "notifyMessage"
+  | "notifySubjectTemplate"
+> &
+  Partial<
+    Pick<DnsScheduleDraft, "daysOfWeek" | "startTime" | "endTime" | "timezone">
+  > & {
+    expiresAt?: string | null;
+  };
+
 function previewContextFromDraft(
-  draft: DnsScheduleDraft,
+  draft: NotificationPreviewDraft,
 ): Record<string, string> {
   const days =
     !draft.daysOfWeek || draft.daysOfWeek.length === 0 || draft.daysOfWeek.length === 7
@@ -618,11 +642,14 @@ function previewContextFromDraft(
   return {
     scheduleName: draft.name || "(unnamed schedule)",
     scheduleId: "00000000-preview",
-    startTime: draft.startTime,
-    startTime12: to12HourFrontend(draft.startTime),
-    endTime: draft.endTime,
-    endTime12: to12HourFrontend(draft.endTime),
-    timezone: draft.timezone,
+    overrideName: draft.name || "(unnamed override)",
+    overrideId: "00000000-preview",
+    expiresAt: draft.expiresAt ?? "When turned off",
+    startTime: draft.startTime ?? "22:00",
+    startTime12: to12HourFrontend(draft.startTime ?? "22:00"),
+    endTime: draft.endTime ?? "06:00",
+    endTime12: to12HourFrontend(draft.endTime ?? "06:00"),
+    timezone: draft.timezone ?? BROWSER_TIMEZONE,
     daysOfWeek: days,
     action: draft.action,
     groups: draft.advancedBlockingGroupNames.join(", ") || "(no groups)",
@@ -702,7 +729,7 @@ function NotificationTemplatePreview({
   draft,
   onChipClick,
 }: {
-  draft: DnsScheduleDraft;
+  draft: NotificationPreviewDraft;
   onChipClick: (token: string) => void;
 }) {
   const context = previewContextFromDraft(draft);
@@ -1517,6 +1544,8 @@ function TemporaryOverrideForm({
   availableAbGroups,
   availableDomainGroups,
   tokenStatus,
+  smtpStatus,
+  knownEmails,
 }: {
   draft: DnsTemporaryOverrideDraft;
   onChange: (draft: DnsTemporaryOverrideDraft) => void;
@@ -1528,17 +1557,101 @@ function TemporaryOverrideForm({
   availableAbGroups: string[];
   availableDomainGroups: DomainGroup[];
   tokenStatus: DnsScheduleTokenStatus | null;
+  smtpStatus?: LogAlertsSmtpStatus | null;
+  knownEmails?: string[];
 }) {
   const [domainEntriesText, setDomainEntriesText] = useState(
     draft.domainEntries.join("\n"),
   );
+  const [emailText, setEmailText] = useState(() => draft.notifyEmails.join("\n"));
   const [durationPreset, setDurationPreset] = useState(
     draft.expiresAt ? "custom" : "until-turned-off",
   );
+  const subjectInputRef = useRef<HTMLInputElement | null>(null);
+  const messageTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [lastFocusedTemplateField, setLastFocusedTemplateField] = useState<
+    "subject" | "body" | null
+  >(null);
 
   useEffect(() => {
     setDomainEntriesText(draft.domainEntries.join("\n"));
   }, [draft.domainEntries]);
+
+  useEffect(() => {
+    setEmailText(draft.notifyEmails.join("\n"));
+  }, [draft.notifyEmails]);
+
+  const insertTokenIntoField = useCallback(
+    (field: "subject" | "body", token: string, dropTarget?: HTMLElement) => {
+      if (field === "subject") {
+        const el =
+          (dropTarget as HTMLInputElement | undefined) ??
+          subjectInputRef.current;
+        const current = draft.notifySubjectTemplate ?? "";
+        const start = el?.selectionStart ?? current.length;
+        const end = el?.selectionEnd ?? start;
+        const next = current.slice(0, start) + token + current.slice(end);
+        onChange({ ...draft, notifySubjectTemplate: next || undefined });
+        queueMicrotask(() => {
+          const node = subjectInputRef.current;
+          if (!node) return;
+          node.focus();
+          const pos = start + token.length;
+          node.setSelectionRange(pos, pos);
+        });
+        return;
+      }
+
+      const el =
+        (dropTarget as HTMLTextAreaElement | undefined) ??
+        messageTextareaRef.current;
+      const current = draft.notifyMessage ?? "";
+      const start = el?.selectionStart ?? current.length;
+      const end = el?.selectionEnd ?? start;
+      const next = current.slice(0, start) + token + current.slice(end);
+      onChange({
+        ...draft,
+        notifyMessage: next || undefined,
+        notifyMessageOnly: next ? draft.notifyMessageOnly : false,
+      });
+      queueMicrotask(() => {
+        const node = messageTextareaRef.current;
+        if (!node) return;
+        node.focus();
+        const pos = start + token.length;
+        node.setSelectionRange(pos, pos);
+      });
+    },
+    [draft, onChange],
+  );
+
+  const handleChipClick = useCallback(
+    (token: string) => {
+      insertTokenIntoField(lastFocusedTemplateField ?? "body", token);
+    },
+    [insertTokenIntoField, lastFocusedTemplateField],
+  );
+
+  const handleTemplateFieldDragOver = (e: DragEvent) => {
+    if (e.dataTransfer.types.includes(TOKEN_MIME)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  const handleSubjectDrop = (e: DragEvent<HTMLInputElement>) => {
+    const token = e.dataTransfer.getData(TOKEN_MIME);
+    if (!token) return;
+    e.preventDefault();
+    insertTokenIntoField("subject", token, e.currentTarget);
+  };
+
+  const handleMessageDrop = (e: DragEvent<HTMLTextAreaElement>) => {
+    const token = e.dataTransfer.getData(TOKEN_MIME);
+    if (!token) return;
+    e.preventDefault();
+    insertTokenIntoField("body", token, e.currentTarget);
+  };
 
   const commitDomainEntriesText = (text: string) => {
     const entries = text
@@ -1779,6 +1892,190 @@ function TemporaryOverrideForm({
           )}
         </div>
 
+        <div className="log-alerts__form-field log-alerts__form-field--wide">
+          <label className="log-alerts__form-label">
+            Email notifications{" "}
+            <span className="log-alerts__form-hint">
+              (alerted while the override is active — one address per line or comma-separated)
+            </span>
+          </label>
+          <AppTextarea
+            value={emailText}
+            onChange={(e) => setEmailText(e.target.value)}
+            onBlur={() => {
+              const emails = emailText
+                .split(/[\n,]/)
+                .map((l) => l.trim())
+                .filter((l) => l.length > 0);
+              setEmailText(emails.join("\n"));
+              onChange({ ...draft, notifyEmails: emails });
+            }}
+            placeholder={"admin@example.com\nparent@example.com"}
+            rows={3}
+            disabled={submitting}
+            className="log-alerts__domain-textarea"
+          />
+          {(() => {
+            const suggestions = (knownEmails ?? []).filter(
+              (e) => !draft.notifyEmails.includes(e),
+            );
+            return suggestions.length > 0 ? (
+              <div className="dns-schedules__email-suggestions">
+                <span className="log-alerts__form-hint">Previously used:</span>
+                {suggestions.map((email) => (
+                  <button
+                    key={email}
+                    type="button"
+                    className="dns-schedules__email-chip"
+                    onClick={() => {
+                      const newEmails = [...draft.notifyEmails, email];
+                      setEmailText(newEmails.join("\n"));
+                      onChange({ ...draft, notifyEmails: newEmails });
+                    }}
+                    disabled={submitting}
+                  >
+                    + {email}
+                  </button>
+                ))}
+              </div>
+            ) : null;
+          })()}
+          {draft.notifyEmails.length > 0 && smtpStatus && !smtpStatus.configured && (
+            <p className="log-alerts__form-hint" style={{ color: "var(--color-warn)" }}>
+              SMTP is not configured — emails will not be delivered. Add{" "}
+              <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, etc. to your{" "}
+              <code>.env</code> to enable email delivery.
+            </p>
+          )}
+        </div>
+
+        {draft.notifyEmails.length > 0 && (
+          <div className="log-alerts__form-field">
+            <label className="log-alerts__form-label">
+              Alert debounce{" "}
+              <span className="log-alerts__form-hint">(minutes)</span>
+            </label>
+            <AppInput
+              type="number"
+              min="0"
+              max="1440"
+              value={String(Math.round(draft.notifyDebounceSeconds / 60))}
+              onChange={(e) => {
+                const mins = Math.max(
+                  0,
+                  Math.round(Number(e.target.value) || 0),
+                );
+                onChange({ ...draft, notifyDebounceSeconds: mins * 60 });
+              }}
+              disabled={submitting}
+            />
+            <p className="log-alerts__form-hint">
+              Minimum time between repeat emails for this override&apos;s alert
+              rule.
+            </p>
+          </div>
+        )}
+
+        {draft.notifyEmails.length > 0 && (
+          <div className="log-alerts__form-field log-alerts__form-field--wide">
+            <label className="log-alerts__form-label">
+              Email subject template{" "}
+              <span className="log-alerts__form-hint">
+                (optional — supports {"{token}"} substitution)
+              </span>
+            </label>
+            <AppInput
+              ref={subjectInputRef}
+              value={draft.notifySubjectTemplate ?? ""}
+              onChange={(e) =>
+                onChange({
+                  ...draft,
+                  notifySubjectTemplate: e.target.value || undefined,
+                })
+              }
+              onFocus={() => setLastFocusedTemplateField("subject")}
+              onDragOver={handleTemplateFieldDragOver}
+              onDrop={handleSubjectDrop}
+              placeholder="[Override] {overrideName}: {domain} blocked for {client}"
+              disabled={submitting}
+              maxLength={200}
+            />
+          </div>
+        )}
+
+        {draft.notifyEmails.length > 0 && (
+          <div className="log-alerts__form-field log-alerts__form-field--wide">
+            <label className="log-alerts__form-label">
+              Email message{" "}
+              <span className="log-alerts__form-hint">
+                (optional — supports {"{token}"} substitution)
+              </span>
+            </label>
+            <AppTextarea
+              ref={messageTextareaRef}
+              value={draft.notifyMessage ?? ""}
+              onChange={(e) =>
+                onChange({
+                  ...draft,
+                  notifyMessage: e.target.value || undefined,
+                  notifyMessageOnly: e.target.value
+                    ? draft.notifyMessageOnly
+                    : false,
+                })
+              }
+              onFocus={() => setLastFocusedTemplateField("body")}
+              onDragOver={handleTemplateFieldDragOver}
+              onDrop={handleMessageDrop}
+              placeholder="Optional note to include at the top of alert emails, e.g. 'Temporary override is active. {client} queried {domain} at {latestMatchAt}.'"
+              rows={3}
+              disabled={submitting}
+            />
+          </div>
+        )}
+
+        {draft.notifyEmails.length > 0 && (
+          <div className="log-alerts__form-field log-alerts__form-field--wide">
+            <details
+              open={!!(draft.notifySubjectTemplate || draft.notifyMessage)}
+            >
+              <summary
+                style={{
+                  cursor: "pointer",
+                  fontSize: "0.85rem",
+                  color: "var(--color-fg-muted, #888)",
+                }}
+              >
+                Template tokens & live preview
+              </summary>
+              <NotificationTemplatePreview
+                draft={draft}
+                onChipClick={handleChipClick}
+              />
+            </details>
+          </div>
+        )}
+
+        {draft.notifyEmails.length > 0 && !!draft.notifyMessage && (
+          <div className="log-alerts__form-field">
+            <label className="dns-schedules__dow-label">
+              <input
+                type="checkbox"
+                checked={!!draft.notifyMessageOnly}
+                onChange={(e) =>
+                  onChange({ ...draft, notifyMessageOnly: e.target.checked })
+                }
+                disabled={submitting}
+              />
+              <span>
+                Send custom message only{" "}
+                <span className="log-alerts__form-hint">
+                  (replaces technical details)
+                </span>
+              </span>
+            </label>
+          </div>
+        )}
+
         {availableNodeIds.length > 1 && (
           <div className="log-alerts__form-field log-alerts__form-field--wide">
             <label className="log-alerts__form-label">
@@ -1906,7 +2203,10 @@ export function AutomationPage() {
     DnsTemporaryOverride[]
   >([]);
   const knownEmails = Array.from(
-    new Set(schedules.flatMap((s) => s.notifyEmails)),
+    new Set([
+      ...schedules.flatMap((s) => s.notifyEmails),
+      ...temporaryOverrides.flatMap((o) => o.notifyEmails ?? []),
+    ]),
   ).sort();
   const [appliedState, setAppliedState] = useState<DnsScheduleStateEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2128,6 +2428,11 @@ export function AutomationPage() {
       domainEntries: override.domainEntries ?? [],
       domainGroupNames: override.domainGroupNames ?? [],
       flushCacheOnChange: override.flushCacheOnChange ?? true,
+      notifyEmails: override.notifyEmails ?? [],
+      notifyDebounceSeconds: override.notifyDebounceSeconds ?? 300,
+      notifyMessage: override.notifyMessage,
+      notifyMessageOnly: override.notifyMessageOnly,
+      notifySubjectTemplate: override.notifySubjectTemplate,
       nodeIds: override.nodeIds ?? [],
       expiresAt: override.expiresAt ?? null,
     });
@@ -2529,6 +2834,11 @@ export function AutomationPage() {
         domainGroupNames: [...(override.domainGroupNames ?? [])],
         nodeIds: [...(override.nodeIds ?? [])],
         flushCacheOnChange: override.flushCacheOnChange,
+        notifyEmails: [...(override.notifyEmails ?? [])],
+        notifyDebounceSeconds: override.notifyDebounceSeconds ?? 300,
+        notifyMessage: override.notifyMessage,
+        notifyMessageOnly: override.notifyMessageOnly,
+        notifySubjectTemplate: override.notifySubjectTemplate,
         expiresAt: override.expiresAt ?? null,
       };
       const res = await apiFetch("/nodes/dns-overrides/temporary", {
@@ -3206,6 +3516,8 @@ export function AutomationPage() {
                 availableAbGroups={availableAbGroups}
                 availableDomainGroups={availableDomainGroups}
                 tokenStatus={tokenStatus}
+                smtpStatus={smtpStatus}
+                knownEmails={knownEmails}
               />
             </div>
           )}
@@ -3274,6 +3586,9 @@ export function AutomationPage() {
                         : ""}
                       {override.domainEntries.length > 0
                         ? ` · ${override.domainEntries.length} entr${override.domainEntries.length === 1 ? "y" : "ies"}`
+                        : ""}
+                      {(override.notifyEmails?.length ?? 0) > 0
+                        ? ` · ${override.notifyEmails.length} email${override.notifyEmails.length === 1 ? "" : "s"}`
                         : ""}
                       {" · "}
                       {override.expiresAt
@@ -3435,7 +3750,24 @@ export function AutomationPage() {
                         <strong>Cache flush:</strong>{" "}
                         {override.flushCacheOnChange ? "On change" : "Disabled"}
                       </div>
+                      <div>
+                        <strong>Email alerts:</strong>{" "}
+                        {(override.notifyEmails?.length ?? 0) > 0
+                          ? `${override.notifyEmails.join(", ")} (${Math.round((override.notifyDebounceSeconds ?? 300) / 60)} min debounce)`
+                          : "Disabled"}
+                      </div>
                     </div>
+                    {override.notifyMessage && (
+                      <div className="dns-schedules__entries-list">
+                        <strong>Email message:</strong>{" "}
+                        <span className="log-alerts__rule-meta">
+                          {override.notifyMessage}
+                          {override.notifyMessageOnly
+                            ? " (custom message only)"
+                            : ""}
+                        </span>
+                      </div>
+                    )}
                     {(override.domainGroupNames?.length ?? 0) > 0 && (
                       <div className="dns-schedules__entries-list">
                         <strong>Domain Groups ({override.domainGroupNames.length}):</strong>
@@ -3493,6 +3825,8 @@ export function AutomationPage() {
                     availableAbGroups={availableAbGroups}
                     availableDomainGroups={availableDomainGroups}
                     tokenStatus={tokenStatus}
+                    smtpStatus={smtpStatus}
+                    knownEmails={knownEmails}
                   />
                 )}
               </div>
