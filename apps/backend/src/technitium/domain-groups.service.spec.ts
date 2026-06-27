@@ -441,6 +441,31 @@ describe("DomainGroupsService", () => {
       expect(preview.groups[0]?.allowed).toEqual(["alpha.com", "beta.com"]);
     });
 
+    it("preserves source order within materialized domain lists", () => {
+      const groupA = service.createDomainGroup({ name: "Group A" });
+      service.addEntry(groupA.id, { matchType: "exact", value: "zeta.com" });
+      service.addEntry(groupA.id, { matchType: "exact", value: "alpha.com" });
+      service.addBinding(groupA.id, {
+        advancedBlockingGroupName: "Default",
+        action: "block",
+      });
+
+      const groupB = service.createDomainGroup({ name: "Group B" });
+      service.addEntry(groupB.id, { matchType: "exact", value: "middle.com" });
+      service.addBinding(groupB.id, {
+        advancedBlockingGroupName: "Default",
+        action: "block",
+      });
+
+      const preview = service.getMaterializationPreview();
+      expect(preview.groups).toHaveLength(1);
+      expect(preview.groups[0]?.blocked).toEqual([
+        "zeta.com",
+        "alpha.com",
+        "middle.com",
+      ]);
+    });
+
     it("detects a same-specificity allow/block conflict and excludes it from materialized output", () => {
       const allowGroup = service.createDomainGroup({ name: "Allow Group" });
       service.addEntry(allowGroup.id, {
@@ -527,6 +552,32 @@ describe("DomainGroupsService", () => {
         .calls[0] as [string, AdvancedBlockingConfig];
       const adultsGroup = writtenConfig.groups.find((g) => g.name === "Adults");
       expect(adultsGroup?.allowed).toContain("youtube.com");
+    });
+
+    it("live apply preserves materialized source order in written config", async () => {
+      const group = service.createDomainGroup({ name: "Reference List" });
+      service.addEntry(group.id, { matchType: "exact", value: "zeta.com" });
+      service.addEntry(group.id, { matchType: "exact", value: "alpha.com" });
+      service.addBinding(group.id, {
+        advancedBlockingGroupName: "Adults",
+        action: "allow",
+      });
+
+      mockTechnitium.listNodes.mockResolvedValue([primaryNode]);
+      mockAdvancedBlocking.getSnapshot.mockResolvedValue(
+        makeSnapshot("node-a", makeConfig()),
+      );
+
+      await service.applyMaterialization({ dryRun: false });
+
+      const [, writtenConfig] = mockAdvancedBlocking.setConfig.mock
+        .calls[0] as [string, AdvancedBlockingConfig];
+      const adultsGroup = writtenConfig.groups.find((g) => g.name === "Adults");
+      expect(adultsGroup?.allowed).toEqual([
+        "youtube.com",
+        "zeta.com",
+        "alpha.com",
+      ]);
     });
 
     it("throws ConflictException when materialization has allow/block conflicts", async () => {

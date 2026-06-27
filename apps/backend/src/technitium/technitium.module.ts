@@ -11,6 +11,8 @@ import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
 import { DnsSchedulesController } from "./dns-schedules.controller";
 import { DnsSchedulesEvaluatorService } from "./dns-schedules-evaluator.service";
 import { DnsSchedulesService } from "./dns-schedules.service";
+import { DnsTemporaryOverridesController } from "./dns-temporary-overrides.controller";
+import { DnsTemporaryOverridesService } from "./dns-temporary-overrides.service";
 import { DomainGroupsController } from "./domain-groups.controller";
 import { DomainGroupsService } from "./domain-groups.service";
 import { DomainListController } from "./domain-list-cache.controller";
@@ -59,6 +61,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     LogAlertsRulesService,
     DomainGroupsService,
     DnsSchedulesService,
+    DnsTemporaryOverridesService,
     DnsSchedulesEvaluatorService,
     NodeOverviewCacheInterceptor,
     DnsFilteringSnapshotService,
@@ -147,6 +150,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     BuiltInBlockingController,
     DomainGroupsController,
     DnsSchedulesController,
+    DnsTemporaryOverridesController,
     DomainListController,
     LogAlertsController,
     SplitHorizonPtrController,

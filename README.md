@@ -4,7 +4,9 @@ A multi-node companion tool for aiding in day-to-day management of [Technitium D
 
 - DNS Query Logs (DNS Logs)
 - Advanced Blocking App upkeep (DNS Filtering)
+- Built-in Blocking pause (temporary-disable timer surfaced in the header)
 - Domain Groups (named domain sets that bind to Advanced Blocking groups)
+- DNS Schedules (time-window automation for Advanced Blocking groups)
 - Log Alerts (rule-based SMTP notifications on query log events)
 - DNS Zone Insight (DNS Zones)
 - DHCP Scopes
@@ -58,7 +60,7 @@ Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_
 | Tag | Description |
 |---|---|
 | `latest` | Stable release (default) |
-| `1.5`, `1.5.1` | Pinned version tags |
+| `1.6`, `1.6.9` | Pinned version tags |
 | `beta` | Pre-release from the `next` branch — may include features not yet in stable |
 | `next` | Rolling `next` branch head (same image as `beta`, dev-facing alias) |
 
@@ -178,7 +180,9 @@ These features write data to disk and are disabled unless explicitly enabled/con
 - **Multi-Node Management** - Monitor and manage multiple servers from one interface
 - **Query Logs** - View combined query logs from all configured nodes (optional SQLite stored logs for accurate time-window browsing; see [docs/features/query-logs/SQLITE_ROLLING_QUERY_LOG_STORE.md](docs/features/query-logs/SQLITE_ROLLING_QUERY_LOG_STORE.md))
 - **Advanced Blocking** - Manage domain allow/block lists (requires Advanced Blocking App), with optional DNS Filtering History (snapshots) for quick rollback
+- **Pause Built-in Blocking** - Persistent header pill that surfaces Technitium's temporary-disable timer at the top level; preset durations (1m–4h), a live countdown while paused, and multi-node fan-out so a pause/resume applies across every blocking node at once
 - **Domain Groups** - SQLite-backed named domain sets that bind to Advanced Blocking groups; drag-and-drop bindings, apply tracking with zero-data-loss semantics, and unified export/import
+- **DNS Schedules** - Time-window automation that toggles Advanced Blocking groups on a daily/weekly schedule (with timezone and overnight-window support), optional email notifications with templated subjects/bodies, and drift detection
 - **Log Alerts** - Rule-based SMTP notifications triggered by query log events; configurable domain patterns, debounce, client filters, and outcome modes
 
 ### Analysis & Comparison
