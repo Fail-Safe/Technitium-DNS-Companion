@@ -870,4 +870,77 @@ describe("DomainGroupsService", () => {
       expect(mockAdvancedBlocking.setConfig).not.toHaveBeenCalled();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Unified import
+  // ---------------------------------------------------------------------------
+
+  describe("importUnifiedConfig", () => {
+    it("replace mode deletes absent DGs and rebuilds bindings from the import", async () => {
+      const staleGroup = service.createDomainGroup({
+        name: "Dating & Adult",
+      });
+      service.addEntry(staleGroup.id, {
+        matchType: "exact",
+        value: "onlyfans.com",
+      });
+      service.addBinding(staleGroup.id, {
+        advancedBlockingGroupName: "Parents",
+        action: "block",
+      });
+
+      const existingGroup = service.createDomainGroup({ name: "Dating" });
+      service.addEntry(existingGroup.id, {
+        matchType: "exact",
+        value: "old.example",
+      });
+      service.addBinding(existingGroup.id, {
+        advancedBlockingGroupName: "IoT",
+        action: "allow",
+      });
+
+      const result = await service.importUnifiedConfig({
+        domainsMode: "skip",
+        domainGroupsMode: "replace",
+        data: {
+          groups: {
+            Default: {
+              blockDomainGroups: ["Dating"],
+              allowDomainGroups: [],
+            },
+          },
+          domainGroups: {
+            Dating: {
+              description: "Dating related apps and domains",
+              entries: [{ type: "exact", value: "tinder.com" }],
+            },
+          },
+        },
+      });
+
+      expect(result.domainGroups.replaced).toEqual(["Dating"]);
+      expect(service.listDomainGroups().map((g) => g.name)).toEqual([
+        "Dating",
+      ]);
+
+      const dating = service.getDomainGroup(existingGroup.id);
+      expect(dating.entries.map((entry) => entry.value)).toEqual([
+        "tinder.com",
+      ]);
+      expect(dating.bindings).toHaveLength(1);
+      expect(dating.bindings[0]).toMatchObject({
+        advancedBlockingGroupName: "Default",
+        action: "block",
+      });
+
+      const preview = service.getMaterializationPreview();
+      expect(preview.allBindings).toEqual([
+        expect.objectContaining({
+          domainGroupName: "Dating",
+          advancedBlockingGroupName: "Default",
+          action: "block",
+        }),
+      ]);
+    });
+  });
 });
