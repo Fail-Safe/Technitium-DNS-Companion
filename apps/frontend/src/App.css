@@ -12531,6 +12531,388 @@ button.danger:disabled {
 
 /* Note: Dark mode for DHCP Bulk Sync is handled automatically via CSS custom properties */
 
+/* ===== DHCP DNS Sync ===== */
+.dhcp-dns-sync-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+  max-width: 1440px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.dhcp-dns-sync-page__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.dhcp-dns-sync-page__header h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.8rem;
+  line-height: 1.2;
+}
+
+.dhcp-dns-sync-page__header p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  max-width: 720px;
+}
+
+.dhcp-dns-sync-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.85fr) minmax(320px, 1.15fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.dhcp-dns-sync-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.dhcp-dns-sync-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.dhcp-dns-sync-card__header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.dhcp-dns-sync-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+}
+
+.dhcp-dns-sync-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.85rem;
+  font-weight: 600;
+}
+
+.dhcp-dns-sync-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.dhcp-dns-sync-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: help;
+  padding: 0;
+}
+
+.dhcp-dns-sync-help:hover,
+.dhcp-dns-sync-help:focus-visible {
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
+  outline: none;
+}
+
+.dhcp-dns-sync-field input,
+.dhcp-dns-sync-field select,
+.dhcp-dns-sync-options input[type="number"] {
+  min-height: 2.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.dhcp-dns-sync-scope-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.dhcp-dns-sync-scope-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-tertiary);
+}
+
+.dhcp-dns-sync-scope-row span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dhcp-dns-sync-scope-row small {
+  color: var(--color-text-secondary);
+}
+
+.dhcp-dns-sync-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.dhcp-dns-sync-options label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.dhcp-dns-sync-options input[type="number"] {
+  width: 100%;
+}
+
+.dhcp-dns-sync-actions {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.dhcp-dns-sync-alert,
+.dhcp-dns-sync-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  border-radius: 8px;
+  padding: 0.75rem 0.85rem;
+}
+
+.dhcp-dns-sync-alert--error,
+.dhcp-dns-sync-issue--error {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+  border: 1px solid var(--color-danger);
+}
+
+.dhcp-dns-sync-issue--warn,
+.dhcp-dns-sync-issue--info {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-dark);
+  border: 1px solid var(--color-warning);
+}
+
+.dhcp-dns-sync-results {
+  overflow: hidden;
+}
+
+.dhcp-dns-sync-summary {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(90px, 1fr));
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.dhcp-dns-sync-summary__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-tertiary);
+}
+
+.dhcp-dns-sync-summary__item span {
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.dhcp-dns-sync-summary__item strong {
+  font-size: 1.2rem;
+}
+
+.dhcp-dns-sync-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.dhcp-dns-sync-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.75rem 0.85rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--color-info);
+  border-radius: 8px;
+  background: var(--color-info-bg);
+  color: var(--color-text-primary);
+}
+
+.dhcp-dns-sync-notice--blocked {
+  border-color: var(--color-danger);
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
+.dhcp-dns-sync-apply-summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--color-success);
+  border-radius: 8px;
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.dhcp-dns-sync-apply-summary--failed {
+  border-color: var(--color-danger);
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
+.dhcp-dns-sync-apply-summary__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.dhcp-dns-sync-apply-summary__details {
+  grid-column: 1 / -1;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.dhcp-dns-sync-table-wrap {
+  overflow: auto;
+}
+
+.dhcp-dns-sync-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 840px;
+}
+
+.dhcp-dns-sync-table th,
+.dhcp-dns-sync-table td {
+  text-align: left;
+  padding: 0.7rem 0.6rem;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: top;
+}
+
+.dhcp-dns-sync-table th {
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.dhcp-dns-sync-table code {
+  white-space: nowrap;
+}
+
+.dhcp-dns-sync-table small {
+  display: block;
+  color: var(--color-text-secondary);
+  margin-top: 0.25rem;
+}
+
+.dhcp-dns-sync-row--conflict {
+  background: color-mix(in srgb, var(--color-warning-bg) 45%, transparent);
+}
+
+.dhcp-dns-sync-row--create-record,
+.dhcp-dns-sync-row--update-record,
+.dhcp-dns-sync-row--delete-record {
+  background: color-mix(in srgb, var(--color-info-bg) 35%, transparent);
+}
+
+.dhcp-dns-sync-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.dhcp-dns-sync-pill--create-record,
+.dhcp-dns-sync-pill--update-record {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+}
+
+.dhcp-dns-sync-pill--delete-record,
+.dhcp-dns-sync-pill--conflict,
+.dhcp-dns-sync-pill--missing-zone {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-dark);
+}
+
+.dhcp-dns-sync-pill--already-correct {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.dhcp-dns-sync-empty {
+  color: var(--color-text-secondary);
+  padding: 0.8rem;
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+}
+
+@media (max-width: 980px) {
+  .dhcp-dns-sync-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dhcp-dns-sync-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .dhcp-dns-sync-page {
+    padding: 1rem;
+  }
+
+  .dhcp-dns-sync-options {
+    grid-template-columns: 1fr;
+  }
+
+  .dhcp-dns-sync-apply-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
 .advanced-blocking-summary__card {
   background: var(--color-bg-secondary);
   border-color: var(--color-border);
@@ -12899,6 +13281,110 @@ button.danger:disabled {
 
 /* === DNS Schedules specific === */
 
+.dns-overrides__tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 0.625rem;
+  width: fit-content;
+}
+
+.dns-overrides__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.8rem;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.dns-overrides__tab:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.dns-overrides__tab--active {
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+}
+
+.dns-overrides__tab span {
+  display: inline-flex;
+  min-width: 1.4rem;
+  justify-content: center;
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  background: var(--color-bg-tertiary);
+  color: inherit;
+  font-size: 0.75rem;
+}
+
+.dns-overrides__behavior-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--color-info-border, var(--color-border));
+  border-radius: 0.625rem;
+  background: var(--color-info-bg);
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.dns-overrides__behavior-note-icon {
+  margin-top: 0.15rem;
+  color: var(--color-info);
+  flex: 0 0 auto;
+}
+
+.dns-overrides__behavior-note-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.dns-overrides__behavior-note strong {
+  color: var(--color-text-primary);
+}
+
+.dns-overrides__behavior-note-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.dns-overrides__behavior-note-dismiss:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.dns-overrides__expired-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-dark);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .dns-schedules__dow-grid {
   display: flex;
   flex-wrap: wrap;
@@ -13033,13 +13519,30 @@ button.danger:disabled {
 
 .dns-schedules__applied-nodes {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.5rem;
   font-size: 0.875rem;
   color: var(--color-success-text);
   background: var(--color-success-bg);
   padding: 0.5rem 0.75rem;
   border-radius: 0.5rem;
+}
+
+.dns-schedules__applied-nodes-icon {
+  margin-top: 0.15rem;
+  flex: 0 0 auto;
+}
+
+.dns-schedules__applied-nodes-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.dns-schedules__applied-via {
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
 }
 
 /* Run result panel */

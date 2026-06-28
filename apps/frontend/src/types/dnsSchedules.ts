@@ -37,6 +37,34 @@ export interface DnsSchedule extends DnsScheduleDraft {
   updatedAt: string;
 }
 
+export interface DnsTemporaryOverrideDraft {
+  name: string;
+  enabled: boolean;
+  advancedBlockingGroupNames: string[];
+  action: DnsScheduleAction;
+  domainEntries: string[];
+  domainGroupNames: string[];
+  flushCacheOnChange: boolean;
+  /** Email addresses to notify when blocked domains are queried while the override is active. */
+  notifyEmails: string[];
+  /** Minimum seconds between repeat alert emails. Default 300. */
+  notifyDebounceSeconds: number;
+  /** Optional free-text message prepended to alert email bodies for this override. */
+  notifyMessage?: string;
+  /** When true and notifyMessage is set, the email body is only the custom message. */
+  notifyMessageOnly?: boolean;
+  /** Optional subject-line template for alert emails. */
+  notifySubjectTemplate?: string;
+  nodeIds: string[];
+  expiresAt?: string | null;
+}
+
+export interface DnsTemporaryOverride extends DnsTemporaryOverrideDraft {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DnsSchedulesStorageStatus {
   enabled: boolean;
   ready: boolean;

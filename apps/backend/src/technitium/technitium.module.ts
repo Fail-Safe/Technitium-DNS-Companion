@@ -6,11 +6,16 @@ import { AdvancedBlockingService } from "./advanced-blocking.service";
 import { BuiltInBlockingController } from "./built-in-blocking.controller";
 import { BuiltInBlockingService } from "./built-in-blocking.service";
 import { CompanionDbService } from "./companion-db.service";
+import { DhcpDnsSyncController } from "./dhcp-dns-sync.controller";
+import { DhcpDnsSyncStateService } from "./dhcp-dns-sync-state.service";
+import { DhcpDnsSyncService } from "./dhcp-dns-sync.service";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
 import { DnsSchedulesController } from "./dns-schedules.controller";
 import { DnsSchedulesEvaluatorService } from "./dns-schedules-evaluator.service";
 import { DnsSchedulesService } from "./dns-schedules.service";
+import { DnsTemporaryOverridesController } from "./dns-temporary-overrides.controller";
+import { DnsTemporaryOverridesService } from "./dns-temporary-overrides.service";
 import { DomainGroupsController } from "./domain-groups.controller";
 import { DomainGroupsService } from "./domain-groups.service";
 import { DomainListController } from "./domain-list-cache.controller";
@@ -50,6 +55,8 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     QueryLogSqliteService,
     AdvancedBlockingService,
     BuiltInBlockingService,
+    DhcpDnsSyncService,
+    DhcpDnsSyncStateService,
     SplitHorizonPtrService,
     SplitHorizonPtrStateService,
     DomainListCacheService,
@@ -59,6 +66,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     LogAlertsRulesService,
     DomainGroupsService,
     DnsSchedulesService,
+    DnsTemporaryOverridesService,
     DnsSchedulesEvaluatorService,
     NodeOverviewCacheInterceptor,
     DnsFilteringSnapshotService,
@@ -147,8 +155,10 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     BuiltInBlockingController,
     DomainGroupsController,
     DnsSchedulesController,
+    DnsTemporaryOverridesController,
     DomainListController,
     LogAlertsController,
+    DhcpDnsSyncController,
     SplitHorizonPtrController,
   ],
   exports: [

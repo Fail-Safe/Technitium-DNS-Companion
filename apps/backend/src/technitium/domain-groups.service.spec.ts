@@ -441,6 +441,31 @@ describe("DomainGroupsService", () => {
       expect(preview.groups[0]?.allowed).toEqual(["alpha.com", "beta.com"]);
     });
 
+    it("preserves source order within materialized domain lists", () => {
+      const groupA = service.createDomainGroup({ name: "Group A" });
+      service.addEntry(groupA.id, { matchType: "exact", value: "zeta.com" });
+      service.addEntry(groupA.id, { matchType: "exact", value: "alpha.com" });
+      service.addBinding(groupA.id, {
+        advancedBlockingGroupName: "Default",
+        action: "block",
+      });
+
+      const groupB = service.createDomainGroup({ name: "Group B" });
+      service.addEntry(groupB.id, { matchType: "exact", value: "middle.com" });
+      service.addBinding(groupB.id, {
+        advancedBlockingGroupName: "Default",
+        action: "block",
+      });
+
+      const preview = service.getMaterializationPreview();
+      expect(preview.groups).toHaveLength(1);
+      expect(preview.groups[0]?.blocked).toEqual([
+        "zeta.com",
+        "alpha.com",
+        "middle.com",
+      ]);
+    });
+
     it("detects a same-specificity allow/block conflict and excludes it from materialized output", () => {
       const allowGroup = service.createDomainGroup({ name: "Allow Group" });
       service.addEntry(allowGroup.id, {
@@ -527,6 +552,32 @@ describe("DomainGroupsService", () => {
         .calls[0] as [string, AdvancedBlockingConfig];
       const adultsGroup = writtenConfig.groups.find((g) => g.name === "Adults");
       expect(adultsGroup?.allowed).toContain("youtube.com");
+    });
+
+    it("live apply preserves materialized source order in written config", async () => {
+      const group = service.createDomainGroup({ name: "Reference List" });
+      service.addEntry(group.id, { matchType: "exact", value: "zeta.com" });
+      service.addEntry(group.id, { matchType: "exact", value: "alpha.com" });
+      service.addBinding(group.id, {
+        advancedBlockingGroupName: "Adults",
+        action: "allow",
+      });
+
+      mockTechnitium.listNodes.mockResolvedValue([primaryNode]);
+      mockAdvancedBlocking.getSnapshot.mockResolvedValue(
+        makeSnapshot("node-a", makeConfig()),
+      );
+
+      await service.applyMaterialization({ dryRun: false });
+
+      const [, writtenConfig] = mockAdvancedBlocking.setConfig.mock
+        .calls[0] as [string, AdvancedBlockingConfig];
+      const adultsGroup = writtenConfig.groups.find((g) => g.name === "Adults");
+      expect(adultsGroup?.allowed).toEqual([
+        "youtube.com",
+        "zeta.com",
+        "alpha.com",
+      ]);
     });
 
     it("throws ConflictException when materialization has allow/block conflicts", async () => {
@@ -817,6 +868,77 @@ describe("DomainGroupsService", () => {
       expect(result.nodes[0]?.updatedGroups).toHaveLength(0);
       // No change → setConfig should not be called
       expect(mockAdvancedBlocking.setConfig).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Unified import
+  // ---------------------------------------------------------------------------
+
+  describe("importUnifiedConfig", () => {
+    it("replace mode deletes absent DGs and rebuilds bindings from the import", async () => {
+      const staleGroup = service.createDomainGroup({
+        name: "Dating & Adult",
+      });
+      service.addEntry(staleGroup.id, {
+        matchType: "exact",
+        value: "onlyfans.com",
+      });
+      service.addBinding(staleGroup.id, {
+        advancedBlockingGroupName: "Parents",
+        action: "block",
+      });
+
+      const existingGroup = service.createDomainGroup({ name: "Dating" });
+      service.addEntry(existingGroup.id, {
+        matchType: "exact",
+        value: "old.example",
+      });
+      service.addBinding(existingGroup.id, {
+        advancedBlockingGroupName: "IoT",
+        action: "allow",
+      });
+
+      const result = await service.importUnifiedConfig({
+        domainsMode: "skip",
+        domainGroupsMode: "replace",
+        data: {
+          groups: {
+            Default: {
+              blockDomainGroups: ["Dating"],
+              allowDomainGroups: [],
+            },
+          },
+          domainGroups: {
+            Dating: {
+              description: "Dating related apps and domains",
+              entries: [{ type: "exact", value: "tinder.com" }],
+            },
+          },
+        },
+      });
+
+      expect(result.domainGroups.replaced).toEqual(["Dating"]);
+      expect(service.listDomainGroups().map((g) => g.name)).toEqual(["Dating"]);
+
+      const dating = service.getDomainGroup(existingGroup.id);
+      expect(dating.entries.map((entry) => entry.value)).toEqual([
+        "tinder.com",
+      ]);
+      expect(dating.bindings).toHaveLength(1);
+      expect(dating.bindings[0]).toMatchObject({
+        advancedBlockingGroupName: "Default",
+        action: "block",
+      });
+
+      const preview = service.getMaterializationPreview();
+      expect(preview.allBindings).toEqual([
+        expect.objectContaining({
+          domainGroupName: "Dating",
+          advancedBlockingGroupName: "Default",
+          action: "block",
+        }),
+      ]);
     });
   });
 });

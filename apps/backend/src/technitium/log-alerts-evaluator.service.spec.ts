@@ -74,16 +74,17 @@ describe("LogAlertsEvaluatorService", () => {
       listRules: jest.fn().mockReturnValue(options?.rules ?? [sampleRule]),
     } as unknown as LogAlertsRulesService;
 
+    const sendRuleAlertEmail = jest.fn().mockResolvedValue({
+      accepted: ["alerts@example.com"],
+      rejected: [],
+      messageId: "message-id",
+    });
     const logAlertsEmailService = {
       getSmtpStatus: jest.fn().mockReturnValue({
         ...smtpReady,
         ready: options?.smtpReady ?? true,
       }),
-      sendRuleAlertEmail: jest.fn().mockResolvedValue({
-        accepted: ["alerts@example.com"],
-        rejected: [],
-        messageId: "message-id",
-      }),
+      sendRuleAlertEmail,
     } as unknown as LogAlertsEmailService;
 
     const advancedBlockingService = {
@@ -108,28 +109,29 @@ describe("LogAlertsEvaluatorService", () => {
       queryLogSqliteService,
       logAlertsRulesService,
       logAlertsEmailService,
+      sendRuleAlertEmail,
     };
   };
 
   it("sends alert emails when matching entries are found", async () => {
-    const { service, logAlertsEmailService } = createService();
+    const { service, sendRuleAlertEmail } = createService();
     const result = await service.runNow(false);
 
     expect(result.evaluatedRules).toBe(1);
     expect(result.matchedRules).toBe(1);
     expect(result.alertsSent).toBe(1);
-    expect(logAlertsEmailService.sendRuleAlertEmail).toHaveBeenCalledTimes(1);
+    expect(sendRuleAlertEmail).toHaveBeenCalledTimes(1);
   });
 
   it("does not re-send when no newer matching entries are found", async () => {
-    const { service, logAlertsEmailService } = createService();
+    const { service, sendRuleAlertEmail } = createService();
 
     const firstRun = await service.runNow(false);
     const secondRun = await service.runNow(false);
 
     expect(firstRun.alertsSent).toBe(1);
     expect(secondRun.alertsSent).toBe(0);
-    expect(logAlertsEmailService.sendRuleAlertEmail).toHaveBeenCalledTimes(1);
+    expect(sendRuleAlertEmail).toHaveBeenCalledTimes(1);
   });
 
   it("allows dry-run execution when SMTP is not ready", async () => {

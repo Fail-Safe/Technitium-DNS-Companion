@@ -17,7 +17,9 @@ describe("AuthSessionService — create + get + delete (baseline)", () => {
   it("creates a session with a UUID id and stores it for retrieval", () => {
     const service = new AuthSessionService();
     const session = service.create("alice", { node1: "tok-1" });
-    expect(session.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(session.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
     expect(session.user).toBe("alice");
     expect(session.tokensByNodeId).toEqual({ node1: "tok-1" });
     expect(service.get(session.id)).toBe(session);
@@ -90,7 +92,9 @@ describe("AuthSessionService — idle expiration", () => {
     // Every 6h, get() refreshes lastSeenAt — session should stay live for 24h
     // total (and only hit the ABSOLUTE max after that, not the idle limit).
     for (const hours of [6, 12, 18]) {
-      jest.setSystemTime(new Date(`2026-01-01T${String(hours).padStart(2, "0")}:00:00Z`));
+      jest.setSystemTime(
+        new Date(`2026-01-01T${String(hours).padStart(2, "0")}:00:00Z`),
+      );
       expect(service.get(session.id)).toBeDefined();
     }
     service.onModuleDestroy();
@@ -119,7 +123,9 @@ describe("AuthSessionService — absolute expiration", () => {
     // Keep refreshing every 6h — would defeat idle expiration, but absolute
     // age still trips at 24h.
     for (const hours of [6, 12, 18]) {
-      jest.setSystemTime(new Date(`2026-01-01T${String(hours).padStart(2, "0")}:00:00Z`));
+      jest.setSystemTime(
+        new Date(`2026-01-01T${String(hours).padStart(2, "0")}:00:00Z`),
+      );
       expect(service.get(session.id)).toBeDefined();
     }
     // 24h + 1s past creation — absolute max triggers despite the rolling refreshes.

@@ -49,6 +49,44 @@ type StoredLogRowWithClient = {
 
 type DistinctDomainRow = { qnameLc: string; count: number };
 
+function isSqliteBusyError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const maybeSqliteError = error as Error & {
+    code?: unknown;
+    errcode?: unknown;
+    errstr?: unknown;
+  };
+  return (
+    maybeSqliteError.code === "ERR_SQLITE_ERROR" &&
+    (maybeSqliteError.errcode === 5 ||
+      maybeSqliteError.errstr === "database is locked" ||
+      error.message.includes("database is locked"))
+  );
+}
+
+function formatErrorForLog(error: unknown): string {
+  if (error instanceof Error) {
+    const maybeSqliteError = error as Error & {
+      code?: unknown;
+      errcode?: unknown;
+      errstr?: unknown;
+    };
+    const details = [
+      typeof maybeSqliteError.code === "string"
+        ? `code=${maybeSqliteError.code}`
+        : null,
+      typeof maybeSqliteError.errcode === "number"
+        ? `errcode=${maybeSqliteError.errcode}`
+        : null,
+      typeof maybeSqliteError.errstr === "string"
+        ? `errstr=${maybeSqliteError.errstr}`
+        : null,
+    ].filter((part): part is string => part !== null);
+    return `${error.name}: ${error.message}${details.length > 0 ? `; ${details.join("; ")}` : ""}`;
+  }
+  return String(error);
+}
+
 @Injectable()
 export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QueryLogSqliteService.name);
@@ -200,6 +238,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
 
     // Concurrency-friendly settings: WAL allows concurrent readers while writing.
     this.db.exec("PRAGMA journal_mode=WAL;");
+    this.db.exec("PRAGMA busy_timeout=5000;");
     this.db.exec("PRAGMA synchronous=NORMAL;");
     this.db.exec("PRAGMA temp_store=MEMORY;");
     // Tier 1 perf tunables (benchmarked ~20-25% win on dedup/LIKE queries):
@@ -553,8 +592,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     if (!this.db) return;
 
     const migrationEnabled =
-      (process.env.QUERY_LOG_SQLITE_AUTO_VACUUM_MIGRATION ?? "true").toLowerCase() !==
-      "false";
+      (
+        process.env.QUERY_LOG_SQLITE_AUTO_VACUUM_MIGRATION ?? "true"
+      ).toLowerCase() !== "false";
     if (!migrationEnabled) {
       this.logger.warn(
         "SQLite auto_vacuum migration disabled by QUERY_LOG_SQLITE_AUTO_VACUUM_MIGRATION=false. " +
@@ -564,9 +604,9 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      const row = this.db
-        .prepare("PRAGMA auto_vacuum")
-        .get() as { auto_vacuum?: number } | undefined;
+      const row = this.db.prepare("PRAGMA auto_vacuum").get() as
+        | { auto_vacuum?: number }
+        | undefined;
       const currentMode = row?.auto_vacuum ?? 0;
       if (currentMode === 2) {
         // Already INCREMENTAL — nothing to do.
@@ -686,7 +726,15 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.pollOnce();
     } catch (error) {
-      this.logger.warn("SQLite query log poll failed", error as Error);
+      if (isSqliteBusyError(error)) {
+        this.logger.warn(
+          `SQLite query log poll skipped because the database is locked; will retry on the next poll. ${formatErrorForLog(error)}`,
+        );
+        return;
+      }
+      this.logger.warn(
+        `SQLite query log poll failed: ${formatErrorForLog(error)}`,
+      );
     }
   }
 
@@ -1040,7 +1088,8 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       //   - term is purely digits/dots/colons → IP-literal search (LIKE)
       //   - ambiguous → fall back to the original OR (rare)
       const hasLetter = /[a-z]/.test(lowerClient);
-      const looksLikeIpLiteral = /^[0-9a-f.:]+$/.test(lowerClient) && !hasLetter;
+      const looksLikeIpLiteral =
+        /^[0-9a-f.:]+$/.test(lowerClient) && !hasLetter;
 
       if (useFtsForSubstring) {
         if (looksLikeIpLiteral) {
