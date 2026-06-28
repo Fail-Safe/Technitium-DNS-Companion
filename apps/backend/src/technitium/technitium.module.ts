@@ -6,6 +6,9 @@ import { AdvancedBlockingService } from "./advanced-blocking.service";
 import { BuiltInBlockingController } from "./built-in-blocking.controller";
 import { BuiltInBlockingService } from "./built-in-blocking.service";
 import { CompanionDbService } from "./companion-db.service";
+import { DhcpDnsSyncController } from "./dhcp-dns-sync.controller";
+import { DhcpDnsSyncStateService } from "./dhcp-dns-sync-state.service";
+import { DhcpDnsSyncService } from "./dhcp-dns-sync.service";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
 import { DnsSchedulesController } from "./dns-schedules.controller";
@@ -52,6 +55,8 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     QueryLogSqliteService,
     AdvancedBlockingService,
     BuiltInBlockingService,
+    DhcpDnsSyncService,
+    DhcpDnsSyncStateService,
     SplitHorizonPtrService,
     SplitHorizonPtrStateService,
     DomainListCacheService,
@@ -153,6 +158,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     DnsTemporaryOverridesController,
     DomainListController,
     LogAlertsController,
+    DhcpDnsSyncController,
     SplitHorizonPtrController,
   ],
   exports: [

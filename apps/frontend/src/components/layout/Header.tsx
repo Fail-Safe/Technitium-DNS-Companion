@@ -133,6 +133,7 @@ export function Header() {
     { to: "/dns-lookup", label: "DNS Lookup", icon: faMagnifyingGlass },
     { to: "/zones", label: "DNS Zones", icon: faGlobe },
     { to: "/dhcp", label: "DHCP Scopes", icon: faPlug },
+    { to: "/dhcp-dns-sync", label: "DHCP DNS Sync", icon: faBolt },
   ];
 
   const handleAboutAction = () => {

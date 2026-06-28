@@ -470,7 +470,12 @@ export class TechnitiumService {
     if (!this.scheduleTokenValidation.validated) {
       // Trigger async validation; return pending state
       void this.validateScheduleToken();
-      return { configured, valid: null, hasAppsModify: null, hasCacheModify: null };
+      return {
+        configured,
+        valid: null,
+        hasAppsModify: null,
+        hasCacheModify: null,
+      };
     }
 
     return {
@@ -1380,6 +1385,26 @@ export class TechnitiumService {
     return this.request<T>(node, config, options);
   }
 
+  async listDhcpLeases(
+    nodeId: string,
+    options?: { authMode?: "session" | "background" },
+  ): Promise<TechnitiumStatusEnvelope<TechnitiumDhcpLeaseList>> {
+    const node = this.findNode(nodeId);
+    const envelope = await this.request<
+      TechnitiumApiResponse<TechnitiumDhcpLeaseList>
+    >(node, { method: "GET", url: "/api/dhcp/leases/list" }, options);
+
+    const data = this.unwrapApiResponse(envelope, node.id, "fetch DHCP leases");
+
+    return {
+      nodeId: node.id,
+      fetchedAt: new Date().toISOString(),
+      data: {
+        leases: Array.isArray(data.leases) ? data.leases : [],
+      },
+    };
+  }
+
   /**
    * Fetch all DHCP leases from a node to build an IP → hostname mapping.
    */
@@ -1388,15 +1413,8 @@ export class TechnitiumService {
     options?: { authMode?: "session" | "background" },
   ): Promise<Map<string, string>> {
     try {
-      const envelope = await this.request<
-        TechnitiumApiResponse<TechnitiumDhcpLeaseList>
-      >(node, { method: "GET", url: "/api/dhcp/leases/list" }, options);
-
-      const data = this.unwrapApiResponse(
-        envelope,
-        node.id,
-        "fetch DHCP leases",
-      );
+      const envelope = await this.listDhcpLeases(node.id, options);
+      const data = envelope.data;
       const ipToHostname = new Map<string, string>();
 
       if (data.leases && Array.isArray(data.leases)) {
@@ -1852,13 +1870,18 @@ export class TechnitiumService {
         valid: false,
         hasAppsModify: false,
         hasCacheModify: false,
-        reason: "No nodes are configured; cannot validate TECHNITIUM_SCHEDULE_TOKEN.",
+        reason:
+          "No nodes are configured; cannot validate TECHNITIUM_SCHEDULE_TOKEN.",
       };
       this.logScheduleTokenValidationOutcome();
       return;
     }
 
-    type Permission = { canView?: boolean; canModify?: boolean; canDelete?: boolean };
+    type Permission = {
+      canView?: boolean;
+      canModify?: boolean;
+      canDelete?: boolean;
+    };
     type PermissionMap = Record<string, Permission | undefined>;
     type SessionInfo = {
       username?: string;
@@ -1870,7 +1893,11 @@ export class TechnitiumService {
     try {
       envelope = await this.requestWithExplicitToken<
         TechnitiumApiResponse<SessionInfo>
-      >(node, { method: "GET", url: "/api/user/session/get" }, this.scheduleToken);
+      >(
+        node,
+        { method: "GET", url: "/api/user/session/get" },
+        this.scheduleToken,
+      );
     } catch (error) {
       const message =
         error instanceof HttpException
@@ -1922,11 +1949,14 @@ export class TechnitiumService {
       return;
     }
 
-    const flattened = envelopeObj as unknown as SessionInfo & { status?: string };
+    const flattened = envelopeObj as unknown as SessionInfo & {
+      status?: string;
+    };
     const sessionInfo: SessionInfo | undefined =
       envelopeObj.response !== undefined
         ? envelopeObj.response
-        : flattened && (flattened.info || flattened.username || flattened.displayName)
+        : flattened &&
+            (flattened.info || flattened.username || flattened.displayName)
           ? flattened
           : undefined;
 

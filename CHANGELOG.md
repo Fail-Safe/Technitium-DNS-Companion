@@ -7,6 +7,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.0] - 2026-06-28
+
+### Added
+
+- **DHCP DNS Sync page.** Operators can now source DHCP leases from selected nodes and scopes, preview DNS reconciliation, and apply the required A/AAAA and PTR record changes to the cluster primary node.
+- **Primary-node DNS reconciliation API.** Added backend preview/apply endpoints that select the cluster primary as the DNS mutation target, read DHCP leases from the chosen source node, and plan forward and reverse records using each scope's domain name or an explicit forward-zone override.
+- **Conflict-safe managed-record ownership.** Companion-created DNS records are tagged with managed comments, and the sync refuses to overwrite existing unowned records with different values.
+- **Native DHCP DNS update guardrail.** Apply is blocked while a selected DHCP scope still has native Technitium `dnsUpdates` enabled, preventing two writers from managing the same records.
+- **Managed stale-record cleanup.** Previously managed records are eligible for deletion after their lease disappears for the configured stale-grace period. Cleanup is limited to records Companion previously created.
+
+### Changed
+
+- **DHCP DNS Sync defaults match Technitium DHCP DNS records.** New records default to a 900-second TTL, PTR generation is enabled by default, and expired dynamic leases are ignored during planning.
+- **Apply flow refreshes in place.** After a successful apply, the page refreshes the preview, shows an inline completion summary, and keeps detailed apply results available without leaving stale actionable rows on screen.
+
+### Testing
+
+- Added backend coverage for native `dnsUpdates` blocking, forward/PTR planning, expired dynamic lease filtering, unowned-record conflicts, apply actions, automatic snapshots, and seen-lease tracking.
+- Verified the full workspace build and test suites.
+
 ## [1.7.0] - 2026-06-26
 
 ### Added
