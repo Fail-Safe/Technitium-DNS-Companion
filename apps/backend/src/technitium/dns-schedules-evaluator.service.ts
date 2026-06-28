@@ -553,9 +553,7 @@ export class DnsSchedulesEvaluatorService
     return tuples;
   }
 
-  temporaryOverrideToSchedule(
-    override: DnsTemporaryOverride,
-  ): DnsSchedule {
+  temporaryOverrideToSchedule(override: DnsTemporaryOverride): DnsSchedule {
     return {
       id: override.id,
       name: override.name,

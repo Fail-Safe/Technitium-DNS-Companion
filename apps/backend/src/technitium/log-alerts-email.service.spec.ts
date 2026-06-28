@@ -100,9 +100,9 @@ describe("computeRootDomain", () => {
     // "github.io" / "amazonaws.com" — preferable for notification emails
     // where short and recognizable beats maximally informative.
     expect(computeRootDomain("docs.someproject.github.io")).toBe("github.io");
-    expect(
-      computeRootDomain("my-bucket.s3.us-east-1.amazonaws.com"),
-    ).toBe("amazonaws.com");
+    expect(computeRootDomain("my-bucket.s3.us-east-1.amazonaws.com")).toBe(
+      "amazonaws.com",
+    );
   });
 
   it("returns already-root domains unchanged", () => {

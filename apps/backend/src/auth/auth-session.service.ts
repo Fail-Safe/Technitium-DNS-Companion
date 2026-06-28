@@ -93,10 +93,7 @@ export class AuthSessionService implements OnModuleDestroy {
 
   private isExpired(session: AuthSession, now: number): boolean {
     const createdAtMs = Date.parse(session.createdAt);
-    if (
-      Number.isFinite(createdAtMs) &&
-      now - createdAtMs > this.maxAgeMs
-    ) {
+    if (Number.isFinite(createdAtMs) && now - createdAtMs > this.maxAgeMs) {
       return true;
     }
     if (now - session.lastSeenAt > this.maxIdleMs) {

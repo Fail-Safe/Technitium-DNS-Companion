@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 import { DnsSchedulesEvaluatorService } from "./dns-schedules-evaluator.service";
 import { DnsSchedule } from "./dns-schedules.types";
 
@@ -1226,14 +1227,10 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
       // (untracked) code, leaving entries in Technitium. First apply under
       // the new code has prev=[] tracking. It must add (or skip already-
       // present) but must NEVER remove the existing entries.
-      const { service, setConfigWithAuth, setAppliedEntries } = makeService(
-        {
-          groups: [
-            makeGroup("GroupA", ["youtube.com", "pre-existing.com"], []),
-          ],
-          trackedEntries: [], // empty — pre-tracking-table state
-        },
-      );
+      const { service, setConfigWithAuth, setAppliedEntries } = makeService({
+        groups: [makeGroup("GroupA", ["youtube.com", "pre-existing.com"], [])],
+        trackedEntries: [], // empty — pre-tracking-table state
+      });
 
       const schedule = makeSchedule({
         advancedBlockingGroupNames: ["GroupA"],

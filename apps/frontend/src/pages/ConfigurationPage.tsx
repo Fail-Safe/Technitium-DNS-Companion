@@ -2337,6 +2337,7 @@ export function ConfigurationPage() {
     reloadAdvancedBlocking,
     pushToast,
     setDomainGroupsError,
+    getErrorMessage,
   ]);
 
   // Domain Management tab: Edit domain

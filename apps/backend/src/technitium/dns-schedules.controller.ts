@@ -38,7 +38,10 @@ const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
  * here keeps both delivery and headers safe.
  */
 function stripNewlines(value: string): string {
-  return value.replace(/[\r\n\t]+/g, " ").replace(/ {2,}/g, " ").trim();
+  return value
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/ {2,}/g, " ")
+    .trim();
 }
 
 function formatDaysOfWeekForTemplate(days: number[]): string {
@@ -62,7 +65,14 @@ function to12Hour(hhmm: string): string {
   if (!match) return hhmm;
   const h = Number(match[1]);
   const m = Number(match[2]);
-  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+  if (
+    !Number.isInteger(h) ||
+    !Number.isInteger(m) ||
+    h < 0 ||
+    h > 23 ||
+    m < 0 ||
+    m > 59
+  ) {
     return hhmm;
   }
   const period = h >= 12 ? "PM" : "AM";
@@ -139,9 +149,13 @@ export class DnsSchedulesController {
     const schedule = this.schedulesService.updateSchedule(scheduleId, draft);
     this.syncLinkedAlertRule(schedule);
     if (!schedule.enabled) {
-      await this.evaluatorService.deactivateScheduleIfApplied(schedule).catch((e: unknown) => {
-        this.logger.warn(`Deactivation cleanup failed for "${schedule.name}": ${e instanceof Error ? e.message : String(e)}`);
-      });
+      await this.evaluatorService
+        .deactivateScheduleIfApplied(schedule)
+        .catch((e: unknown) => {
+          this.logger.warn(
+            `Deactivation cleanup failed for "${schedule.name}": ${e instanceof Error ? e.message : String(e)}`,
+          );
+        });
     }
     return schedule;
   }
@@ -154,20 +168,28 @@ export class DnsSchedulesController {
     if (typeof body?.enabled !== "boolean") {
       throw new BadRequestException("enabled must be provided as a boolean.");
     }
-    const schedule = this.schedulesService.setScheduleEnabled(scheduleId, body.enabled);
+    const schedule = this.schedulesService.setScheduleEnabled(
+      scheduleId,
+      body.enabled,
+    );
     this.syncLinkedAlertRule(schedule);
     if (!schedule.enabled) {
-      await this.evaluatorService.deactivateScheduleIfApplied(schedule).catch((e: unknown) => {
-        this.logger.warn(`Deactivation cleanup failed for "${schedule.name}": ${e instanceof Error ? e.message : String(e)}`);
-      });
+      await this.evaluatorService
+        .deactivateScheduleIfApplied(schedule)
+        .catch((e: unknown) => {
+          this.logger.warn(
+            `Deactivation cleanup failed for "${schedule.name}": ${e instanceof Error ? e.message : String(e)}`,
+          );
+        });
     }
     return schedule;
   }
 
   @Delete("rules/:scheduleId")
-  deleteSchedule(
-    @Param("scheduleId") scheduleId: string,
-  ): { deleted: true; scheduleId: string } {
+  deleteSchedule(@Param("scheduleId") scheduleId: string): {
+    deleted: true;
+    scheduleId: string;
+  } {
     const result = this.schedulesService.deleteSchedule(scheduleId);
     this.deleteLinkedAlertRule(scheduleId);
     return result;
@@ -235,18 +257,24 @@ export class DnsSchedulesController {
     const targetType: DnsScheduleDraft["targetType"] =
       input.targetType === "built-in" ? "built-in" : "advanced-blocking";
 
-    const advancedBlockingGroupNames = Array.isArray(input.advancedBlockingGroupNames)
+    const advancedBlockingGroupNames = Array.isArray(
+      input.advancedBlockingGroupNames,
+    )
       ? (input.advancedBlockingGroupNames as unknown[])
           .filter((v): v is string => typeof v === "string")
           .map((v) => v.trim())
           .filter((v) => v.length > 0)
       : [];
-    if (targetType === "advanced-blocking" && advancedBlockingGroupNames.length === 0) {
-      throw new BadRequestException("advancedBlockingGroupNames must contain at least one group.");
+    if (
+      targetType === "advanced-blocking" &&
+      advancedBlockingGroupNames.length === 0
+    ) {
+      throw new BadRequestException(
+        "advancedBlockingGroupNames must contain at least one group.",
+      );
     }
 
-    const action =
-      typeof input.action === "string" ? input.action.trim() : "";
+    const action = typeof input.action === "string" ? input.action.trim() : "";
     if (!ACTIONS.includes(action as (typeof ACTIONS)[number])) {
       throw new BadRequestException("action must be 'block' or 'allow'.");
     }
@@ -320,26 +348,32 @@ export class DnsSchedulesController {
     // their respective input boundaries (name above, subject template
     // below) so the rendered subject can never carry attacker-controlled
     // CRLF regardless of what notifyMessage contains.
-    const notifyMessageRaw = typeof input.notifyMessage === "string"
-      ? input.notifyMessage.trim()
-      : undefined;
-    const notifyMessage = notifyMessageRaw && targetType !== "built-in"
-      ? notifyMessageRaw
-      : undefined;
+    const notifyMessageRaw =
+      typeof input.notifyMessage === "string"
+        ? input.notifyMessage.trim()
+        : undefined;
+    const notifyMessage =
+      notifyMessageRaw && targetType !== "built-in"
+        ? notifyMessageRaw
+        : undefined;
 
     const notifyMessageOnly =
-      targetType !== "built-in" && !!notifyMessage && input.notifyMessageOnly === true;
+      targetType !== "built-in" &&
+      !!notifyMessage &&
+      input.notifyMessageOnly === true;
 
     // Subject template flows into an email header at send time; CRLF here
     // would either be rejected by nodemailer (silent notification loss) or
     // injected as additional headers in non-sanitizing transports. Strip
     // unconditionally; the field is single-line by intent anyway.
-    const notifySubjectTemplateRaw = typeof input.notifySubjectTemplate === "string"
-      ? stripNewlines(input.notifySubjectTemplate)
-      : undefined;
-    const notifySubjectTemplate = notifySubjectTemplateRaw && targetType !== "built-in"
-      ? notifySubjectTemplateRaw
-      : undefined;
+    const notifySubjectTemplateRaw =
+      typeof input.notifySubjectTemplate === "string"
+        ? stripNewlines(input.notifySubjectTemplate)
+        : undefined;
+    const notifySubjectTemplate =
+      notifySubjectTemplateRaw && targetType !== "built-in"
+        ? notifySubjectTemplateRaw
+        : undefined;
 
     return {
       name,

@@ -12,7 +12,9 @@ import type { DnsScheduleDraft } from "./dns-schedules.types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeDraft(overrides: Partial<DnsScheduleDraft> = {}): DnsScheduleDraft {
+function makeDraft(
+  overrides: Partial<DnsScheduleDraft> = {},
+): DnsScheduleDraft {
   return {
     name: "Test Schedule",
     enabled: true,
@@ -61,7 +63,8 @@ describe("DnsSchedulesService", () => {
     companionDb.onModuleDestroy();
     rmSync(tempDir, { recursive: true, force: true });
 
-    if (previousEnvEnabled === undefined) delete process.env.DNS_SCHEDULES_ENABLED;
+    if (previousEnvEnabled === undefined)
+      delete process.env.DNS_SCHEDULES_ENABLED;
     else process.env.DNS_SCHEDULES_ENABLED = previousEnvEnabled;
 
     if (previousEnvDbPath === undefined) delete process.env.COMPANION_DB_PATH;
@@ -143,7 +146,9 @@ describe("DnsSchedulesService", () => {
     });
 
     it("throws BadRequestException when name is empty", () => {
-      expect(() => service.createSchedule(makeDraft({ name: "" }))).toThrow(BadRequestException);
+      expect(() => service.createSchedule(makeDraft({ name: "" }))).toThrow(
+        BadRequestException,
+      );
     });
 
     it("throws BadRequestException when name exceeds 120 characters", () => {
@@ -166,7 +171,9 @@ describe("DnsSchedulesService", () => {
 
     it("throws BadRequestException when both domainEntries and domainGroupNames are empty", () => {
       expect(() =>
-        service.createSchedule(makeDraft({ domainEntries: [], domainGroupNames: [] })),
+        service.createSchedule(
+          makeDraft({ domainEntries: [], domainGroupNames: [] }),
+        ),
       ).toThrow(BadRequestException);
     });
 
@@ -179,7 +186,9 @@ describe("DnsSchedulesService", () => {
 
     it("throws BadRequestException for startTime/endTime equal to each other", () => {
       expect(() =>
-        service.createSchedule(makeDraft({ startTime: "10:00", endTime: "10:00" })),
+        service.createSchedule(
+          makeDraft({ startTime: "10:00", endTime: "10:00" }),
+        ),
       ).toThrow(BadRequestException);
     });
 
@@ -197,16 +206,16 @@ describe("DnsSchedulesService", () => {
 
     it("throws BadRequestException on duplicate name (case-insensitive)", () => {
       service.createSchedule(makeDraft({ name: "Bedtime" }));
-      expect(() => service.createSchedule(makeDraft({ name: "BEDTIME" }))).toThrow(
-        BadRequestException,
-      );
+      expect(() =>
+        service.createSchedule(makeDraft({ name: "BEDTIME" })),
+      ).toThrow(BadRequestException);
     });
 
     it("throws BadRequestException on exact duplicate name", () => {
       service.createSchedule(makeDraft({ name: "Bedtime" }));
-      expect(() => service.createSchedule(makeDraft({ name: "Bedtime" }))).toThrow(
-        BadRequestException,
-      );
+      expect(() =>
+        service.createSchedule(makeDraft({ name: "Bedtime" })),
+      ).toThrow(BadRequestException);
     });
   });
 
@@ -227,13 +236,19 @@ describe("DnsSchedulesService", () => {
 
     it("preserves the original createdAt timestamp", () => {
       const created = service.createSchedule(makeDraft());
-      const updated = service.updateSchedule(created.id, makeDraft({ name: "New Name" }));
+      const updated = service.updateSchedule(
+        created.id,
+        makeDraft({ name: "New Name" }),
+      );
       expect(updated.createdAt).toBe(created.createdAt);
     });
 
     it("throws NotFoundException for an unknown schedule ID", () => {
       expect(() =>
-        service.updateSchedule("00000000-0000-0000-0000-000000000000", makeDraft()),
+        service.updateSchedule(
+          "00000000-0000-0000-0000-000000000000",
+          makeDraft(),
+        ),
       ).toThrow(NotFoundException);
     });
 
@@ -270,7 +285,10 @@ describe("DnsSchedulesService", () => {
 
     it("throws NotFoundException for an unknown schedule ID", () => {
       expect(() =>
-        service.setScheduleEnabled("00000000-0000-0000-0000-000000000000", false),
+        service.setScheduleEnabled(
+          "00000000-0000-0000-0000-000000000000",
+          false,
+        ),
       ).toThrow(NotFoundException);
     });
   });
@@ -430,7 +448,9 @@ describe("DnsSchedulesService", () => {
     });
 
     it("listSchedules throws ServiceUnavailableException", () => {
-      expect(() => disabledService.listSchedules()).toThrow(ServiceUnavailableException);
+      expect(() => disabledService.listSchedules()).toThrow(
+        ServiceUnavailableException,
+      );
     });
 
     it("createSchedule throws ServiceUnavailableException", () => {

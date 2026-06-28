@@ -44,7 +44,10 @@ export class DhcpSnapshotService extends SnapshotFileStore<
     };
 
     await this.writeSnapshot(nodeId, snapshotId, { metadata, scopes });
-    await this.applyRetentionToList(nodeId, await this.listAllSnapshots(nodeId));
+    await this.applyRetentionToList(
+      nodeId,
+      await this.listAllSnapshots(nodeId),
+    );
     return metadata;
   }
 }

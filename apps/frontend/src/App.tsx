@@ -24,6 +24,7 @@ const OverviewPage = lazy(() => import("./pages/OverviewPage"));
 const ConfigurationPage = lazy(() => import("./pages/ConfigurationPage"));
 const LogsPage = lazy(() => import("./pages/LogsPage"));
 const DhcpPage = lazy(() => import("./pages/DhcpPage"));
+const DhcpDnsSyncPage = lazy(() => import("./pages/DhcpDnsSyncPage"));
 const ZonesPage = lazy(() => import("./pages/ZonesPage"));
 const DnsLookupPage = lazy(() => import("./pages/DnsLookupPage"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
@@ -128,6 +129,7 @@ export default function App() {
                       element={<ConfigurationPage />}
                     />
                     <Route path="/dhcp" element={<DhcpPage />} />
+                    <Route path="/dhcp-dns-sync" element={<DhcpDnsSyncPage />} />
                     <Route path="/logs" element={<LogsPage />} />
                     <Route path="/zones" element={<ZonesPage />} />
                     <Route path="/dns-lookup" element={<DnsLookupPage />} />
