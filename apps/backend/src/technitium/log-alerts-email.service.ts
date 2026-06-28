@@ -22,6 +22,30 @@ type SmtpConfig = {
   replyTo?: string;
 };
 
+interface SmtpSendResult {
+  accepted: string[];
+  rejected: string[];
+  messageId: string;
+  response?: string;
+}
+
+function normalizeSmtpSendResult(result: unknown): SmtpSendResult {
+  const payload =
+    result && typeof result === "object"
+      ? (result as Record<string, unknown>)
+      : {};
+  const accepted = Array.isArray(payload.accepted) ? payload.accepted : [];
+  const rejected = Array.isArray(payload.rejected) ? payload.rejected : [];
+
+  return {
+    accepted: accepted.map((value) => String(value)),
+    rejected: rejected.map((value) => String(value)),
+    messageId: typeof payload.messageId === "string" ? payload.messageId : "",
+    response:
+      typeof payload.response === "string" ? payload.response : undefined,
+  };
+}
+
 /**
  * Replaces `{token}` occurrences in `template` with values from `context`.
  * Unknown tokens are left literal (e.g. `{statTime}` if mis-typed) so users
@@ -334,13 +358,13 @@ export class LogAlertsEmailService {
     };
 
     try {
-      const result = await transporter.sendMail(mail);
+      const result: unknown = await transporter.sendMail(mail);
+      const normalized = normalizeSmtpSendResult(result);
       return {
-        accepted: result.accepted.map((value) => String(value)),
-        rejected: result.rejected.map((value) => String(value)),
-        messageId: result.messageId,
-        response:
-          typeof result.response === "string" ? result.response : undefined,
+        accepted: normalized.accepted,
+        rejected: normalized.rejected,
+        messageId: normalized.messageId,
+        response: normalized.response,
       };
     } catch (error) {
       throw new ServiceUnavailableException(

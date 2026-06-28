@@ -111,12 +111,9 @@ export class DnsTemporaryOverridesController {
     const domainGroupNames = this.normalizeStringArray(input.domainGroupNames);
     const nodeIds = this.normalizeStringArray(input.nodeIds);
     const notifyEmails = this.normalizeStringArray(input.notifyEmails);
-    const notifyDebounceSecondsRaw = Number(
-      input.notifyDebounceSeconds ?? 300,
-    );
+    const notifyDebounceSecondsRaw = Number(input.notifyDebounceSeconds ?? 300);
     const notifyDebounceSeconds =
-      Number.isFinite(notifyDebounceSecondsRaw) &&
-      notifyDebounceSecondsRaw >= 0
+      Number.isFinite(notifyDebounceSecondsRaw) && notifyDebounceSecondsRaw >= 0
         ? Math.round(notifyDebounceSecondsRaw)
         : 300;
     const notifyMessageRaw =

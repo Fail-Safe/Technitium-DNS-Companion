@@ -222,7 +222,7 @@ export async function runWithConcurrencyLimit<T, R>(
   jitterMs: number,
 ): Promise<R[]> {
   if (items.length === 0) return [];
-  const results: R[] = new Array(items.length);
+  const results = new Map<number, R>();
   let cursor = 0;
   const workerCount = Math.min(Math.max(1, maxConcurrent), items.length);
   const workers = Array.from({ length: workerCount }, async () => {
@@ -234,11 +234,17 @@ export async function runWithConcurrencyLimit<T, R>(
           setTimeout(resolve, Math.floor(Math.random() * jitterMs)),
         );
       }
-      results[idx] = await worker(items[idx]);
+      results.set(idx, await worker(items[idx]));
     }
   });
   await Promise.all(workers);
-  return results;
+  return items.map((_, idx) => {
+    const result = results.get(idx);
+    if (!results.has(idx)) {
+      throw new Error(`Missing concurrency result at index ${idx}.`);
+    }
+    return result as R;
+  });
 }
 
 /** Default fetch concurrency: bounded enough to never overwhelm a typical

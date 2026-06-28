@@ -919,9 +919,7 @@ describe("DomainGroupsService", () => {
       });
 
       expect(result.domainGroups.replaced).toEqual(["Dating"]);
-      expect(service.listDomainGroups().map((g) => g.name)).toEqual([
-        "Dating",
-      ]);
+      expect(service.listDomainGroups().map((g) => g.name)).toEqual(["Dating"]);
 
       const dating = service.getDomainGroup(existingGroup.id);
       expect(dating.entries.map((entry) => entry.value)).toEqual([

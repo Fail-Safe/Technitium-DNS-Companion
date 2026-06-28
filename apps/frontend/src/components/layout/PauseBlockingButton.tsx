@@ -49,7 +49,11 @@ export function PauseBlockingButton() {
   const [now, setNow] = useState(() => Date.now());
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const nodes = technitium?.builtInBlocking?.nodes ?? [];
+  const builtInBlockingNodes = technitium?.builtInBlocking?.nodes;
+  const nodes = useMemo(
+    () => builtInBlockingNodes ?? [],
+    [builtInBlockingNodes],
+  );
 
   const { pausedNodes, latestPauseUntilMs } = useMemo(() => {
     let latest = 0;

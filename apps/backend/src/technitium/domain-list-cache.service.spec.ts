@@ -198,7 +198,7 @@ describe("runWithConcurrencyLimit", () => {
     const items = [1, 2, 3, 4, 5];
     const result = await runWithConcurrencyLimit(
       items,
-      async (n) => n * 10,
+      (n) => Promise.resolve(n * 10),
       3,
       0,
     );

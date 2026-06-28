@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-argument */
 import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync, rmSync, statSync } from "fs";
 import { dirname } from "path";
@@ -31,9 +32,7 @@ import { createHash } from "crypto";
 const RUN = process.env.RUN_QLOG_BENCHMARKS === "true";
 const BENCH_DB_PATH =
   process.env.QLOG_BENCHMARK_DB ?? "/tmp/bench-qlogs.sqlite";
-const BENCH_ROWS = Number(
-  process.env.QLOG_BENCHMARK_ROWS ?? String(1_000_000),
-);
+const BENCH_ROWS = Number(process.env.QLOG_BENCHMARK_ROWS ?? String(1_000_000));
 const REGEN = process.env.QLOG_BENCHMARK_REGENERATE === "true";
 const PHASE = process.env.QLOG_BENCHMARK_PHASE ?? "baseline";
 const APPLY_TIER1 = process.env.QLOG_BENCHMARK_APPLY_TIER1 === "true";
@@ -95,10 +94,7 @@ function makeRng(seed: number): () => number {
   };
 }
 
-function weightedPick<T>(
-  weights: Array<[T, number]>,
-  rng: () => number,
-): T {
+function weightedPick<T>(weights: Array<[T, number]>, rng: () => number): T {
   const r = rng();
   let acc = 0;
   for (const [value, weight] of weights) {
@@ -371,7 +367,9 @@ function ensureFtsTable(db: DatabaseSync): void {
   // External-content FTS5 requires the 'rebuild' command; a manual
   // INSERT INTO ... SELECT registers rowids but doesn't actually tokenize
   // content. Earlier bench numbers were misleading because of this.
-  db.prepare(`INSERT INTO query_log_fts(query_log_fts) VALUES('rebuild')`).run();
+  db.prepare(
+    `INSERT INTO query_log_fts(query_log_fts) VALUES('rebuild')`,
+  ).run();
 }
 
 // ── Benchmark harness ──────────────────────────────────────────────────────
@@ -388,7 +386,7 @@ function buildQueryCases(): QueryCase[] {
   const tsClause = "ts >= ? AND ts <= ?";
   const tsParams = [startTs, endTs];
 
-  const ftsLikeSubquery = (column: "qnameLc" | "clientNameLc", term: string) =>
+  const ftsLikeSubquery = (column: "qnameLc" | "clientNameLc") =>
     USE_FTS
       ? `rowid IN (SELECT rowid FROM query_log_fts WHERE ${column} MATCH ?)`
       : `${column} LIKE ?`;
@@ -403,10 +401,7 @@ function buildQueryCases(): QueryCase[] {
       .split(/[^a-z0-9]+/)
       .filter((t) => t.length > 0);
     if (tokens.length === 0) return "*";
-    return [
-      ...tokens.slice(0, -1),
-      `${tokens[tokens.length - 1]}*`,
-    ].join(" ");
+    return [...tokens.slice(0, -1), `${tokens[tokens.length - 1]}*`].join(" ");
   };
 
   return [
@@ -593,120 +588,130 @@ function formatMs(ms: number): string {
 
 // ── Test entry points ──────────────────────────────────────────────────────
 
-describeOrSkip("QueryLogSqliteService — SQLite query performance benchmarks", () => {
-  beforeAll(() => {
-    const needsRegen = REGEN || !existsSync(BENCH_DB_PATH);
-    if (needsRegen) {
-      console.log(
-        `[bench] Generating synthetic DB at ${BENCH_DB_PATH} (${BENCH_ROWS.toLocaleString()} target rows)…`,
-      );
-      const start = Date.now();
-      generateSyntheticDb(BENCH_DB_PATH, BENCH_ROWS);
-      const elapsed = (Date.now() - start) / 1000;
-      const size = statSync(BENCH_DB_PATH).size;
-      console.log(
-        `[bench] Generated in ${elapsed.toFixed(1)}s; DB size ${(size / 1024 / 1024).toFixed(1)} MB`,
-      );
-    } else {
-      console.log(
-        `[bench] Reusing DB at ${BENCH_DB_PATH} (set QLOG_BENCHMARK_REGENERATE=true to rebuild)`,
-      );
-    }
-  }, 10 * 60 * 1000);
-
-  it(`benchmark suite — phase="${PHASE}" tier1=${APPLY_TIER1} fts=${USE_FTS}`, () => {
-    const cases = buildQueryCases();
-
-    // Optionally prebuild FTS index in a copy-of-snapshot connection.
-    if (USE_FTS) {
-      const db = openBenchmarkDb(BENCH_DB_PATH);
-      ensureFtsTable(db);
-      // Sanity check: a freshly-built FTS index over a DB where at least
-      // one query term appears should return non-zero matches for that
-      // term. This catches the "FTS populated but not tokenized" bug we
-      // hit in production — previously the bench was measuring a sparse
-      // index and reporting bogus "FTS wins" numbers.
-      const sanityRow = db
-        .prepare(
-          "SELECT COUNT(*) AS c FROM query_log_fts WHERE qnameLc MATCH 'google*'",
-        )
-        .get() as { c?: number } | undefined;
-      const sanityCount = sanityRow?.c ?? 0;
-      if (sanityCount === 0) {
-        throw new Error(
-          "FTS5 sanity check failed: 'google*' returned 0 matches after " +
-            "ensureFtsTable(). Index is either empty or tokens weren't " +
-            "built. Did the rebuild command fire correctly?",
-        );
-      }
-      console.log(
-        `[bench] FTS5 sanity: MATCH 'google*' returned ${sanityCount.toLocaleString()} rows.`,
-      );
-      db.close();
-    }
-
-    const results: Array<{
-      name: string;
-      coldMs: number;
-      warmMedian: number;
-      warmP95: number;
-      rows: number;
-    }> = [];
-
-    for (const queryCase of cases) {
-      // Cold: fresh connection, single sample.
-      const coldDb = openBenchmarkDb(BENCH_DB_PATH);
-      const cold = timeQuery(coldDb, queryCase.sql, queryCase.params);
-      coldDb.close();
-
-      // Warm: same connection, 5 samples after one priming call.
-      const warmDb = openBenchmarkDb(BENCH_DB_PATH);
-      timeQuery(warmDb, queryCase.sql, queryCase.params); // prime
-      const warmSamples: number[] = [];
-      for (let i = 0; i < 5; i++) {
-        const { durationMs } = timeQuery(
-          warmDb,
-          queryCase.sql,
-          queryCase.params,
-        );
-        warmSamples.push(durationMs);
-      }
-      warmDb.close();
-
-      results.push({
-        name: queryCase.name,
-        coldMs: cold.durationMs,
-        warmMedian: percentile(warmSamples, 50),
-        warmP95: percentile(warmSamples, 95),
-        rows: cold.rows,
-      });
-    }
-
-    const nameWidth = Math.max(...results.map((r) => r.name.length), 20);
-    const header = `| ${"Query".padEnd(nameWidth)} | Cold      | Warm med  | Warm p95  | Rows |`;
-    const divider = `| ${"".padEnd(nameWidth, "-")} | --------- | --------- | --------- | ---- |`;
-    const lines = results.map(
-      (r) =>
-        `| ${r.name.padEnd(nameWidth)} | ${formatMs(r.coldMs).padStart(9)} | ${formatMs(r.warmMedian).padStart(9)} | ${formatMs(r.warmP95).padStart(9)} | ${String(r.rows).padStart(4)} |`,
+describeOrSkip(
+  "QueryLogSqliteService — SQLite query performance benchmarks",
+  () => {
+    beforeAll(
+      () => {
+        const needsRegen = REGEN || !existsSync(BENCH_DB_PATH);
+        if (needsRegen) {
+          console.log(
+            `[bench] Generating synthetic DB at ${BENCH_DB_PATH} (${BENCH_ROWS.toLocaleString()} target rows)…`,
+          );
+          const start = Date.now();
+          generateSyntheticDb(BENCH_DB_PATH, BENCH_ROWS);
+          const elapsed = (Date.now() - start) / 1000;
+          const size = statSync(BENCH_DB_PATH).size;
+          console.log(
+            `[bench] Generated in ${elapsed.toFixed(1)}s; DB size ${(size / 1024 / 1024).toFixed(1)} MB`,
+          );
+        } else {
+          console.log(
+            `[bench] Reusing DB at ${BENCH_DB_PATH} (set QLOG_BENCHMARK_REGENERATE=true to rebuild)`,
+          );
+        }
+      },
+      10 * 60 * 1000,
     );
 
-    const stats = statSync(BENCH_DB_PATH);
-    console.log(
-      [
-        "",
-        `### Query-log SQLite benchmark — phase="${PHASE}"`,
-        `DB: ${BENCH_DB_PATH} (${(stats.size / 1024 / 1024).toFixed(1)} MB)  `,
-        `Tier1 PRAGMAs: ${APPLY_TIER1 ? "on" : "off"}  |  FTS5: ${USE_FTS ? "on" : "off"}`,
-        "",
-        header,
-        divider,
-        ...lines,
-        "",
-      ].join("\n"),
-    );
+    it(
+      `benchmark suite — phase="${PHASE}" tier1=${APPLY_TIER1} fts=${USE_FTS}`,
+      () => {
+        const cases = buildQueryCases();
 
-    // Sanity: at least some queries should return non-empty results.
-    const nonEmpty = results.filter((r) => r.rows > 0).length;
-    expect(nonEmpty).toBeGreaterThan(0);
-  }, 10 * 60 * 1000);
-});
+        // Optionally prebuild FTS index in a copy-of-snapshot connection.
+        if (USE_FTS) {
+          const db = openBenchmarkDb(BENCH_DB_PATH);
+          ensureFtsTable(db);
+          // Sanity check: a freshly-built FTS index over a DB where at least
+          // one query term appears should return non-zero matches for that
+          // term. This catches the "FTS populated but not tokenized" bug we
+          // hit in production — previously the bench was measuring a sparse
+          // index and reporting bogus "FTS wins" numbers.
+          const sanityRow = db
+            .prepare(
+              "SELECT COUNT(*) AS c FROM query_log_fts WHERE qnameLc MATCH 'google*'",
+            )
+            .get() as { c?: number } | undefined;
+          const sanityCount = sanityRow?.c ?? 0;
+          if (sanityCount === 0) {
+            throw new Error(
+              "FTS5 sanity check failed: 'google*' returned 0 matches after " +
+                "ensureFtsTable(). Index is either empty or tokens weren't " +
+                "built. Did the rebuild command fire correctly?",
+            );
+          }
+          console.log(
+            `[bench] FTS5 sanity: MATCH 'google*' returned ${sanityCount.toLocaleString()} rows.`,
+          );
+          db.close();
+        }
+
+        const results: Array<{
+          name: string;
+          coldMs: number;
+          warmMedian: number;
+          warmP95: number;
+          rows: number;
+        }> = [];
+
+        for (const queryCase of cases) {
+          // Cold: fresh connection, single sample.
+          const coldDb = openBenchmarkDb(BENCH_DB_PATH);
+          const cold = timeQuery(coldDb, queryCase.sql, queryCase.params);
+          coldDb.close();
+
+          // Warm: same connection, 5 samples after one priming call.
+          const warmDb = openBenchmarkDb(BENCH_DB_PATH);
+          timeQuery(warmDb, queryCase.sql, queryCase.params); // prime
+          const warmSamples: number[] = [];
+          for (let i = 0; i < 5; i++) {
+            const { durationMs } = timeQuery(
+              warmDb,
+              queryCase.sql,
+              queryCase.params,
+            );
+            warmSamples.push(durationMs);
+          }
+          warmDb.close();
+
+          results.push({
+            name: queryCase.name,
+            coldMs: cold.durationMs,
+            warmMedian: percentile(warmSamples, 50),
+            warmP95: percentile(warmSamples, 95),
+            rows: cold.rows,
+          });
+        }
+
+        const nameWidth = Math.max(...results.map((r) => r.name.length), 20);
+        const header = `| ${"Query".padEnd(nameWidth)} | Cold      | Warm med  | Warm p95  | Rows |`;
+        const divider = `| ${"".padEnd(nameWidth, "-")} | --------- | --------- | --------- | ---- |`;
+        const lines = results.map(
+          (r) =>
+            `| ${r.name.padEnd(nameWidth)} | ${formatMs(r.coldMs).padStart(9)} | ${formatMs(r.warmMedian).padStart(9)} | ${formatMs(r.warmP95).padStart(9)} | ${String(r.rows).padStart(4)} |`,
+        );
+
+        const stats = statSync(BENCH_DB_PATH);
+        console.log(
+          [
+            "",
+            `### Query-log SQLite benchmark — phase="${PHASE}"`,
+            `DB: ${BENCH_DB_PATH} (${(stats.size / 1024 / 1024).toFixed(1)} MB)  `,
+            `Tier1 PRAGMAs: ${APPLY_TIER1 ? "on" : "off"}  |  FTS5: ${USE_FTS ? "on" : "off"}`,
+            "",
+            header,
+            divider,
+            ...lines,
+            "",
+          ].join("\n"),
+        );
+
+        // Sanity: at least some queries should return non-empty results.
+        const nonEmpty = results.filter((r) => r.rows > 0).length;
+        expect(nonEmpty).toBeGreaterThan(0);
+      },
+      10 * 60 * 1000,
+    );
+  },
+);

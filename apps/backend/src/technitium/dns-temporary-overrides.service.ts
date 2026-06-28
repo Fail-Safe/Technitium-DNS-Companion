@@ -104,10 +104,7 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
     );
     addColumnIfMissing("notify_message", `TEXT NOT NULL DEFAULT ''`);
     addColumnIfMissing("notify_message_only", `INTEGER NOT NULL DEFAULT 0`);
-    addColumnIfMissing(
-      "notify_subject_template",
-      `TEXT NOT NULL DEFAULT ''`,
-    );
+    addColumnIfMissing("notify_subject_template", `TEXT NOT NULL DEFAULT ''`);
     this.schemaReady = true;
   }
 
@@ -280,11 +277,9 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
         "End the temporary override before deleting it.",
       );
     }
-    db
-      .prepare(
-        `DELETE FROM dns_schedule_applied_entries WHERE schedule_id = ?`,
-      )
-      .run(id);
+    db.prepare(
+      `DELETE FROM dns_schedule_applied_entries WHERE schedule_id = ?`,
+    ).run(id);
     const result = db
       .prepare(`DELETE FROM dns_temporary_overrides WHERE id = ?`)
       .run(id);

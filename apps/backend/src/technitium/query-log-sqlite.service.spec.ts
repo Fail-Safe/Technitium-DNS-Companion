@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access */
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -150,7 +151,7 @@ describe("QueryLogSqliteService — poll failure logging", () => {
     service = new QueryLogSqliteService({} as never, [] as never);
     internal = service as unknown as PollShape;
     internal.logger = { warn: jest.fn() };
-    internal.pollOnce = jest.fn();
+    internal.pollOnce = jest.fn(() => Promise.resolve());
   });
 
   it("logs SQLite busy poll failures as a single sanitized warning", async () => {
