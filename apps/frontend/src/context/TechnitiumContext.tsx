@@ -30,6 +30,11 @@ import type {
 import type {
     DhcpBulkSyncRequest,
     DhcpBulkSyncResult,
+    DhcpDnsSyncApplyRequest,
+    DhcpDnsSyncApplyResponse,
+    DhcpDnsSyncDefaults,
+    DhcpDnsSyncPreviewRequest,
+    DhcpDnsSyncPreviewResponse,
     DhcpSnapshot,
     DhcpSnapshotMetadata,
     DhcpSnapshotOrigin,
@@ -232,6 +237,13 @@ export interface TechnitiumState {
   bulkSyncDhcpScopes: (
     request: DhcpBulkSyncRequest,
   ) => Promise<DhcpBulkSyncResult>;
+  loadDhcpDnsSyncDefaults: () => Promise<DhcpDnsSyncDefaults>;
+  previewDhcpDnsSync: (
+    request: DhcpDnsSyncPreviewRequest,
+  ) => Promise<DhcpDnsSyncPreviewResponse>;
+  applyDhcpDnsSync: (
+    request: DhcpDnsSyncApplyRequest,
+  ) => Promise<DhcpDnsSyncApplyResponse>;
   listDhcpSnapshots: (nodeId: string) => Promise<DhcpSnapshotMetadata[]>;
   createDhcpSnapshot: (
     nodeId: string,
@@ -2220,6 +2232,67 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const previewDhcpDnsSync = useCallback(
+    async (request: DhcpDnsSyncPreviewRequest) => {
+      if (!request.sourceScopes || request.sourceScopes.length === 0) {
+        throw new Error("At least one DHCP source scope is required.");
+      }
+
+      const response = await apiFetch("/dhcp-dns-sync/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to preview DHCP DNS sync (${response.status}): ${errorText}`,
+        );
+      }
+
+      return (await response.json()) as DhcpDnsSyncPreviewResponse;
+    },
+    [],
+  );
+
+  const loadDhcpDnsSyncDefaults = useCallback(async () => {
+    const response = await apiFetch("/dhcp-dns-sync/defaults");
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unknown error");
+      throw new Error(
+        `Failed to load DHCP DNS sync defaults (${response.status}): ${errorText}`,
+      );
+    }
+
+    return (await response.json()) as DhcpDnsSyncDefaults;
+  }, []);
+
+  const applyDhcpDnsSync = useCallback(
+    async (request: DhcpDnsSyncApplyRequest) => {
+      if (!request.sourceScopes || request.sourceScopes.length === 0) {
+        throw new Error("At least one DHCP source scope is required.");
+      }
+
+      const response = await apiFetch("/dhcp-dns-sync/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "Unknown error");
+        throw new Error(
+          `Failed to apply DHCP DNS sync (${response.status}): ${errorText}`,
+        );
+      }
+
+      return (await response.json()) as DhcpDnsSyncApplyResponse;
+    },
+    [],
+  );
+
   const listDhcpSnapshots = useCallback(async (nodeId: string) => {
     const response = await apiFetch(
       `/nodes/${encodeURIComponent(nodeId)}/dhcp/snapshots`,
@@ -2998,6 +3071,9 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       updateDhcpScope,
       deleteDhcpScope,
       bulkSyncDhcpScopes,
+      loadDhcpDnsSyncDefaults,
+      previewDhcpDnsSync,
+      applyDhcpDnsSync,
       listDhcpSnapshots,
       createDhcpSnapshot,
       restoreDhcpSnapshot,
@@ -3080,6 +3156,9 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       updateDhcpScope,
       deleteDhcpScope,
       bulkSyncDhcpScopes,
+      loadDhcpDnsSyncDefaults,
+      previewDhcpDnsSync,
+      applyDhcpDnsSync,
       listDhcpSnapshots,
       createDhcpSnapshot,
       restoreDhcpSnapshot,

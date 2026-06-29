@@ -1,10 +1,11 @@
 import { jest } from "@jest/globals";
 import type { HttpService } from "@nestjs/axios";
-import { of } from "rxjs";
+import { of, Subject, throwError } from "rxjs";
 import type { AdvancedBlockingService } from "./advanced-blocking.service";
 import {
   DomainListCacheService,
   buildConditionalHeaders,
+  formatFetchErrorForLog,
   parseRetryAfter,
   runWithConcurrencyLimit,
 } from "./domain-list-cache.service";
@@ -63,7 +64,10 @@ describe("DomainListCacheService scheduled refresh auth mode", () => {
       throw new Error("scheduleNodeRefresh is not available on service");
     }
 
-    await (schedule as (nodeId: string) => Promise<void>).call(service, "nodeA");
+    await (schedule as (nodeId: string) => Promise<void>).call(
+      service,
+      "nodeA",
+    );
 
     expect(getSnapshotWithAuth).toHaveBeenCalledWith("nodeA", "background");
 
@@ -95,7 +99,9 @@ describe("buildConditionalHeaders", () => {
   });
   it("sets If-Modified-Since from cached lastModified", () => {
     expect(
-      buildConditionalHeaders({ lastModified: "Wed, 21 Oct 2026 07:28:00 GMT" }),
+      buildConditionalHeaders({
+        lastModified: "Wed, 21 Oct 2026 07:28:00 GMT",
+      }),
     ).toEqual({
       "If-Modified-Since": "Wed, 21 Oct 2026 07:28:00 GMT",
     });
@@ -140,12 +146,59 @@ describe("parseRetryAfter", () => {
   });
 });
 
+describe("formatFetchErrorForLog", () => {
+  it("summarizes Axios network errors without dumping request internals", () => {
+    const error = Object.assign(new Error("AggregateError"), {
+      name: "AxiosError",
+      code: "ETIMEDOUT",
+      config: { headers: { Authorization: "should-not-appear" } },
+      request: { socket: { _events: "should-not-appear" } },
+      cause: {
+        errors: [
+          {
+            code: "ETIMEDOUT",
+            address: "57.128.255.167",
+            port: 443,
+          },
+          {
+            code: "ENETUNREACH",
+            address: "2001:41d0:601:1100::8a86",
+            port: 443,
+          },
+        ],
+      },
+    });
+
+    const summary = formatFetchErrorForLog(error);
+
+    expect(summary).toContain("AxiosError: AggregateError");
+    expect(summary).toContain("code=ETIMEDOUT");
+    expect(summary).toContain("ETIMEDOUT 57.128.255.167:443");
+    expect(summary).toContain("ENETUNREACH 2001:41d0:601:1100::8a86:443");
+    expect(summary).not.toContain("Authorization");
+    expect(summary).not.toContain("request");
+    expect(summary).not.toContain("_events");
+  });
+
+  it("includes HTTP status when a response is present", () => {
+    const error = Object.assign(new Error("Request failed"), {
+      name: "AxiosError",
+      code: "ERR_BAD_RESPONSE",
+      response: { status: 503, data: "unavailable" },
+    });
+
+    expect(formatFetchErrorForLog(error)).toBe(
+      "AxiosError: Request failed; code=ERR_BAD_RESPONSE; status=503",
+    );
+  });
+});
+
 describe("runWithConcurrencyLimit", () => {
   it("preserves input order in the result array", async () => {
     const items = [1, 2, 3, 4, 5];
     const result = await runWithConcurrencyLimit(
       items,
-      async (n) => n * 10,
+      (n) => Promise.resolve(n * 10),
       3,
       0,
     );
@@ -175,28 +228,46 @@ describe("runWithConcurrencyLimit", () => {
 });
 
 describe("DomainListCacheService.fetchDomainListOnce", () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   function makeService(httpGet: jest.Mock) {
     const httpService = { get: httpGet } as unknown as HttpService;
     return new DomainListCacheService(
       httpService,
       {} as unknown as AdvancedBlockingService,
       {} as unknown as TechnitiumService,
-      {} as unknown as DomainListPersistenceService,
+      {
+        saveCache: jest.fn().mockResolvedValue(undefined),
+      } as unknown as DomainListPersistenceService,
     );
   }
 
   type Internals = {
+    getOrFetchList: (
+      nodeId: string,
+      url: string,
+    ) => Promise<{
+      domains: Set<string>;
+      errorMessage?: string;
+    }>;
     fetchDomainListOnce: (
       url: string,
       hash: string,
       cached: unknown,
     ) => Promise<{
       notModified: boolean;
-      parsed?: { domains: Set<string>; lineCount: number; commentCount: number };
+      parsed?: {
+        domains: Set<string>;
+        lineCount: number;
+        commentCount: number;
+      };
       etag?: string;
       lastModified?: string;
     }>;
     rateLimitedUntil: Map<string, Date>;
+    transientFailureUntil: Map<string, Date>;
   };
 
   it("sends If-None-Match / If-Modified-Since when cached has validators", async () => {
@@ -216,7 +287,10 @@ describe("DomainListCacheService.fetchDomainListOnce", () => {
     });
 
     expect(httpGet).toHaveBeenCalledTimes(1);
-    const [, options] = httpGet.mock.calls[0] as [string, { headers?: Record<string, string> }];
+    const [, options] = httpGet.mock.calls[0] as [
+      string,
+      { headers?: Record<string, string> },
+    ];
     expect(options.headers?.["If-None-Match"]).toBe('"old"');
     expect(options.headers?.["If-Modified-Since"]).toBe(
       "Wed, 21 Oct 2026 07:28:00 GMT",
@@ -224,9 +298,9 @@ describe("DomainListCacheService.fetchDomainListOnce", () => {
   });
 
   it("returns notModified=true on 304 response", async () => {
-    const httpGet = jest.fn().mockReturnValue(
-      of({ status: 304, headers: {}, data: "" }),
-    );
+    const httpGet = jest
+      .fn()
+      .mockReturnValue(of({ status: 304, headers: {}, data: "" }));
     const service = makeService(httpGet);
     const internal = service as unknown as Internals;
 
@@ -286,6 +360,50 @@ describe("DomainListCacheService.fetchDomainListOnce", () => {
     expect(httpGet).toHaveBeenCalledTimes(1);
   });
 
+  it("coalesces concurrent same-node cache population into one save", async () => {
+    const response$ = new Subject<{
+      status: number;
+      headers: Record<string, string>;
+      data: string;
+    }>();
+    const httpGet = jest.fn().mockReturnValue(response$);
+    const persistenceService = {
+      saveCache: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new DomainListCacheService(
+      { get: httpGet } as unknown as HttpService,
+      {} as unknown as AdvancedBlockingService,
+      {} as unknown as TechnitiumService,
+      persistenceService as unknown as DomainListPersistenceService,
+    );
+    const internal = service as unknown as Internals;
+
+    const first = internal.getOrFetchList(
+      "nodeA",
+      "https://blocklist.test/list",
+    );
+    const second = internal.getOrFetchList(
+      "nodeA",
+      "https://blocklist.test/list",
+    );
+
+    expect(httpGet).toHaveBeenCalledTimes(1);
+
+    response$.next({
+      status: 200,
+      headers: {},
+      data: "coalesced.example.com\n",
+    });
+    response$.complete();
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(firstResult).toBe(secondResult);
+    expect(firstResult.domains.has("coalesced.example.com")).toBe(true);
+    expect(httpGet).toHaveBeenCalledTimes(1);
+    expect(persistenceService.saveCache).toHaveBeenCalledTimes(1);
+  });
+
   it("sets back-off on 429 with Retry-After and skips subsequent fetches", async () => {
     const httpGet = jest.fn().mockReturnValue(
       of({
@@ -320,10 +438,150 @@ describe("DomainListCacheService.fetchDomainListOnce", () => {
     expect(httpGet).toHaveBeenCalledTimes(1); // still one — no second request
   });
 
-  it("applies default back-off when 429 has no Retry-After header", async () => {
-    const httpGet = jest.fn().mockReturnValue(
-      of({ status: 429, headers: {}, data: "" }),
+  it("retries transient transport failures before returning a successful response", async () => {
+    jest.useFakeTimers();
+    const timeout = Object.assign(new Error("connect timed out"), {
+      code: "ETIMEDOUT",
+    });
+    const httpGet = jest
+      .fn()
+      .mockReturnValueOnce(throwError(() => timeout))
+      .mockReturnValueOnce(
+        of({
+          status: 200,
+          headers: {},
+          data: "retried.example.com\n",
+        }),
+      );
+    const service = makeService(httpGet);
+    const internal = service as unknown as Internals;
+
+    const resultPromise = internal.fetchDomainListOnce(
+      "https://blocklist.test/flaky",
+      "flaky-hash",
+      undefined,
     );
+
+    expect(httpGet).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1000);
+
+    const result = await resultPromise;
+
+    expect(httpGet).toHaveBeenCalledTimes(2);
+    expect(result.parsed?.domains.has("retried.example.com")).toBe(true);
+    expect(internal.transientFailureUntil.has("flaky-hash")).toBe(false);
+  });
+
+  it("normalizes wildcard domain-list entries into matchable base domains", async () => {
+    const httpGet = jest.fn().mockReturnValue(
+      of({
+        status: 200,
+        headers: {},
+        data: [
+          "# wildcard list",
+          "*.ads.example.com",
+          ".tracker.example.net",
+          "0.0.0.0 *.hosts-format.example.org",
+          "plain.example.edu",
+        ].join("\n"),
+      }),
+    );
+    const service = makeService(httpGet);
+    const internal = service as unknown as Internals;
+
+    const result = await internal.fetchDomainListOnce(
+      "https://blocklist.test/domainswild",
+      "wildcard-hash",
+      undefined,
+    );
+
+    expect(result.parsed?.domains).toEqual(
+      new Set([
+        "ads.example.com",
+        "tracker.example.net",
+        "hosts-format.example.org",
+        "plain.example.edu",
+      ]),
+    );
+    expect(result.parsed?.commentCount).toBe(1);
+  });
+
+  it("does not retry upstream rate-limit responses", async () => {
+    const httpGet = jest.fn().mockReturnValue(
+      of({
+        status: 429,
+        headers: { "retry-after": "120" },
+        data: "Too Many Requests",
+      }),
+    );
+    const service = makeService(httpGet);
+    const internal = service as unknown as Internals;
+
+    await expect(
+      internal.fetchDomainListOnce(
+        "https://blocklist.test/rate-limited",
+        "rate-limited-hash",
+        undefined,
+      ),
+    ).rejects.toThrow(/HTTP 429/);
+
+    expect(httpGet).toHaveBeenCalledTimes(1);
+    expect(internal.rateLimitedUntil.has("rate-limited-hash")).toBe(true);
+  });
+
+  it("keeps cold-cache error entries fresh only for the transient failure back-off", async () => {
+    jest.useFakeTimers();
+    const timeout = Object.assign(new Error("connect timed out"), {
+      code: "ETIMEDOUT",
+    });
+    const httpGet = jest
+      .fn()
+      .mockReturnValueOnce(throwError(() => timeout))
+      .mockReturnValueOnce(throwError(() => timeout))
+      .mockReturnValueOnce(throwError(() => timeout))
+      .mockReturnValueOnce(
+        of({
+          status: 200,
+          headers: {},
+          data: "recovered.example.com\n",
+        }),
+      );
+    const service = makeService(httpGet);
+    const internal = service as unknown as Internals;
+
+    const failedPromise = internal.getOrFetchList(
+      "nodeA",
+      "https://blocklist.test/flaky-cold",
+    );
+    await jest.advanceTimersByTimeAsync(1000);
+    await jest.advanceTimersByTimeAsync(3000);
+    const failed = await failedPromise;
+
+    expect(failed.errorMessage).toContain("connect timed out");
+    expect(httpGet).toHaveBeenCalledTimes(3);
+
+    const stillBackedOff = await internal.getOrFetchList(
+      "nodeA",
+      "https://blocklist.test/flaky-cold",
+    );
+    expect(stillBackedOff.errorMessage).toContain("connect timed out");
+    expect(httpGet).toHaveBeenCalledTimes(3);
+
+    await jest.advanceTimersByTimeAsync(5 * 60 * 1000);
+    const recovered = await internal.getOrFetchList(
+      "nodeA",
+      "https://blocklist.test/flaky-cold",
+    );
+
+    expect(httpGet).toHaveBeenCalledTimes(4);
+    expect(recovered.domains.has("recovered.example.com")).toBe(true);
+    expect(recovered.errorMessage).toBeUndefined();
+  });
+
+  it("applies default back-off when 429 has no Retry-After header", async () => {
+    const httpGet = jest
+      .fn()
+      .mockReturnValue(of({ status: 429, headers: {}, data: "" }));
     const service = makeService(httpGet);
     const internal = service as unknown as Internals;
 

@@ -35,6 +35,7 @@ import type {
   UnifiedExportAbGroup,
   UnifiedExportDg,
   UnifiedExportData,
+  UnifiedImportDomainGroupsMode,
   UnifiedImportDomainsMode,
   UnifiedImportRequest,
   UnifiedImportResult,
@@ -767,6 +768,7 @@ export class DomainGroupsService implements OnModuleInit {
             ON b.domain_group_id = g.id
           JOIN domain_group_entries e
             ON e.domain_group_id = g.id
+          ORDER BY b.advanced_blocking_group_name_lc ASC, b.rowid ASC, e.rowid ASC
         `,
       )
       .all() as MaterializationRow[];
@@ -927,14 +929,10 @@ export class DomainGroupsService implements OnModuleInit {
       groups: [...groupsByName.values()]
         .map((group) => ({
           advancedBlockingGroupName: group.advancedBlockingGroupName,
-          allowed: [...group.allowed].sort((a, b) => a.localeCompare(b)),
-          blocked: [...group.blocked].sort((a, b) => a.localeCompare(b)),
-          allowedRegex: [...group.allowedRegex].sort((a, b) =>
-            a.localeCompare(b),
-          ),
-          blockedRegex: [...group.blockedRegex].sort((a, b) =>
-            a.localeCompare(b),
-          ),
+          allowed: [...group.allowed],
+          blocked: [...group.blocked],
+          allowedRegex: [...group.allowedRegex],
+          blockedRegex: [...group.blockedRegex],
         }))
         .sort((a, b) =>
           a.advancedBlockingGroupName.localeCompare(
@@ -1753,7 +1751,8 @@ export class DomainGroupsService implements OnModuleInit {
     }
 
     const domainsMode = input.domainsMode as UnifiedImportDomainsMode;
-    const domainGroupsMode = input.domainGroupsMode;
+    const domainGroupsMode =
+      input.domainGroupsMode as UnifiedImportDomainGroupsMode;
     const data = (input.data ?? {}) as UnifiedImportRequest["data"];
 
     const result: UnifiedImportResult = {
@@ -1807,6 +1806,28 @@ export class DomainGroupsService implements OnModuleInit {
 
     // --- DomainGroups import ---
     const db = this.getDb();
+    if (domainGroupsMode === "replace") {
+      const importGroupNamesLc = new Set(
+        Object.keys(data.domainGroups ?? {})
+          .map((name) => name.trim().toLowerCase())
+          .filter((name) => name.length > 0),
+      );
+      const existingGroups = db
+        .prepare(`SELECT id, name_lc FROM domain_groups`)
+        .all() as { id: string; name_lc: string }[];
+
+      const deleteGroupStmt = db.prepare(
+        `DELETE FROM domain_groups WHERE id = ?`,
+      );
+      for (const existing of existingGroups) {
+        if (!importGroupNamesLc.has(existing.name_lc)) {
+          deleteGroupStmt.run(existing.id);
+        }
+      }
+
+      db.prepare(`DELETE FROM domain_group_bindings`).run();
+    }
+
     for (const [name, rawDg] of Object.entries(data.domainGroups ?? {})) {
       const trimmedName = name.trim();
       if (!trimmedName) {

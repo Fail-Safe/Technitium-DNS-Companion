@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access */
 import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -15,6 +16,12 @@ interface MaintenanceShape {
   logger: { warn: jest.Mock; log: jest.Mock; debug: jest.Mock };
   maybeMigrateAutoVacuum: () => void;
   runMaintenance: () => void;
+}
+
+interface PollShape {
+  logger: { warn: jest.Mock };
+  pollOnce: jest.Mock<Promise<void>, []>;
+  safePollOnce: () => Promise<void>;
 }
 
 function runSql(database: DatabaseSync, sql: string): void {
@@ -47,10 +54,7 @@ describe("QueryLogSqliteService — SQLite maintenance", () => {
     runSql(db, "PRAGMA journal_mode=WAL");
     // Schema mirroring the production table (just enough for the tests to
     // create + delete rows and observe page churn).
-    runSql(
-      db,
-      "CREATE TABLE query_log_entries (ts INTEGER, payload TEXT)",
-    );
+    runSql(db, "CREATE TABLE query_log_entries (ts INTEGER, payload TEXT)");
 
     service = new QueryLogSqliteService({} as never, [] as never);
     internal = service as unknown as MaintenanceShape;
@@ -76,7 +80,9 @@ describe("QueryLogSqliteService — SQLite maintenance", () => {
     expect(readPragmaNumber(db, "auto_vacuum")).toBe(2);
     expect(internal.logger.warn).toHaveBeenCalled();
     const messages = internal.logger.warn.mock.calls.map((c) => c[0]).join(" ");
-    expect(messages).toContain("Migrating query-logs SQLite to auto_vacuum=INCREMENTAL");
+    expect(messages).toContain(
+      "Migrating query-logs SQLite to auto_vacuum=INCREMENTAL",
+    );
     expect(messages).toContain("Migration complete");
   });
 
@@ -133,6 +139,48 @@ describe("QueryLogSqliteService — SQLite maintenance", () => {
     internal.db = null;
     expect(() => internal.runMaintenance()).not.toThrow();
     expect(internal.logger.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("QueryLogSqliteService — poll failure logging", () => {
+  let service: QueryLogSqliteService;
+  let internal: PollShape;
+
+  beforeEach(() => {
+    process.env.NODE_ENV = "test";
+    service = new QueryLogSqliteService({} as never, [] as never);
+    internal = service as unknown as PollShape;
+    internal.logger = { warn: jest.fn() };
+    internal.pollOnce = jest.fn(() => Promise.resolve());
+  });
+
+  it("logs SQLite busy poll failures as a single sanitized warning", async () => {
+    const lockedError = Object.assign(new Error("database is locked"), {
+      code: "ERR_SQLITE_ERROR",
+      errcode: 5,
+      errstr: "database is locked",
+    });
+    internal.pollOnce.mockRejectedValueOnce(lockedError);
+
+    await internal.safePollOnce();
+
+    expect(internal.logger.warn).toHaveBeenCalledTimes(1);
+    expect(internal.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("database is locked"),
+    );
+    expect(internal.logger.warn.mock.calls[0]).toHaveLength(1);
+  });
+
+  it("logs generic poll failures as a single sanitized warning", async () => {
+    internal.pollOnce.mockRejectedValueOnce(new Error("boom"));
+
+    await internal.safePollOnce();
+
+    expect(internal.logger.warn).toHaveBeenCalledTimes(1);
+    expect(internal.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("SQLite query log poll failed: Error: boom"),
+    );
+    expect(internal.logger.warn.mock.calls[0]).toHaveLength(1);
   });
 });
 
@@ -285,7 +333,9 @@ describe("QueryLogSqliteService — buildWhereClause FTS5 routing", () => {
     // Nothing to search for → no FTS clause at all (just the ts window).
     expect(whereSql).not.toContain("query_log_fts");
     expect(whereSql).not.toContain("qnameLc LIKE");
-    expect(params.every((p) => typeof p !== "string" || !p.includes("*"))).toBe(true);
+    expect(params.every((p) => typeof p !== "string" || !p.includes("*"))).toBe(
+      true,
+    );
   });
 
   it("sanitizes dotted hostname-like client terms (kid-phone)", () => {

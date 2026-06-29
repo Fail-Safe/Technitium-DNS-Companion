@@ -17,7 +17,9 @@ function makeParseDraft() {
     {} as never,
   );
   return (body: unknown): DnsScheduleDraft =>
-    (controller as unknown as { parseDraft(b: unknown): DnsScheduleDraft }).parseDraft(body);
+    (
+      controller as unknown as { parseDraft(b: unknown): DnsScheduleDraft }
+    ).parseDraft(body);
 }
 
 // ── Spec ─────────────────────────────────────────────────────────────────────
@@ -67,7 +69,9 @@ describe("DnsSchedulesController — parseDraft", () => {
     });
 
     it("throws BadRequestException when name is whitespace-only", () => {
-      expect(() => parseDraft({ ...base(), name: "   " })).toThrow(BadRequestException);
+      expect(() => parseDraft({ ...base(), name: "   " })).toThrow(
+        BadRequestException,
+      );
     });
 
     it("trims whitespace from name", () => {
@@ -76,7 +80,9 @@ describe("DnsSchedulesController — parseDraft", () => {
     });
 
     it("throws BadRequestException when name is a non-string", () => {
-      expect(() => parseDraft({ ...base(), name: 42 })).toThrow(BadRequestException);
+      expect(() => parseDraft({ ...base(), name: 42 })).toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -110,12 +116,18 @@ describe("DnsSchedulesController — parseDraft", () => {
     });
 
     it("trims whitespace from group names", () => {
-      const result = parseDraft({ ...base(), advancedBlockingGroupNames: ["  Kids  ", " Parents "] });
+      const result = parseDraft({
+        ...base(),
+        advancedBlockingGroupNames: ["  Kids  ", " Parents "],
+      });
       expect(result.advancedBlockingGroupNames).toEqual(["Kids", "Parents"]);
     });
 
     it("accepts multiple groups", () => {
-      const result = parseDraft({ ...base(), advancedBlockingGroupNames: ["Kids", "Parents"] });
+      const result = parseDraft({
+        ...base(),
+        advancedBlockingGroupNames: ["Kids", "Parents"],
+      });
       expect(result.advancedBlockingGroupNames).toEqual(["Kids", "Parents"]);
     });
   });
@@ -138,7 +150,9 @@ describe("DnsSchedulesController — parseDraft", () => {
     });
 
     it("throws BadRequestException when action is an unknown string", () => {
-      expect(() => parseDraft({ ...base(), action: "deny" })).toThrow(BadRequestException);
+      expect(() => parseDraft({ ...base(), action: "deny" })).toThrow(
+        BadRequestException,
+      );
     });
 
     it("accepts 'block'", () => {
@@ -170,12 +184,17 @@ describe("DnsSchedulesController — parseDraft", () => {
     });
 
     it("throws BadRequestException when startTime is an empty string", () => {
-      expect(() => parseDraft({ ...base(), startTime: "" })).toThrow(BadRequestException);
+      expect(() => parseDraft({ ...base(), startTime: "" })).toThrow(
+        BadRequestException,
+      );
     });
 
     it("throws BadRequestException when endTime is missing", () => {
-      const { endTime: _ignored, ...noEnd } = base();
-      expect(() => parseDraft({ ...noEnd, startTime: "22:00" })).toThrow(BadRequestException);
+      const noEnd = base() as Partial<ReturnType<typeof base>>;
+      delete noEnd.endTime;
+      expect(() => parseDraft({ ...noEnd, startTime: "22:00" })).toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -223,7 +242,10 @@ describe("DnsSchedulesController — parseDraft", () => {
     }
 
     it("defaults to an empty array when not provided", () => {
-      const result = parseDraft({ ...validBody(), domainGroupNames: ["SocialMedia"] });
+      const result = parseDraft({
+        ...validBody(),
+        domainGroupNames: ["SocialMedia"],
+      });
       expect(result.domainEntries).toEqual([]);
     });
 
@@ -342,7 +364,10 @@ describe("DnsSchedulesController — parseDraft", () => {
     });
 
     it("passes through the timezone string as-is (no format validation here)", () => {
-      const result = parseDraft({ ...validBody(), timezone: "America/New_York" });
+      const result = parseDraft({
+        ...validBody(),
+        timezone: "America/New_York",
+      });
       expect(result.timezone).toBe("America/New_York");
     });
   });
@@ -429,7 +454,10 @@ describe("DnsSchedulesController — parseDraft", () => {
         ...validBody(),
         notifyEmails: ["  parent@example.com  ", "  ", "admin@example.com"],
       });
-      expect(result.notifyEmails).toEqual(["parent@example.com", "admin@example.com"]);
+      expect(result.notifyEmails).toEqual([
+        "parent@example.com",
+        "admin@example.com",
+      ]);
     });
 
     it("notifyDebounceSeconds defaults to 300", () => {
@@ -443,7 +471,10 @@ describe("DnsSchedulesController — parseDraft", () => {
     });
 
     it("notifyDebounceSeconds rounds fractional seconds", () => {
-      const result = parseDraft({ ...validBody(), notifyDebounceSeconds: 60.7 });
+      const result = parseDraft({
+        ...validBody(),
+        notifyDebounceSeconds: 60.7,
+      });
       expect(result.notifyDebounceSeconds).toBe(61);
     });
 
@@ -453,7 +484,10 @@ describe("DnsSchedulesController — parseDraft", () => {
     });
 
     it("notifyDebounceSeconds falls back to 300 for non-numeric strings", () => {
-      const result = parseDraft({ ...validBody(), notifyDebounceSeconds: "bad" });
+      const result = parseDraft({
+        ...validBody(),
+        notifyDebounceSeconds: "bad",
+      });
       expect(result.notifyDebounceSeconds).toBe(300);
     });
 

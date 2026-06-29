@@ -1,5 +1,12 @@
 # Domain Groups (MVP)
 
+> **Status (updated 2026-05-30):** Domain Groups shipped in **v1.5.0** (Mar 6, 2026) with the
+> full UI — drag-and-drop bindings, chip-summary displays, apply/dry-run with a cluster
+> primary-write guard, and unified export/import. This document captures the original MVP
+> *design scope*; any sections below that describe the UI or apply/sync as a "future phase"
+> have since shipped. See [CHANGELOG.md](../../CHANGELOG.md) and the README Features section
+> for current behavior.
+
 ## Overview
 
 Domain Groups add a reusable DNS-domain object model similar to firewall address groups:

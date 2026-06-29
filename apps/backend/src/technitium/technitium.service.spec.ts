@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { UnauthorizedException } from "@nestjs/common";
 import axios from "axios";
 import { promises as fs } from "fs";
@@ -695,14 +696,17 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
       hasAppsModify: false,
       hasCacheModify: true,
       username: "low-priv",
-      reason: "Token authenticated but lacks Apps: Modify permission needed to update Advanced Blocking config.",
+      reason:
+        "Token authenticated but lacks Apps: Modify permission needed to update Advanced Blocking config.",
     };
     s.logScheduleTokenValidationOutcome();
     expect(s.logger.log).not.toHaveBeenCalled();
     expect(s.logger.warn).toHaveBeenCalledTimes(1);
     const msg = s.logger.warn.mock.calls[0][0];
     expect(msg).toContain("missing Apps: Modify");
-    expect(msg).toContain("DNS Schedules cannot update Advanced Blocking config");
+    expect(msg).toContain(
+      "DNS Schedules cannot update Advanced Blocking config",
+    );
   });
 
   it("warns when Cache: Modify is missing (flushCacheOnChange will fail)", () => {
@@ -738,7 +742,9 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
     expect(s.logger.warn).toHaveBeenCalledTimes(1);
     const msg = s.logger.warn.mock.calls[0][0];
     expect(msg).toContain("ECONNRESET");
-    expect(msg).toContain("Will re-validate the next time the Automation UI is opened");
+    expect(msg).toContain(
+      "Will re-validate the next time the Automation UI is opened",
+    );
   });
 
   it("warns without retry hint when validation hit a config error (invalid-token)", () => {
@@ -824,7 +830,9 @@ describe("TechnitiumService — getClusterSettings error classification", () => 
     expect(logger.warn).not.toHaveBeenCalled();
     expect(logger.debug).toHaveBeenCalledTimes(1);
     expect(logger.debug.mock.calls[0][0]).toContain("read ECONNRESET");
-    expect(logger.debug.mock.calls[0][0]).toContain("Skipping cluster timing settings for nodeA");
+    expect(logger.debug.mock.calls[0][0]).toContain(
+      "Skipping cluster timing settings for nodeA",
+    );
   });
 
   it("routes 403 permission errors to DEBUG (expected for low-priv tokens)", async () => {
@@ -960,10 +968,7 @@ describe("TechnitiumService — resolveClusterWriteTargets", () => {
       summary("b2", { domain: "B" }),
     ];
     const { perCandidate, writeTargets } =
-      await service.resolveClusterWriteTargets(
-        ["a1", "a2", "b1", "b2"],
-        nodes,
-      );
+      await service.resolveClusterWriteTargets(["a1", "a2", "b1", "b2"], nodes);
     expect(writeTargets.sort()).toEqual(["a1", "b1"]);
     expect(perCandidate.get("a2")?.writeTarget).toBe("a1");
     expect(perCandidate.get("b2")?.writeTarget).toBe("b1");

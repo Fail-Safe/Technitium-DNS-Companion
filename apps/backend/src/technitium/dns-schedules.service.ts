@@ -95,7 +95,9 @@ export class DnsSchedulesService implements OnModuleInit {
     );
 
     if (!this.enabled) {
-      this.logger.log("DNS Schedules are disabled (DNS_SCHEDULES_ENABLED=false).");
+      this.logger.log(
+        "DNS Schedules are disabled (DNS_SCHEDULES_ENABLED=false).",
+      );
       return;
     }
 
@@ -105,7 +107,10 @@ export class DnsSchedulesService implements OnModuleInit {
         `DNS Schedules schema initialized in Companion SQLite at ${this.companionDb.dbPath}`,
       );
     } catch (error) {
-      this.logger.error(`Failed to initialize DNS Schedules schema`, error as Error);
+      this.logger.error(
+        `Failed to initialize DNS Schedules schema`,
+        error as Error,
+      );
     }
   }
 
@@ -168,7 +173,9 @@ export class DnsSchedulesService implements OnModuleInit {
       );
     } catch (error) {
       if (this.isSqliteUniqueConstraintError(error)) {
-        throw new BadRequestException("A DNS schedule with this name already exists.");
+        throw new BadRequestException(
+          "A DNS schedule with this name already exists.",
+        );
       }
       throw error;
     }
@@ -226,7 +233,9 @@ export class DnsSchedulesService implements OnModuleInit {
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
       if (this.isSqliteUniqueConstraintError(error)) {
-        throw new BadRequestException("A DNS schedule with this name already exists.");
+        throw new BadRequestException(
+          "A DNS schedule with this name already exists.",
+        );
       }
       throw error;
     }
@@ -256,8 +265,12 @@ export class DnsSchedulesService implements OnModuleInit {
     // matters even when the schedule is currently inactive — if a delete
     // races with a tick that hasn't run cleanup yet, leftover tracking would
     // become orphaned references to a schedule that no longer exists.
-    db.prepare(`DELETE FROM dns_schedule_state WHERE schedule_id = ?`).run(scheduleId);
-    db.prepare(`DELETE FROM dns_schedule_applied_entries WHERE schedule_id = ?`).run(scheduleId);
+    db.prepare(`DELETE FROM dns_schedule_state WHERE schedule_id = ?`).run(
+      scheduleId,
+    );
+    db.prepare(
+      `DELETE FROM dns_schedule_applied_entries WHERE schedule_id = ?`,
+    ).run(scheduleId);
     const result = db
       .prepare(`DELETE FROM dns_schedules WHERE id = ?`)
       .run(scheduleId);
@@ -468,7 +481,9 @@ export class DnsSchedulesService implements OnModuleInit {
     }
     const db = this.companionDb.db;
     if (!db) {
-      throw new ServiceUnavailableException("DNS Schedules storage is unavailable.");
+      throw new ServiceUnavailableException(
+        "DNS Schedules storage is unavailable.",
+      );
     }
     this.ensureSchema();
     return db;
@@ -581,17 +596,32 @@ export class DnsSchedulesService implements OnModuleInit {
       enabled: row.enabled === 1,
       targetType:
         row.target_type === "built-in" ? "built-in" : "advanced-blocking",
-      advancedBlockingGroupNames: this.parseJsonStringArray(row.advanced_blocking_group_names ?? "[]", "advancedBlockingGroupNames"),
+      advancedBlockingGroupNames: this.parseJsonStringArray(
+        row.advanced_blocking_group_names ?? "[]",
+        "advancedBlockingGroupNames",
+      ),
       action: row.action,
-      domainEntries: this.parseJsonStringArray(row.domain_entries_json, "domainEntries"),
-      domainGroupNames: this.parseJsonStringArray(row.domain_group_names_json ?? "[]", "domainGroupNames"),
-      daysOfWeek: this.parseJsonNumberArray(row.days_of_week_json, "daysOfWeek"),
+      domainEntries: this.parseJsonStringArray(
+        row.domain_entries_json,
+        "domainEntries",
+      ),
+      domainGroupNames: this.parseJsonStringArray(
+        row.domain_group_names_json ?? "[]",
+        "domainGroupNames",
+      ),
+      daysOfWeek: this.parseJsonNumberArray(
+        row.days_of_week_json,
+        "daysOfWeek",
+      ),
       startTime: row.start_time,
       endTime: row.end_time,
       timezone: row.timezone,
       nodeIds: this.parseJsonStringArray(row.node_ids_json, "nodeIds"),
       flushCacheOnChange: (row.flush_cache_on_change ?? 0) === 1,
-      notifyEmails: this.parseJsonStringArray(row.notify_emails_json ?? "[]", "notifyEmails"),
+      notifyEmails: this.parseJsonStringArray(
+        row.notify_emails_json ?? "[]",
+        "notifyEmails",
+      ),
       notifyDebounceSeconds: row.notify_debounce_seconds ?? 300,
       notifyMessage: row.notify_message || undefined,
       notifyMessageOnly: (row.notify_message_only ?? 0) === 1,
@@ -610,7 +640,9 @@ export class DnsSchedulesService implements OnModuleInit {
     } catch {
       // fall through
     }
-    this.logger.warn(`Invalid JSON for field "${field}" in dns_schedules: ${raw}`);
+    this.logger.warn(
+      `Invalid JSON for field "${field}" in dns_schedules: ${raw}`,
+    );
     return [];
   }
 
@@ -623,7 +655,9 @@ export class DnsSchedulesService implements OnModuleInit {
     } catch {
       // fall through
     }
-    this.logger.warn(`Invalid JSON for field "${field}" in dns_schedules: ${raw}`);
+    this.logger.warn(
+      `Invalid JSON for field "${field}" in dns_schedules: ${raw}`,
+    );
     return [];
   }
 
@@ -635,34 +669,50 @@ export class DnsSchedulesService implements OnModuleInit {
       throw new BadRequestException("name cannot exceed 120 characters.");
     }
     if (draft.targetType !== "built-in") {
-      if (!Array.isArray(draft.advancedBlockingGroupNames) || draft.advancedBlockingGroupNames.length === 0) {
-        throw new BadRequestException("At least one advancedBlockingGroupName is required.");
+      if (
+        !Array.isArray(draft.advancedBlockingGroupNames) ||
+        draft.advancedBlockingGroupNames.length === 0
+      ) {
+        throw new BadRequestException(
+          "At least one advancedBlockingGroupName is required.",
+        );
       }
       for (const g of draft.advancedBlockingGroupNames) {
         if (!g.trim()) {
-          throw new BadRequestException("advancedBlockingGroupNames entries must be non-empty strings.");
+          throw new BadRequestException(
+            "advancedBlockingGroupNames entries must be non-empty strings.",
+          );
         }
         if (g.length > 200) {
-          throw new BadRequestException("advancedBlockingGroupNames entry cannot exceed 200 characters.");
+          throw new BadRequestException(
+            "advancedBlockingGroupNames entry cannot exceed 200 characters.",
+          );
         }
       }
     }
     if (!["block", "allow"].includes(draft.action)) {
       throw new BadRequestException("action must be 'block' or 'allow'.");
     }
-    const hasDomainEntries = Array.isArray(draft.domainEntries) && draft.domainEntries.length > 0;
-    const hasDomainGroups = Array.isArray(draft.domainGroupNames) && draft.domainGroupNames.length > 0;
+    const hasDomainEntries =
+      Array.isArray(draft.domainEntries) && draft.domainEntries.length > 0;
+    const hasDomainGroups =
+      Array.isArray(draft.domainGroupNames) &&
+      draft.domainGroupNames.length > 0;
     if (!hasDomainEntries && !hasDomainGroups) {
       throw new BadRequestException(
         "At least one domainEntry or domainGroupName is required.",
       );
     }
-    for (const entry of (draft.domainEntries ?? [])) {
+    for (const entry of draft.domainEntries ?? []) {
       if (typeof entry !== "string" || !entry.trim()) {
-        throw new BadRequestException("Each domain entry must be a non-empty string.");
+        throw new BadRequestException(
+          "Each domain entry must be a non-empty string.",
+        );
       }
       if (entry.length > 300) {
-        throw new BadRequestException("Domain entry cannot exceed 300 characters.");
+        throw new BadRequestException(
+          "Domain entry cannot exceed 300 characters.",
+        );
       }
     }
     if (!Array.isArray(draft.daysOfWeek)) {
@@ -670,7 +720,9 @@ export class DnsSchedulesService implements OnModuleInit {
     }
     for (const day of draft.daysOfWeek) {
       if (!Number.isInteger(day) || day < 0 || day > 6) {
-        throw new BadRequestException("daysOfWeek values must be integers 0–6.");
+        throw new BadRequestException(
+          "daysOfWeek values must be integers 0–6.",
+        );
       }
     }
     if (!this.isValidTime(draft.startTime)) {
@@ -680,7 +732,9 @@ export class DnsSchedulesService implements OnModuleInit {
       throw new BadRequestException("endTime must be in HH:MM format.");
     }
     if (draft.startTime === draft.endTime) {
-      throw new BadRequestException("startTime and endTime cannot be the same.");
+      throw new BadRequestException(
+        "startTime and endTime cannot be the same.",
+      );
     }
     if (!draft.timezone?.trim()) {
       throw new BadRequestException("timezone is required.");
@@ -693,7 +747,10 @@ export class DnsSchedulesService implements OnModuleInit {
     if (!Array.isArray(draft.nodeIds)) {
       throw new BadRequestException("nodeIds must be an array.");
     }
-    if (draft.notifySubjectTemplate && draft.notifySubjectTemplate.length > 200) {
+    if (
+      draft.notifySubjectTemplate &&
+      draft.notifySubjectTemplate.length > 200
+    ) {
       throw new BadRequestException(
         "notifySubjectTemplate cannot exceed 200 characters.",
       );
@@ -707,11 +764,15 @@ export class DnsSchedulesService implements OnModuleInit {
 
   private isValidTime(value: string): boolean {
     if (typeof value !== "string") return false;
-    return /^\d{2}:\d{2}$/.test(value.trim()) &&
+    return (
+      /^\d{2}:\d{2}$/.test(value.trim()) &&
       (() => {
         const [h, m] = value.trim().split(":").map(Number);
-        return (h ?? 25) >= 0 && (h ?? 25) <= 23 && (m ?? 60) >= 0 && (m ?? 60) <= 59;
-      })();
+        return (
+          (h ?? 25) >= 0 && (h ?? 25) <= 23 && (m ?? 60) >= 0 && (m ?? 60) <= 59
+        );
+      })()
+    );
   }
 
   private isValidTimezone(tz: string): boolean {
@@ -727,6 +788,6 @@ export class DnsSchedulesService implements OnModuleInit {
     const e = error as { code?: string; errcode?: number; message?: string };
     if (e.code === "ERR_SQLITE_CONSTRAINT_UNIQUE") return true;
     if (e.errcode === 2067) return true;
-    return (e.message?.includes("UNIQUE constraint failed") ?? false);
+    return e.message?.includes("UNIQUE constraint failed") ?? false;
   }
 }
