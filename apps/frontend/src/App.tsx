@@ -114,9 +114,7 @@ export default function App() {
     <AuthProvider>
       <ToastProvider>
         <TechnitiumProvider>
-          <BrowserRouter
-            future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-          >
+          <BrowserRouter>
             <OfflineBanner />
             <AppLayout>
               <Suspense fallback={<PageLoader />}>
