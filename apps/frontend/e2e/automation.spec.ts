@@ -1,11 +1,10 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Navigate to /automation and wait for all pending API requests to settle. */
-async function gotoAutomation(page: Parameters<Parameters<typeof test>[1]>[0]["page"]) {
+async function gotoAutomation(page: Page) {
   await page.goto("/automation");
-  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("heading", { name: "DNS Overrides" })).toBeVisible();
 }
 
 // ── Tests that need a guaranteed-empty schedule list ──────────────────────────
@@ -51,8 +50,8 @@ test.describe("Automation page", () => {
   // ── Page structure ────────────────────────────────────────────────────────────
 
   test("renders the page heading and evaluator section", async ({ page }) => {
-    await expect(page.getByRole("heading", { name: "DNS Schedules" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Schedule Evaluator" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "DNS Overrides" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Override Evaluator" })).toBeVisible();
   });
 
   test("shows Refresh and New Schedule buttons in the header", async ({ page }) => {

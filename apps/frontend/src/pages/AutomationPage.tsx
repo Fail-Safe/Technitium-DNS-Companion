@@ -89,6 +89,28 @@ const DEFAULT_OVERRIDE_DRAFT: DnsTemporaryOverrideDraft = {
   expiresAt: null,
 };
 
+type DnsScheduleRunResult =
+  RunDnsScheduleEvaluatorResponse["results"][number];
+
+function isDeferredRunResult(result: DnsScheduleRunResult): boolean {
+  return (
+    result.action === "skipped" &&
+    (result.reason?.startsWith("deferred-") ?? false)
+  );
+}
+
+function shouldDisplayRunResult(result: DnsScheduleRunResult): boolean {
+  return result.action !== "skipped" || isDeferredRunResult(result);
+}
+
+function formatRunResultDetail(result: DnsScheduleRunResult): string {
+  const detail = result.error ?? result.reason ?? "";
+  return detail.replace(
+    /^deferred-node-unreachable:\s*/,
+    "Deferred until node is reachable: ",
+  );
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const readApiErrorMessage = async (
@@ -2246,6 +2268,8 @@ export function AutomationPage() {
     useState<RunDnsScheduleEvaluatorResponse | null>(null);
   const [showRunResult, setShowRunResult] = useState(false);
   const [showPrecedenceNote, setShowPrecedenceNote] = useState(true);
+  const visibleRunResults =
+    lastRunResult?.results.filter(shouldDisplayRunResult) ?? [];
 
   // Expanded schedule cards
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -3140,7 +3164,7 @@ export function AutomationPage() {
                 <span className="log-alerts__warn">{lastRunResult.errored} error(s)</span>
               )}
             </div>
-            {lastRunResult.results.filter((r) => r.action !== "skipped").length > 0 && (
+            {visibleRunResults.length > 0 && (
               <table className="dns-schedules__run-table">
                 <thead>
                   <tr>
@@ -3151,20 +3175,29 @@ export function AutomationPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lastRunResult.results
-                    .filter((r) => r.action !== "skipped")
-                    .map((r, i) => (
-                      <tr key={i} className={r.action === "error" ? "dns-schedules__run-row--error" : ""}>
-                        <td>{r.scheduleName}</td>
-                        <td>{r.nodeId}</td>
-                        <td>
-                          <span className={`dns-schedules__action-badge dns-schedules__action-badge--${r.action}`}>
-                            {r.action}
-                          </span>
-                        </td>
-                        <td>{r.error ?? r.reason ?? ""}</td>
-                      </tr>
-                    ))}
+                  {visibleRunResults.map((r, i) => (
+                    <tr
+                      key={i}
+                      className={
+                        r.action === "error"
+                          ? "dns-schedules__run-row--error"
+                          : isDeferredRunResult(r)
+                            ? "dns-schedules__run-row--deferred"
+                            : ""
+                      }
+                    >
+                      <td>{r.scheduleName}</td>
+                      <td>{r.nodeId}</td>
+                      <td>
+                        <span
+                          className={`dns-schedules__action-badge dns-schedules__action-badge--${r.action}`}
+                        >
+                          {r.action}
+                        </span>
+                      </td>
+                      <td>{formatRunResultDetail(r)}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             )}

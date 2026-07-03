@@ -14,6 +14,8 @@ export type AuthStatus = {
   authenticated: boolean;
   user?: string;
   nodeIds?: string[];
+  unreachableNodeIds?: string[];
+  failedNodeIds?: string[];
   configuredNodeIds?: string[];
   transport?: AuthTransportInfo;
   backgroundPtrToken?: BackgroundPtrTokenValidationSummary;
@@ -35,8 +37,55 @@ export type AuthContextValue = {
 async function safeReadError(response: Response): Promise<string> {
   try {
     const data = (await response.json()) as unknown;
-    if (data && typeof data === "object" && "message" in data) {
-      const message = (data as { message?: unknown }).message;
+    if (!data || typeof data !== "object") {
+      return `Request failed (${response.status})`;
+    }
+
+    const payload = data as {
+      message?: unknown;
+      nodes?: unknown;
+    };
+
+    const message =
+      typeof payload.message === "string" ?
+        payload.message
+      : `Request failed (${response.status})`;
+
+    if (Array.isArray(payload.nodes) && payload.nodes.length > 0) {
+      const nodeDetails = payload.nodes
+        .map((node) => {
+          if (!node || typeof node !== "object") {
+            return null;
+          }
+
+          const item = node as {
+            nodeId?: unknown;
+            authState?: unknown;
+            status?: unknown;
+            error?: unknown;
+          };
+          const nodeId =
+            typeof item.nodeId === "string" ? item.nodeId : "unknown node";
+          const state =
+            typeof item.authState === "string" ? item.authState : "failed";
+          const status =
+            typeof item.status === "string" ? `/${item.status}` : "";
+          const error =
+            typeof item.error === "string" && item.error.trim() ?
+              `: ${item.error}`
+            : "";
+
+          return `${nodeId} (${state}${status})${error}`;
+        })
+        .filter((line): line is string => line !== null);
+
+      if (nodeDetails.length > 0) {
+        return `${message}\n${nodeDetails.join("\n")}`;
+      }
+    }
+
+    if ("message" in payload) {
+      const message = payload.message;
       if (typeof message === "string") {
         return message;
       }

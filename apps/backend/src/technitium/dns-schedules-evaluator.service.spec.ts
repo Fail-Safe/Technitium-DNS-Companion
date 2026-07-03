@@ -304,9 +304,15 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
         action: "block" | "allow";
         domain: string;
       }>;
+      appliedNodeIds?: string[];
     } = {},
   ) {
     const setConfigWithAuth = jest.fn();
+    const isApplied = jest.fn((_scheduleId: string, nodeId: string) =>
+      (options.appliedNodeIds ?? []).includes(nodeId),
+    );
+    const markApplied = jest.fn();
+    const markRemoved = jest.fn();
     const listAppliedEntries = jest.fn().mockReturnValue(
       (options.trackedEntries ?? []).map((e) => ({
         scheduleId: "test-id",
@@ -319,6 +325,9 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
     const clearAppliedEntries = jest.fn();
     const service = new DnsSchedulesEvaluatorService(
       {
+        isApplied,
+        markApplied,
+        markRemoved,
         listAppliedEntries,
         setAppliedEntries,
         clearAppliedEntries,
@@ -331,6 +340,9 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
     return {
       service,
       setConfigWithAuth,
+      isApplied,
+      markApplied,
+      markRemoved,
       listAppliedEntries,
       setAppliedEntries,
       clearAppliedEntries,
@@ -391,6 +403,88 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
     ).rejects.toThrow(/nodeA.*ECONNRESET/);
 
     expect(setConfigWithAuth).not.toHaveBeenCalled();
+  });
+
+  it("active evaluation defers unreachable target nodes without marking applied", async () => {
+    const getSnapshotWithAuth = jest.fn().mockResolvedValue({
+      ...failingSnapshot,
+      error:
+        'Unable to reach Technitium DNS node "nodeA". Check connectivity and credentials.',
+    });
+    const { service, setConfigWithAuth, markApplied } =
+      makeService(getSnapshotWithAuth);
+
+    const result = await (
+      service as unknown as {
+        evaluateScheduleForNode: (
+          s: DnsSchedule,
+          n: string,
+          flushNodeIds: string[],
+          stateNodeIds: string[],
+          now: Date,
+          dryRun: boolean,
+        ) => Promise<{ action: string; reason?: string; error?: string }>;
+      }
+    ).evaluateScheduleForNode(
+      makeSchedule({ startTime: "09:00", endTime: "17:00", timezone: "UTC" }),
+      "nodeA",
+      ["nodeA"],
+      ["nodeA"],
+      utcDate(2024, 1, 15, 12, 0),
+      false,
+    );
+
+    expect(result).toMatchObject({
+      action: "skipped",
+      reason: expect.stringContaining("deferred-node-unreachable"),
+    });
+    expect(result.error).toBeUndefined();
+    expect(setConfigWithAuth).not.toHaveBeenCalled();
+    expect(markApplied).not.toHaveBeenCalled();
+  });
+
+  it("inactive evaluation defers unreachable target nodes without clearing tracked entries", async () => {
+    const getSnapshotWithAuth = jest.fn().mockResolvedValue(failingSnapshot);
+    const { service, setConfigWithAuth, markRemoved, clearAppliedEntries } =
+      makeService(getSnapshotWithAuth, {
+        appliedNodeIds: ["nodeA"],
+        trackedEntries: [
+          {
+            advancedBlockingGroupName: "social",
+            action: "block",
+            domain: "example.com",
+          },
+        ],
+      });
+
+    const result = await (
+      service as unknown as {
+        evaluateScheduleForNode: (
+          s: DnsSchedule,
+          n: string,
+          flushNodeIds: string[],
+          stateNodeIds: string[],
+          now: Date,
+          dryRun: boolean,
+        ) => Promise<{ action: string; reason?: string; error?: string }>;
+      }
+    ).evaluateScheduleForNode(
+      makeSchedule({ startTime: "09:00", endTime: "17:00", timezone: "UTC" }),
+      "nodeA",
+      ["nodeA"],
+      ["nodeA"],
+      utcDate(2024, 1, 15, 18, 0),
+      false,
+    );
+
+    expect(result).toMatchObject({
+      action: "skipped",
+      reason: expect.stringContaining("deferred-node-unreachable"),
+    });
+    expect(result.error).toBeUndefined();
+    expect(setConfigWithAuth).not.toHaveBeenCalled();
+    expect(markRemoved).not.toHaveBeenCalled();
+    expect(clearAppliedEntries).not.toHaveBeenCalled();
   });
 
   it("remove proceeds normally when snapshot is healthy with a non-empty config", async () => {

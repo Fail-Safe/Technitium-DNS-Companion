@@ -25,6 +25,7 @@ describe("NodeSessionExpiredBanner", () => {
                   authenticated={true}
                   configuredNodeIds={["node1", "node2"]}
                   nodeIds={["node1"]}
+                  unreachableNodeIds={[]}
                 />
               </>
             }
@@ -55,6 +56,7 @@ describe("NodeSessionExpiredBanner", () => {
                   authenticated={true}
                   configuredNodeIds={["node1", "node2"]}
                   nodeIds={["node1"]}
+                  unreachableNodeIds={[]}
                 />
               </>
             }
@@ -70,6 +72,7 @@ describe("NodeSessionExpiredBanner", () => {
                   authenticated={true}
                   configuredNodeIds={["node1", "node2"]}
                   nodeIds={["node1"]}
+                  unreachableNodeIds={[]}
                 />
               </>
             }
@@ -83,6 +86,29 @@ describe("NodeSessionExpiredBanner", () => {
 
     expect(screen.getByTestId("path")).toHaveTextContent("/login");
     expect(screen.getByText("LOGIN")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not render when the only missing node is unreachable", () => {
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <NodeSessionExpiredBanner
+                sessionAuthEnabled={true}
+                authenticated={true}
+                configuredNodeIds={["node1", "node2"]}
+                nodeIds={["node2"]}
+                unreachableNodeIds={["node1"]}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

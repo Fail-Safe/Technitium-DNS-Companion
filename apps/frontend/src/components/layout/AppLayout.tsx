@@ -24,6 +24,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         authenticated={status?.authenticated ?? false}
         configuredNodeIds={status?.configuredNodeIds}
         nodeIds={status?.nodeIds}
+        unreachableNodeIds={status?.unreachableNodeIds}
       />
       <TransportSecurityBanner
         sessionAuthEnabled={status?.sessionAuthEnabled}

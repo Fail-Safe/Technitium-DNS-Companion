@@ -13600,6 +13600,11 @@ button.danger:disabled {
   color: var(--color-danger-text);
 }
 
+.dns-schedules__run-row--deferred td {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-dark);
+}
+
 .dns-schedules__action-badge {
   padding: 0.15rem 0.4rem;
   border-radius: 999px;
@@ -13622,6 +13627,11 @@ button.danger:disabled {
 .dns-schedules__action-badge--error {
   background: var(--color-danger-bg);
   color: var(--color-danger-text);
+}
+
+.dns-schedules__action-badge--skipped {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-dark);
 }
 
 /* Clock arc time window preview */

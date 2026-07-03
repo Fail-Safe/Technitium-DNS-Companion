@@ -3,6 +3,7 @@ export type AuthStatusLike = {
   sessionAuthEnabled?: boolean;
   configuredNodeIds?: string[];
   nodeIds?: string[];
+  unreachableNodeIds?: string[];
 };
 
 export function isNodeSessionRequiredButMissing(
@@ -11,10 +12,16 @@ export function isNodeSessionRequiredButMissing(
   if (!status?.authenticated) return false;
 
   const configuredNodeCount = status.configuredNodeIds?.length ?? 0;
-  const sessionNodeCount = status.nodeIds?.length ?? 0;
+  const sessionNodeIds = new Set(status.nodeIds ?? []);
+  const unreachableNodeIds = new Set(status.unreachableNodeIds ?? []);
 
-  // When at least one node is configured but not all are currently authenticated
-  // in this session, the common cause is that one or more Technitium session
-  // tokens expired (while the Companion session cookie may still be valid).
-  return configuredNodeCount > 0 && sessionNodeCount < configuredNodeCount;
+  // Missing tokens on reachable nodes usually means one or more Technitium
+  // sessions expired while the Companion session cookie is still valid.
+  // Nodes that were unreachable at login should not block degraded access.
+  return (
+    configuredNodeCount > 0 &&
+    status.configuredNodeIds!.some(
+      (nodeId) => !sessionNodeIds.has(nodeId) && !unreachableNodeIds.has(nodeId),
+    )
+  );
 }

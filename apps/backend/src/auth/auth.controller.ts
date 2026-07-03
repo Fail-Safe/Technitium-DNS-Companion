@@ -62,11 +62,21 @@ export class AuthController {
       };
     }
 
+    const nodeAuthStates = session.nodeAuthStatesByNodeId ?? {};
+    const unreachableNodeIds = configuredNodeIds.filter(
+      (nodeId) => nodeAuthStates[nodeId]?.status === "unreachable",
+    );
+    const failedNodeIds = configuredNodeIds.filter(
+      (nodeId) => nodeAuthStates[nodeId]?.status === "failed",
+    );
+
     return {
       sessionAuthEnabled,
       authenticated: true,
       user: session.user,
       nodeIds: Object.keys(session.tokensByNodeId),
+      unreachableNodeIds,
+      failedNodeIds,
       configuredNodeIds,
       ...(transport ? { transport } : {}),
       backgroundPtrToken,

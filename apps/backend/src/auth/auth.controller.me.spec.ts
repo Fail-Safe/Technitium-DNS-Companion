@@ -91,7 +91,37 @@ describe("AuthController /auth/me", () => {
     expect(res.sessionAuthEnabled).toBe(true);
     expect(res.user).toBe("alice");
     expect(res.nodeIds?.sort()).toEqual(["nodeA", "nodeB"]);
+    expect(res.unreachableNodeIds).toEqual([]);
+    expect(res.failedNodeIds).toEqual([]);
     expect(res.configuredNodeIds?.sort()).toEqual(["nodeA", "nodeB"]);
     expect(res.backgroundPtrToken).toBeDefined();
+  });
+
+  it("reports unreachable and failed nodes separately from authenticated nodeIds", async () => {
+    const { controller, technitiumServiceMock } = await createController();
+
+    const session: AuthSession = {
+      id: "s1",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "alice",
+      tokensByNodeId: { nodeB: "t2" },
+      nodeAuthStatesByNodeId: {
+        nodeA: { status: "unreachable", error: "timeout" },
+        nodeB: { status: "authenticated" },
+        nodeC: { status: "failed", error: "invalid-token" },
+      },
+    };
+
+    jest
+      .spyOn(technitiumServiceMock, "getConfiguredNodeIds")
+      .mockReturnValue(["nodeA", "nodeB", "nodeC"]);
+
+    const res = withContext(session, () => controller.me());
+
+    expect(res.authenticated).toBe(true);
+    expect(res.nodeIds).toEqual(["nodeB"]);
+    expect(res.unreachableNodeIds).toEqual(["nodeA"]);
+    expect(res.failedNodeIds).toEqual(["nodeC"]);
   });
 });

@@ -1,9 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { clearAuthRedirectReason } from "../config";
 import { useAuth } from "../context/useAuth";
 import { isNodeSessionRequiredButMissing } from "../utils/authSession";
 import { AppInput } from "../components/common/AppInput";
+
+function isTotpRequiredError(message: string): boolean {
+  return (
+    /\b2fa-required\b/i.test(message) ||
+    /\bTOTP\b.*\brequired\b/i.test(message) ||
+    /one-time password .*required/i.test(message)
+  );
+}
 
 export default function LoginPage() {
   const { status, loading, login } = useAuth();
@@ -31,6 +39,8 @@ export default function LoginPage() {
   const [totp, setTotp] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [totpRequired, setTotpRequired] = useState(false);
+  const totpInputRef = useRef<HTMLInputElement>(null);
 
   if (
     !loading &&
@@ -42,6 +52,12 @@ export default function LoginPage() {
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (totpRequired && !totp.trim()) {
+      setError("Enter your 2FA code and try again.");
+      totpInputRef.current?.focus();
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     try {
@@ -50,9 +66,17 @@ export default function LoginPage() {
         password,
         totp: totp.trim() ? totp.trim() : undefined,
       });
+      setTotpRequired(false);
       navigate(nextPath, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      const message = err instanceof Error ? err.message : "Login failed";
+      if (isTotpRequiredError(message)) {
+        setTotpRequired(true);
+        setError("Enter your 2FA code and try again.");
+        totpInputRef.current?.focus();
+      } else {
+        setError(message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -117,11 +141,13 @@ export default function LoginPage() {
         }}
       >
         <label
+          htmlFor="login-username"
           style={{ display: "block", fontWeight: 600, marginBottom: "0.25rem" }}
         >
           Username
         </label>
         <AppInput
+          id="login-username"
           type="text"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
@@ -139,11 +165,13 @@ export default function LoginPage() {
         />
 
         <label
+          htmlFor="login-password"
           style={{ display: "block", fontWeight: 600, marginBottom: "0.25rem" }}
         >
           Password
         </label>
         <AppInput
+          id="login-password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -161,16 +189,21 @@ export default function LoginPage() {
         />
 
         <label
+          htmlFor="login-totp"
           style={{ display: "block", fontWeight: 600, marginBottom: "0.25rem" }}
         >
-          2FA code (optional)
+          2FA code {totpRequired ? "(required)" : "(optional)"}
         </label>
         <AppInput
+          id="login-totp"
+          ref={totpInputRef}
           type="text"
           value={totp}
           onChange={(e) => setTotp(e.target.value)}
           inputMode="numeric"
           autoComplete="one-time-code"
+          required={totpRequired}
+          aria-invalid={totpRequired && Boolean(error)}
           style={{
             width: "100%",
             padding: "0.75rem",
@@ -185,7 +218,11 @@ export default function LoginPage() {
         {error && (
           <p
             role="alert"
-            style={{ margin: "0 0 1rem 0", color: "var(--color-danger-text)" }}
+            style={{
+              margin: "0 0 1rem 0",
+              color: "var(--color-danger-text)",
+              whiteSpace: "pre-line",
+            }}
           >
             {error}
           </p>

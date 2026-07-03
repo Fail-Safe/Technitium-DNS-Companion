@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import type { AuthSession } from "./auth.types";
+import type { AuthNodeSessionState, AuthSession } from "./auth.types";
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 /**
@@ -45,7 +45,11 @@ export class AuthSessionService implements OnModuleDestroy {
     this.stopSweepTimer();
   }
 
-  create(user: string, tokensByNodeId: Record<string, string>): AuthSession {
+  create(
+    user: string,
+    tokensByNodeId: Record<string, string>,
+    nodeAuthStatesByNodeId?: Record<string, AuthNodeSessionState>,
+  ): AuthSession {
     const id = randomUUID();
     const now = Date.now();
     const session: AuthSession = {
@@ -54,6 +58,7 @@ export class AuthSessionService implements OnModuleDestroy {
       createdAt: new Date(now).toISOString(),
       lastSeenAt: now,
       tokensByNodeId,
+      nodeAuthStatesByNodeId,
     };
 
     this.sessions.set(id, session);

@@ -26,10 +26,20 @@ describe("AppController (e2e)", () => {
     await app.close();
   });
 
-  it("/ (GET)", () => {
+  it("/health (GET)", () => {
     return request(app.getHttpServer())
-      .get("/api")
+      .get("/api/health")
       .expect(200)
-      .expect("Hello World!");
+      .expect((res) => {
+        expect(res.body).toMatchObject({
+          status: "ok",
+        });
+        expect(typeof (res.body as { timestamp?: unknown }).timestamp).toBe(
+          "string",
+        );
+        expect(typeof (res.body as { uptime?: unknown }).uptime).toBe(
+          "number",
+        );
+      });
   });
 });

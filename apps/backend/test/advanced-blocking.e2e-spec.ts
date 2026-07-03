@@ -9,9 +9,15 @@ import { App } from "supertest/types";
 import { DnsFilteringSnapshotService } from "../src/technitium/dns-filtering-snapshot.service";
 import { TechnitiumService } from "../src/technitium/technitium.service";
 import { AppModule } from "./../src/app.module";
+import {
+  createE2eSessionCookie,
+  enableSecureProxyForE2e,
+  withE2eAuth,
+} from "./e2e-auth";
 
 describe("Advanced Blocking save/get round-trip (e2e)", () => {
   let app: INestApplication<App>;
+  let sessionCookie: string;
 
   const getBlockingAnswerTtl = (res: SupertestResponse): unknown => {
     const body = res.body as unknown;
@@ -90,7 +96,9 @@ describe("Advanced Blocking save/get round-trip (e2e)", () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix("api");
+    enableSecureProxyForE2e(app);
     await app.init();
+    sessionCookie = createE2eSessionCookie(app, { node1: "test-token" });
   });
 
   afterEach(async () => {
@@ -106,16 +114,20 @@ describe("Advanced Blocking save/get round-trip (e2e)", () => {
       groups: [],
     };
 
-    await request(app.getHttpServer())
-      .post("/api/nodes/node1/advanced-blocking")
+    await withE2eAuth(
+      request(app.getHttpServer()).post("/api/nodes/node1/advanced-blocking"),
+      sessionCookie,
+    )
       .send({ config, snapshotNote: "test" })
       .expect(201)
       .expect((res: SupertestResponse) => {
         expect(getBlockingAnswerTtl(res)).toBe(123);
       });
 
-    await request(app.getHttpServer())
-      .get("/api/nodes/node1/advanced-blocking")
+    await withE2eAuth(
+      request(app.getHttpServer()).get("/api/nodes/node1/advanced-blocking"),
+      sessionCookie,
+    )
       .expect(200)
       .expect((res: SupertestResponse) => {
         expect(getBlockingAnswerTtl(res)).toBe(123);
@@ -131,16 +143,20 @@ describe("Advanced Blocking save/get round-trip (e2e)", () => {
       groups: [],
     };
 
-    await request(app.getHttpServer())
-      .post("/api/nodes/node1/advanced-blocking")
+    await withE2eAuth(
+      request(app.getHttpServer()).post("/api/nodes/node1/advanced-blocking"),
+      sessionCookie,
+    )
       .send({ config, snapshotNote: "test" })
       .expect(201)
       .expect((res: SupertestResponse) => {
         expect(getBlockingAnswerTtl(res)).toBe(456);
       });
 
-    await request(app.getHttpServer())
-      .get("/api/nodes/node1/advanced-blocking")
+    await withE2eAuth(
+      request(app.getHttpServer()).get("/api/nodes/node1/advanced-blocking"),
+      sessionCookie,
+    )
       .expect(200)
       .expect((res: SupertestResponse) => {
         expect(getBlockingAnswerTtl(res)).toBe(456);
