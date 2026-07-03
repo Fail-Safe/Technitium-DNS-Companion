@@ -546,9 +546,19 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const isNodeUnreachableForSession = useCallback((nodeId: string): boolean => {
+    const status = authStatusRef.current;
+    return status?.unreachableNodeIds?.includes(nodeId) === true;
+  }, []);
+
   const requireNodeAuth = useCallback(
     (nodeId: string): void => {
       if (!isNodeAuthenticatedForSession(nodeId)) {
+        if (isNodeUnreachableForSession(nodeId)) {
+          throw new Error(
+            `Technitium node ${nodeId} is unreachable. Try again when the node is online.`,
+          );
+        }
         triggerAuthRedirect("node-session-expired", {
           path: `/nodes/${nodeId}`,
         });
@@ -557,7 +567,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         );
       }
     },
-    [isNodeAuthenticatedForSession],
+    [isNodeAuthenticatedForSession, isNodeUnreachableForSession],
   );
 
   // Track in-flight overview fetch to prevent duplicate requests

@@ -4,6 +4,7 @@ export interface AuthSession {
   lastSeenAt: number;
   user: string;
   tokensByNodeId: Record<string, string>;
+  nodeAuthStatesByNodeId?: Record<string, AuthNodeSessionState>;
 }
 
 export interface AuthLoginRequestDto {
@@ -16,8 +17,14 @@ export interface AuthNodeLoginResult {
   nodeId: string;
   baseUrl: string;
   success: boolean;
+  authState?: AuthNodeSessionState["status"];
   token?: string;
   status?: string;
+  error?: string;
+}
+
+export interface AuthNodeSessionState {
+  status: "authenticated" | "unreachable" | "failed";
   error?: string;
 }
 
@@ -26,11 +33,26 @@ export interface AuthLoginResponseDto {
   nodes: AuthNodeLoginResult[];
 }
 
+export interface AuthLoginFailureResponseDto {
+  message: string;
+  nodes: AuthNodeLoginFailureResult[];
+}
+
+export interface AuthNodeLoginFailureResult {
+  nodeId: string;
+  success: false;
+  authState?: AuthNodeSessionState["status"];
+  status?: string;
+  error?: string;
+}
+
 export interface AuthMeResponseDto {
   sessionAuthEnabled: boolean;
   authenticated: boolean;
   user?: string;
   nodeIds?: string[];
+  unreachableNodeIds?: string[];
+  failedNodeIds?: string[];
   configuredNodeIds?: string[];
   transport?: {
     requestSecure: boolean;

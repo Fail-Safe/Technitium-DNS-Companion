@@ -1,7 +1,7 @@
 {
   "name": "technitium-dns-companion",
   "private": true,
-  "version": "1.8.0",
+  "version": "1.8.1",
   "license": "MIT",
   "workspaces": [
     "apps/backend",
@@ -14,12 +14,19 @@
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "overrides": {
+    "@babel/core": "7.29.7",
+    "esbuild": "0.28.1",
     "handlebars": "4.7.9",
+    "js-yaml": "4.3.0",
+    "multer": "2.2.0",
     "path-to-regexp": "8.4.2",
     "serialize-javascript": "7.0.5",
     "@angular-devkit/core": {
       "ajv": "8.18.0",
       "picomatch": "4.0.4"
+    },
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "3.15.0"
     }
   },
   "devDependencies": {

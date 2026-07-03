@@ -16,12 +16,23 @@ afterEach(() => {
 describe("AuthSessionService — create + get + delete (baseline)", () => {
   it("creates a session with a UUID id and stores it for retrieval", () => {
     const service = new AuthSessionService();
-    const session = service.create("alice", { node1: "tok-1" });
+    const session = service.create(
+      "alice",
+      { node1: "tok-1" },
+      {
+        node1: { status: "authenticated" },
+        node2: { status: "unreachable", error: "timeout" },
+      },
+    );
     expect(session.id).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
     expect(session.user).toBe("alice");
     expect(session.tokensByNodeId).toEqual({ node1: "tok-1" });
+    expect(session.nodeAuthStatesByNodeId).toEqual({
+      node1: { status: "authenticated" },
+      node2: { status: "unreachable", error: "timeout" },
+    });
     expect(service.get(session.id)).toBe(session);
     service.onModuleDestroy();
   });

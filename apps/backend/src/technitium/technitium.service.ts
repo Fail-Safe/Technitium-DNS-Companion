@@ -5324,6 +5324,11 @@ export class TechnitiumService {
         const session = AuthRequestContext.getSession();
         if (session?.tokensByNodeId?.[node.id]) {
           delete session.tokensByNodeId[node.id];
+          session.nodeAuthStatesByNodeId ??= {};
+          session.nodeAuthStatesByNodeId[node.id] = {
+            status: "failed",
+            error: "invalid-token",
+          };
           this.logger.warn(
             `Technitium rejected token for node "${node.id}" (invalid-token envelope). Dropped token from session; re-login required for this node.`,
           );
@@ -5352,6 +5357,11 @@ export class TechnitiumService {
         const session = AuthRequestContext.getSession();
         if (session?.tokensByNodeId?.[node.id]) {
           delete session.tokensByNodeId[node.id];
+          session.nodeAuthStatesByNodeId ??= {};
+          session.nodeAuthStatesByNodeId[node.id] = {
+            status: "failed",
+            error: "invalid token",
+          };
           this.logger.warn(
             `Technitium rejected token for node "${node.id}" (invalid token). Dropped token from session; re-login required for this node.`,
           );

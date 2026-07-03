@@ -80,6 +80,15 @@ function isTupleLiveInConfig(
   return list.includes(tuple.domain);
 }
 
+function isNodeReachabilityError(message: string): boolean {
+  return (
+    /Unable to reach Technitium DNS node/i.test(message) ||
+    /\b(?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENOTFOUND)\b/i.test(
+      message,
+    )
+  );
+}
+
 @Injectable()
 export class DnsSchedulesEvaluatorService
   implements OnModuleInit, OnModuleDestroy
@@ -735,6 +744,18 @@ export class DnsSchedulesEvaluatorService
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error.";
+      if (isNodeReachabilityError(message)) {
+        this.logger.warn(
+          `Deferred ${shouldBeActive ? "apply" : "remove"} for schedule "${schedule.name}" on node "${nodeId}": ${message}`,
+        );
+        return {
+          scheduleId: schedule.id,
+          scheduleName: schedule.name,
+          nodeId,
+          action: "skipped",
+          reason: `deferred-node-unreachable: ${message}`,
+        };
+      }
       this.logger.error(
         `Failed to ${shouldBeActive ? "apply" : "remove"} schedule "${schedule.name}" on node "${nodeId}": ${message}`,
       );

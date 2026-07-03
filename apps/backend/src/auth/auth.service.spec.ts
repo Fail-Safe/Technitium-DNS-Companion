@@ -10,7 +10,9 @@ jest.mock("axios", () => {
   const mock: AxiosMock = {
     get: jest.fn(),
     isAxiosError: (err: unknown) =>
-      Boolean(err) && typeof err === "object" && "response" in (err as object),
+      Boolean(err) &&
+      typeof err === "object" &&
+      ("response" in (err as object) || "isAxiosError" in (err as object)),
   };
 
   return { __esModule: true, default: mock };
@@ -95,9 +97,57 @@ describe("AuthService.login", () => {
     expect(nodeB).toMatchObject({
       nodeId: "nodeB",
       success: false,
+      authState: "failed",
       status: "ok",
       error: "invalid token",
     });
+  });
+
+  it("keeps login usable when one configured node is unreachable", async () => {
+    const { service, axiosMock } = createService([
+      { id: "nodeA", baseUrl: "https://n1" },
+      { id: "nodeB", baseUrl: "https://n2" },
+    ]);
+
+    axiosMock.get.mockImplementation((url: string) => {
+      if (url === "https://n1/api/user/login") {
+        const err = Object.assign(new Error("connect ECONNREFUSED"), {
+          isAxiosError: true,
+          code: "ECONNREFUSED",
+          request: {},
+        });
+        return Promise.reject(err);
+      }
+
+      if (url === "https://n2/api/user/login") {
+        return Promise.resolve({ data: { status: "ok", token: "t2" } });
+      }
+      if (url === "https://n2/api/user/session/get") {
+        return Promise.resolve({ data: { status: "ok" } });
+      }
+
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const { session, response } = await service.login({
+      username: "alice",
+      password: "pw",
+    });
+
+    expect(session.tokensByNodeId).toEqual({ nodeB: "t2" });
+    expect(session.nodeAuthStatesByNodeId).toEqual({
+      nodeA: {
+        status: "unreachable",
+        error: "connect ECONNREFUSED",
+      },
+      nodeB: { status: "authenticated" },
+    });
+
+    expect(response.nodes.find((n) => n.nodeId === "nodeA")).toMatchObject({
+      success: false,
+      authState: "unreachable",
+    });
+    expect(response.authenticated).toBe(true);
   });
 
   it("rejects login when no node yields a verified token", async () => {
@@ -120,7 +170,20 @@ describe("AuthService.login", () => {
 
     await expect(
       service.login({ username: "alice", password: "pw" }),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    ).rejects.toMatchObject({
+      response: {
+        message: "Unable to authenticate to any configured Technitium node",
+        nodes: [
+          {
+            nodeId: "nodeA",
+            success: false,
+            authState: "failed",
+            status: "ok",
+            error: "invalid token",
+          },
+        ],
+      },
+    });
   });
 
   it("captures redirect diagnostics when Technitium baseUrl redirects", async () => {

@@ -7,22 +7,31 @@ export function NodeSessionExpiredBanner({
   authenticated,
   configuredNodeIds,
   nodeIds,
+  unreachableNodeIds,
 }: {
   sessionAuthEnabled: boolean | undefined;
   authenticated: boolean;
   configuredNodeIds: string[] | undefined;
   nodeIds: string[] | undefined;
+  unreachableNodeIds: string[] | undefined;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
 
   const configured = useMemo(() => configuredNodeIds ?? [], [configuredNodeIds]);
   const sessionNodes = useMemo(() => nodeIds ?? [], [nodeIds]);
+  const unreachableNodes = useMemo(
+    () => unreachableNodeIds ?? [],
+    [unreachableNodeIds],
+  );
 
   const missingNodeIds = useMemo(() => {
     const sessionSet = new Set(sessionNodes);
-    return configured.filter((nodeId) => !sessionSet.has(nodeId));
-  }, [configured, sessionNodes]);
+    const unreachableSet = new Set(unreachableNodes);
+    return configured.filter(
+      (nodeId) => !sessionSet.has(nodeId) && !unreachableSet.has(nodeId),
+    );
+  }, [configured, sessionNodes, unreachableNodes]);
 
   const show =
     sessionAuthEnabled === true &&

@@ -29,7 +29,7 @@ export class NodeOverviewCacheInterceptor extends CacheInterceptor {
     const http = context.switchToHttp();
     const response = http.getResponse<HeaderResponse>();
 
-    const key = this.trackBy(context);
+    const key = await Promise.resolve(this.trackBy(context));
     if (!key) {
       response.setHeader("X-Cache-Status", "BYPASS");
       return super.intercept(context, next);

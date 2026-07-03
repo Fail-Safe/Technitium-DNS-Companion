@@ -7,6 +7,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.1] - 2026-07-03
+
+### Changed
+
+- **Multi-node login now supports degraded access.** A login succeeds when at least one configured node authenticates, while unreachable nodes are tracked separately from invalid credentials.
+- **2FA login retry flow is clearer.** When a node requires a one-time password, the login form marks the 2FA field as required, focuses it, and preserves the user's username/password entry for retry.
+- **Dependency constraints refreshed.** Updated backend NestJS package ranges and root overrides for patched transitive packages.
+
+### Fixed
+
+- **Unreachable nodes no longer trigger stale session warnings.** Nodes that were unreachable during login are excluded from the "missing node session" banner until they become reachable.
+- **Invalidated node tokens are reflected in session state.** When Technitium rejects a per-node token, Companion removes that token and marks the node as failed so the UI can prompt for re-authentication accurately.
+- **DNS Override evaluation defers unreachable nodes safely.** Schedule apply/remove operations now skip unreachable target nodes without marking entries as applied or clearing tracked state.
+- **Manual DNS Override runs show deferred nodes.** The run result table now surfaces deferred node actions with an operator-readable reason instead of hiding them as ordinary skipped rows.
+- **Overview cards keep a stable node order.** The overview page now sorts node cards consistently instead of depending on response order.
+- **Node overview cache status works with async cache keys.** The cache interceptor now handles NestJS cache key tracking that resolves asynchronously.
+
+### Testing
+
+- Updated backend E2E tests to create authenticated Companion sessions and exercise current protected API behavior.
+- Updated frontend Playwright coverage for the renamed DNS Overrides page headings.
+- Verified build, unit tests, lint, audit, backend E2E, frontend Chromium E2E, production Docker image build, and container health check.
+
 ## [1.8.0] - 2026-06-28
 
 ### Added

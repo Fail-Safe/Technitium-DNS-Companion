@@ -5,6 +5,11 @@ import { App } from "supertest/types";
 import { AppModule } from "./../src/app.module";
 import { join } from "path";
 import os from "os";
+import {
+  createE2eSessionCookie,
+  enableSecureProxyForE2e,
+  withE2eAuth,
+} from "./e2e-auth";
 
 // Response type definitions for test
 interface QueryLogEntry {
@@ -21,6 +26,7 @@ interface CombinedLogsResponse {
 
 describe("Query Logs - Combined View (e2e)", () => {
   let app: INestApplication<App>;
+  let sessionCookie: string;
 
   beforeEach(async () => {
     // Ensure cache directory is writable during tests
@@ -33,7 +39,9 @@ describe("Query Logs - Combined View (e2e)", () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix("api");
+    enableSecureProxyForE2e(app);
     await app.init();
+    sessionCookie = createE2eSessionCookie(app);
   });
 
   afterEach(async () => {
@@ -42,8 +50,10 @@ describe("Query Logs - Combined View (e2e)", () => {
 
   describe("Balanced Node Sampling", () => {
     it("should list configured nodes (or empty if none configured)", () => {
-      return request(app.getHttpServer())
-        .get("/api/nodes")
+      return withE2eAuth(
+        request(app.getHttpServer()).get("/api/nodes"),
+        sessionCookie,
+      )
         .expect(200)
         .expect((res) => {
           const body = res.body as Array<{ id: string; baseUrl: string }>;
@@ -58,10 +68,12 @@ describe("Query Logs - Combined View (e2e)", () => {
     });
 
     it("should fetch combined logs without deduplication", () => {
-      return request(app.getHttpServer())
-        .get(
+      return withE2eAuth(
+        request(app.getHttpServer()).get(
           "/api/nodes/logs/combined?entriesPerPage=200&deduplicateDomains=false",
-        )
+        ),
+        sessionCookie,
+      )
         .expect(200)
         .expect((res) => {
           const body = res.body as CombinedLogsResponse;
@@ -97,10 +109,12 @@ describe("Query Logs - Combined View (e2e)", () => {
     });
 
     it("should fetch combined logs with deduplication and preserve node diversity", () => {
-      return request(app.getHttpServer())
-        .get(
+      return withE2eAuth(
+        request(app.getHttpServer()).get(
           "/api/nodes/logs/combined?entriesPerPage=200&deduplicateDomains=true",
-        )
+        ),
+        sessionCookie,
+      )
         .expect(200)
         .expect((res) => {
           const body = res.body as CombinedLogsResponse;
@@ -139,10 +153,12 @@ describe("Query Logs - Combined View (e2e)", () => {
     });
 
     it("should respect buffer size parameter for balanced sampling", () => {
-      return request(app.getHttpServer())
-        .get(
+      return withE2eAuth(
+        request(app.getHttpServer()).get(
           "/api/nodes/logs/combined?entriesPerPage=500&deduplicateDomains=false",
-        )
+        ),
+        sessionCookie,
+      )
         .expect(200)
         .expect((res) => {
           const body = res.body as CombinedLogsResponse;
@@ -173,8 +189,12 @@ describe("Query Logs - Combined View (e2e)", () => {
     });
 
     it("should return nodes summary with total entries per node", () => {
-      return request(app.getHttpServer())
-        .get("/api/nodes/logs/combined?entriesPerPage=50")
+      return withE2eAuth(
+        request(app.getHttpServer()).get(
+          "/api/nodes/logs/combined?entriesPerPage=50",
+        ),
+        sessionCookie,
+      )
         .expect(200)
         .expect((res) => {
           const body = res.body as CombinedLogsResponse;
@@ -191,10 +211,12 @@ describe("Query Logs - Combined View (e2e)", () => {
     });
 
     it("should include node information in each log entry", () => {
-      return request(app.getHttpServer())
-        .get(
+      return withE2eAuth(
+        request(app.getHttpServer()).get(
           "/api/nodes/logs/combined?entriesPerPage=10&deduplicateDomains=false",
-        )
+        ),
+        sessionCookie,
+      )
         .expect(200)
         .expect((res) => {
           const body = res.body as CombinedLogsResponse;
@@ -211,10 +233,12 @@ describe("Query Logs - Combined View (e2e)", () => {
 
   describe("Deduplication Logic", () => {
     it("should reduce duplicate domains while preserving node diversity", () => {
-      return request(app.getHttpServer())
-        .get(
+      return withE2eAuth(
+        request(app.getHttpServer()).get(
           "/api/nodes/logs/combined?entriesPerPage=100&deduplicateDomains=true",
-        )
+        ),
+        sessionCookie,
+      )
         .expect(200)
         .expect((res) => {
           const body = res.body as CombinedLogsResponse;
@@ -229,10 +253,12 @@ describe("Query Logs - Combined View (e2e)", () => {
     });
 
     it("should prioritize blocked entries over allowed in deduplication", () => {
-      return request(app.getHttpServer())
-        .get(
+      return withE2eAuth(
+        request(app.getHttpServer()).get(
           "/api/nodes/logs/combined?entriesPerPage=200&deduplicateDomains=true",
-        )
+        ),
+        sessionCookie,
+      )
         .expect(200)
         .expect((res) => {
           const body = res.body as CombinedLogsResponse;

@@ -13,9 +13,16 @@ import { AUTH_SESSION_COOKIE_NAME } from "./auth.constants";
 import type {
   AuthLoginRequestDto,
   AuthLoginResponseDto,
+  AuthNodeSessionState,
   AuthNodeLoginResult,
+  AuthNodeLoginFailureResult,
   AuthSession,
 } from "./auth.types";
+
+type AuthNodeFailureStatus = Exclude<
+  AuthNodeSessionState["status"],
+  "authenticated"
+>;
 
 @Injectable()
 export class AuthService {
@@ -26,11 +33,68 @@ export class AuthService {
     keepAlive: true,
   });
 
+  private isNodeUnreachableError(error: unknown): boolean {
+    if (axios.isAxiosError(error) && !error.response) {
+      return true;
+    }
+
+    if (!error || typeof error !== "object") {
+      return false;
+    }
+
+    const code = (error as { code?: unknown }).code;
+    if (
+      typeof code === "string" &&
+      [
+        "ECONNABORTED",
+        "ECONNREFUSED",
+        "ECONNRESET",
+        "ENETUNREACH",
+        "EHOSTUNREACH",
+        "ENOTFOUND",
+        "ETIMEDOUT",
+      ].includes(code)
+    ) {
+      return true;
+    }
+
+    const message =
+      error instanceof Error ? error.message.toLowerCase() : undefined;
+    return Boolean(
+      message &&
+      (message.includes("timeout") ||
+        message.includes("network error") ||
+        message.includes("connect econnrefused") ||
+        message.includes("getaddrinfo") ||
+        message.includes("host unreachable")),
+    );
+  }
+
+  private classifyFailure(error: unknown): AuthNodeFailureStatus {
+    return this.isNodeUnreachableError(error) ? "unreachable" : "failed";
+  }
+
+  private buildFailureResults(
+    results: AuthNodeLoginResult[],
+  ): AuthNodeLoginFailureResult[] {
+    return results.map(({ nodeId, success, authState, status, error }) => ({
+      nodeId,
+      success: false,
+      authState,
+      status,
+      error,
+      ...(success ? { error: "Unexpected successful login result." } : {}),
+    }));
+  }
+
   private async verifyTokenForNode(args: {
     nodeId: string;
     baseUrl: string;
     token: string;
-  }): Promise<{ ok: true } | { ok: false; error: string }> {
+  }): Promise<
+    | { ok: true }
+    | { ok: false; error: string; authState: AuthNodeFailureStatus }
+  > {
     try {
       const res = await axios.get(`${args.baseUrl}/api/user/session/get`, {
         params: { token: args.token },
@@ -54,7 +118,11 @@ export class AuthService {
             ((res.data as Record<string, unknown>).innerErrorMessage as string)
           : undefined;
 
-      return { ok: false, error: errorMessage || "Token was rejected by node" };
+      return {
+        ok: false,
+        error: errorMessage || "Token was rejected by node",
+        authState: "failed",
+      };
     } catch (error) {
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
@@ -65,6 +133,7 @@ export class AuthService {
               : "(missing Location header)";
           return {
             ok: false,
+            authState: "failed",
             error: `Request was redirected (HTTP ${status}) to ${location}. Check baseUrl for node "${args.nodeId}".`,
           };
         }
@@ -72,13 +141,18 @@ export class AuthService {
         if (typeof status === "number") {
           return {
             ok: false,
+            authState: "failed",
             error: `Token validation failed (HTTP ${status}).`,
           };
         }
       }
 
       const message = error instanceof Error ? error.message : "Unknown error";
-      return { ok: false, error: message };
+      return {
+        ok: false,
+        authState: this.classifyFailure(error),
+        error: message,
+      };
     }
   }
 
@@ -145,6 +219,7 @@ export class AuthService {
 
     const results: AuthNodeLoginResult[] = [];
     const tokensByNodeId: Record<string, string> = {};
+    const nodeAuthStatesByNodeId: Record<string, AuthNodeSessionState> = {};
 
     for (const node of this.nodeConfigs) {
       const baseUrl = node.baseUrl;
@@ -172,10 +247,12 @@ export class AuthService {
 
           if (verified.ok) {
             tokensByNodeId[node.id] = token;
+            nodeAuthStatesByNodeId[node.id] = { status: "authenticated" };
             results.push({
               nodeId: node.id,
               baseUrl,
               success: true,
+              authState: "authenticated",
               token,
               status: "ok",
             });
@@ -190,9 +267,14 @@ export class AuthService {
             nodeId: node.id,
             baseUrl,
             success: false,
+            authState: verified.authState,
             status: "ok",
             error: verified.error,
           });
+          nodeAuthStatesByNodeId[node.id] = {
+            status: verified.authState,
+            error: verified.error,
+          };
           continue;
         }
 
@@ -207,12 +289,18 @@ export class AuthService {
           nodeId: node.id,
           baseUrl,
           success: false,
+          authState: "failed",
           status: typeof status === "string" ? status : undefined,
           error: errorMessage || "Login failed",
         });
+        nodeAuthStatesByNodeId[node.id] = {
+          status: "failed",
+          error: errorMessage || "Login failed",
+        };
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
+        const authState = this.classifyFailure(error);
         this.logger.warn(
           `Login failed for node ${node.id} (${baseUrl}): ${message}`,
         );
@@ -220,19 +308,29 @@ export class AuthService {
           nodeId: node.id,
           baseUrl,
           success: false,
+          authState,
           error: message,
         });
+        nodeAuthStatesByNodeId[node.id] = {
+          status: authState,
+          error: message,
+        };
       }
     }
 
     const successCount = Object.keys(tokensByNodeId).length;
     if (successCount === 0) {
-      throw new UnauthorizedException(
-        "Unable to authenticate to any configured Technitium node",
-      );
+      throw new UnauthorizedException({
+        message: "Unable to authenticate to any configured Technitium node",
+        nodes: this.buildFailureResults(results),
+      });
     }
 
-    const session = this.sessionService.create(username, tokensByNodeId);
+    const session = this.sessionService.create(
+      username,
+      tokensByNodeId,
+      nodeAuthStatesByNodeId,
+    );
 
     return { session, response: { authenticated: true, nodes: results } };
   }
