@@ -629,75 +629,78 @@ export class TechnitiumService {
     //   would see all nodes as Standalone and skip cluster-aware behavior.
     if (this.nodeConfigs.length > 0) {
       const session = AuthRequestContext.getSession();
-      const probeNode =
+      const probeNodes =
         authMode === "session"
           ? this.sessionAuthEnabled
-            ? this.nodeConfigs.find(
+            ? this.nodeConfigs.filter(
                 (node) => !!session?.tokensByNodeId?.[node.id],
               )
-            : this.nodeConfigs[0]
-          : this.nodeConfigs[0];
+            : this.nodeConfigs
+          : this.nodeConfigs;
 
-      if (!probeNode) {
+      if (probeNodes.length === 0) {
         // No authenticated nodes available (or no nodes configured)
         // -> treat as standalone.
         sharedClusterInfo = null;
       } else {
-        try {
-          // Get full cluster state from first node
-          const response = await this.request<{
-            status: string;
-            info?: {
-              version?: string;
-              clusterInitialized?: boolean;
-              clusterDomain?: string;
-              dnsServerDomain?: string;
-              clusterNodes?: Array<{
-                id: number;
-                name: string;
-                url: string;
-                ipAddress: string;
-                type: "Primary" | "Secondary";
-                state: string;
-              }>;
-            };
-            server?: string;
-          }>(
-            probeNode,
-            {
-              method: "GET",
-              url: "/api/user/session/get",
-              params: {},
-            },
-            { authMode },
-          );
-
-          if (response.status === "ok" && response.info?.clusterInitialized) {
-            const clusterNodes = response.info.clusterNodes || [];
-            sharedClusterInfo = {
-              initialized: true,
-              domain: response.info.clusterDomain,
-              clusterNodes,
-            };
-            const topologyFingerprint = this.buildClusterTopologyFingerprint(
-              response.info.clusterDomain,
-              clusterNodes,
+        for (const probeNode of probeNodes) {
+          try {
+            // Get full cluster state from first node
+            const response = await this.request<{
+              status: string;
+              info?: {
+                version?: string;
+                clusterInitialized?: boolean;
+                clusterDomain?: string;
+                dnsServerDomain?: string;
+                clusterNodes?: Array<{
+                  id: number;
+                  name: string;
+                  url: string;
+                  ipAddress: string;
+                  type: "Primary" | "Secondary";
+                  state: string;
+                }>;
+              };
+              server?: string;
+            }>(
+              probeNode,
+              {
+                method: "GET",
+                url: "/api/user/session/get",
+                params: {},
+              },
+              { authMode },
             );
-            if (this.shouldLogClusterTopology(topologyFingerprint)) {
-              this.logger.log(
-                `Cluster detected: ${response.info.clusterDomain} with ${clusterNodes.length} nodes`,
+
+            if (response.status === "ok" && response.info?.clusterInitialized) {
+              const clusterNodes = response.info.clusterNodes || [];
+              sharedClusterInfo = {
+                initialized: true,
+                domain: response.info.clusterDomain,
+                clusterNodes,
+              };
+              const topologyFingerprint = this.buildClusterTopologyFingerprint(
+                response.info.clusterDomain,
+                clusterNodes,
               );
-              for (const cn of clusterNodes) {
-                this.logger.debug(
-                  `  Cluster node: name="${cn.name}", url="${cn.url}", ip="${cn.ipAddress}", type="${cn.type}"`,
+              if (this.shouldLogClusterTopology(topologyFingerprint)) {
+                this.logger.log(
+                  `Cluster detected: ${response.info.clusterDomain} with ${clusterNodes.length} nodes`,
                 );
+                for (const cn of clusterNodes) {
+                  this.logger.debug(
+                    `  Cluster node: name="${cn.name}", url="${cn.url}", ip="${cn.ipAddress}", type="${cn.type}"`,
+                  );
+                }
               }
+              break;
             }
+          } catch (error) {
+            this.logger.warn(
+              `Failed to fetch cluster state from probe node ${probeNode.id}, trying another configured node: ${error}`,
+            );
           }
-        } catch (error) {
-          this.logger.warn(
-            `Failed to fetch cluster state from probe node ${probeNode.id}, will treat all as standalone: ${error}`,
-          );
         }
       }
     }

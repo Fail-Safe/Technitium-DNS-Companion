@@ -122,6 +122,7 @@ export interface TechnitiumState {
     nodeId: string,
     config: AdvancedBlockingConfig,
     snapshotNote?: string,
+    cacheDomain?: string,
   ) => Promise<AdvancedBlockingSnapshot | undefined>;
   // Built-in Blocking state
   builtInBlocking?: BuiltInBlockingOverview;
@@ -1165,6 +1166,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       nodeId: string,
       config: AdvancedBlockingConfig,
       snapshotNote?: string,
+      cacheDomain?: string,
     ) => {
       try {
         const response = await apiFetch(
@@ -1172,7 +1174,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ config, snapshotNote }),
+            body: JSON.stringify({ config, snapshotNote, cacheDomain }),
           },
         );
 

@@ -33,6 +33,10 @@ import type {
   AdvancedBlockingConfig,
   AdvancedBlockingGroup,
 } from "../types/advancedBlocking";
+import {
+  resolveAdvancedBlockingWriteNodeId,
+  selectAdvancedBlockingWriteSnapshots,
+} from "../utils/advanced-blocking-routing";
 import type {
   LogAlertEvaluatorStatus,
   LogAlertCapabilitiesResponse,
@@ -4051,8 +4055,12 @@ export function LogsPage() {
         // Open the modal immediately (spinner UX) and let the modal content reflect
         // Advanced Blocking loading state instead of forcing the user to retry.
         const domain = entry.qname ?? "";
+        const writeNodeId = resolveAdvancedBlockingWriteNodeId(
+          nodes,
+          entry.nodeId,
+        );
         const snapshot = advancedBlocking?.nodes?.find(
-          (nodeConfig) => nodeConfig.nodeId === entry.nodeId,
+          (nodeConfig) => nodeConfig.nodeId === writeNodeId,
         );
         const groups = snapshot?.config?.groups ?? [];
 
@@ -4061,7 +4069,7 @@ export function LogsPage() {
         // Only hard-fail early if we already have a payload and it explicitly errored for this node.
         if (advancedBlocking && !snapshot?.config && snapshot?.error) {
           setBlockError(
-            `Failed to load Advanced Blocking config for node "${entry.nodeId}": ${snapshot.error}`,
+            `Failed to load Advanced Blocking config for node "${writeNodeId}": ${snapshot.error}`,
           );
         }
 
@@ -4165,6 +4173,7 @@ export function LogsPage() {
       displayMode,
       tailPaused,
       blockingStatus?.nodes,
+      nodes,
     ],
   );
 
@@ -4587,10 +4596,14 @@ export function LogsPage() {
       return undefined;
     }
 
-    return advancedBlocking?.nodes?.find(
-      (snapshot) => snapshot.nodeId === blockDialog.entry.nodeId,
+    const writeNodeId = resolveAdvancedBlockingWriteNodeId(
+      nodes,
+      blockDialog.entry.nodeId,
     );
-  }, [advancedBlocking, blockDialog]);
+    return advancedBlocking?.nodes?.find(
+      (snapshot) => snapshot.nodeId === writeNodeId,
+    );
+  }, [advancedBlocking, blockDialog, nodes]);
 
   const blockAvailableGroups = useMemo(
     () => blockDialogSnapshot?.config?.groups ?? [],
@@ -4604,6 +4617,18 @@ export function LogsPage() {
   );
   const blockNodeLabel = blockDialog
     ? (nodeMap.get(blockDialog.entry.nodeId)?.name ?? blockDialog.entry.nodeId)
+    : "";
+  const blockWriteNodeId = blockDialog
+    ? resolveAdvancedBlockingWriteNodeId(nodes, blockDialog.entry.nodeId)
+    : "";
+  const blockWriteNodeLabel = blockWriteNodeId
+    ? (nodeMap.get(blockWriteNodeId)?.name ?? blockWriteNodeId)
+    : "";
+  const advancedBlockingPrimaryNode = nodes.find(
+    (node) => node.isPrimary === true,
+  );
+  const advancedBlockingPrimaryLabel = advancedBlockingPrimaryNode
+    ? advancedBlockingPrimaryNode.name || advancedBlockingPrimaryNode.id
     : "";
   const isBlockedEntry = blockDialog
     ? isEntryBlocked(blockDialog.entry)
@@ -4703,11 +4728,15 @@ export function LogsPage() {
   // For bulk actions, collect groups from all nodes
   const availableGroupsForSelection = useMemo(() => {
     if (bulkAction) {
-      // Get union of all groups from all nodes
+      // Cluster writes use the Primary's authoritative config. Standalone nodes
+      // retain the existing union-of-groups behavior.
       const groupMap = new Map<string, AdvancedBlockingGroup>();
-      const nodes = advancedBlocking?.nodes ?? [];
+      const snapshots = selectAdvancedBlockingWriteSnapshots(
+        nodes,
+        advancedBlocking?.nodes ?? [],
+      );
 
-      nodes.forEach((snapshot) => {
+      snapshots.forEach((snapshot) => {
         const groups = snapshot.config?.groups ?? [];
         groups.forEach((group) => {
           if (!groupMap.has(group.name)) {
@@ -4719,7 +4748,7 @@ export function LogsPage() {
       return Array.from(groupMap.values());
     }
     return blockAvailableGroups;
-  }, [bulkAction, advancedBlocking, blockAvailableGroups]);
+  }, [bulkAction, advancedBlocking, blockAvailableGroups, nodes]);
 
   const modalTitle =
     blockingAction === "allow"
@@ -5145,7 +5174,12 @@ export function LogsPage() {
 
     try {
       setIsBlocking(true);
-      await saveAdvancedBlockingConfig(blockDialog.entry.nodeId, updatedConfig);
+      await saveAdvancedBlockingConfig(
+        blockWriteNodeId,
+        updatedConfig,
+        undefined,
+        domain,
+      );
 
       // Tail mode UX: if paused, patch visible entries in-place rather than forcing
       // a refresh that can reshuffle the table and lose the user's position.
@@ -5170,6 +5204,7 @@ export function LogsPage() {
   }, [
     blockDialog,
     blockDialogSnapshot,
+    blockWriteNodeId,
     blockMode,
     blockRegexValue,
     blockSelectedGroups,
@@ -5209,8 +5244,12 @@ export function LogsPage() {
       setBlockError(undefined);
 
       // Apply to all nodes with Advanced Blocking enabled
-      const nodesToUpdate =
+      const configuredSnapshots =
         advancedBlocking?.nodes?.filter((snapshot) => snapshot.config) ?? [];
+      const nodesToUpdate = selectAdvancedBlockingWriteSnapshots(
+        nodes,
+        configuredSnapshots,
+      );
 
       if (nodesToUpdate.length === 0) {
         setBlockError("No nodes with Advanced Blocking configuration found.");
@@ -5317,6 +5356,7 @@ export function LogsPage() {
     selectedDomains,
     blockSelectedGroups,
     advancedBlocking,
+    nodes,
     saveAdvancedBlockingConfig,
     setRefreshTick,
     clearSelection,
@@ -8772,7 +8812,10 @@ export function LogsPage() {
                             {selectedDomains.size} domain
                             {selectedDomains.size !== 1 ? "s" : ""}
                           </strong>{" "}
-                          in Advanced Blocking groups across all nodes.
+                          in Advanced Blocking groups
+                          {advancedBlockingPrimaryNode
+                            ? ` through ${advancedBlockingPrimaryLabel}.`
+                            : " across all nodes."}
                         </p>
                         <section className="logs-page__modal-summary">
                           <h3 className="logs-page__modal-summary-title">
@@ -8850,7 +8893,16 @@ export function LogsPage() {
                                     {isBlockedEntry
                                       ? "on"
                                       : "to Advanced Blocking on"}{" "}
-                                    node <strong>{blockNodeLabel}</strong>.
+                                    node <strong>{blockWriteNodeLabel}</strong>
+                                    {blockWriteNodeId !==
+                                    blockDialog?.entry.nodeId ? (
+                                      <>
+                                        {" "}
+                                        (query observed on {blockNodeLabel}).
+                                      </>
+                                    ) : (
+                                      "."
+                                    )}
                                   </>
                                 )}
                               </>
