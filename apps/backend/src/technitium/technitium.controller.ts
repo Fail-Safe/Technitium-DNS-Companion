@@ -593,7 +593,7 @@ export class TechnitiumController {
         flushNodeIds.map(async (flushNodeId) => {
           try {
             await this.technitiumService.executeAction(flushNodeId, {
-              method: "DELETE",
+              method: "GET",
               url: "/api/cache/delete",
               params: { domain: cacheDomain },
             });
