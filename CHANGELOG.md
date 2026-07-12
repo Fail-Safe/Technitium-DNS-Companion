@@ -7,6 +7,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.2] - 2026-07-12
+
+### Fixed
+
+- **Advanced Blocking writes now target the cluster primary.** Domain allow/block changes initiated while viewing a secondary node are routed through the primary node so cluster-managed configuration remains consistent.
+- **Policy changes invalidate only the affected DNS cache entry.** After an Advanced Blocking mutation, Companion calls Technitium's cache-delete action for the changed domain instead of flushing the complete DNS cache.
+- **Log-page allow/block actions preserve the selected node context.** The frontend resolves the correct mutation target while retaining the originating node for status and error reporting.
+
+### Testing
+
+- Added backend and frontend regression coverage for primary-node Advanced Blocking routing and targeted cache invalidation.
+
 ## [1.8.1] - 2026-07-03
 
 ### Changed
