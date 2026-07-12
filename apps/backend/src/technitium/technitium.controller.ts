@@ -555,15 +555,23 @@ export class TechnitiumController {
       throw new BadRequestException("Advanced Blocking config is required.");
     }
 
+    const { perCandidate } =
+      await this.technitiumService.resolveClusterWriteTargets([nodeId]);
+    const writePlan = perCandidate.get(nodeId);
+    const writeNodeId = writePlan?.writeTarget ?? nodeId;
+    const flushNodeIds = writePlan?.flushNodes ?? [writeNodeId];
+
     // Best-effort automatic snapshot for rollback before applying changes.
     // Do not block the save if snapshot creation fails.
     const requestNote =
       typeof body.snapshotNote === "string" ? body.snapshotNote.trim() : "";
     const snapshotNote = requestNote.length > 0 ? requestNote : undefined;
+    const cacheDomain =
+      typeof body.cacheDomain === "string" ? body.cacheDomain.trim() : "";
 
     try {
       await this.dnsFilteringSnapshotService.saveSnapshot(
-        nodeId,
+        writeNodeId,
         "advanced-blocking",
         "automatic",
         snapshotNote ??
@@ -571,11 +579,34 @@ export class TechnitiumController {
       );
     } catch (error) {
       this.logger.warn(
-        `Failed to create automatic DNS filtering snapshot before Advanced Blocking save for node ${nodeId}: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to create automatic DNS filtering snapshot before Advanced Blocking save for node ${writeNodeId}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 
-    return this.advancedBlockingService.setConfig(nodeId, body.config);
+    const snapshot = await this.advancedBlockingService.setConfig(
+      writeNodeId,
+      body.config,
+    );
+
+    if (cacheDomain) {
+      await Promise.all(
+        flushNodeIds.map(async (flushNodeId) => {
+          try {
+            await this.technitiumService.executeAction(flushNodeId, {
+              method: "DELETE",
+              url: "/api/cache/delete",
+              params: { domain: cacheDomain },
+            });
+          } catch (error) {
+            this.logger.warn(
+              `Failed to invalidate cached domain ${cacheDomain} on node ${flushNodeId} after Advanced Blocking save: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }),
+      );
+    }
+
+    return snapshot;
   }
 
   @Post(":nodeId/dhcp/scopes/:scopeName/clone")

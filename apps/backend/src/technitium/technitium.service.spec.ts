@@ -1030,3 +1030,66 @@ describe("TechnitiumService — resolveClusterWriteTargets", () => {
     expect(writeTargets).toEqual(["ghost"]);
   });
 });
+
+describe("TechnitiumService — cluster probe failover", () => {
+  let service: TechnitiumService;
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    service.onModuleDestroy();
+  });
+
+  it("tries another configured node when the first cluster probe fails", async () => {
+    const nodes: TechnitiumNodeConfig[] = [
+      { id: "secondary", baseUrl: "https://secondary.test", token: "token" },
+      { id: "primary", baseUrl: "https://primary.test", token: "token" },
+    ];
+    service = new TechnitiumService(nodes, new DhcpSnapshotService());
+    const internals = service as unknown as {
+      request: jest.Mock;
+      resolveHostname: jest.Mock;
+    };
+    internals.request = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("probe unavailable"))
+      .mockResolvedValueOnce({
+        status: "ok",
+        info: {
+          clusterInitialized: true,
+          clusterDomain: "example.test",
+          clusterNodes: [
+            {
+              id: 1,
+              name: "primary",
+              url: "https://primary.test",
+              ipAddress: "192.0.2.10",
+              type: "Primary",
+              state: "Connected",
+            },
+            {
+              id: 2,
+              name: "secondary",
+              url: "https://secondary.test",
+              ipAddress: "192.0.2.11",
+              type: "Secondary",
+              state: "Connected",
+            },
+          ],
+        },
+      });
+    internals.resolveHostname = jest
+      .fn()
+      .mockImplementation((hostname: string) =>
+        Promise.resolve(
+          hostname === "primary.test" ? "192.0.2.10" : "192.0.2.11",
+        ),
+      );
+
+    const summaries = await service.listNodes({ authMode: "background" });
+
+    expect(internals.request).toHaveBeenCalledTimes(2);
+    expect(summaries.find((node) => node.id === "primary")?.isPrimary).toBe(
+      true,
+    );
+  });
+});

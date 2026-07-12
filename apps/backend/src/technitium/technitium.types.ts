@@ -76,7 +76,7 @@ export type TechnitiumActionCategory =
   | "advancedBlocking";
 
 export interface TechnitiumActionPayload {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "DELETE";
   url: string;
   params?: Record<string, string | number | boolean>;
   headers?: Record<string, string>;
