@@ -1,0 +1,91 @@
+name: Verify Technitium v15 Compatibility
+
+on:
+  pull_request:
+    branches:
+      - next
+    paths:
+      - ".github/workflows/technitium-v15-compatibility.yml"
+      - "apps/backend/**"
+      - "package.json"
+      - "package-lock.json"
+      - "docs/features/TECHNITIUM_VERSION_COMPATIBILITY.md"
+  push:
+    branches:
+      - next
+    paths:
+      - ".github/workflows/technitium-v15-compatibility.yml"
+      - "apps/backend/**"
+      - "package.json"
+      - "package-lock.json"
+      - "docs/features/TECHNITIUM_VERSION_COMPATIBILITY.md"
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+    inputs:
+      latest_v15_tag:
+        description: Official technitium/dns-server tag for the latest v15 release
+        required: false
+        type: string
+        default: "15.4.0"
+
+jobs:
+  compatibility:
+    name: Technitium ${{ matrix.track }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        track:
+          - minimum-v15.3
+          - latest-v15
+
+    services:
+      technitium:
+        image: technitium/dns-server:${{ matrix.track == 'minimum-v15.3' && '15.3.0' || (inputs.latest_v15_tag || vars.TECHNITIUM_LATEST_V15_TAG || '15.4.0') }}
+        env:
+          DNS_SERVER_DOMAIN: compatibility.test.invalid
+          DNS_SERVER_ADMIN_PASSWORD: admin
+        ports:
+          - 5380:5380
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Wait for Technitium DNS
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error \
+              "http://127.0.0.1:5380/api/user/login?user=admin&pass=admin" \
+              >/dev/null; then
+              exit 0
+            fi
+
+            echo "Technitium DNS is not ready yet (attempt ${attempt}/30)."
+            sleep 2
+          done
+
+          echo "Technitium DNS did not become ready in time." >&2
+          exit 1
+
+      - name: Run Companion compatibility suite
+        env:
+          TECHNITIUM_TEST_BASE_URL: http://127.0.0.1:5380
+          TECHNITIUM_TEST_EXPECTED_VERSION: ${{ matrix.track == 'minimum-v15.3' && '15.3.0' || (inputs.latest_v15_tag || vars.TECHNITIUM_LATEST_V15_TAG || '15.4.0') }}
+          TECHNITIUM_TEST_USERNAME: admin
+          TECHNITIUM_TEST_PASSWORD: admin
+        run: npm run test:technitium:v15
