@@ -6,11 +6,21 @@ Technitium DNS upgrade guide.
 
 ## Supported baseline
 
-- Technitium DNS v14 remains the minimum supported clustered deployment.
-- Technitium DNS v15.3+ uses the current status endpoint and Bearer-token API
-  convention.
+- Technitium DNS v15.3+ is the forward-looking supported baseline; operators
+  should run the latest available v15 release for upstream security fixes.
+- Technitium DNS v14 and earlier are deprecated. Companion 1.x keeps them
+  functional on a best-effort basis, but no new v14-specific features or
+  integration-test infrastructure will be added.
+- Companion 2.0 will require Technitium DNS v15.3 or later. Removal is planned
+  no earlier than late October 2026, providing at least a 60–90 day migration
+  window from the deprecation announcement.
 - Companion keeps the legacy token query parameter alongside the Bearer header
-  so the same request path remains compatible with v14.
+  during the 1.x deprecation period so existing v14 deployments continue to
+  work.
+
+The Overview page identifies connected pre-v15 nodes and shows an upgrade
+warning. The warning is advisory in Companion 1.x and does not disable reads or
+writes.
 
 ## v14-to-v15 API audit
 
@@ -35,8 +45,20 @@ Backend contract tests verify that:
   HTTP 404;
 - other status failures are not hidden by the compatibility fallback.
 
-These are mocked API-contract tests. Running the integration suite against real
-v14 and v15 containers is still an open roadmap item.
+These are mocked API-contract tests. The planned live integration matrix will
+target the v15.3 minimum and latest v15 release rather than expanding v14 test
+infrastructure during its deprecation period.
+
+## Removal plan for Companion 2.0
+
+Companion 2.0 will remove the v14 compatibility paths:
+
+- duplicate query-token authentication on requests that use a Bearer token;
+- the `/api/status` HTTP 404 fallback to `/api/user/session/get`;
+- documentation and examples that present pre-v15 deployments as supported.
+
+Before that removal, Companion 1.x will retain the existing compatibility
+tests and provide an actionable warning without blocking operators.
 
 ## Upgrade notes
 

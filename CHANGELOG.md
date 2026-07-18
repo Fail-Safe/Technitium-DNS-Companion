@@ -7,6 +7,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **Technitium DNS v14 and earlier are now deprecated.** Companion 1.x keeps existing deployments functional on a best-effort basis and surfaces an actionable Overview warning. Companion 2.0 will require Technitium DNS v15.3 or later, with removal planned no earlier than late October 2026.
+
 ## [1.8.2] - 2026-07-12
 
 ### Fixed
