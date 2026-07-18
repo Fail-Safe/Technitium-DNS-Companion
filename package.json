@@ -11,6 +11,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:technitium:v15": "npm run test:technitium:v15 --workspace apps/backend",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "overrides": {

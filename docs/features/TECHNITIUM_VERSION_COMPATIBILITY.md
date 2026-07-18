@@ -45,9 +45,20 @@ Backend contract tests verify that:
   HTTP 404;
 - other status failures are not hidden by the compatibility fallback.
 
-These are mocked API-contract tests. The planned live integration matrix will
-target the v15.3 minimum and latest v15 release rather than expanding v14 test
-infrastructure during its deprecation period.
+The live compatibility matrix complements those mocked contracts by starting
+official Technitium DNS containers and exercising Companion's real login and
+authenticated request flow. It currently covers:
+
+- the v15.3 minimum (`technitium/dns-server:15.3.0`);
+- the latest validated v15 release (`15.4.0` at the time of this update);
+- Companion session establishment, `/api/status`, settings-backed version
+  detection, zone listing, and standalone cluster discovery.
+
+The workflow runs for relevant pull requests and `next` pushes, on a weekly
+schedule, and on demand. Set the `TECHNITIUM_LATEST_V15_TAG` repository variable
+or the manual workflow input when a newer v15 image should join the matrix.
+This matrix intentionally does not expand v14 integration infrastructure
+during its deprecation period.
 
 ## Removal plan for Companion 2.0
 

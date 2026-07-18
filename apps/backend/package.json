@@ -17,6 +17,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:technitium:v15": "cross-env RUN_TECHNITIUM_V15_TESTS=true ALLOW_TECHNITIUM_HTTP_IN_TESTS=true jest --config ./test/jest-technitium-v15.json --runInBand --detectOpenHandles",
     "test:benchmark": "cross-env RUN_BENCHMARK_TESTS=true ALLOW_TECHNITIUM_HTTP_IN_TESTS=true jest benchmark --runInBand --detectOpenHandles"
   },
   "dependencies": {
