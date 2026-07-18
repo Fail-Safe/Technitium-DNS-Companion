@@ -285,6 +285,31 @@ export class LogAlertsEmailService {
     });
   }
 
+  async sendConfigSyncFailureAlert(params: {
+    sourceNodeId: string;
+    failures: Array<{ nodeId: string; error?: string }>;
+    recipients: string[];
+    startedAt: string;
+  }): Promise<LogAlertsSendTestEmailResponse | null> {
+    const recipients = this.normalizeRecipients(params.recipients);
+    if (recipients.length === 0) return null;
+
+    return this.sendEmail({
+      to: recipients,
+      subject: `[Technitium DNS Companion] Configuration Sync failed: ${params.sourceNodeId}`,
+      text: [
+        `Scheduled Configuration Sync from "${params.sourceNodeId}" failed for ${params.failures.length} target(s).`,
+        `Run started: ${params.startedAt}`,
+        "",
+        ...params.failures.map(
+          (failure) => `${failure.nodeId}: ${failure.error ?? "Unknown error"}`,
+        ),
+        "",
+        "Further alerts are suppressed until a sync run succeeds.",
+      ].join("\n"),
+    });
+  }
+
   private readConfig(): SmtpConfig {
     const host = (process.env.SMTP_HOST ?? "").trim() || undefined;
     const portRaw = (process.env.SMTP_PORT ?? "").trim();

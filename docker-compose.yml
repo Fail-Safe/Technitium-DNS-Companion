@@ -72,9 +72,17 @@ services:
       # Optional: Background token (least-privilege) for background jobs
       # If unset, background jobs that require a token may be disabled.
       # NOTE: This is expected to be REQUIRED when using session auth if you want background
-      # features (PTR warming, scheduled sync) to run.
+      # read-only features such as PTR warming to run.
       # IMPORTANT: Use a low-privilege Technitium DNS token.
       # TECHNITIUM_BACKGROUND_TOKEN: ${TECHNITIUM_BACKGROUND_TOKEN:-}
+
+      # Optional: write-capable automation for DNS Schedules / Configuration Sync
+      # TECHNITIUM_SCHEDULE_TOKEN: ${TECHNITIUM_SCHEDULE_TOKEN:-}
+      # CONFIG_SYNC_ENABLED: "false"
+      # CONFIG_SYNC_SOURCE_NODE: node1
+      # CONFIG_SYNC_TARGET_NODES: node2
+      # CONFIG_SYNC_INTERVAL_MINUTES: "60"
+      # CONFIG_SYNC_NOTIFY_EMAILS: admin@example.com
 
     # Persistent data directory: SQLite databases and DNS filtering snapshots survive
     # container recreates/rebuilds. Create the host directory before first run:

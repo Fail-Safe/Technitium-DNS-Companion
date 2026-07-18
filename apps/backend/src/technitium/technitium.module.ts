@@ -6,6 +6,8 @@ import { AdvancedBlockingService } from "./advanced-blocking.service";
 import { BuiltInBlockingController } from "./built-in-blocking.controller";
 import { BuiltInBlockingService } from "./built-in-blocking.service";
 import { CompanionDbService } from "./companion-db.service";
+import { ConfigSyncSchedulerController } from "./config-sync-scheduler.controller";
+import { ConfigSyncSchedulerService } from "./config-sync-scheduler.service";
 import { DhcpDnsSyncController } from "./dhcp-dns-sync.controller";
 import { DhcpDnsSyncStateService } from "./dhcp-dns-sync-state.service";
 import { DhcpDnsSyncService } from "./dhcp-dns-sync.service";
@@ -72,6 +74,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     DnsFilteringSnapshotService,
     DhcpSnapshotService,
     ZoneSnapshotService,
+    ConfigSyncSchedulerService,
     {
       provide: TECHNITIUM_NODES_TOKEN,
       useFactory: (): TechnitiumNodeConfig[] => {
@@ -160,6 +163,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     LogAlertsController,
     DhcpDnsSyncController,
     SplitHorizonPtrController,
+    ConfigSyncSchedulerController,
   ],
   exports: [
     TechnitiumService,

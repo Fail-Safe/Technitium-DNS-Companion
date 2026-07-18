@@ -157,7 +157,7 @@ export class AdvancedBlockingService {
     nodeId: string,
     authMode: "session" | "background" | "schedule",
   ): Promise<AdvancedBlockingSnapshot> {
-    const summaries = await this.technitiumService.listNodes();
+    const summaries = await this.technitiumService.listNodes({ authMode });
     const summary = summaries.find(
       (node) => node.id.toLowerCase() === nodeId.toLowerCase(),
     );
