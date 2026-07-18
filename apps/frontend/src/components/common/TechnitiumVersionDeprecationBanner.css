@@ -1,0 +1,59 @@
+.technitium-version-deprecation-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning);
+  border-radius: 0.75rem;
+  color: var(--color-warning-dark);
+}
+
+.technitium-version-deprecation-banner__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.technitium-version-deprecation-banner h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  color: inherit;
+}
+
+.technitium-version-deprecation-banner p {
+  margin: 0;
+  line-height: 1.5;
+  color: inherit;
+}
+
+.technitium-version-deprecation-banner .technitium-version-deprecation-banner__nodes {
+  margin-top: 0.35rem;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.technitium-version-deprecation-banner__link {
+  flex-shrink: 0;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid currentcolor;
+  border-radius: 0.5rem;
+  color: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.technitium-version-deprecation-banner__link:hover {
+  background: var(--color-warning);
+}
+
+@media (max-width: 767px) {
+  .technitium-version-deprecation-banner {
+    flex-direction: column;
+  }
+
+  .technitium-version-deprecation-banner__link {
+    width: 100%;
+    text-align: center;
+  }
+}
