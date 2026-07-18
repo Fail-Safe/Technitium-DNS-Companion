@@ -610,6 +610,116 @@ describe("TechnitiumService request (session auth)", () => {
     service.onModuleDestroy();
   });
 
+  it("sends v15 bearer auth while retaining the v14 query token", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+
+    const requestSpy = jest
+      .spyOn(axios, "request")
+      .mockResolvedValue({ data: { status: "ok" } } as never);
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+
+    await AuthRequestContext.run({ session }, () =>
+      service.request(node, { method: "GET", url: "/api/apps/list" }),
+    );
+
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer token-1",
+        }),
+        params: { token: "token-1" },
+      }),
+    );
+  });
+
+  it("falls back to the v14 session endpoint when /api/status is unavailable", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    const requestSpy = jest
+      .spyOn(axios, "request")
+      .mockRejectedValueOnce({
+        isAxiosError: true,
+        response: { status: 404, data: "not found", statusText: "Not Found" },
+      })
+      .mockResolvedValueOnce({
+        data: { status: "ok", info: { version: "14.2" } },
+      } as never);
+
+    const result = await AuthRequestContext.run({ session }, () =>
+      new TechnitiumService([node], new DhcpSnapshotService()).getNodeStatus(
+        node.id,
+      ),
+    );
+
+    expect(result.data).toMatchObject({
+      status: "ok",
+      info: { version: "14.2" },
+    });
+    expect(requestSpy.mock.calls.map(([config]) => config.url)).toEqual([
+      "/api/status",
+      "/api/user/session/get",
+    ]);
+  });
+
+  it("does not hide authentication failures behind the v14 status fallback", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    const requestSpy = jest.spyOn(axios, "request").mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 401,
+        data: "permission denied",
+        statusText: "Unauthorized",
+      },
+    });
+    const compatibilityService = new TechnitiumService(
+      [node],
+      new DhcpSnapshotService(),
+    );
+
+    await AuthRequestContext.run({ session }, async () => {
+      await expect(
+        compatibilityService.getNodeStatus(node.id),
+      ).rejects.toMatchObject({ status: 401 });
+    });
+
+    expect(requestSpy).toHaveBeenCalledTimes(1);
+    compatibilityService.onModuleDestroy();
+  });
+
   it("drops the per-node session token when Technitium returns an invalid-token envelope", async () => {
     const session = {
       id: "test-session",

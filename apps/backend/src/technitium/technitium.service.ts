@@ -1190,10 +1190,25 @@ export class TechnitiumService {
     nodeId: string,
   ): Promise<TechnitiumStatusEnvelope<T>> {
     const node = this.findNode(nodeId);
-    const response = await this.request<T>(node, {
-      method: "GET",
-      url: "/api/status",
-    });
+    let response: T;
+
+    try {
+      response = await this.request<T>(node, {
+        method: "GET",
+        url: "/api/status",
+      });
+    } catch (error) {
+      if (!(error instanceof HttpException) || error.getStatus() !== 404) {
+        throw error;
+      }
+
+      // /api/status was added in Technitium DNS v15.3. The authenticated
+      // session endpoint is the lightweight compatibility probe for v14.
+      response = await this.request<T>(node, {
+        method: "GET",
+        url: "/api/user/session/get",
+      });
+    }
 
     return {
       nodeId: node.id,
@@ -2240,6 +2255,10 @@ export class TechnitiumService {
       };
 
       const params = axiosConfig.params as unknown;
+      axiosConfig.headers = {
+        ...axiosConfig.headers,
+        Authorization: `Bearer ${token}`,
+      };
       if (params instanceof URLSearchParams) {
         if (!params.has("token")) {
           params.set("token", token);
@@ -5300,6 +5319,12 @@ export class TechnitiumService {
       }
 
       const params = axiosConfig.params as unknown;
+      if (effectiveToken) {
+        axiosConfig.headers = {
+          ...axiosConfig.headers,
+          Authorization: `Bearer ${effectiveToken}`,
+        };
+      }
       if (params instanceof URLSearchParams) {
         if (!params.has("token")) {
           params.set("token", effectiveToken ?? "");

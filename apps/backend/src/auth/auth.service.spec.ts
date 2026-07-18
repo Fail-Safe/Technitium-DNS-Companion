@@ -101,6 +101,14 @@ describe("AuthService.login", () => {
       status: "ok",
       error: "invalid token",
     });
+
+    expect(axiosMock.get).toHaveBeenCalledWith(
+      "https://n1/api/user/session/get",
+      expect.objectContaining({
+        params: { token: "t1" },
+        headers: { Authorization: "Bearer t1" },
+      }),
+    );
   });
 
   it("keeps login usable when one configured node is unreachable", async () => {

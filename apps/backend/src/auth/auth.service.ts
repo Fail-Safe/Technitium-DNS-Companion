@@ -98,6 +98,7 @@ export class AuthService {
     try {
       const res = await axios.get(`${args.baseUrl}/api/user/session/get`, {
         params: { token: args.token },
+        headers: { Authorization: `Bearer ${args.token}` },
         timeout: 15_000,
         maxRedirects: 0,
         httpsAgent: this.httpsAgent,
@@ -350,6 +351,7 @@ export class AuthService {
       try {
         await axios.get(`${node.baseUrl}/api/user/logout`, {
           params: { token },
+          headers: { Authorization: `Bearer ${token}` },
           timeout: 15_000,
           httpsAgent: this.httpsAgent,
         });
