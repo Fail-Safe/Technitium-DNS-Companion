@@ -5,6 +5,7 @@ import type {
   DhcpSnapshotOrigin,
   DhcpSnapshotScopeEntry,
 } from "./technitium.types";
+import { getSnapshotAttribution } from "./snapshot-attribution";
 import { SnapshotFileStore } from "./snapshot-file-store";
 
 @Injectable()
@@ -41,6 +42,7 @@ export class DhcpSnapshotService extends SnapshotFileStore<
       origin,
       pinned: false,
       note: undefined,
+      ...getSnapshotAttribution(),
     };
 
     await this.writeSnapshot(nodeId, snapshotId, { metadata, scopes });

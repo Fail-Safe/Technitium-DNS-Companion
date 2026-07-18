@@ -5,6 +5,7 @@ import type {
   ZoneSnapshotOrigin,
   ZoneSnapshotZoneEntry,
 } from "./technitium.types";
+import { getSnapshotAttribution } from "./snapshot-attribution";
 import { SnapshotFileStore } from "./snapshot-file-store";
 
 @Injectable()
@@ -42,6 +43,7 @@ export class ZoneSnapshotService extends SnapshotFileStore<
       origin,
       pinned: false,
       note: note?.trim() ? note.trim() : undefined,
+      ...getSnapshotAttribution(),
     };
 
     await this.writeSnapshot(nodeId, snapshotId, { metadata, zones });

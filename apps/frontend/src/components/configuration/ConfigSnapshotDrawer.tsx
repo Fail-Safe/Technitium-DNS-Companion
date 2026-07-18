@@ -17,6 +17,7 @@ import {
 } from "../common/SnapshotDrawerScaffolding";
 import {
     formatSnapshotDateTime,
+    formatSnapshotCreator,
     formatSnapshotRelative,
     useSnapshotDrawerLifecycle,
 } from "../common/snapshotDrawerShared";
@@ -700,6 +701,9 @@ export const ConfigSnapshotDrawer: React.FC<ConfigSnapshotDrawerProps> = ({
                               <span>
                                 Created {formatSnapshotDateTime(meta.createdAt)}
                               </span>
+                              <span>
+                                Created by {formatSnapshotCreator(meta)}
+                              </span>
                               <span>{methodPillLabel(meta.method)}</span>
                               {counts.map((c) => (
                                 <span key={c.label}>
@@ -1019,6 +1023,9 @@ export const ConfigSnapshotDrawer: React.FC<ConfigSnapshotDrawerProps> = ({
                             : <span>—</span>}
                             <span className="snapshot-drawer__pill-quiet">
                               {origin}
+                            </span>
+                            <span className="snapshot-drawer__pill-quiet">
+                              By {formatSnapshotCreator(snap)}
                             </span>
                           </div>
 

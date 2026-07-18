@@ -18,6 +18,7 @@ import {
 } from "../common/SnapshotDrawerScaffolding";
 import {
     formatSnapshotDateTime,
+    formatSnapshotCreator,
     formatSnapshotRelative,
     useSnapshotDrawerLifecycle,
 } from "../common/snapshotDrawerShared";
@@ -479,6 +480,9 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                               <span>
                                 Created {formatSnapshotDateTime(meta.createdAt)}
                               </span>
+                              <span>
+                                Created by {formatSnapshotCreator(meta)}
+                              </span>
                               <span>Scopes: {meta.scopeCount}</span>
                               {meta.pinned && <span>📌 Pinned</span>}
                             </>
@@ -738,6 +742,9 @@ export const DhcpSnapshotDrawer: React.FC<DhcpSnapshotDrawerProps> = ({
                             {snapshot.origin === "automatic" ?
                               "Auto"
                             : "Manual"}
+                          </span>
+                          <span className="snapshot-drawer__pill-quiet">
+                            By {formatSnapshotCreator(snapshot)}
                           </span>
                         </div>
                         <div className="snapshot-drawer__snapshot-id">

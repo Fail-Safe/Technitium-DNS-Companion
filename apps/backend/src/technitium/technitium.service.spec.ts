@@ -458,6 +458,41 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
       expect(ids).not.toContain(second.id); // pruned oldest unpinned
     });
 
+    it("attributes snapshots to the current Technitium user without storing the session id", async () => {
+      const svc = new DhcpSnapshotService();
+      const session = {
+        id: "secret-session-id",
+        createdAt: new Date().toISOString(),
+        lastSeenAt: Date.now(),
+        user: "alice",
+        tokensByNodeId: { node1: "token-1" },
+      };
+
+      const metadata = await AuthRequestContext.run({ session }, () =>
+        svc.saveSnapshot("node1", [
+          { scope: makeScope("attributed"), enabled: true },
+        ]),
+      );
+      const persisted = await svc.getSnapshot("node1", metadata.id);
+
+      expect(metadata).toMatchObject({
+        createdBy: "alice",
+        createdByType: "user",
+      });
+      expect(JSON.stringify(persisted)).not.toContain(session.id);
+    });
+
+    it("attributes snapshots created outside a request to the system", async () => {
+      const svc = new DhcpSnapshotService();
+
+      const metadata = await svc.saveSnapshot("node1", [
+        { scope: makeScope("background"), enabled: true },
+      ]);
+
+      expect(metadata).toMatchObject({ createdByType: "system" });
+      expect(metadata.createdBy).toBeUndefined();
+    });
+
     it("restores a snapshot with deleteExtraScopes defaulting to true and requires confirm flag", async () => {
       const nodeConfig = makeNodeConfig();
       const snapshotSvc = new DhcpSnapshotService();

@@ -19,6 +19,7 @@ import {
 } from "../common/SnapshotDrawerScaffolding";
 import {
     formatSnapshotDateTime,
+    formatSnapshotCreator,
     formatSnapshotRelative,
     useSnapshotDrawerLifecycle,
 } from "../common/snapshotDrawerShared";
@@ -914,6 +915,9 @@ export const ZoneSnapshotDrawer: React.FC<ZoneSnapshotDrawerProps> = ({
                               <span>
                                 Created {formatSnapshotDateTime(meta.createdAt)}
                               </span>
+                              <span>
+                                Created by {formatSnapshotCreator(meta)}
+                              </span>
                               <span>Zones: {meta.zoneCount}</span>
                               {meta.pinned && <span>📌 Pinned</span>}
                             </>
@@ -1177,6 +1181,9 @@ export const ZoneSnapshotDrawer: React.FC<ZoneSnapshotDrawerProps> = ({
                             {snapshot.origin === "automatic" ?
                               "Auto"
                             : "Manual"}
+                          </span>
+                          <span className="snapshot-drawer__pill-quiet">
+                            By {formatSnapshotCreator(snapshot)}
                           </span>
                         </div>
                         <div className="snapshot-drawer__snapshot-id">
