@@ -9,13 +9,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Container-only upgrades require no configuration or volume migration.** Existing image consumers can continue using their current environment and container invocation. The public `/api/health` endpoint and Docker image health check retain their existing liveness behavior.
+- **Detailed-health monitoring now includes resolver failures.** Consumers of authenticated `/api/health/detailed` may see a node reported as unhealthy when its Technitium API is reachable but its DNS resolver health check fails. The response adds `dnsResolution`; pre-v15.3 nodes and sessions without `DnsClient: View` remain API-healthy and report `unsupported` or `unavailable` respectively.
+- **The repository Compose file requires Docker Compose 2.24 or later.** It uses optional environment-file overlays so `.env.example` can provide documented, backward-compatible defaults while `.env` remains the single user configuration source. Existing container names, networks, port bindings, timezone, and storage paths are preserved.
+- **Compose log retention and hardening are now explicit.** The stock service drops all Linux capabilities, enables `no-new-privileges`, and rotates local `json-file` logs at three 10 MB files by default. The published image was validated with these restrictions; deployments that replace its entrypoint or add privileged integrations should review them before adopting the updated Compose file. Log limits are configurable through `.env`.
+
 ### Added
 
 - **Live Technitium v15 compatibility matrix.** A new opt-in Nest integration suite and GitHub Actions workflow exercise Companion login, status, settings/version, zone listing, and cluster discovery against the v15.3 minimum and latest supported v15 container.
+- **Resolver-aware detailed health.** Authenticated node diagnostics now include Technitium's DNS resolution health result when supported.
 
 ### Changed
 
 - **Technitium DNS v14 and earlier are now deprecated.** Companion 1.x keeps existing deployments functional on a best-effort basis and surfaces an actionable Overview warning. Companion 2.0 will require Technitium DNS v15.3 or later, with removal planned no earlier than late October 2026.
+- **Docker Compose configuration is centralized in `.env`.** The Compose file loads the fully commented `.env.example` defaults first and overlays an optional `.env`, avoiding split user configuration and preserving the released deployment defaults. Obsolete v13/v14 sample files have been retired so `.env.example` is the single authoritative configuration reference.
+- **Repository Git hooks are consolidated under `.githooks`.** The existing `prepare` script now activates both the protected-branch pre-commit check and the full-workspace pre-push tests.
+- **Remote-container development is treated as a personal workflow.** Incomplete public examples and documentation for the untracked local setup have been removed from the supported contributor surface.
 
 ## [1.8.2] - 2026-07-12
 

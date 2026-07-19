@@ -105,8 +105,7 @@ technitium-dns-companion/
 │       │   ├── context/
 │       │   └── types/
 │       └── package.json
-├── docs/                 # All project documentation
-└── configs/              # Sample configuration files
+└── docs/                 # All project documentation
 ```
 
 **Tech Stack**:
@@ -155,8 +154,6 @@ npm run dev
 ### Development Options
 
 - Local development (backend on `localhost:3000`, frontend on `localhost:5173`)
-- Remote development with hot-reload (see `scripts/remote-dev.sh.example`)
-- Docker development environment with `docker-compose.dev-hotreload.yml`
 
 **Backend API Base**: `http://localhost:3000/api`
 

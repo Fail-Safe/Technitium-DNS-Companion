@@ -29,6 +29,7 @@ writes.
 | Authenticated API calls | v15 prefers `Authorization: Bearer <token>`; token parameters remain backward compatible | Sends both the Bearer header and legacy query token |
 | Login and session APIs | `/api/user/login` and `/api/user/session/get` remain available | Uses login for interactive sessions and session/get for validation and cluster discovery |
 | Status API | `/api/status` was added in v15.3 | Uses `/api/status`, falling back to `/api/user/session/get` only on HTTP 404 |
+| DNS resolution health | `/api/dnsClient/healthCheck` was added in v15.3 and requires `DnsClient: View` | Reports resolver health when supported; reports `unsupported` on HTTP 404 and `unavailable` on HTTP 401/403 without marking an API-responsive node unhealthy |
 | DNS settings | v15.2 renamed `reverseProxyNetworkACL` to `dnsReverseProxyNetworkACL` and added `webServiceReverseProxyAddresses` | These fields are not currently read or written by Companion, so no translation is needed |
 | Zone listing | v15 added optional zone name/type filters | Existing `/api/zones/list` requests remain valid without those optional filters |
 | Internal zones | v15.3 replaced default internal zones with locally served DNS zones | Comparison continues to honor the API's `internal` marker; removed upstream defaults require no special migration |
@@ -43,6 +44,8 @@ Backend contract tests verify that:
 - token validation uses the same dual-auth request shape;
 - node health falls back to the v14 session endpoint when `/api/status` returns
   HTTP 404;
+- resolver health distinguishes successful resolution, a genuine DNS failure,
+  pre-v15.3 nodes, and sessions without `DnsClient: View`;
 - other status failures are not hidden by the compatibility fallback.
 
 The live compatibility matrix complements those mocked contracts by starting
@@ -52,7 +55,8 @@ authenticated request flow. It currently covers:
 - the v15.3 minimum (`technitium/dns-server:15.3.0`);
 - the latest validated v15 release (`15.4.0` at the time of this update);
 - Companion session establishment, `/api/status`, settings-backed version
-  detection, zone listing, and standalone cluster discovery.
+  detection, resolver-aware health, zone listing, and standalone cluster
+  discovery.
 
 The workflow runs for relevant pull requests and `next` pushes, on a weekly
 schedule, and on demand. Set the `TECHNITIUM_LATEST_V15_TAG` repository variable

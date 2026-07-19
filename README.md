@@ -118,7 +118,7 @@ TECHNITIUM_SECONDARY2_BASE_URL=https://secondary2.home.arpa:53443
 # TECHNITIUM_BACKGROUND_TOKEN=your-low-privilege-token
 ```
 
-**Example config:** See [`configs/.env.example.v14`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/configs/.env.example.v14) (legacy filename; the same node layout applies to v15).
+**Configuration reference:** [`.env.example`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/.env.example) contains the current defaults and all supported options.
 
 **Cluster Features:**
 
@@ -147,7 +147,7 @@ TECHNITIUM_NODE3_BASE_URL=https://dns3.yourdomain.com:5380
 TECHNITIUM_NODE3_TOKEN=unique-token-for-node3
 ```
 
-**Example config:** See [`configs/.env.example.v13`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/configs/.env.example.v13)
+**Legacy configuration:** Use the per-node token section in [`.env.example`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/.env.example) and review the [Technitium version compatibility guide](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/docs/features/TECHNITIUM_VERSION_COMPATIBILITY.md).
 
 **Standalone Features:**
 

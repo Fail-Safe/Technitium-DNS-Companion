@@ -55,7 +55,6 @@ That migration:
 
 After updating `.env`, you must **recreate** the container so the new env vars apply.
 
-- Remote dev: `./scripts/remote-dev.sh recreate`
 - Docker Compose: `docker compose up -d --force-recreate`
 - Docker run (named container): remove + run again with updated env file:
 
