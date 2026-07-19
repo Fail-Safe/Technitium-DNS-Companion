@@ -78,10 +78,10 @@ QUERY_LOG_SQLITE_MAX_ENTRIES_PER_POLL=20000
 
 - With session auth (v1.4+: always enabled for interactive UI), ingestion runs as a background task and requires `TECHNITIUM_BACKGROUND_TOKEN` (least-privilege token that can read query logs). Without it, the DB may exist but will not stay up to date.
 
-- HTTP: http://localhost:3000
-- HTTPS (if enabled): https://localhost:3443
+- Direct access defaults to automatically generated self-signed HTTPS: https://localhost:3443
+- HTTP on port 3000 is intended for a trusted host-based TLS reverse proxy (`TRUST_PROXY=true`).
 
-3. Enable HTTPS (optional but recommended):
+3. Use a trusted HTTPS certificate (optional):
 
 - Place certs locally:
 
@@ -121,23 +121,46 @@ docker run --rm -p 3000:3000 -p 3443:3443 \
 
 ### Option C: `docker compose` (from a repo clone)
 
-Use this if you’ve cloned the repo and prefer compose for repeatability or dev overrides.
+Use this if you’ve cloned the repo and prefer compose for repeatability or dev
+overrides. The included file requires Docker Compose 2.24 or later for optional
+environment-file overlays.
 
-1. Copy `.env.example` to `.env` and set your variables.
+1. Copy `.env.example` to `.env` and set your variables. `.env.example` is the
+   complete, commented configuration reference, so the available settings are
+   documented locally without needing this guide open. Compose loads it first
+   for backward-compatible defaults, then overlays values from `.env`. The
+   user file is optional to Compose so existing deployments that configure the
+   service another way continue to start.
 
-2. Start:
+2. Start the published image. Compose creates the persistent `data` directory
+   if it does not already exist:
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
-3. HTTPS: place certs in `certs/` and set the HTTPS vars in `.env`, then ensure the certs volume is mounted in `docker-compose.yml`.
+   To build the checked-out source instead, use:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d --build
+```
+
+3. HTTPS: the default is persistent self-signed HTTPS on port 3443. For a
+   trusted certificate, place certs in `certs/`, set the HTTPS variables in
+   `.env`, and uncomment the certificate mount in `docker-compose.yml`. For a
+   host-based TLS reverse proxy, set `TRUST_PROXY=true`. Port 3000 retains its
+   existing all-interface bind by default; set `COMPANION_HTTP_BIND=127.0.0.1`
+   when only a host-based reverse proxy should reach it.
 
 4. Operations:
 
 - Logs: `docker compose logs -f`
 - Restart: `docker compose restart`
-- Upgrade: `git pull && docker compose up -d --build`
+- Upgrade: run `git pull`, then `docker compose up -d`
+
+Compose also limits the service's local `json-file` logs to three 10 MB files
+by default. Use `COMPANION_LOG_MAX_SIZE` and `COMPANION_LOG_MAX_FILES` in
+`.env` to tune those limits.
 
 ## Troubleshooting
 
@@ -147,18 +170,18 @@ docker compose up -d --build
 
 ### Health checks
 
-The container health check probes `http://127.0.0.1:<PORT>/api/health` or
-`https://127.0.0.1:<HTTPS_PORT>/api/health` from inside the container.
+The image health check probes `https://127.0.0.1:<HTTPS_PORT>/api/health` and
+`http://127.0.0.1:<PORT>/api/health` from inside the container. Compose inherits
+this image-level check.
 
-- If `HTTPS_ENABLED=true`, the HTTPS probe is attempted first, then HTTP as fallback.
-- If `HTTPS_ENABLED=false`, the HTTP probe is attempted first, then HTTPS as fallback.
-- Compose uses a Node-based probe (no `wget/curl` dependency required).
+- HTTPS is attempted first, then HTTP as fallback.
+- The probe uses Node.js and does not require `wget` or `curl` in the image.
 
 Quick verification:
 
 ```bash
 docker compose ps
-docker inspect --format='{{json .State.Health}}' technitium-dns-companion | jq
+docker inspect --format='{{json .State.Health}}' "$(docker compose ps -q technitium-dns-companion)" | jq
 ```
 
 ### Post-upgrade permissions check (v1.4+)
@@ -171,7 +194,7 @@ Recent images run as a non-root user (`node`, uid/gid `1000`). If older bind mou
 Quick check inside the container:
 
 ```bash
-docker exec -it <container> sh -lc 'id; ls -ld /app/certs /app/config; ls -l /app/certs 2>/dev/null || true; ls -l /app/config 2>/dev/null || true'
+docker exec -it <container> sh -lc 'id; ls -ld /app/certs /data /app/config; ls -l /app/certs 2>/dev/null || true; ls -l /data 2>/dev/null || true'
 ```
 
 Recommended permissions:
@@ -188,7 +211,7 @@ chmod 755 /path/to/certs /path/to/certs/certs
 chmod 644 /path/to/certs/certs/*
 
 # App state volume (from container as root, then restart)
-docker exec -u 0 <container> sh -lc 'chown -R node:node /app/config'
+docker exec -u 0 <container> sh -lc 'chown -R node:node /data'
 docker restart <container>
 ```
 
@@ -303,4 +326,4 @@ secrets:
   - technitium_node2_token
 ```
 
-Need contributor/dev container instructions? See `DEVELOPMENT.md` or `docker-compose.dev.yml`.
+Need contributor instructions? See `DEVELOPMENT.md`.

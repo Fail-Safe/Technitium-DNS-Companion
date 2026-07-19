@@ -10,6 +10,7 @@
 services:
   technitium-dns-companion:
     image: technitium-dns-companion:local
+    pull_policy: build
     build:
       context: .
       dockerfile: Dockerfile
