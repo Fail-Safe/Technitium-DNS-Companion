@@ -1,111 +1,67 @@
 services:
   technitium-dns-companion:
-    # Production default: pull the published image.
-    # If you want to build locally instead, comment out `image:` and uncomment `build:`.
+    # Production default: pull the published image. For local builds, use:
+    # docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d --build
     image: ghcr.io/fail-safe/technitium-dns-companion:latest
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile
+    # Stable name retained for compatibility with existing scripts and tooling.
     container_name: technitium-dns-companion
     restart: unless-stopped
 
-    ports:
-      # HTTP (default)
-      - "3000:3000"
-      # HTTPS (if enabled)
-      - "3443:3443"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
+    ports:
+      # HTTP for a TLS reverse proxy. Set COMPANION_HTTP_BIND=127.0.0.1
+      # when the proxy runs directly on this host.
+      - target: ${PORT:-3000}
+        published: "${COMPANION_HTTP_PORT:-3000}"
+        host_ip: "${COMPANION_HTTP_BIND:-0.0.0.0}"
+      # Direct HTTPS, including the automatic self-signed default.
+      - target: ${HTTPS_PORT:-3443}
+        published: "${COMPANION_HTTPS_PORT:-3443}"
+        host_ip: "${COMPANION_HTTPS_BIND:-0.0.0.0}"
+
+    # Application configuration lives in .env. Copy .env.example to .env;
+    # that file is the complete, commented variable reference. The example
+    # file also supplies backward-compatible defaults, and .env overrides it.
+    # At minimum, configure:
+    #   TECHNITIUM_NODES=node1,node2
+    #   TECHNITIUM_NODE1_BASE_URL=https://dns-primary.example.com:53443
+    #   TECHNITIUM_NODE2_BASE_URL=https://dns-secondary.example.com:53443
+    env_file:
+      - .env.example
+      - path: .env
+        required: false
+
+    # Fixed container behavior only; user-configurable values belong in .env.
     environment:
-      # Node environment
       NODE_ENV: production
 
-      # Server configuration
-      PORT: 3000
-      HTTPS_ENABLED: "false" # Set to "true" to enable HTTPS
-      # HTTPS_PORT: 3443
-      # HTTPS_CERT_PATH: /app/certs/fullchain.pem
-      # HTTPS_KEY_PATH: /app/certs/privkey.pem
-      # HTTPS_CA_PATH: /app/certs/chain.pem  # Optional
-
-      # Authentication (as of v1.3)
-      #
-      # Preferred: Technitium-backed session authentication
-      # - Users log in with their Technitium DNS credentials via the Companion UI
-      # - Companion stores Technitium DNS session tokens server-side; browser uses an HttpOnly cookie
-      # - When enabled, the app requires login (no env tokens needed for interactive usage)
-      #
-      # IMPORTANT: Run over HTTPS when enabling session auth.
-      # - Option A: enable Companion HTTPS above and mount certs below
-      # - Option B: terminate TLS in a reverse proxy and set TRUST_PROXY=true
-      #
-      # v1.4+: the interactive UI requires session auth (Technitium DNS login/RBAC).
-      # TRUST_PROXY: "true"
-      # TRUST_PROXY_HOPS: "1"
-
-      # Timezone
-      TZ: America/New_York
-
-      # CORS (optional, for development)
-      # CORS_ORIGINS: http://localhost:5173,http://localhost:3000
-
-      # Technitium DNS Nodes Configuration
-      # List of node IDs (comma-separated)
-      TECHNITIUM_NODES: node1,node2
-
-      # Legacy env-token mode (legacy/migration only)
-      #
-      # In v1.4+, interactive API calls require a logged-in user session.
-      # If you leave tokens blank, interactive calls work after login; legacy env-token mode is intended only for legacy/migration.
-
-      # Node 1 Configuration
-      TECHNITIUM_NODE1_NAME: "DNS Primary"
-      TECHNITIUM_NODE1_BASE_URL: https://dns-primary.example.com:53443
-
-      # Node 2 Configuration
-      TECHNITIUM_NODE2_NAME: "DNS Secondary"
-      TECHNITIUM_NODE2_BASE_URL: https://dns-secondary.example.com:53443
-
-      # Legacy only (Technitium DNS < v14): per-node tokens
-      # TECHNITIUM_NODE1_TOKEN: ${TECHNITIUM_NODE1_TOKEN:-}
-      # TECHNITIUM_NODE2_TOKEN: ${TECHNITIUM_NODE2_TOKEN:-}
-
-      # Optional: Background token (least-privilege) for background jobs
-      # If unset, background jobs that require a token may be disabled.
-      # NOTE: This is expected to be REQUIRED when using session auth if you want background
-      # features (PTR warming, scheduled sync) to run.
-      # IMPORTANT: Use a low-privilege Technitium DNS token.
-      # TECHNITIUM_BACKGROUND_TOKEN: ${TECHNITIUM_BACKGROUND_TOKEN:-}
-
-    # Persistent data directory: SQLite databases and DNS filtering snapshots survive
-    # container recreates/rebuilds. Create the host directory before first run:
-    #   mkdir -p ./data
+    # Persistent application state. Compose creates ./data if it is absent.
     volumes:
-      - ./data:/app/config
+      - type: bind
+        source: ./data
+        target: /data
+      # Compatibility alias for existing .env paths under /app/config.
+      - type: bind
+        source: ./data
+        target: /app/config
       # Optional: mount SSL certificates (if using HTTPS)
       # - ./certs:/app/certs:ro
 
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "node -e \"const http=require('http');const https=require('https');const httpsEnabled=String(process.env.HTTPS_ENABLED||'false').toLowerCase()==='true';const primary=httpsEnabled?'https':'http';const secondary=httpsEnabled?'http':'https';const check=(scheme)=>new Promise((resolve)=>{const mod=scheme==='https'?https:http;const port=Number(scheme==='https'?(process.env.HTTPS_PORT||3443):(process.env.PORT||3000));const req=mod.get({hostname:'127.0.0.1',port,path:'/api/health',rejectUnauthorized:false},(r)=>resolve(r.statusCode===200));req.on('error',()=>resolve(false));req.setTimeout(5000,()=>{req.destroy();resolve(false);});});(async()=>{if(await check(primary)||await check(secondary)){process.exit(0);}process.exit(1);})();\"",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "${COMPANION_LOG_MAX_SIZE:-10m}"
+        max-file: "${COMPANION_LOG_MAX_FILES:-3}"
 
+    # Stable network retained for compatibility with reverse proxies and peers.
     networks:
       - technitium-dns-companion-network
 
     # Resource limits (optional)
-    #
-    # IMPORTANT (non-Swarm deployments):
-    # - The `deploy:` section is primarily for Docker Swarm.
-    # - With plain `docker compose up` (non-Swarm), these limits are typically NOT enforced.
-    # - If you want `deploy.resources` to be applied in non-Swarm compose, start with:
-    #     docker compose --compatibility up -d
-    #
     # Sizing note:
     # - Production should use less memory than the dev container (no Vite/HMR).
     # - However, large blocklists / domain-list caching can legitimately increase baseline RAM.

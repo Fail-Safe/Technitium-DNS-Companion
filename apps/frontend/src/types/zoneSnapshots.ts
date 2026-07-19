@@ -14,6 +14,8 @@ export interface ZoneSnapshotMetadata {
   origin: ZoneSnapshotOrigin;
   pinned?: boolean;
   note?: string;
+  createdBy?: string;
+  createdByType?: "user" | "system";
 }
 
 export interface ZoneSnapshot {

@@ -15,6 +15,7 @@ import type {
   DnsFilteringSnapshotOrigin,
   DnsFilteringSnapshotRestoreResult,
 } from "./technitium.types";
+import { getSnapshotAttribution } from "./snapshot-attribution";
 import { SnapshotFileStore } from "./snapshot-file-store";
 
 @Injectable()
@@ -79,6 +80,7 @@ export class DnsFilteringSnapshotService extends SnapshotFileStore<
     method: DnsFilteringSnapshotMethod,
     origin: DnsFilteringSnapshotOrigin = "manual",
     note?: string,
+    authMode: "session" | "schedule" = "session",
   ): Promise<DnsFilteringSnapshotMetadata> {
     await this.ensureNodeDir(nodeId);
 
@@ -101,6 +103,7 @@ export class DnsFilteringSnapshotService extends SnapshotFileStore<
         note: note?.trim() ? note.trim() : undefined,
         allowedCount: allowedDomains.length,
         blockedCount: blockedDomains.length,
+        ...getSnapshotAttribution(),
       };
 
       await this.writeSnapshot(nodeId, snapshotId, {
@@ -111,7 +114,10 @@ export class DnsFilteringSnapshotService extends SnapshotFileStore<
       return metadata;
     }
 
-    const snapshot = await this.advancedBlockingService.getSnapshot(nodeId);
+    const snapshot = await this.advancedBlockingService.getSnapshotWithAuth(
+      nodeId,
+      authMode,
+    );
     const config = snapshot.config;
 
     if (!config) {
@@ -134,6 +140,7 @@ export class DnsFilteringSnapshotService extends SnapshotFileStore<
       pinned: false,
       note: note?.trim() ? note.trim() : undefined,
       groupCount,
+      ...getSnapshotAttribution(),
     };
 
     await this.writeSnapshot(nodeId, snapshotId, {

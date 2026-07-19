@@ -65,6 +65,12 @@ export interface TechnitiumStatusEnvelope<T = unknown> {
   data: T;
 }
 
+export interface TechnitiumDnsHealthCheck {
+  status: "healthy" | "unhealthy" | "unsupported" | "unavailable";
+  responseTime: number;
+  error?: string;
+}
+
 export type TechnitiumActionCategory =
   | "upstream"
   | "zone"
@@ -280,7 +286,14 @@ export interface DhcpSnapshotScopeEntry {
 
 export type DhcpSnapshotOrigin = "manual" | "automatic";
 
-export interface DhcpSnapshotMetadata {
+export type SnapshotActorType = "user" | "system";
+
+export interface SnapshotAttribution {
+  createdBy?: string;
+  createdByType?: SnapshotActorType;
+}
+
+export interface DhcpSnapshotMetadata extends SnapshotAttribution {
   id: string;
   nodeId: string;
   createdAt: string;
@@ -307,7 +320,7 @@ export type DnsFilteringSnapshotMethod =
   | "advanced-blocking"
   | "rule-optimizer";
 
-export interface DnsFilteringSnapshotMetadata {
+export interface DnsFilteringSnapshotMetadata extends SnapshotAttribution {
   id: string;
   nodeId: string;
   createdAt: string;
@@ -352,7 +365,7 @@ export interface ZoneSnapshotZoneEntry {
   zoneFile?: string;
 }
 
-export interface ZoneSnapshotMetadata {
+export interface ZoneSnapshotMetadata extends SnapshotAttribution {
   id: string;
   nodeId: string;
   createdAt: string;

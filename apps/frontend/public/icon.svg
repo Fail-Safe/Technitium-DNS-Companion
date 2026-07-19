@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Technitium DNS Companion</title>
+  <desc id="desc">A central Technitium T hub surrounded by three evenly spaced DNS nodes, with a raised counterclockwise data-flow arrow cleanly terminating the orbit.</desc>
+  <defs>
+    <radialGradient id="bg" cx="38%" cy="28%" r="86%">
+      <stop stop-color="#263B9C"/>
+      <stop offset=".58" stop-color="#171455"/>
+      <stop offset="1" stop-color="#0D092B"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="104" y1="105" x2="416" y2="401" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34E8F4"/>
+      <stop offset=".48" stop-color="#7186FF"/>
+      <stop offset="1" stop-color="#F051D8"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="239" y1="100" x2="291" y2="100" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#70D8FF"/>
+      <stop offset="1" stop-color="#A38CFF"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="arrowElevation" x="-50%" y="-50%" width="200%" height="220%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="5" result="shadowBlur"/>
+      <feOffset in="shadowBlur" dx="0" dy="7" result="shadowOffset"/>
+      <feFlood flood-color="#070A25" flood-opacity=".82" result="shadowColor"/>
+      <feComposite in="shadowColor" in2="shadowOffset" operator="in" result="shadow"/>
+      <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="18" y="18" width="476" height="476" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="158" fill="none" stroke="url(#ring)" stroke-width="20" stroke-linecap="round" stroke-dasharray="690 110" transform="rotate(-18 256 256)" filter="url(#glow)"/>
+  <path d="M244 80c-4-2-7 3-4 7l13 10c3 2 3 5 0 7l-13 11c-4 3-1 9 4 7l38-14c10-4 10-12 0-16z" fill="url(#arrow)" stroke="#D6F5FF" stroke-opacity=".28" stroke-width="2" filter="url(#arrowElevation)" transform="matrix(-1 0 0 1 531 0)"/>
+  <circle cx="256" cy="256" r="104" fill="#111642" stroke="#8298FF" stroke-width="8"/>
+  <circle cx="256" cy="256" r="84" fill="#365DF3" fill-opacity=".2"/>
+  <path d="M190 194h132v38h-45v102h-42V232h-45z" fill="#fff"/>
+  <g stroke="#101238" stroke-width="10">
+    <circle cx="151" cy="138" r="31" fill="#4FF1F8"/>
+    <circle cx="414" cy="263" r="31" fill="#9A7CFF"/>
+    <circle cx="191" cy="401" r="31" fill="#F36ADB"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="151" cy="138" r="8"/>
+    <circle cx="414" cy="263" r="8"/>
+    <circle cx="191" cy="401" r="8"/>
+  </g>
+</svg>

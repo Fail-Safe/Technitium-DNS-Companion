@@ -24,6 +24,7 @@ if (!existsSync(publicDir)) {
 
 // Required icon sizes for PWA
 const ICON_SIZES = [
+    { size: 512, name: 'icon.png', purpose: 'legacy' },
     { size: 192, name: 'icon-192x192.png', purpose: 'any' },
     { size: 512, name: 'icon-512x512.png', purpose: 'any' },
     { size: 192, name: 'icon-192x192-maskable.png', purpose: 'maskable', padding: 0.1 },
@@ -47,7 +48,7 @@ async function generateIcons() {
             const outputPath = join(publicDir, name);
 
             // Calculate size with padding for maskable icons
-            const actualSize = padding ? Math.floor(size * (1 - padding * 2)) : size;
+            const actualSize = padding ? Math.round(size * (1 - padding * 2)) : size;
             const padSize = padding ? Math.floor((size - actualSize) / 2) : 0;
 
             if (padding) {
@@ -64,6 +65,14 @@ async function generateIcons() {
                         right: padSize,
                         background: { r: 15, g: 23, b: 42, alpha: 1 } // Match theme background
                     })
+                    .flatten({ background: { r: 15, g: 23, b: 42 } })
+                    .png()
+                    .toFile(outputPath);
+            } else if (purpose === 'apple') {
+                // Apple touch icons should be opaque; iOS supplies the final icon mask.
+                await sharp(svgBuffer)
+                    .resize(size, size, { fit: 'contain' })
+                    .flatten({ background: { r: 15, g: 23, b: 42 } })
                     .png()
                     .toFile(outputPath);
             } else {

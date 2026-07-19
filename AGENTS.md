@@ -13,8 +13,7 @@ technitium-dns-companion/
 ├── apps/
 │   ├── backend/    # NestJS (TypeScript) — port 3000
 │   └── frontend/   # React 18 + Vite (TypeScript) — port 5173 in dev
-├── docs/           # Architecture & feature documentation
-└── configs/        # Sample configuration files
+└── docs/           # Architecture & feature documentation
 ```
 
 ---
@@ -54,6 +53,8 @@ npx jest src/technitium/technitium.service.spec.ts --detectOpenHandles
 npx jest --testNamePattern="serializes the required DHCP scope fields" --detectOpenHandles
 ```
 
+Run direct `npx jest` commands from `apps/backend`; running them from the repository root resolves the wrong Jest/Babel configuration and cannot process the backend TypeScript suite. The root `npm test` workspace command is safe.
+
 > By default, Jest skips live Technitium API calls. Set `ALLOW_TECHNITIUM_HTTP_IN_TESTS=true`
 > only when you intentionally want to hit real nodes.
 
@@ -88,10 +89,10 @@ npx vitest run --reporter=verbose -t "sorts and normalises arrays"
 ## Git Hooks
 
 ```bash
-git config core.hooksPath scripts/git-hooks
+git config core.hooksPath .githooks
 ```
 
-The `pre-push` hook runs `npm test` in both workspaces. Only bypass with genuine cause.
+The root `npm install` configures this path automatically through the `prepare` script. The `pre-commit` hook protects `main`, and the `pre-push` hook runs `npm test` in both workspaces. Only bypass with genuine cause.
 
 ---
 
@@ -142,6 +143,18 @@ The `pre-push` hook runs `npm test` in both workspaces. Only bypass with genuine
 - Inject dependencies via NestJS DI — do not instantiate services manually in production code.
 - Controllers are thin; business logic lives in services.
 
+#### SQLite-backed features
+
+- `node:sqlite` uses synchronous `DatabaseSync` APIs; do not add `await` or Promise handling around database calls.
+- Schema changes must update both `CREATE TABLE IF NOT EXISTS` for fresh installations and the idempotent migration statements for existing databases.
+
+#### DNS Schedules and linked alerts
+
+- `DnsSchedulesController` owns schedule CRUD and linked Log Alert rule lifecycle; `DnsSchedulesEvaluatorService` owns window evaluation, Advanced Blocking writes, cache flushing, and active-window rule toggling.
+- The internal rule name `__schedule:{scheduleId}__` is the link between a schedule and its Log Alert rule. Linked-rule synchronization and deletion are best-effort so Log Alerts availability never prevents schedule CRUD.
+- Linked rules are created disabled. Only the evaluator enables them while their schedule window is active, preventing unrelated permanently blocked domains from triggering schedule notifications outside the window.
+- When changing `DnsScheduleDraft`, update the backend type, storage schema and migrations, row mapping, validation and controller parsing, plus the frontend type mirror, form/edit mapping, and relevant test helpers.
+
 ### Frontend Patterns (React)
 
 - Use `TechnitiumContext` for all API calls and node state — do not `fetch` directly in components.
@@ -171,7 +184,7 @@ The `pre-push` hook runs `npm test` in both workspaces. Only bypass with genuine
 
 - **Never** commit real admin tokens, passwords, or sensitive environment variables.
 - **Never** put private admin tokens in public repositories or log output.
-- **Never** commit docker-compose.dev.yml, docker-compose.local-build.yml, or docker-compose.prod.test.yml.
+- **Never** commit docker-compose.dev.yml or docker-compose.prod.test.yml; they contain personal development and validation configuration.
 - Use `.env.example` as the reference for environment variable shapes; copy to `.env` locally.
 
 ---
@@ -186,3 +199,4 @@ The `pre-push` hook runs `npm test` in both workspaces. Only bypass with genuine
   - `docs/performance/BACKEND_PERFORMANCE_QUICK_START.md` — caching/throttling patterns
 - Before publishing: update `CHANGELOG.md` (Keep a Changelog format) and bump the version in the root `package.json`.
 - Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+- A `v*` tag triggers `.github/workflows/sync-next-from-main.yml`, which merges `main` back into `next` after a release. If that workflow reports a conflict, resolve `main` into `next` before opening the next release PR.

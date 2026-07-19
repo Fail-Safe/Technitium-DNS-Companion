@@ -3,6 +3,8 @@ site_url: https://fail-safe.github.io/Technitium-DNS-Companion/
 repo_url: https://github.com/Fail-Safe/Technitium-DNS-Companion
 theme:
   name: material
+  logo: assets/icon.svg
+  favicon: assets/icon.svg
   palette:
     - scheme: default
       primary: indigo
@@ -35,9 +37,7 @@ plugins:
         - "ui/**"
         - "zone-comparison/**"
         - "apps/**"
-        - "configs/**"
         - "PWA_README.md"
-        - "REMOTE_DEVELOPMENT.md"
         - "TESTING.md"
         - "architecture.md"
         - "release-notes.md"

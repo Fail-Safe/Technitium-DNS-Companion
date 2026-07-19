@@ -69,6 +69,10 @@ curl -b cookies.txt http://localhost:3000/api/health/detailed
         "baseUrl": "https://dns-primary.example.com:53443",
         "status": "healthy",
         "responseTime": 45,
+        "dnsResolution": {
+          "status": "healthy",
+          "responseTime": 12
+        },
         "clusterState": {
           "initialized": true,
           "type": "Primary",
@@ -81,6 +85,10 @@ curl -b cookies.txt http://localhost:3000/api/health/detailed
         "baseUrl": "https://dns-secondary.example.com:53443",
         "status": "healthy",
         "responseTime": 52,
+        "dnsResolution": {
+          "status": "healthy",
+          "responseTime": 15
+        },
         "clusterState": {
           "initialized": true,
           "type": "Secondary",
@@ -106,6 +114,10 @@ curl -b cookies.txt http://localhost:3000/api/health/detailed
     - `status` (string): `"healthy"`, `"unhealthy"`, or `"unknown"`
     - `responseTime` (number, optional): Response time in milliseconds
     - `error` (string, optional): Error message if unhealthy
+    - `dnsResolution` (object, optional): Resolver-aware health result
+      - `status` (string): `"healthy"`, `"unhealthy"`, `"unsupported"`, or `"unavailable"`
+      - `responseTime` (number): DNS health-check response time in milliseconds
+      - `error` (string, optional): Failure or availability explanation
     - `clusterState` (object, optional): Cluster membership information
       - `initialized` (boolean): Whether the node is part of a cluster
       - `type` (string): `"Primary"`, `"Secondary"`, or `"Standalone"`
@@ -127,14 +139,19 @@ curl -b cookies.txt http://localhost:3000/api/health/detailed
 }
 ```
 
+For Technitium DNS v15.3 and later, detailed health uses
+`/api/dnsClient/healthCheck` to confirm that the DNS process can resolve the
+default `localhost` A query. Technitium does not record this probe in query
+logs. A supported check that returns `unhealthy` makes the node unhealthy.
+Older nodes remain healthy when their API probe succeeds and report resolver
+status `unsupported`; users without `DnsClient: View` report `unavailable`.
+
 ## Docker Health Check
 
-The Dockerfile includes a built-in health check that uses the basic health endpoint:
-
-```dockerfile
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
-```
+The Dockerfile includes a built-in, dependency-free health check that tries
+the basic health endpoint over HTTPS and then HTTP. This supports direct TLS,
+automatic self-signed TLS, and reverse-proxy deployments with one image-level
+probe.
 
 **Configuration:**
 - **Interval:** 30 seconds between checks
@@ -144,19 +161,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 
 ## Docker Compose Health Check
 
-You can also configure health checks in `docker-compose.yml`:
-
-```yaml
-services:
-  technitium-dns-companion:
-    image: ghcr.io/fail-safe/technitium-dns-companion:latest
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
-      interval: 30s
-      timeout: 10s
-      start_period: 40s
-      retries: 3
-```
+The published image defines the protocol-aware health check, and
+`docker-compose.yml` inherits it. Keeping the probe in the image avoids a
+second Compose-specific implementation drifting from the Dockerfile.
 
 ## External Monitoring
 
@@ -313,6 +320,8 @@ Possible causes:
 2. **Network connectivity:** Check if backend can reach node URLs
 3. **Technitium DNS not running:** Verify Technitium DNS services are up
 4. **SSL certificate issues:** Check certificate validity if using HTTPS
+5. **Resolver check unavailable:** Grant the Technitium user `DnsClient: View`
+6. **Resolver check unsupported:** Upgrade the node to Technitium DNS v15.3 or later
 
 ### Docker health check always failing
 

@@ -12,61 +12,16 @@ This guide covers setting up a development environment for Technitium DNS Compan
 - **🎨 [docs/ui/](./docs/ui/)** - UI component guidelines
 - **📝 [docs/README.md](./docs/README.md)** - Complete documentation index
 
-## Development Options
-
-You have **three options** for development:
-
-### Option 1: Remote Development (Docker with Hot-Reload) 🔥
-
-Run Docker on a remote server while editing locally:
-
-```bash
-# One-time setup
-cp ./scripts/remote-dev.sh.example ./scripts/remote-dev.sh
-chmod +x ./scripts/remote-dev.sh
-
-# Edit config defaults in scripts/remote-dev.sh (or set env vars):
-#   REMOTE_HOST, REMOTE_USER, REMOTE_PATH, REMOTE_DOMAIN
-```
-
-```bash
-# Terminal 1: Start remote container
-./scripts/remote-dev.sh start
-
-# Terminal 2: Watch and sync local changes
-./scripts/remote-dev.sh watch
-
-# Edit files locally, they sync to remote and hot-reload
-# Access at http://<your-server>:5173
-```
-
-Useful commands:
-
-```bash
-./scripts/remote-dev.sh recreate   # Reload .env / compose-time env vars
-./scripts/remote-dev.sh rebuild    # Full rebuild with fresh node_modules volumes
-./scripts/remote-dev.sh prodtest   # Run production-mode container on remote host
-```
-
-**Benefits:**
-
-- ✅ Production-like environment (Linux server)
-- ✅ Direct access to Technitium DNS nodes (same network)
-- ✅ Edit locally, run remotely
-- ✅ Hot-reload works like local development
-
-See [docs/REMOTE_DEVELOPMENT.md](./docs/REMOTE_DEVELOPMENT.md) for full guide.
-
-### Option 2: Local Development (Traditional)
+## Local Development
 
 Run directly on your machine:
 
-#### Prerequisites
+### Prerequisites
 
 - Node.js 22+ (or use nvm with `.nvmrc`)
 - npm or pnpm
 
-#### Installation
+### Installation
 
 ```bash
 # Install dependencies for all workspaces
@@ -76,7 +31,7 @@ npm install
 npm run lint        # runs lint in each workspace
 ```
 
-#### Backend Development
+### Backend Development
 
 ```bash
 cd apps/backend
@@ -84,7 +39,7 @@ npm install
 npm run start:dev  # Runs on http://localhost:3000
 ```
 
-#### Frontend Development
+### Frontend Development
 
 ```bash
 cd apps/frontend
@@ -92,7 +47,7 @@ npm install
 npm run dev  # Runs on http://localhost:5173
 ```
 
-### Option 3: Production Docker Build
+## Production Docker Build
 
 Test production builds locally:
 
@@ -157,34 +112,18 @@ When contributing, please:
 
 ## Development Tips
 
-- Use the Docker hot-reload setup for the fastest iteration cycle
+- Use frontend HMR and the backend watch mode for a fast local iteration cycle
 - Backend logs show API requests and Technitium DNS API interactions
 - Frontend HMR updates most changes without full page reload
 - Check `docs/` for implementation patterns and design decisions
 - Install the provided git hooks (below) so pushes only happen after tests succeed
 
-### Recover from dev `node_modules` volume issues
-
-If your dev container gets stuck restarting with npm `ENOTEMPTY` errors, run:
-
-```bash
-./scripts/reset-dev-node-modules.sh
-```
-
-This helper stops the dev stack, removes the three `node_modules` Docker volumes,
-rebuilds the dev image, and recreates the dev container.
-
-Optional flags/env:
-
-- `--yes` skips the confirmation prompt.
-- `FORCE_NO_CACHE=true ./scripts/reset-dev-node-modules.sh` forces a no-cache rebuild.
-
 ## Git Hooks
 
-Repository-managed git hooks live under `scripts/git-hooks`. Point Git at this directory once per clone so the `pre-push` script runs automatically:
+Repository-managed git hooks live under `.githooks`. The root `npm install` runs the `prepare` script, which configures this path automatically. To configure it manually:
 
 ```bash
-git config core.hooksPath scripts/git-hooks
+git config core.hooksPath .githooks
 ```
 
-The hook executes `npm test` in both `apps/backend` and `apps/frontend`. If either suite fails, the push is aborted so regressions never leave your machine. Only bypass the hook (e.g., `HUSKY=0 git push`) when absolutely necessary.
+The pre-commit hook prevents accidental commits directly to `main`, and the pre-push hook executes `npm test` in both `apps/backend` and `apps/frontend`. If either test suite fails, the push is aborted. Only bypass a hook with `--no-verify` when genuinely necessary.

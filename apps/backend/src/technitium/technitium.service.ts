@@ -39,6 +39,7 @@ import {
   TechnitiumDhcpLeaseList,
   TechnitiumDhcpScope,
   TechnitiumDhcpScopeList,
+  TechnitiumDnsHealthCheck,
   TechnitiumNodeAppsResponse,
   TechnitiumNodeConfig,
   TechnitiumNodeOverview,
@@ -1190,16 +1191,92 @@ export class TechnitiumService {
     nodeId: string,
   ): Promise<TechnitiumStatusEnvelope<T>> {
     const node = this.findNode(nodeId);
-    const response = await this.request<T>(node, {
-      method: "GET",
-      url: "/api/status",
-    });
+    let response: T;
+
+    try {
+      response = await this.request<T>(node, {
+        method: "GET",
+        url: "/api/status",
+      });
+    } catch (error) {
+      if (!(error instanceof HttpException) || error.getStatus() !== 404) {
+        throw error;
+      }
+
+      // /api/status was added in Technitium DNS v15.3. The authenticated
+      // session endpoint is the lightweight compatibility probe for v14.
+      response = await this.request<T>(node, {
+        method: "GET",
+        url: "/api/user/session/get",
+      });
+    }
 
     return {
       nodeId: node.id,
       fetchedAt: new Date().toISOString(),
       data: response,
     };
+  }
+
+  async checkDnsResolution(nodeId: string): Promise<TechnitiumDnsHealthCheck> {
+    const node = this.findNode(nodeId);
+    const startedAt = Date.now();
+
+    try {
+      const response = await this.request<{
+        status?: string;
+        errorMessage?: string;
+        innerErrorMessage?: string;
+      }>(node, {
+        method: "GET",
+        url: "/api/dnsClient/healthCheck",
+      });
+      const responseTime = Date.now() - startedAt;
+
+      if (response.status !== "ok") {
+        return {
+          status: "unhealthy",
+          responseTime,
+          error:
+            response.errorMessage ??
+            response.innerErrorMessage ??
+            "Technitium DNS resolution health check failed.",
+        };
+      }
+
+      return { status: "healthy", responseTime };
+    } catch (error) {
+      const responseTime = Date.now() - startedAt;
+
+      if (error instanceof HttpException) {
+        const status = error.getStatus();
+
+        if (status === 404) {
+          return {
+            status: "unsupported",
+            responseTime,
+            error: "Technitium DNS v15.3 or later is required.",
+          };
+        }
+
+        if (status === 401 || status === 403) {
+          return {
+            status: "unavailable",
+            responseTime,
+            error: "DnsClient: View permission is required.",
+          };
+        }
+      }
+
+      return {
+        status: "unhealthy",
+        responseTime,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Technitium DNS resolution health check failed.",
+      };
+    }
   }
 
   async getNodeApps(nodeId: string): Promise<TechnitiumNodeAppsResponse> {
@@ -2240,6 +2317,10 @@ export class TechnitiumService {
       };
 
       const params = axiosConfig.params as unknown;
+      axiosConfig.headers = {
+        ...axiosConfig.headers,
+        Authorization: `Bearer ${token}`,
+      };
       if (params instanceof URLSearchParams) {
         if (!params.has("token")) {
           params.set("token", token);
@@ -5300,6 +5381,12 @@ export class TechnitiumService {
       }
 
       const params = axiosConfig.params as unknown;
+      if (effectiveToken) {
+        axiosConfig.headers = {
+          ...axiosConfig.headers,
+          Authorization: `Bearer ${effectiveToken}`,
+        };
+      }
       if (params instanceof URLSearchParams) {
         if (!params.has("token")) {
           params.set("token", effectiveToken ?? "");

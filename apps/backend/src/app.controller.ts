@@ -45,13 +45,23 @@ export class AppController {
             // Perform a lightweight API call to check node health
             await this.technitiumService.getNodeStatus(node.id);
             const responseTime = Date.now() - startTime;
+            const dnsResolution =
+              await this.technitiumService.checkDnsResolution(node.id);
 
             return {
               id: node.id,
               name: node.name || node.id,
               baseUrl: node.baseUrl,
-              status: "healthy" as const,
+              status:
+                dnsResolution.status === "unhealthy"
+                  ? ("unhealthy" as const)
+                  : ("healthy" as const),
               responseTime,
+              error:
+                dnsResolution.status === "unhealthy"
+                  ? dnsResolution.error
+                  : undefined,
+              dnsResolution,
               clusterState: node.clusterState
                 ? {
                     initialized: node.clusterState.initialized,

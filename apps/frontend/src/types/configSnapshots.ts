@@ -18,6 +18,8 @@ export interface ConfigSnapshotMetadata {
   allowedCount?: number;
   blockedCount?: number;
   groupCount?: number;
+  createdBy?: string;
+  createdByType?: "user" | "system";
 }
 
 export interface ConfigBuiltInSnapshotData {

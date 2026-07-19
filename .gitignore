@@ -1,6 +1,3 @@
-# Claude Code local notes (personal, not committed)
-claude.local.md
-
 # Node.js dependencies
 node_modules
 
@@ -71,4 +68,3 @@ docker-entrypoint-dev.sh
 Dockerfile.dev
 technitium.env
 test*.json
-claude.local.md

@@ -8,7 +8,7 @@ A mobile-friendly web interface for managing multiple Technitium DNS servers. Vi
 
 - **`apps/backend`** - NestJS REST API that proxies Technitium DNS API calls with caching
 - **`apps/frontend`** - React + Vite SPA with mobile-responsive UI
-- **`configs/`** - Example environment configurations for Technitium DNS v13 and v14
+- **`.env.example`** - Authoritative environment configuration reference
 
 ## Backend (NestJS)
 

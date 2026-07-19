@@ -164,9 +164,12 @@ export function Header() {
   return (
     <header className="app-header" ref={headerRef}>
       <div className="app-header__brand">
-        <span className="app-header__brand-icon">
-          <FontAwesomeIcon icon={faBolt} />
-        </span>
+        <img
+          className="app-header__brand-icon"
+          src="/icon.svg"
+          alt=""
+          aria-hidden="true"
+        />
         <span className="app-header__brand-text">{__APP_NAME__}</span>
       </div>
       <nav

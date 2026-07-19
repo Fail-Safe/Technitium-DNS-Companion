@@ -35,6 +35,10 @@ import type {
   LogAlertsSmtpStatus,
   RunDnsScheduleEvaluatorResponse,
 } from "../types/dnsSchedules";
+import {
+  isDnsOverridesPrecedenceNoteDismissed,
+  rememberDnsOverridesPrecedenceNoteDismissed,
+} from "../utils/dns-overrides-precedence-note";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -2267,7 +2271,9 @@ export function AutomationPage() {
   const [lastRunResult, setLastRunResult] =
     useState<RunDnsScheduleEvaluatorResponse | null>(null);
   const [showRunResult, setShowRunResult] = useState(false);
-  const [showPrecedenceNote, setShowPrecedenceNote] = useState(true);
+  const [showPrecedenceNote, setShowPrecedenceNote] = useState(
+    () => !isDnsOverridesPrecedenceNoteDismissed(),
+  );
   const visibleRunResults =
     lastRunResult?.results.filter(shouldDisplayRunResult) ?? [];
 
@@ -3073,7 +3079,10 @@ export function AutomationPage() {
           <button
             type="button"
             className="dns-overrides__behavior-note-dismiss"
-            onClick={() => setShowPrecedenceNote(false)}
+            onClick={() => {
+              setShowPrecedenceNote(false);
+              rememberDnsOverridesPrecedenceNoteDismissed();
+            }}
             aria-label="Dismiss precedence note"
             title="Dismiss"
           >

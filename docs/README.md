@@ -17,7 +17,6 @@ Welcome to the documentation for Technitium DNS Companion. This guide will help 
 
 ### Development
 
-- **[REMOTE_DEVELOPMENT.md](./REMOTE_DEVELOPMENT.md)** - Remote development setup (develop on a server, edit locally)
 - **[RELEASING.md](./RELEASING.md)** - Release process and sanity checklist (tag-driven)
 - **[BRANCHING_STRATEGY.md](./BRANCHING_STRATEGY.md)** - Patch-friendly branching model (`main` + `next` + `release/X.Y`) and hotfix flow
 
@@ -63,8 +62,10 @@ Detailed documentation for specific features:
 
 - **[features/HEALTH_CHECK_API.md](./features/HEALTH_CHECK_API.md)** - Health check API for monitoring and Docker health checks
 - **[features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](./features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)** - Session auth (v1.2+) overview, recommended deployment model, Technitium permissions map, and cluster-token → background-token migration
+- **[features/TECHNITIUM_VERSION_COMPATIBILITY.md](./features/TECHNITIUM_VERSION_COMPATIBILITY.md)** - Technitium DNS v14/v15 API compatibility baseline and upgrade notes
 - **[features/AUTHENTICATION_DECISION.md](./features/AUTHENTICATION_DECISION.md)** - Authentication approach and token strategy rationale
 - **[features/CONFIG_CHANGE_DETECTION.md](./features/CONFIG_CHANGE_DETECTION.md)** - Unsaved changes detection
+- **[features/CONFIG_SYNC_SCHEDULING.md](./features/CONFIG_SYNC_SCHEDULING.md)** - Automated Advanced Blocking sync for standalone nodes with failure alerts
 - **[features/DHCP_AGGREGATION.md](./features/DHCP_AGGREGATION.md)** - DHCP scope aggregation
 - **[features/DHCP_BULK_SYNC.md](./features/DHCP_BULK_SYNC.md)** - Bulk DHCP scope operations
 - **[features/DHCP_HOSTNAME_RESOLUTION.md](./features/DHCP_HOSTNAME_RESOLUTION.md)** - Hostname resolution

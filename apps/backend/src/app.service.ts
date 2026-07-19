@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { TechnitiumDnsHealthCheck } from "./technitium/technitium.types";
 
 export interface HealthCheckBasic {
   status: "ok";
@@ -13,6 +14,7 @@ export interface NodeHealthStatus {
   status: "healthy" | "unhealthy" | "unknown";
   responseTime?: number;
   error?: string;
+  dnsResolution?: TechnitiumDnsHealthCheck;
   clusterState?: {
     initialized: boolean;
     type?: string;

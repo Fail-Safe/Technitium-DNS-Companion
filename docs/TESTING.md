@@ -26,6 +26,13 @@ This project uses **Vitest** for unit testing and **Playwright** for E2E testing
 - Designed for fast “does the app load/render” validation
 - Located in `apps/frontend/e2e/smoke.spec.ts`
 
+### Technitium v15 Compatibility Tests (Jest + Docker)
+
+- Opt-in tests against real, disposable Technitium DNS containers
+- Exercise Companion's login, status, settings/version, zone-list, and cluster-discovery paths
+- CI matrix covers the v15.3 minimum and the latest validated v15 release
+- Located in `apps/backend/test/technitium-v15.integration-spec.ts`
+
 ## Setup
 
 ### Installation
@@ -140,6 +147,25 @@ E2E_USE_EXISTING_SERVER=true npm run test:smoke:chromium
 Notes:
 
 - By default the smoke test expects the app title to include “Technitium” and the top nav to render.
+
+### Technitium v15 Compatibility Tests
+
+Start a disposable Technitium DNS v15 container on loopback port 5380, then
+provide its expected image version and disposable credentials:
+
+```bash
+TECHNITIUM_TEST_BASE_URL=http://127.0.0.1:5380 \
+TECHNITIUM_TEST_EXPECTED_VERSION=15.3.0 \
+TECHNITIUM_TEST_USERNAME=admin \
+TECHNITIUM_TEST_PASSWORD=your-disposable-test-password \
+npm run test:technitium:v15
+```
+
+The command enables real Technitium HTTP requests only for this dedicated Jest
+configuration. Never point it at a production DNS server. GitHub Actions runs
+the same suite against official `15.3.0` and latest-v15 service containers; the
+latest tag can be overridden with the `TECHNITIUM_LATEST_V15_TAG` repository
+variable or the manual workflow input.
 
 ## Test Files
 

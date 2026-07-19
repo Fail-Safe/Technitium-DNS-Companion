@@ -296,6 +296,8 @@ export interface DhcpSnapshotMetadata {
   origin: DhcpSnapshotOrigin;
   pinned?: boolean;
   note?: string;
+  createdBy?: string;
+  createdByType?: "user" | "system";
 }
 
 export interface DhcpSnapshotScopeEntry {

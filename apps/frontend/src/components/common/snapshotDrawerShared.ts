@@ -18,6 +18,21 @@ export const formatSnapshotRelative = (value: string): string => {
   return `${Math.round(delta / 86_400_000)} d ago`;
 };
 
+export const formatSnapshotCreator = (snapshot: {
+  createdBy?: string;
+  createdByType?: "user" | "system";
+}): string => {
+  if (snapshot.createdByType === "user" && snapshot.createdBy?.trim()) {
+    return snapshot.createdBy.trim();
+  }
+
+  if (snapshot.createdByType === "system") {
+    return "Companion system";
+  }
+
+  return "Unknown (legacy snapshot)";
+};
+
 export const useSnapshotDrawerLifecycle = (
   isOpen: boolean,
   onClose: () => void,

@@ -49,7 +49,9 @@ Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_
 
 - **Docker, OrbStack, or Podman (or similar)** (recommended for easiest deployment)
 - **OR Node.js 22+** (for running directly without Docker)
-- Access to one or more Technitium DNS servers (v13.6 or v14.0+)
+- Access to one or more Technitium DNS servers (v15.3+ recommended; v14 and
+  earlier are deprecated but remain best-effort compatible throughout
+  Companion 1.x)
 - For **session auth (required for interactive UI in v1.4+)**: a Technitium user account to sign in with (run Companion over HTTPS)
 - For **legacy env-token mode**: admin API token(s) from your Technitium DNS server(s)
 
@@ -96,11 +98,14 @@ For manual docker run or compose instructions, head to [DOCKER.md](DOCKER.md).
 
 ## Configuration
 
-Technitium-DNS-Companion supports both **v13.6 (standalone)** and **v14.0+ (clustering)** configurations.
+Technitium-DNS-Companion's forward-looking baseline is **v15.3+**. Technitium
+DNS v14 and earlier remain functional on a best-effort basis in Companion 1.x,
+but are deprecated and will be removed in Companion 2.0 no earlier than late
+October 2026.
 
-#### Technitium DNS v14.0+ with Clustering (Recommended)
+#### Technitium DNS v15.3+ with Clustering (Recommended)
 
-When clustering is enabled in Technitium DNS v14.0+, the recommended setup is session auth for interactive UI access:
+When clustering is enabled in Technitium DNS v15.3+, the recommended setup is session auth for interactive UI access:
 
 ```bash
 TECHNITIUM_NODES=primary,secondary1,secondary2
@@ -113,7 +118,7 @@ TECHNITIUM_SECONDARY2_BASE_URL=https://secondary2.home.arpa:53443
 # TECHNITIUM_BACKGROUND_TOKEN=your-low-privilege-token
 ```
 
-**Example config:** See [`configs/.env.example.v14`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/configs/.env.example.v14)
+**Configuration reference:** [`.env.example`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/.env.example) contains the current defaults and all supported options.
 
 **Cluster Features:**
 
@@ -123,9 +128,10 @@ TECHNITIUM_SECONDARY2_BASE_URL=https://secondary2.home.arpa:53443
 - Automatic cluster role change detection (every 30 seconds)
 - Sync tab hidden (not needed with native clustering)
 
-#### Technitium DNS v13.6 (Standalone Nodes)
+#### Legacy v14 and Earlier Deployments (Deprecated)
 
-For v13.6 or nodes without clustering, per-node env tokens are legacy-only (Technitium DNS < v14):
+For pre-v15 deployments or nodes without clustering, per-node environment
+tokens remain available for migration compatibility:
 
 ```bash
 # Each node has its OWN unique token
@@ -141,7 +147,7 @@ TECHNITIUM_NODE3_BASE_URL=https://dns3.yourdomain.com:5380
 TECHNITIUM_NODE3_TOKEN=unique-token-for-node3
 ```
 
-**Example config:** See [`configs/.env.example.v13`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/configs/.env.example.v13)
+**Legacy configuration:** Use the per-node token section in [`.env.example`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/.env.example) and review the [Technitium version compatibility guide](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/docs/features/TECHNITIUM_VERSION_COMPATIBILITY.md).
 
 **Standalone Features:**
 
@@ -199,7 +205,7 @@ These features write data to disk and are disabled unless explicitly enabled/con
 ### User Experience
 
 - **Responsive UI** - Mobile-friendly interface built with React and TailwindCSS
-- **Cluster Support** - Automatic detection and support for Technitium DNS v14+ clustering
+- **Cluster Support** - Automatic detection and support for Technitium DNS v15 clustering
 - **Touch-Optimized** - Designed for easy use on smartphones and tablets
 
 ## License

@@ -458,6 +458,41 @@ describe("TechnitiumService buildDhcpScopeFormData", () => {
       expect(ids).not.toContain(second.id); // pruned oldest unpinned
     });
 
+    it("attributes snapshots to the current Technitium user without storing the session id", async () => {
+      const svc = new DhcpSnapshotService();
+      const session = {
+        id: "secret-session-id",
+        createdAt: new Date().toISOString(),
+        lastSeenAt: Date.now(),
+        user: "alice",
+        tokensByNodeId: { node1: "token-1" },
+      };
+
+      const metadata = await AuthRequestContext.run({ session }, () =>
+        svc.saveSnapshot("node1", [
+          { scope: makeScope("attributed"), enabled: true },
+        ]),
+      );
+      const persisted = await svc.getSnapshot("node1", metadata.id);
+
+      expect(metadata).toMatchObject({
+        createdBy: "alice",
+        createdByType: "user",
+      });
+      expect(JSON.stringify(persisted)).not.toContain(session.id);
+    });
+
+    it("attributes snapshots created outside a request to the system", async () => {
+      const svc = new DhcpSnapshotService();
+
+      const metadata = await svc.saveSnapshot("node1", [
+        { scope: makeScope("background"), enabled: true },
+      ]);
+
+      expect(metadata).toMatchObject({ createdByType: "system" });
+      expect(metadata.createdBy).toBeUndefined();
+    });
+
     it("restores a snapshot with deleteExtraScopes defaulting to true and requires confirm flag", async () => {
       const nodeConfig = makeNodeConfig();
       const snapshotSvc = new DhcpSnapshotService();
@@ -608,6 +643,247 @@ describe("TechnitiumService request (session auth)", () => {
   afterEach(() => {
     jest.restoreAllMocks();
     service.onModuleDestroy();
+  });
+
+  it("sends v15 bearer auth while retaining the v14 query token", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+
+    const requestSpy = jest
+      .spyOn(axios, "request")
+      .mockResolvedValue({ data: { status: "ok" } } as never);
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+
+    await AuthRequestContext.run({ session }, () =>
+      service.request(node, { method: "GET", url: "/api/apps/list" }),
+    );
+
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer token-1",
+        }),
+        params: { token: "token-1" },
+      }),
+    );
+  });
+
+  it("falls back to the v14 session endpoint when /api/status is unavailable", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    const requestSpy = jest
+      .spyOn(axios, "request")
+      .mockRejectedValueOnce({
+        isAxiosError: true,
+        response: { status: 404, data: "not found", statusText: "Not Found" },
+      })
+      .mockResolvedValueOnce({
+        data: { status: "ok", info: { version: "14.2" } },
+      } as never);
+
+    const result = await AuthRequestContext.run({ session }, () =>
+      new TechnitiumService([node], new DhcpSnapshotService()).getNodeStatus(
+        node.id,
+      ),
+    );
+
+    expect(result.data).toMatchObject({
+      status: "ok",
+      info: { version: "14.2" },
+    });
+    expect(requestSpy.mock.calls.map(([config]) => config.url)).toEqual([
+      "/api/status",
+      "/api/user/session/get",
+    ]);
+  });
+
+  it("reports healthy DNS resolution through the v15.3 health endpoint", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    const requestSpy = jest.spyOn(axios, "request").mockResolvedValue({
+      data: { server: "server1", status: "ok" },
+    } as never);
+    service = new TechnitiumService([node], new DhcpSnapshotService());
+
+    const result = await AuthRequestContext.run({ session }, () =>
+      service.checkDnsResolution(node.id),
+    );
+
+    expect(result).toMatchObject({ status: "healthy" });
+    expect(result.responseTime).toEqual(expect.any(Number));
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "/api/dnsClient/healthCheck",
+        headers: expect.objectContaining({
+          Authorization: "Bearer token-1",
+        }),
+      }),
+    );
+  });
+
+  it("reports the DNS resolution check as unsupported on pre-v15.3 nodes", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    jest.spyOn(axios, "request").mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 404, data: "not found", statusText: "Not Found" },
+    });
+    service = new TechnitiumService([node], new DhcpSnapshotService());
+
+    const result = await AuthRequestContext.run({ session }, () =>
+      service.checkDnsResolution(node.id),
+    );
+
+    expect(result).toMatchObject({
+      status: "unsupported",
+      error: "Technitium DNS v15.3 or later is required.",
+    });
+  });
+
+  it("reports the DNS resolution check as unavailable without permission", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    jest.spyOn(axios, "request").mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 403,
+        data: "permission denied",
+        statusText: "Forbidden",
+      },
+    });
+    service = new TechnitiumService([node], new DhcpSnapshotService());
+
+    const result = await AuthRequestContext.run({ session }, () =>
+      service.checkDnsResolution(node.id),
+    );
+
+    expect(result).toMatchObject({
+      status: "unavailable",
+      error: "DnsClient: View permission is required.",
+    });
+  });
+
+  it("reports a supported DNS resolution failure as unhealthy", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    jest.spyOn(axios, "request").mockResolvedValue({
+      data: {
+        status: "error",
+        errorMessage: "DNS server failed to resolve localhost.",
+      },
+    } as never);
+    service = new TechnitiumService([node], new DhcpSnapshotService());
+
+    const result = await AuthRequestContext.run({ session }, () =>
+      service.checkDnsResolution(node.id),
+    );
+
+    expect(result).toMatchObject({
+      status: "unhealthy",
+      error: "DNS server failed to resolve localhost.",
+    });
+  });
+
+  it("does not hide authentication failures behind the v14 status fallback", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    const requestSpy = jest.spyOn(axios, "request").mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 401,
+        data: "permission denied",
+        statusText: "Unauthorized",
+      },
+    });
+    const compatibilityService = new TechnitiumService(
+      [node],
+      new DhcpSnapshotService(),
+    );
+
+    await AuthRequestContext.run({ session }, async () => {
+      await expect(
+        compatibilityService.getNodeStatus(node.id),
+      ).rejects.toMatchObject({ status: 401 });
+    });
+
+    expect(requestSpy).toHaveBeenCalledTimes(1);
+    compatibilityService.onModuleDestroy();
   });
 
   it("drops the per-node session token when Technitium returns an invalid-token envelope", async () => {
