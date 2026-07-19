@@ -48,6 +48,10 @@ curl -b cookies.txt http://localhost:3000/api/health/detailed
         "baseUrl": "https://dns-primary.example.com:53443",
         "status": "healthy",
         "responseTime": 45,
+        "dnsResolution": {
+          "status": "healthy",
+          "responseTime": 12
+        },
         "clusterState": {
           "initialized": true,
           "type": "Primary",
@@ -60,6 +64,10 @@ curl -b cookies.txt http://localhost:3000/api/health/detailed
         "baseUrl": "https://dns-secondary.example.com:53443",
         "status": "healthy",
         "responseTime": 52,
+        "dnsResolution": {
+          "status": "healthy",
+          "responseTime": 15
+        },
         "clusterState": {
           "initialized": true,
           "type": "Secondary",
@@ -101,6 +109,10 @@ curl -b cookies.txt http://localhost:3000/api/health/detailed
         "baseUrl": "https://dns-primary.example.com:53443",
         "status": "healthy",
         "responseTime": 45,
+        "dnsResolution": {
+          "status": "healthy",
+          "responseTime": 12
+        },
         "clusterState": {
           "initialized": true,
           "type": "Primary",
@@ -113,6 +125,10 @@ curl -b cookies.txt http://localhost:3000/api/health/detailed
         "baseUrl": "https://dns-secondary.example.com:53443",
         "status": "healthy",
         "responseTime": 52,
+        "dnsResolution": {
+          "status": "healthy",
+          "responseTime": 15
+        },
         "clusterState": {
           "initialized": true,
           "type": "Secondary",
@@ -144,17 +160,8 @@ curl -b cookies.txt http://localhost:3000/api/health/detailed
 
 ### Docker Compose Health Check
 
-```yaml
-services:
-  technitium-dns-companion:
-    image: ghcr.io/fail-safe/technitium-dns-companion:latest
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
-      interval: 30s
-      timeout: 10s
-      start_period: 40s
-      retries: 3
-```
+The published image includes its own HTTP/HTTPS health check, so Compose
+inherits the correct probe without redefining it.
 
 ### Shell Script Monitoring
 

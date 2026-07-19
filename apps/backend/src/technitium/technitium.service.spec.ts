@@ -718,6 +718,137 @@ describe("TechnitiumService request (session auth)", () => {
     ]);
   });
 
+  it("reports healthy DNS resolution through the v15.3 health endpoint", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    const requestSpy = jest.spyOn(axios, "request").mockResolvedValue({
+      data: { server: "server1", status: "ok" },
+    } as never);
+    service = new TechnitiumService([node], new DhcpSnapshotService());
+
+    const result = await AuthRequestContext.run({ session }, () =>
+      service.checkDnsResolution(node.id),
+    );
+
+    expect(result).toMatchObject({ status: "healthy" });
+    expect(result.responseTime).toEqual(expect.any(Number));
+    expect(requestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: "/api/dnsClient/healthCheck",
+        headers: expect.objectContaining({
+          Authorization: "Bearer token-1",
+        }),
+      }),
+    );
+  });
+
+  it("reports the DNS resolution check as unsupported on pre-v15.3 nodes", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    jest.spyOn(axios, "request").mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 404, data: "not found", statusText: "Not Found" },
+    });
+    service = new TechnitiumService([node], new DhcpSnapshotService());
+
+    const result = await AuthRequestContext.run({ session }, () =>
+      service.checkDnsResolution(node.id),
+    );
+
+    expect(result).toMatchObject({
+      status: "unsupported",
+      error: "Technitium DNS v15.3 or later is required.",
+    });
+  });
+
+  it("reports the DNS resolution check as unavailable without permission", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    jest.spyOn(axios, "request").mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 403,
+        data: "permission denied",
+        statusText: "Forbidden",
+      },
+    });
+    service = new TechnitiumService([node], new DhcpSnapshotService());
+
+    const result = await AuthRequestContext.run({ session }, () =>
+      service.checkDnsResolution(node.id),
+    );
+
+    expect(result).toMatchObject({
+      status: "unavailable",
+      error: "DnsClient: View permission is required.",
+    });
+  });
+
+  it("reports a supported DNS resolution failure as unhealthy", async () => {
+    const session = {
+      id: "test-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      tokensByNodeId: { node1: "token-1" },
+    };
+    const node = {
+      id: "node1",
+      name: "Node 1",
+      baseUrl: "https://example.invalid",
+      token: "fallback-token",
+    } satisfies TechnitiumNodeConfig;
+    jest.spyOn(axios, "request").mockResolvedValue({
+      data: {
+        status: "error",
+        errorMessage: "DNS server failed to resolve localhost.",
+      },
+    } as never);
+    service = new TechnitiumService([node], new DhcpSnapshotService());
+
+    const result = await AuthRequestContext.run({ session }, () =>
+      service.checkDnsResolution(node.id),
+    );
+
+    expect(result).toMatchObject({
+      status: "unhealthy",
+      error: "DNS server failed to resolve localhost.",
+    });
+  });
+
   it("does not hide authentication failures behind the v14 status fallback", async () => {
     const session = {
       id: "test-session",

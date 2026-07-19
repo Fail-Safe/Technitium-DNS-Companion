@@ -12,6 +12,10 @@ describe("AppController", () => {
     const mockTechnitiumService = {
       listNodes: jest.fn(),
       getNodeStatus: jest.fn(),
+      checkDnsResolution: jest.fn().mockResolvedValue({
+        status: "unsupported",
+        responseTime: 0,
+      }),
     };
 
     const app: TestingModule = await Test.createTestingModule({
@@ -64,6 +68,9 @@ describe("AppController", () => {
         fetchedAt: new Date().toISOString(),
         data: { status: "ok" },
       });
+      jest
+        .spyOn(technitiumService, "checkDnsResolution")
+        .mockResolvedValue({ status: "healthy", responseTime: 12 });
 
       const result = await appController.getHealthDetailed();
 
@@ -83,6 +90,77 @@ describe("AppController", () => {
         name: "DNS Primary",
         baseUrl: "http://localhost:5380",
         status: "healthy",
+        dnsResolution: {
+          status: "healthy",
+          responseTime: 12,
+        },
+      });
+    });
+
+    it("should mark a node unhealthy when DNS resolution fails", async () => {
+      const mockNodes: TechnitiumNodeSummary[] = [
+        {
+          id: "node1",
+          name: "DNS Primary",
+          baseUrl: "http://localhost:5380",
+        },
+      ];
+
+      jest.spyOn(technitiumService, "listNodes").mockResolvedValue(mockNodes);
+      jest.spyOn(technitiumService, "getNodeStatus").mockResolvedValue({
+        nodeId: "node1",
+        fetchedAt: new Date().toISOString(),
+        data: { status: "ok" },
+      });
+      jest.spyOn(technitiumService, "checkDnsResolution").mockResolvedValue({
+        status: "unhealthy",
+        responseTime: 25,
+        error: "DNS resolution failed.",
+      });
+
+      const result = await appController.getHealthDetailed();
+
+      expect(result.nodes.healthy).toBe(0);
+      expect(result.nodes.unhealthy).toBe(1);
+      expect(result.nodes.details[0]).toMatchObject({
+        id: "node1",
+        status: "unhealthy",
+        error: "DNS resolution failed.",
+        dnsResolution: {
+          status: "unhealthy",
+          responseTime: 25,
+        },
+      });
+    });
+
+    it("should keep a node healthy when resolver health is unsupported", async () => {
+      const mockNodes: TechnitiumNodeSummary[] = [
+        {
+          id: "node1",
+          name: "DNS Primary",
+          baseUrl: "http://localhost:5380",
+        },
+      ];
+
+      jest.spyOn(technitiumService, "listNodes").mockResolvedValue(mockNodes);
+      jest.spyOn(technitiumService, "getNodeStatus").mockResolvedValue({
+        nodeId: "node1",
+        fetchedAt: new Date().toISOString(),
+        data: { status: "ok" },
+      });
+      jest.spyOn(technitiumService, "checkDnsResolution").mockResolvedValue({
+        status: "unsupported",
+        responseTime: 3,
+        error: "Technitium DNS v15.3 or later is required.",
+      });
+
+      const result = await appController.getHealthDetailed();
+
+      expect(result.nodes.healthy).toBe(1);
+      expect(result.nodes.unhealthy).toBe(0);
+      expect(result.nodes.details[0]).toMatchObject({
+        status: "healthy",
+        dnsResolution: { status: "unsupported" },
       });
     });
 

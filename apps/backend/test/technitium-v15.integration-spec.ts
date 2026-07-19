@@ -93,6 +93,23 @@ describeCompatibility("Technitium DNS v15 compatibility", () => {
     expect(response.body.data.status).toBe("ok");
   });
 
+  it("verifies DNS resolution through the v15.3 health endpoint", async () => {
+    const response = await authenticatedGet("/api/health/detailed").expect(200);
+
+    expect(response.body.nodes).toMatchObject({
+      configured: 1,
+      healthy: 1,
+      unhealthy: 0,
+    });
+    expect(response.body.nodes.details).toEqual([
+      expect.objectContaining({
+        id: "compatibility",
+        status: "healthy",
+        dnsResolution: expect.objectContaining({ status: "healthy" }),
+      }),
+    ]);
+  });
+
   it("reads settings-backed version data through the node overview", async () => {
     const response = await authenticatedGet(
       "/api/nodes/compatibility/overview",

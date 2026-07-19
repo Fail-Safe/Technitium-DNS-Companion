@@ -65,6 +65,12 @@ export interface TechnitiumStatusEnvelope<T = unknown> {
   data: T;
 }
 
+export interface TechnitiumDnsHealthCheck {
+  status: "healthy" | "unhealthy" | "unsupported" | "unavailable";
+  responseTime: number;
+  error?: string;
+}
+
 export type TechnitiumActionCategory =
   | "upstream"
   | "zone"
