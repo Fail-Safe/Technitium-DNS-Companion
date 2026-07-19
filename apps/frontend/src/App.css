@@ -1003,7 +1003,10 @@ html {
 }
 
 .app-header__brand-icon {
-  font-size: 1.5rem;
+  display: block;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
 }
 
 .app-header__brand-text {
@@ -1397,7 +1400,8 @@ html {
   }
 
   .app-header__brand-icon {
-    font-size: 1.25rem;
+    width: 1.5rem;
+    height: 1.5rem;
   }
 
   .app-header__controls {

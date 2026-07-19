@@ -76,6 +76,7 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: [
         "icon.svg",
+        "favicon.ico",
         "vite.svg",
         "icon-192x192.png",
         "icon-512x512.png",

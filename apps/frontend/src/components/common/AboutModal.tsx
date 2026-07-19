@@ -1,7 +1,6 @@
 import { faGithub } from "@fortawesome/free-brands-svg-icons";
 import {
   faBalanceScale,
-  faBolt,
   faBook,
   faExternalLinkAlt,
   faTimes,
@@ -57,9 +56,12 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
         </button>
 
         <div className="about-modal__header">
-          <div className="about-modal__logo">
-            <FontAwesomeIcon icon={faBolt} />
-          </div>
+          <img
+            className="about-modal__logo"
+            src="/icon.svg"
+            alt=""
+            aria-hidden="true"
+          />
           <h2 id="about-modal-title" className="about-modal__title">
             {__APP_NAME__}
           </h2>
