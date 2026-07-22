@@ -642,6 +642,10 @@
   align-items: center;
   justify-content: center;
   z-index: 9999;
+  padding: calc(1rem + var(--safe-area-top))
+    calc(1rem + var(--safe-area-right))
+    calc(1rem + var(--safe-area-bottom))
+    calc(1rem + var(--safe-area-left));
 }
 
 .modal-container {

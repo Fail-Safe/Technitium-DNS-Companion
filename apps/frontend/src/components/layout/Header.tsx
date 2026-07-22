@@ -44,7 +44,7 @@ export function Header() {
     }
 
     const setHeaderHeightVar = () => {
-      const height = headerEl.getBoundingClientRect().height;
+      const height = headerEl.offsetHeight;
       if (Number.isFinite(height) && height > 0) {
         document.documentElement.style.setProperty(
           "--app-header-height",
@@ -72,6 +72,54 @@ export function Header() {
     return () => {
       resizeObserver?.disconnect();
       window.removeEventListener("resize", setHeaderHeightVar);
+    };
+  }, []);
+
+  useEffect(() => {
+    const headerEl = headerRef.current;
+    const visualViewport = window.visualViewport;
+    if (!headerEl || !visualViewport) {
+      return;
+    }
+
+    let animationFrameId: number | null = null;
+
+    const syncHeaderToVisualViewport = () => {
+      animationFrameId = null;
+      headerEl.style.setProperty(
+        "--visual-viewport-offset-top",
+        `${Math.max(0, visualViewport.offsetTop)}px`,
+      );
+      headerEl.style.setProperty(
+        "--visual-viewport-offset-left",
+        `${Math.max(0, visualViewport.offsetLeft)}px`,
+      );
+      headerEl.style.setProperty(
+        "--visual-viewport-width",
+        `${visualViewport.width}px`,
+      );
+    };
+
+    const requestViewportSync = () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      animationFrameId = requestAnimationFrame(syncHeaderToVisualViewport);
+    };
+
+    syncHeaderToVisualViewport();
+    visualViewport.addEventListener("scroll", requestViewportSync);
+    visualViewport.addEventListener("resize", requestViewportSync);
+
+    return () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      visualViewport.removeEventListener("scroll", requestViewportSync);
+      visualViewport.removeEventListener("resize", requestViewportSync);
+      headerEl.style.removeProperty("--visual-viewport-offset-top");
+      headerEl.style.removeProperty("--visual-viewport-offset-left");
+      headerEl.style.removeProperty("--visual-viewport-width");
     };
   }, []);
 

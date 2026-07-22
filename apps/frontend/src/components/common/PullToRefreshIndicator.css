@@ -1,6 +1,6 @@
 .pull-to-refresh-indicator {
     position: fixed;
-    top: 0;
+    top: var(--safe-area-top);
     left: 50%;
     display: flex;
     flex-direction: column;

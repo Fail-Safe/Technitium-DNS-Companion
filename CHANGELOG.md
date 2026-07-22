@@ -9,6 +9,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-07-22
+
+### Changed
+
+- **DNS Logs table settings are easier to dismiss on mobile.** The settings sheet now has a persistent close button, keyboard focus management, Escape-key dismissal, and an explicit dialog relationship with its trigger.
+- **Installed PWAs check for updates while in use.** The service worker checks when the app returns to the foreground and periodically while it remains open so deployed fixes are discovered without requiring a manual cache reset.
+
+### Fixed
+
+- **Mobile and installed-PWA content respects device safe areas.** Headers, banners, dialogs, drawers, toasts, and floating controls now use browser-provided cutout and home-indicator insets instead of overlapping iPhone status indicators or screen edges.
+- **The application header remains visible during iOS overscroll and pinch zoom.** The fixed header tracks the visual viewport while preserving safe-area and offline-banner offsets.
+- **DNS Logs settings no longer trigger pull-to-refresh.** Opening the settings dialog disables the page-level refresh gesture and prevents modal-originated touches from arming it.
+
 ## [1.9.0] - 2026-07-19
 
 ### Upgrade notes

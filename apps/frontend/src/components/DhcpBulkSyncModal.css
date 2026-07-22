@@ -7,7 +7,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1.25rem;
+  padding: calc(1.25rem + var(--safe-area-top))
+    calc(1.25rem + var(--safe-area-right))
+    calc(1.25rem + var(--safe-area-bottom))
+    calc(1.25rem + var(--safe-area-left));
   z-index: 1200;
 }
 

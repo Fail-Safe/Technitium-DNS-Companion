@@ -225,8 +225,8 @@
     .cluster-info-banner--dropdown {
         position: fixed;
         top: auto;
-        right: 8px;
-        left: 8px;
+        right: calc(8px + var(--safe-area-right));
+        left: calc(8px + var(--safe-area-left));
         width: auto;
         min-width: unset;
         max-width: unset;
