@@ -8,6 +8,25 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 
+  /* Browser-provided viewport cutout and home-indicator insets. */
+  --safe-area-top: max(
+    env(safe-area-inset-top, 0px),
+    env(safe-area-max-inset-top, 0px)
+  );
+  --safe-area-right: max(
+    env(safe-area-inset-right, 0px),
+    env(safe-area-max-inset-right, 0px)
+  );
+  --safe-area-bottom: max(
+    env(safe-area-inset-bottom, 0px),
+    env(safe-area-max-inset-bottom, 0px)
+  );
+  --safe-area-left: max(
+    env(safe-area-inset-left, 0px),
+    env(safe-area-max-inset-left, 0px)
+  );
+  --app-header-height: calc(4rem + var(--safe-area-top));
+
   /* Light Mode Colors */
   --color-text-primary: #1a1f2d;
   --color-text-secondary: #5a6e8b;

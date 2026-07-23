@@ -5,7 +5,9 @@
     left: 0;
     right: 0;
     z-index: 9999;
-    padding: 12px 20px;
+    padding: calc(12px + var(--safe-area-top))
+        calc(20px + var(--safe-area-right)) 12px
+        calc(20px + var(--safe-area-left));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -52,7 +54,9 @@
 /* Mobile Adjustments */
 @media (max-width: 768px) {
     .offline-banner {
-        padding: 10px 16px;
+        padding: calc(10px + var(--safe-area-top))
+            calc(16px + var(--safe-area-right)) 10px
+            calc(16px + var(--safe-area-left));
         font-size: 13px;
     }
 
@@ -97,8 +101,16 @@
     /* Adjust based on banner height */
 }
 
+.offline-banner~.app-shell .app-header {
+    --app-header-base-top: 44px;
+}
+
 @media (max-width: 768px) {
     .offline-banner~* {
         margin-top: 40px;
+    }
+
+    .offline-banner~.app-shell .app-header {
+        --app-header-base-top: 40px;
     }
 }
