@@ -29,7 +29,7 @@
     "@nestjs/platform-express": "^11.1.27",
     "@nestjs/throttler": "^6.5.0",
     "@types/nodemailer": "^7.0.10",
-    "axios": "^1.18.0",
+    "axios": "^1.18.1",
     "cache-manager": "^6.4.3",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",
