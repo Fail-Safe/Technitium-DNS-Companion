@@ -10,7 +10,10 @@
   align-items: center;
   justify-content: center;
   z-index: 10000;
-  padding: 1rem;
+  padding: calc(1rem + var(--safe-area-top))
+    calc(1rem + var(--safe-area-right))
+    calc(1rem + var(--safe-area-bottom))
+    calc(1rem + var(--safe-area-left));
   animation: confirmModalFadeIn 0.15s ease-out;
 }
 

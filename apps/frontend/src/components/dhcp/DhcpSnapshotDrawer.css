@@ -1,6 +1,3 @@
-:root {
-}
-
 .snapshot-drawer__overlay {
   position: fixed;
   inset: 0;
@@ -10,7 +7,10 @@
   justify-content: flex-end;
   align-items: stretch;
   z-index: 140;
-  padding: calc(var(--app-header-height, 72px) + 12px) 1.75rem 1.75rem;
+  padding: calc(var(--app-header-height, 72px) + 12px)
+    calc(1.75rem + var(--safe-area-right))
+    calc(1.75rem + var(--safe-area-bottom))
+    calc(1.75rem + var(--safe-area-left));
   opacity: 0;
   transition: opacity 200ms ease-out;
 }
@@ -34,7 +34,9 @@
   transition:
     transform 200ms ease-out,
     opacity 200ms ease-out;
-  max-height: calc(100vh - (var(--app-header-height, 72px) + 32px));
+  max-height: calc(
+    100dvh - var(--app-header-height, 72px) - 32px - var(--safe-area-bottom)
+  );
 }
 
 .snapshot-drawer.is-visible {
@@ -171,7 +173,10 @@
   align-items: center;
   justify-content: center;
   z-index: 50;
-  padding: 1.25rem;
+  padding: calc(1.25rem + var(--safe-area-top))
+    calc(1.25rem + var(--safe-area-right))
+    calc(1.25rem + var(--safe-area-bottom))
+    calc(1.25rem + var(--safe-area-left));
 }
 
 .snapshot-drawer__dialog {
@@ -299,7 +304,7 @@
 
 .drawer-pull {
   position: fixed;
-  right: 0;
+  right: var(--safe-area-right);
   top: 42%;
   transform: translateY(-50%);
   writing-mode: vertical-rl;

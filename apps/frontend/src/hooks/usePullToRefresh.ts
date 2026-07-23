@@ -61,11 +61,17 @@ export function usePullToRefresh({
         };
 
         const handleTouchStart = (e: TouchEvent) => {
+            const target = e.target;
+            const startedInsideModal =
+                target instanceof Element &&
+                target.closest('[aria-modal="true"]') !== null;
+
             // Record starting position and whether we're at top
             // Don't set isPulling yet - wait to see the direction
             startY.current = e.touches[0].clientY;
             currentY.current = startY.current;
-            touchStartedAtTop.current = isAtTop() && !isRefreshing;
+            touchStartedAtTop.current =
+                !startedInsideModal && isAtTop() && !isRefreshing;
         };
 
         const handleTouchMove = (e: TouchEvent) => {

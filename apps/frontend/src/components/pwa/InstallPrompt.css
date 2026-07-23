@@ -1,8 +1,8 @@
 /* Install Prompt Container */
 .install-prompt {
     position: fixed;
-    bottom: 20px;
-    right: 20px;
+    bottom: calc(20px + var(--safe-area-bottom));
+    right: calc(20px + var(--safe-area-right));
     display: flex;
     align-items: center;
     gap: 8px;
@@ -81,7 +81,10 @@
     align-items: center;
     justify-content: center;
     z-index: 2000;
-    padding: 20px;
+    padding: calc(20px + var(--safe-area-top))
+        calc(20px + var(--safe-area-right))
+        calc(20px + var(--safe-area-bottom))
+        calc(20px + var(--safe-area-left));
     animation: fadeIn 0.3s ease;
 }
 
@@ -179,9 +182,9 @@
 /* Mobile Adjustments */
 @media (max-width: 768px) {
     .install-prompt {
-        bottom: 80px;
+        bottom: calc(80px + var(--safe-area-bottom));
         /* Above mobile nav if present */
-        right: 16px;
+        right: calc(16px + var(--safe-area-right));
         padding: 10px 16px;
         font-size: 13px;
     }

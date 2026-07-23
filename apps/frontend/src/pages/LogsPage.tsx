@@ -7,6 +7,7 @@ import {
   faSquare,
   faSquareCheck,
   faTowerBroadcast,
+  faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { ReactNode } from "react";
@@ -3602,6 +3603,8 @@ export function LogsPage() {
   const [settingsPopupHorizontalAlign, setSettingsPopupHorizontalAlign] =
     useState<"left" | "right">("left");
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const settingsPanelRef = useRef<HTMLElement>(null);
+  const settingsCloseButtonRef = useRef<HTMLButtonElement>(null);
   const [filtersVisible, setFiltersVisible] = useState<boolean>(false);
   const [statisticsExpanded, setStatisticsExpanded] = useState<boolean>(false);
   const [mobileControlsExpanded, setMobileControlsExpanded] =
@@ -3836,7 +3839,7 @@ export function LogsPage() {
   const pullToRefresh = usePullToRefresh({
     onRefresh: handlePullToRefresh,
     threshold: 80,
-    disabled: false,
+    disabled: settingsOpen,
   });
 
   const handleClientClick = useCallback(
@@ -4363,6 +4366,54 @@ export function LogsPage() {
       setSettingsPopupHorizontalAlign("right");
     }
   }, [settingsOpen]);
+
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false);
+    window.requestAnimationFrame(() => settingsButtonRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!settingsOpen) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => settingsCloseButtonRef.current?.focus());
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSettings();
+        return;
+      }
+
+      if (event.key !== "Tab" || !settingsPanelRef.current) {
+        return;
+      }
+
+      const focusableElements = Array.from(
+        settingsPanelRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements.at(-1);
+
+      if (!firstElement || !lastElement) {
+        return;
+      }
+
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [closeSettings, settingsOpen]);
 
   const toggleColumnVisibility = (key: OptionalColumnKey) => {
     setColumnVisibility((prev) => {
@@ -8295,7 +8346,15 @@ export function LogsPage() {
                           ? "logs-page__settings-toggle active"
                           : "logs-page__settings-toggle"
                       }
-                      onClick={() => setSettingsOpen((prev) => !prev)}
+                      onClick={() => {
+                        if (settingsOpen) {
+                          closeSettings();
+                        } else {
+                          setSettingsOpen(true);
+                        }
+                      }}
+                      aria-expanded={settingsOpen}
+                      aria-controls="logs-table-settings"
                     >
                       Table settings
                     </button>
@@ -8304,17 +8363,35 @@ export function LogsPage() {
                       <>
                         <div
                           className="logs-page__settings-backdrop"
-                          onClick={() => setSettingsOpen(false)}
+                          onClick={closeSettings}
                         />
                         <section
+                          ref={settingsPanelRef}
+                          id="logs-table-settings"
                           className={`logs-page__settings logs-page__settings--${settingsPopupHorizontalAlign}`}
+                          role="dialog"
+                          aria-modal="true"
+                          aria-labelledby="logs-table-settings-title"
+                          aria-describedby="logs-table-settings-description"
                         >
-                          <header>
-                            <h2>Table settings</h2>
-                            <p>
-                              Adjust which optional columns appear in the logs
-                              table.
-                            </p>
+                          <header className="logs-page__settings-header">
+                            <div className="logs-page__settings-header-copy">
+                              <h2 id="logs-table-settings-title">Table settings</h2>
+                              <p id="logs-table-settings-description">
+                                Adjust which optional columns appear in the logs
+                                table.
+                              </p>
+                            </div>
+                            <button
+                              ref={settingsCloseButtonRef}
+                              type="button"
+                              className="logs-page__settings-close"
+                              onClick={closeSettings}
+                              aria-label="Close table settings"
+                              title="Close"
+                            >
+                              <FontAwesomeIcon icon={faXmark} />
+                            </button>
                           </header>
                           <div className="logs-page__settings-options">
                             {OPTIONAL_COLUMN_OPTIONS.map((option) => {
