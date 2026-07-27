@@ -76,6 +76,11 @@ import {
     compareStringArrays,
     compareUrlArrays,
 } from "../utils/arrayComparison";
+import {
+  getNewRegexEntryCandidate,
+  isRegexDomainType,
+  type AdvancedBlockingDomainType,
+} from "../utils/advanced-blocking-domain-entries";
 import "./ConfigurationPage.css";
 import { AppInput } from "../components/common/AppInput";
 
@@ -574,9 +579,8 @@ export function ConfigurationPage() {
   const [dragOverGroup, setDragOverGroup] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [groups, setGroups] = useState<string[]>([]);
-  const [activeDomainType, setActiveDomainType] = useState<
-    "blocked" | "allowed" | "blockedRegex" | "allowedRegex"
-  >("blocked");
+  const [activeDomainType, setActiveDomainType] =
+    useState<AdvancedBlockingDomainType>("blocked");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   // The binding action that corresponds to the current activeDomainType tab
@@ -1672,15 +1676,24 @@ export function ConfigurationPage() {
 
   const handleCheckDomain = useCallback(
     async (domainOverride?: string) => {
-      // Regex patterns cannot be checked via the domain lookup API
-      if (
-        activeDomainType === "blockedRegex" ||
-        activeDomainType === "allowedRegex"
-      ) {
+      const rawInput = (domainOverride ?? searchInput).trim();
+      if (!rawInput || !selectedNodeId) return;
+
+      // Regex patterns cannot be checked via the domain lookup API. Prepare
+      // new patterns locally so they can still be dragged into a group.
+      if (isRegexDomainType(activeDomainType)) {
+        const candidate = getNewRegexEntryCandidate(
+          rawInput,
+          activeDomainType,
+          testStagedConfig ?? selectedNodeConfig,
+        );
+        setSearchedDomain(candidate);
+        setDomainExists(false);
+        setDomainInGroups([]);
+        setDomainMatchDetails([]);
         return;
       }
-      const rawInput = domainOverride ?? searchInput.trim();
-      if (!rawInput || !selectedNodeId) return;
+
       const domain = extractDomainFromInput(rawInput);
       setChecking(true);
       try {
@@ -1720,7 +1733,14 @@ export function ConfigurationPage() {
         setChecking(false);
       }
     },
-    [activeDomainType, searchInput, selectedNodeId, extractDomainFromInput],
+    [
+      activeDomainType,
+      searchInput,
+      selectedNodeId,
+      extractDomainFromInput,
+      testStagedConfig,
+      selectedNodeConfig,
+    ],
   );
 
   const handleDomainClick = useCallback(
