@@ -9,6 +9,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.9.2] - 2026-07-28
+
+### Fixed
+
+- **New Advanced Blocking regex entries can be added from DNS Filtering → Domains.** Allowed Regex and Blocked Regex input now produces the existing draggable entry preview without attempting an incompatible domain lookup, while exact duplicates remain search-only (closes #95).
+- **Clean dependency installs accept the committed Sharp version.** The frontend manifest now matches the lockfile so `npm ci` and the Technitium compatibility workflow no longer fail before tests begin.
+
+### Security
+
+- **Runtime and development dependencies received security updates.** Updated Axios and patched transitive releases of Body Parser, Fast URI, PostCSS, Brace Expansion, and Nano ID. The React Router RSC advisory was separately assessed as not applicable because Companion does not use React Server Components.
+
 ## [1.9.1] - 2026-07-22
 
 ### Changed
