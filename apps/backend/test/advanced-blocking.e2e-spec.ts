@@ -55,6 +55,17 @@ describe("Advanced Blocking save/get round-trip (e2e)", () => {
           cluster: { type: "Standalone", health: "healthy" },
         },
       ]),
+      resolveClusterWriteTargets: jest.fn().mockResolvedValue({
+        perCandidate: new Map([
+          [
+            "node1",
+            {
+              writeTarget: "node1",
+              flushNodes: ["node1"],
+            },
+          ],
+        ]),
+      }),
       executeAction: jest
         .fn()
         .mockImplementation((_nodeId: string, action: unknown) => {

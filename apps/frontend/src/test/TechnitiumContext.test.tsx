@@ -585,6 +585,15 @@ describe("TechnitiumContext React Hook Integration", () => {
       expect(result.current.saveAdvancedBlockingConfig).toBeInstanceOf(
         Function,
       );
+      expect(result.current.loadAdvancedBlockingRawConfig).toBeInstanceOf(
+        Function,
+      );
+      expect(result.current.saveAdvancedBlockingRawConfig).toBeInstanceOf(
+        Function,
+      );
+      expect(result.current.mutateAdvancedBlockingComment).toBeInstanceOf(
+        Function,
+      );
       expect(result.current.loadNodeLogs).toBeInstanceOf(Function);
       expect(result.current.loadCombinedLogs).toBeInstanceOf(Function);
       expect(result.current.loadDhcpScopes).toBeInstanceOf(Function);
@@ -594,6 +603,273 @@ describe("TechnitiumContext React Hook Integration", () => {
       expect(result.current.loadZones).toBeInstanceOf(Function);
       expect(result.current.loadCombinedZoneRecords).toBeInstanceOf(Function);
       expect(result.current.loadCombinedZones).toBeInstanceOf(Function);
+    });
+
+    it("loads and mutates Advanced Blocking JSONC through the expected endpoints", async () => {
+      const rawConfig = `{
+  "groups": [{
+    "name": "default",
+    "blocked": [
+      // rationale
+      "ads.example"
+    ]
+  }]
+}`;
+      const rawResponse = {
+        nodeId: "node1",
+        rawConfig,
+        configRevision: "revision-1",
+        domainComments: [],
+      };
+      const requests: Array<{ url: string; options?: RequestInit }> = [];
+
+      fetchSpy.mockImplementation(
+        (url: string | URL | Request, options?: RequestInit) => {
+          if (url === "/api/nodes") {
+            return Promise.resolve({
+              ok: true,
+              json: () =>
+                Promise.resolve([
+                  {
+                    id: "node1",
+                    name: "Node 1",
+                    baseUrl: "http://node1.test",
+                  },
+                ]),
+            } as Response);
+          }
+          if (typeof url === "string" && url.includes("/apps")) {
+            return Promise.resolve({
+              ok: true,
+              json: () =>
+                Promise.resolve({
+                  nodeId: "node1",
+                  apps: [],
+                  hasAdvancedBlocking: true,
+                  fetchedAt: "2026-07-29T00:00:00.000Z",
+                }),
+            } as Response);
+          }
+          if (
+            typeof url === "string" &&
+            (url.endsWith("/advanced-blocking/raw") ||
+              url.endsWith("/advanced-blocking/comments"))
+          ) {
+            requests.push({ url, options });
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve(rawResponse),
+            } as Response);
+          }
+          return Promise.resolve({ ok: false, status: 404 } as Response);
+        },
+      );
+
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <TechnitiumProvider>{children}</TechnitiumProvider>
+      );
+      const { result } = renderHook(() => useTechnitiumState(), { wrapper });
+
+      await waitFor(() => expect(result.current.nodes).toHaveLength(1));
+
+      await act(async () => {
+        await result.current.loadAdvancedBlockingRawConfig("node1");
+        await result.current.saveAdvancedBlockingRawConfig(
+          "node1",
+          rawConfig,
+          "revision-1",
+        );
+        await result.current.mutateAdvancedBlockingComment("node1", {
+          action: "add",
+          configRevision: "revision-1",
+          groupName: "default",
+          field: "blocked",
+          value: "ads.example",
+          occurrence: 0,
+          text: "rationale",
+          style: "line",
+        });
+      });
+
+      expect(requests).toHaveLength(3);
+      expect(requests[0]).toEqual({
+        url: "/api/nodes/node1/advanced-blocking/raw",
+        options: {
+          credentials: "include",
+          headers: {},
+        },
+      });
+      expect(requests[1]).toMatchObject({
+        url: "/api/nodes/node1/advanced-blocking/raw",
+        options: {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        },
+      });
+      expect(JSON.parse(String(requests[1].options?.body))).toEqual({
+        rawConfig,
+        configRevision: "revision-1",
+      });
+      expect(requests[2]).toMatchObject({
+        url: "/api/nodes/node1/advanced-blocking/comments",
+        options: {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        },
+      });
+      expect(JSON.parse(String(requests[2].options?.body))).toEqual({
+        action: "add",
+        configRevision: "revision-1",
+        groupName: "default",
+        field: "blocked",
+        value: "ads.example",
+        occurrence: 0,
+        text: "rationale",
+        style: "line",
+      });
+    });
+
+    it("sends the loaded config revision when saving Advanced Blocking", async () => {
+      const metrics = {
+        groupCount: 0,
+        blockedDomainCount: 0,
+        allowedDomainCount: 0,
+        blockListUrlCount: 0,
+        allowListUrlCount: 0,
+        adblockListUrlCount: 0,
+        allowedRegexCount: 0,
+        blockedRegexCount: 0,
+        regexAllowListUrlCount: 0,
+        regexBlockListUrlCount: 0,
+        localEndpointMappingCount: 0,
+        networkMappingCount: 0,
+        scheduledNodeCount: 0,
+      };
+      const config = {
+        localEndPointGroupMap: {},
+        networkGroupMap: {},
+        groups: [],
+      };
+      const snapshot = {
+        nodeId: "node1",
+        baseUrl: "http://node1.test",
+        fetchedAt: "2026-07-29T00:00:00.000Z",
+        metrics,
+        config,
+        configRevision: "revision-abc",
+      };
+      const overview = {
+        fetchedAt: "2026-07-29T00:00:00.000Z",
+        aggregate: metrics,
+        nodes: [snapshot],
+      };
+      let saveBody: string | undefined;
+
+      fetchSpy.mockImplementation(
+        (url: string | URL | Request, options?: RequestInit) => {
+          if (url === "/api/nodes") {
+            return Promise.resolve({
+              ok: true,
+              json: () =>
+                Promise.resolve([
+                  {
+                    id: "node1",
+                    name: "Node 1",
+                    baseUrl: "http://node1.test",
+                  },
+                ]),
+            } as Response);
+          }
+          if (typeof url === "string" && url.includes("/apps")) {
+            return Promise.resolve({
+              ok: true,
+              json: () =>
+                Promise.resolve({
+                  nodeId: "node1",
+                  apps: [],
+                  hasAdvancedBlocking: true,
+                  fetchedAt: "2026-07-29T00:00:00.000Z",
+                }),
+            } as Response);
+          }
+          if (
+            url === "/api/nodes/advanced-blocking" &&
+            options?.method !== "POST"
+          ) {
+            return Promise.resolve({
+              ok: true,
+              text: () => Promise.resolve(JSON.stringify(overview)),
+            } as Response);
+          }
+          if (
+            url === "/api/nodes/node1/advanced-blocking" &&
+            options?.method === "POST"
+          ) {
+            saveBody = String(options.body);
+            return Promise.resolve({
+              ok: true,
+              json: () => Promise.resolve(snapshot),
+            } as Response);
+          }
+          return Promise.resolve({ ok: false, status: 404 } as Response);
+        },
+      );
+
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <TechnitiumProvider>{children}</TechnitiumProvider>
+      );
+      const { result } = renderHook(() => useTechnitiumState(), { wrapper });
+
+      await waitFor(() => expect(result.current.nodes).toHaveLength(1));
+      await act(async () => {
+        await result.current.reloadAdvancedBlocking();
+      });
+      await waitFor(() =>
+        expect(
+          result.current.advancedBlocking?.nodes[0].configRevision,
+        ).toBe("revision-abc"),
+      );
+
+      await act(async () => {
+        await result.current.saveAdvancedBlockingConfig(
+          "node1",
+          config,
+          undefined,
+          undefined,
+          {
+            configRevision: "revision-abc",
+            configNodeId: "node1",
+            mutations: [
+              {
+                action: "add",
+                groupName: "default",
+                field: "blocked",
+                value: "ads.example",
+                occurrence: 0,
+                text: "pending rationale",
+                style: "line",
+              },
+            ],
+          },
+        );
+      });
+
+      expect(JSON.parse(saveBody ?? "{}")).toMatchObject({
+        config,
+        configNodeId: "node1",
+        configRevision: "revision-abc",
+        commentMutations: [
+          {
+            action: "add",
+            groupName: "default",
+            field: "blocked",
+            value: "ads.example",
+            occurrence: 0,
+            text: "pending rationale",
+            style: "line",
+          },
+        ],
+      });
     });
 
     it("should handle fetchNodeOverviews without causing infinite loops", async () => {

@@ -8,6 +8,7 @@
  */
 
 import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { parseAdvancedBlockingJsonc } from "./advanced-blocking-jsonc";
 import { TechnitiumService } from "./technitium.service";
 import type {
   TechnitiumApiResponse,
@@ -141,7 +142,9 @@ export class BuiltInBlockingService {
             advancedBlockingInstalled = true;
 
             if (abOverview.response?.config) {
-              const config = JSON.parse(abOverview.response.config) as {
+              const config = parseAdvancedBlockingJsonc(
+                abOverview.response.config,
+              ) as {
                 enableBlocking?: boolean;
               };
               advancedBlockingEnabled = Boolean(config.enableBlocking);

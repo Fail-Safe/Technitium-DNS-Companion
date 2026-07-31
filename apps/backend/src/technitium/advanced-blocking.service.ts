@@ -1,13 +1,25 @@
 import {
+  BadRequestException,
+  ConflictException,
   forwardRef,
   Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from "@nestjs/common";
+import {
+  applyAdvancedBlockingJsoncChanges,
+  calculateAdvancedBlockingConfigRevision,
+  listAdvancedBlockingDomainComments,
+  mutateAdvancedBlockingDomainComment,
+  parseAdvancedBlockingJsonc,
+} from "./advanced-blocking-jsonc";
 import type {
   AdvancedBlockingCombinedOverview,
+  AdvancedBlockingCommentMutation,
+  AdvancedBlockingCommentMutationRequest,
   AdvancedBlockingConfig,
+  AdvancedBlockingRawConfig,
   AdvancedBlockingGroup,
   AdvancedBlockingGroupComparison,
   AdvancedBlockingGroupComparisonStatus,
@@ -171,56 +183,128 @@ export class AdvancedBlockingService {
     return this.loadSnapshot(summary, authMode);
   }
 
+  async getRawConfig(
+    nodeId: string,
+    includeSnapshot = true,
+  ): Promise<AdvancedBlockingRawConfig> {
+    const { envelope, appName } = await this.fetchConfigWithFallback(
+      nodeId,
+      "session",
+    );
+    const rawConfig = envelope?.response?.config || "{}";
+    if (appName) {
+      this.appNameByNode.set(nodeId, appName);
+    }
+    try {
+      const parsed = parseAdvancedBlockingJsonc(rawConfig);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Advanced Blocking config payload was not an object.");
+      }
+    } catch (error) {
+      throw new BadRequestException(
+        `Unable to parse Advanced Blocking config JSON: ${(error as Error).message}`,
+      );
+    }
+
+    const result: AdvancedBlockingRawConfig = {
+      nodeId,
+      rawConfig,
+      configRevision: calculateAdvancedBlockingConfigRevision(rawConfig),
+      domainComments: listAdvancedBlockingDomainComments(rawConfig),
+    };
+    if (includeSnapshot) {
+      result.snapshot = await this.getSnapshot(nodeId);
+    }
+    return result;
+  }
+
+  async setRawConfig(
+    nodeId: string,
+    rawConfig: string,
+    expectedRevision: string,
+  ): Promise<AdvancedBlockingRawConfig> {
+    try {
+      const parsed = parseAdvancedBlockingJsonc(rawConfig);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Advanced Blocking config payload was not an object.");
+      }
+    } catch (error) {
+      throw new BadRequestException(
+        `Unable to parse Advanced Blocking config JSON: ${(error as Error).message}`,
+      );
+    }
+
+    await this.assertCurrentRevision(nodeId, expectedRevision);
+    await this.writeRawConfig(nodeId, rawConfig, "session");
+    return this.getRawConfig(nodeId);
+  }
+
+  async mutateDomainComment(
+    nodeId: string,
+    mutation: AdvancedBlockingCommentMutationRequest,
+  ): Promise<AdvancedBlockingRawConfig> {
+    const current = await this.getRawConfig(nodeId, false);
+    if (current.configRevision !== mutation.configRevision) {
+      throw this.createRevisionConflict();
+    }
+
+    let nextRaw: string;
+    try {
+      nextRaw = mutateAdvancedBlockingDomainComment(
+        current.rawConfig,
+        mutation,
+      );
+    } catch (error) {
+      throw new BadRequestException((error as Error).message);
+    }
+
+    await this.writeRawConfig(nodeId, nextRaw, "session");
+    return this.getRawConfig(nodeId);
+  }
+
   async setConfig(
     nodeId: string,
     config: AdvancedBlockingConfig,
+    expectedRevision?: string,
+    commentMutations: AdvancedBlockingCommentMutation[] = [],
   ): Promise<AdvancedBlockingSnapshot> {
-    return this.setConfigWithAuth(nodeId, config, "session");
+    return this.setConfigWithAuth(
+      nodeId,
+      config,
+      "session",
+      expectedRevision,
+      commentMutations,
+    );
   }
 
   async setConfigWithAuth(
     nodeId: string,
     config: AdvancedBlockingConfig,
     authMode: "session" | "schedule",
+    expectedRevision?: string,
+    commentMutations: AdvancedBlockingCommentMutation[] = [],
   ): Promise<AdvancedBlockingSnapshot> {
-    const serialized = this.serializeConfig(config);
-    const body = new URLSearchParams();
-    body.set("config", JSON.stringify(serialized, null, 2));
-
-    const appNames = this.resolveAppNameCandidates(nodeId);
-    let lastError: Error | undefined;
-
-    for (const appName of appNames) {
-      try {
-        await this.technitiumService.executeAction(
-          nodeId,
-          {
-            method: "POST",
-            url: "/api/apps/config/set",
-            params: { name: appName },
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: body.toString(),
-          },
-          { authMode },
-        );
-
-        this.appNameByNode.set(nodeId, appName);
-        return this.getSnapshotWithAuth(nodeId, authMode);
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        this.logger.warn(
-          `Failed to save Advanced Blocking config via app name "${appName}" on node "${nodeId}"`,
-        );
-      }
-    }
-
-    if (lastError) {
-      throw lastError;
-    }
-
-    throw new Error(
-      "Failed to save Advanced Blocking config: no app names succeeded.",
+    const { envelope: currentEnvelope } = await this.fetchConfigWithFallback(
+      nodeId,
+      authMode,
     );
+    const currentRawConfig = currentEnvelope?.response?.config || "{}";
+    const currentRevision =
+      calculateAdvancedBlockingConfigRevision(currentRawConfig);
+    if (expectedRevision && expectedRevision !== currentRevision) {
+      throw this.createRevisionConflict();
+    }
+
+    const desiredConfig = this.normalizeSerializedConfig(
+      this.serializeConfig(config),
+    );
+    const patchedConfig = applyAdvancedBlockingJsoncChanges(
+      currentRawConfig,
+      desiredConfig,
+      commentMutations,
+    );
+    await this.writeRawConfig(nodeId, patchedConfig, authMode);
+    return this.getSnapshotWithAuth(nodeId, authMode);
   }
 
   private async loadSnapshot(
@@ -248,7 +332,12 @@ export class AdvancedBlockingService {
           this.appNameByNode.set(summary.id, appName);
         }
 
-        return { ...baseSnapshot, config, metrics };
+        return {
+          ...baseSnapshot,
+          config,
+          configRevision: calculateAdvancedBlockingConfigRevision("{}"),
+          metrics,
+        };
       }
 
       const config = this.parseConfig(rawConfig);
@@ -257,7 +346,12 @@ export class AdvancedBlockingService {
         this.appNameByNode.set(summary.id, appName);
       }
 
-      return { ...baseSnapshot, config, metrics };
+      return {
+        ...baseSnapshot,
+        config,
+        configRevision: calculateAdvancedBlockingConfigRevision(rawConfig),
+        metrics,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       this.logger.warn(
@@ -302,6 +396,66 @@ export class AdvancedBlockingService {
 
     throw new Error(
       "Unable to fetch Advanced Blocking config: no app names succeeded.",
+    );
+  }
+
+  private async assertCurrentRevision(
+    nodeId: string,
+    expectedRevision: string,
+  ): Promise<void> {
+    const { envelope } = await this.fetchConfigWithFallback(nodeId, "session");
+    const rawConfig = envelope?.response?.config || "{}";
+    if (
+      calculateAdvancedBlockingConfigRevision(rawConfig) !== expectedRevision
+    ) {
+      throw this.createRevisionConflict();
+    }
+  }
+
+  private createRevisionConflict(): ConflictException {
+    return new ConflictException(
+      "Advanced Blocking configuration changed after it was loaded. Reload it before saving so existing comments and concurrent edits are preserved.",
+    );
+  }
+
+  private async writeRawConfig(
+    nodeId: string,
+    rawConfig: string,
+    authMode: "session" | "schedule",
+  ): Promise<void> {
+    const body = new URLSearchParams();
+    body.set("config", rawConfig);
+    const appNames = this.resolveAppNameCandidates(nodeId);
+    let lastError: Error | undefined;
+
+    for (const appName of appNames) {
+      try {
+        await this.technitiumService.executeAction(
+          nodeId,
+          {
+            method: "POST",
+            url: "/api/apps/config/set",
+            params: { name: appName },
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString(),
+          },
+          { authMode },
+        );
+        this.appNameByNode.set(nodeId, appName);
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        this.logger.warn(
+          `Failed to save Advanced Blocking config via app name "${appName}" on node "${nodeId}"`,
+        );
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+    throw new Error(
+      "Failed to save Advanced Blocking config: no app names succeeded.",
     );
   }
 
@@ -1064,7 +1218,7 @@ export class AdvancedBlockingService {
   private parseConfig(rawConfig: string): AdvancedBlockingConfig {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(rawConfig) as Record<string, unknown>;
+      parsed = parseAdvancedBlockingJsonc(rawConfig);
     } catch (error) {
       throw new Error(
         `Unable to parse Advanced Blocking config JSON: ${(error as Error).message}`,
@@ -1102,6 +1256,12 @@ export class AdvancedBlockingService {
       networkGroupMap: this.normalizeMapping(payload.networkGroupMap),
       groups,
     };
+  }
+
+  private normalizeSerializedConfig(
+    serialized: Record<string, unknown>,
+  ): AdvancedBlockingConfig {
+    return this.parseConfig(JSON.stringify(serialized));
   }
 
   private normalizeInteger(value: unknown): number | undefined {

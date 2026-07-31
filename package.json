@@ -1,7 +1,7 @@
 {
   "name": "technitium-dns-companion",
   "private": true,
-  "version": "1.9.2",
+  "version": "1.10.0",
   "license": "MIT",
   "workspaces": [
     "apps/backend",

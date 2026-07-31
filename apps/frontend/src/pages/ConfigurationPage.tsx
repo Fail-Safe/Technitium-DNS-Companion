@@ -6,6 +6,7 @@ import {
     faCircle,
     faClockRotateLeft,
     faCode,
+    faCommentDots,
     faDownload,
     faExclamationTriangle,
     faGripVertical,
@@ -41,6 +42,11 @@ import { ClusterInfoBanner } from "../components/common/ClusterInfoBanner.tsx";
 import { ConfirmModal } from "../components/common/ConfirmModal";
 import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndicator";
 import { AdvancedBlockingEditor } from "../components/configuration/AdvancedBlockingEditor.tsx";
+import {
+  AdvancedBlockingDomainComments,
+  type AdvancedBlockingStagedCommentChange,
+} from "../components/configuration/AdvancedBlockingDomainComments";
+import { AdvancedBlockingJsoncEditor } from "../components/configuration/AdvancedBlockingJsoncEditor";
 import { AdvancedBlockingSetupGuide } from "../components/configuration/AdvancedBlockingSetupGuide.tsx";
 import { BlockingConflictBanner } from "../components/configuration/BlockingConflictBanner.tsx";
 import { BlockingMethodSelector } from "../components/configuration/BlockingMethodSelector.tsx";
@@ -56,7 +62,12 @@ import { useToast } from "../context/useToast";
 import { useNavigationBlocker } from "../hooks/useNavigationBlocker";
 import { useClusterNodes } from "../hooks/usePrimaryNode";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
-import type { AdvancedBlockingConfig } from "../types/advancedBlocking";
+import type {
+  AdvancedBlockingCommentMutation,
+  AdvancedBlockingConfig,
+  AdvancedBlockingDomainListField,
+  AdvancedBlockingRawConfig,
+} from "../types/advancedBlocking";
 import type {
     DomainGroup,
     DomainGroupBindingSummary,
@@ -89,6 +100,7 @@ type TabMode =
   | "domain-groups"
   | "group-management"
   | "list-management"
+  | "raw-jsonc"
   | "sync";
 
 interface DomainMatchApiEntry {
@@ -264,6 +276,8 @@ export function ConfigurationPage() {
     reloadAdvancedBlocking,
     reloadBuiltInBlocking,
     saveAdvancedBlockingConfig,
+    loadAdvancedBlockingRawConfig,
+    saveAdvancedBlockingRawConfig,
     blockingStatus,
     selectedBlockingMethod,
     reloadBlockingStatus,
@@ -303,6 +317,15 @@ export function ConfigurationPage() {
   const [hasUnsavedListSourcesChanges, setHasUnsavedListSourcesChanges] =
     useState(false);
   const [hasUnsavedDomainChanges, setHasUnsavedDomainChanges] = useState(false);
+  const [hasUnsavedRawJsoncChanges, setHasUnsavedRawJsoncChanges] =
+    useState(false);
+  const [advancedBlockingRaw, setAdvancedBlockingRaw] =
+    useState<AdvancedBlockingRawConfig>();
+  const [advancedBlockingRawLoading, setAdvancedBlockingRawLoading] =
+    useState(false);
+  const [advancedBlockingRawError, setAdvancedBlockingRawError] =
+    useState<string>();
+  const [commentDomain, setCommentDomain] = useState<string>();
 
   const [domainGroupsStatus, setDomainGroupsStatus] =
     useState<DomainGroupsStatus | null>(null);
@@ -376,7 +399,8 @@ export function ConfigurationPage() {
   const hasAnyUnsavedChanges =
     hasUnsavedGroupChanges ||
     hasUnsavedListSourcesChanges ||
-    hasUnsavedDomainChanges;
+    hasUnsavedDomainChanges ||
+    hasUnsavedRawJsoncChanges;
 
   // Track sync summary for badge display
   const [syncChangeCount, setSyncChangeCount] = useState(0);
@@ -399,6 +423,44 @@ export function ConfigurationPage() {
   const selectedNodeConfig = advancedNodes.find(
     (n) => n.nodeId === selectedNodeId,
   )?.config;
+  const refreshAdvancedBlockingRaw = useCallback(async () => {
+    if (!selectedNodeId) {
+      setAdvancedBlockingRaw(undefined);
+      return;
+    }
+    setAdvancedBlockingRawLoading(true);
+    setAdvancedBlockingRawError(undefined);
+    try {
+      setAdvancedBlockingRaw(
+        await loadAdvancedBlockingRawConfig(selectedNodeId),
+      );
+    } catch (error) {
+      setAdvancedBlockingRaw(undefined);
+      setAdvancedBlockingRawError(
+        error instanceof Error
+          ? error.message
+          : "Failed to load Advanced Blocking JSONC.",
+      );
+    } finally {
+      setAdvancedBlockingRawLoading(false);
+    }
+  }, [selectedNodeId, loadAdvancedBlockingRawConfig]);
+
+  useEffect(() => {
+    if (
+      selectedBlockingMethod === "advanced" &&
+      selectedNodeId &&
+      (activeTab === "domain-management" || activeTab === "raw-jsonc")
+    ) {
+      void refreshAdvancedBlockingRaw();
+    }
+  }, [
+    activeTab,
+    selectedBlockingMethod,
+    selectedNodeId,
+    refreshAdvancedBlockingRaw,
+  ]);
+
   const selectedBuiltInSnapshot = builtInNodes.find(
     (n) => n.nodeId === selectedNodeId,
   );
@@ -630,7 +692,47 @@ export function ConfigurationPage() {
       description: string;
     }>
   >([]);
+  const [stagedCommentChanges, setStagedCommentChanges] = useState<
+    AdvancedBlockingStagedCommentChange[]
+  >([]);
+  const stagedCommentSequence = useRef(0);
   const [showTestChangesSummary, setShowTestChangesSummary] = useState(false);
+  const stagedCommentPendingChanges = useMemo(
+    () =>
+      stagedCommentChanges.map((change) => {
+        const mutation = change.mutation;
+        if (mutation.action === "add") {
+          return {
+            type: "added" as const,
+            category: "comments",
+            description: `Added a ${mutation.style ?? "line"} comment for "${mutation.value}" in "${mutation.groupName}"`,
+          };
+        }
+
+        const comment = advancedBlockingRaw?.domainComments.find(
+          (candidate) => candidate.id === mutation.commentId,
+        );
+        const target = comment
+          ? `"${comment.value}" in "${comment.groupName}"`
+          : "an Advanced Blocking domain";
+        return {
+          type:
+            mutation.action === "edit"
+              ? ("modified" as const)
+              : ("removed" as const),
+          category: "comments",
+          description:
+            mutation.action === "edit"
+              ? `Edited a comment for ${target}`
+              : `Removed a comment for ${target}`,
+        };
+      }),
+    [stagedCommentChanges, advancedBlockingRaw],
+  );
+  const allTestPendingChanges = useMemo(
+    () => [...testPendingChanges, ...stagedCommentPendingChanges],
+    [testPendingChanges, stagedCommentPendingChanges],
+  );
 
   // Domain Management tab: Edit/Delete modals
   const [editingDomain, setEditingDomain] = useState<{
@@ -1584,6 +1686,7 @@ export function ConfigurationPage() {
       setTestStagedConfig(JSON.parse(JSON.stringify(selectedNodeConfig)));
       setHasUnsavedDomainChanges(false);
       setTestPendingChanges([]);
+      setStagedCommentChanges([]);
     }
   }, [selectedNodeConfig, selectedNodeId, activeTab]);
 
@@ -1606,6 +1709,9 @@ export function ConfigurationPage() {
       } else if (activeTab === "domain-management" && hasUnsavedDomainChanges) {
         hasUnsaved = true;
         tabName = "Domain Management";
+      } else if (activeTab === "raw-jsonc" && hasUnsavedRawJsoncChanges) {
+        hasUnsaved = true;
+        tabName = "Raw JSONC";
       }
 
       if (hasUnsaved) {
@@ -1624,6 +1730,8 @@ export function ConfigurationPage() {
               setHasUnsavedListSourcesChanges(false);
             if (activeTab === "domain-management")
               setHasUnsavedDomainChanges(false);
+            if (activeTab === "raw-jsonc")
+              setHasUnsavedRawJsoncChanges(false);
             setActiveTab(newTab);
           },
         });
@@ -1635,6 +1743,7 @@ export function ConfigurationPage() {
       hasUnsavedGroupChanges,
       hasUnsavedListSourcesChanges,
       hasUnsavedDomainChanges,
+      hasUnsavedRawJsoncChanges,
       activeTab,
       closeConfirmModal,
     ],
@@ -1656,6 +1765,7 @@ export function ConfigurationPage() {
             setHasUnsavedGroupChanges(false);
             setHasUnsavedListSourcesChanges(false);
             setHasUnsavedDomainChanges(false);
+            setHasUnsavedRawJsoncChanges(false);
             setSelectedNodeId(nodeId);
           },
         });
@@ -2265,11 +2375,70 @@ export function ConfigurationPage() {
     ],
   );
 
+  const handleStageCommentChanges = useCallback(
+    (mutations: AdvancedBlockingCommentMutation[]) => {
+      setStagedCommentChanges((current) => {
+        const next = [...current];
+        for (const mutation of mutations) {
+          if (mutation.action === "add") {
+            stagedCommentSequence.current += 1;
+            next.push({
+              id: `comment-add-${stagedCommentSequence.current}`,
+              mutation,
+            });
+            continue;
+          }
+
+          const id = `comment-${mutation.commentId}`;
+          const existingIndex = next.findIndex(
+            (change) => change.id === id,
+          );
+          if (existingIndex >= 0) {
+            next[existingIndex] = { id, mutation };
+          } else {
+            next.push({ id, mutation });
+          }
+        }
+        return next;
+      });
+      setHasUnsavedDomainChanges(true);
+      pushToast({
+        message:
+          mutations.length === 1
+            ? "Comment change staged. Use Save Changes to apply it."
+            : `${mutations.length} comment changes staged. Use Save Changes to apply them.`,
+        tone: "info",
+      });
+    },
+    [pushToast],
+  );
+
+  const handleUnstageCommentChange = useCallback(
+    (changeId: string) => {
+      const next = stagedCommentChanges.filter(
+        (change) => change.id !== changeId,
+      );
+      setStagedCommentChanges(next);
+      setHasUnsavedDomainChanges(
+        testPendingChanges.length > 0 || next.length > 0,
+      );
+    },
+    [stagedCommentChanges, testPendingChanges.length],
+  );
+
   // Domain Management tab: Save changes
   const handleTestSave = useCallback(async () => {
     if (!testStagedConfig || !selectedNodeId) return;
+    if (stagedCommentChanges.length > 0 && !advancedBlockingRaw) {
+      pushToast({
+        message:
+          "Reload the Advanced Blocking JSONC before saving staged comments.",
+        tone: "error",
+      });
+      return;
+    }
 
-    const pendingNoteItems = testPendingChanges
+    const pendingNoteItems = allTestPendingChanges
       .map((change) => change.description?.trim())
       .filter((value): value is string => Boolean(value && value.length > 0));
 
@@ -2287,9 +2456,21 @@ export function ConfigurationPage() {
         selectedNodeId,
         testStagedConfig,
         snapshotNote,
+        undefined,
+        stagedCommentChanges.length > 0 && advancedBlockingRaw
+          ? {
+              mutations: stagedCommentChanges.map(
+                (change) => change.mutation,
+              ),
+              configRevision: advancedBlockingRaw.configRevision,
+              configNodeId: advancedBlockingRaw.nodeId,
+            }
+          : undefined,
       );
+      await refreshAdvancedBlockingRaw();
       setHasUnsavedDomainChanges(false);
       setTestPendingChanges([]);
+      setStagedCommentChanges([]);
       // Refresh the search result alert-box if a domain is still displayed
       if (searchedDomain) {
         void handleCheckDomain(searchedDomain);
@@ -2301,10 +2482,14 @@ export function ConfigurationPage() {
   }, [
     testStagedConfig,
     selectedNodeId,
-    testPendingChanges,
+    allTestPendingChanges,
+    stagedCommentChanges,
+    advancedBlockingRaw,
     searchedDomain,
     handleCheckDomain,
     saveAdvancedBlockingConfig,
+    refreshAdvancedBlockingRaw,
+    pushToast,
   ]);
 
   // Domain Management tab: Reset changes
@@ -2313,6 +2498,7 @@ export function ConfigurationPage() {
       setTestStagedConfig(JSON.parse(JSON.stringify(selectedNodeConfig)));
       setHasUnsavedDomainChanges(false);
       setTestPendingChanges([]);
+      setStagedCommentChanges([]);
     }
   }, [selectedNodeConfig]);
 
@@ -2658,6 +2844,13 @@ export function ConfigurationPage() {
                   onClick={() => handleTabChange("list-management")}
                 >
                   <span>Lists</span>
+                </button>
+                <button
+                  type="button"
+                  className={`configuration__tab ${activeTab === "raw-jsonc" ? "configuration__tab--active" : ""}`}
+                  onClick={() => handleTabChange("raw-jsonc")}
+                >
+                  <span>Raw JSONC</span>
                 </button>
                 {/* Hide Sync tab in cluster mode - Primary automatically syncs to Secondaries */}
                 {!isClusterEnabled && nodes.length > 0 && (
@@ -3933,6 +4126,29 @@ export function ConfigurationPage() {
               </section>
             )}
 
+            {activeTab === "raw-jsonc" && availableNodes.length > 0 && (
+              <AdvancedBlockingJsoncEditor
+                config={advancedBlockingRaw}
+                loading={advancedBlockingRawLoading}
+                error={advancedBlockingRawError}
+                onDirtyChange={setHasUnsavedRawJsoncChanges}
+                onReload={refreshAdvancedBlockingRaw}
+                onSave={async (rawConfig, configRevision) => {
+                  const updated = await saveAdvancedBlockingRawConfig(
+                    selectedNodeId,
+                    rawConfig,
+                    configRevision,
+                  );
+                  setAdvancedBlockingRaw(updated);
+                  pushToast({
+                    message: "Advanced Blocking JSONC saved.",
+                    tone: "success",
+                  });
+                  return updated;
+                }}
+              />
+            )}
+
             {/* Domain Management Tab */}
             {activeTab === "domain-management" && availableNodes.length > 0 && (
               <section className="configuration-editor configuration-editor--stacked">
@@ -4202,6 +4418,26 @@ export function ConfigurationPage() {
                                 {filteredDomains.map((domain) => {
                                   const domainBadgeEntries =
                                     getDomainBadgeEntries(domain);
+                                  const domainCommentCount =
+                                    (advancedBlockingRaw?.domainComments.filter(
+                                      (comment) =>
+                                        comment.field === activeDomainType &&
+                                        comment.value === domain &&
+                                        !stagedCommentChanges.some(
+                                          (change) =>
+                                            change.mutation.action ===
+                                              "remove" &&
+                                            change.mutation.commentId ===
+                                              comment.id,
+                                        ),
+                                    ).length ?? 0) +
+                                    stagedCommentChanges.filter(
+                                      (change) =>
+                                        change.mutation.action === "add" &&
+                                        change.mutation.field ===
+                                          activeDomainType &&
+                                        change.mutation.value === domain,
+                                    ).length;
 
                                   return (
                                     <tr
@@ -4268,6 +4504,28 @@ export function ConfigurationPage() {
                                         })}
                                       </td>
                                       <td className="domain-table__cell domain-table__cell--right">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setCommentDomain(domain)
+                                          }
+                                          className="icon-button icon-button--comment"
+                                          title={
+                                            domainCommentCount > 0
+                                              ? `View ${domainCommentCount} comment${domainCommentCount === 1 ? "" : "s"}`
+                                              : "Add a comment"
+                                          }
+                                          disabled={!advancedBlockingRaw}
+                                        >
+                                          <FontAwesomeIcon
+                                            icon={faCommentDots}
+                                          />
+                                          {domainCommentCount > 0 && (
+                                            <span className="domain-table__comment-count">
+                                              {domainCommentCount}
+                                            </span>
+                                          )}
+                                        </button>
                                         <button
                                           type="button"
                                           onClick={() =>
@@ -4941,16 +5199,16 @@ export function ConfigurationPage() {
                       }
                       title="Click to see what will be saved"
                     >
-                      You have unsaved changes ({testPendingChanges.length}){" "}
+                      You have unsaved changes ({allTestPendingChanges.length}){" "}
                       {showTestChangesSummary ? "▼" : "▲"}
                     </button>
 
                     {showTestChangesSummary &&
-                      testPendingChanges.length > 0 && (
+                      allTestPendingChanges.length > 0 && (
                         <div className="multi-group-editor__changes-summary">
                           <h4>Pending Changes:</h4>
                           <ul className="multi-group-editor__changes-list">
-                            {testPendingChanges.map((change, idx) => (
+                            {allTestPendingChanges.map((change, idx) => (
                               <li
                                 key={idx}
                                 className={`change-item change-item--${change.type}`}
@@ -5061,6 +5319,19 @@ export function ConfigurationPage() {
           </section>
         }
       </section>
+
+      {commentDomain && advancedBlockingRaw && (
+        <AdvancedBlockingDomainComments
+          domain={commentDomain}
+          field={activeDomainType as AdvancedBlockingDomainListField}
+          groupNames={getGroupsForDomain(commentDomain)}
+          rawConfig={advancedBlockingRaw}
+          stagedChanges={stagedCommentChanges}
+          onClose={() => setCommentDomain(undefined)}
+          onStage={handleStageCommentChanges}
+          onUnstage={handleUnstageCommentChange}
+        />
+      )}
 
       <ConfigSnapshotDrawer
         isOpen={configSnapshotsOpen}

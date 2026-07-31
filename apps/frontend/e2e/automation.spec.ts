@@ -94,12 +94,15 @@ test.describe("Automation page", () => {
 
   // ── Schedule creation ─────────────────────────────────────────────────────────
 
-  test("creating a schedule closes the form and shows it in the list", async ({ page }) => {
+  test("creating a schedule closes the form and shows it in the list", async ({
+    page,
+  }, testInfo) => {
+    const scheduleName = `Bedtime Block ${testInfo.project.name} ${testInfo.retry}`;
     await page.getByRole("button", { name: /new schedule/i }).click();
 
     // Fill required fields: name, AB group, and at least one domain entry.
     // Time fields are pre-filled by DEFAULT_DRAFT (22:00 / 06:00).
-    await page.getByPlaceholder("e.g. Kids bedtime block").fill("Bedtime Block");
+    await page.getByPlaceholder("e.g. Kids bedtime block").fill(scheduleName);
     await page.getByPlaceholder("e.g. Kids, Parents", { exact: true }).fill("KidsGroup");
     await page.getByPlaceholder(/social\.example\.com/).fill("example.com");
 
@@ -107,8 +110,8 @@ test.describe("Automation page", () => {
 
     // Form closes and new schedule card is visible.
     await expect(page.getByRole("heading", { name: "New Schedule" })).not.toBeVisible();
-    // exact:true avoids matching the transient toast "Schedule "Bedtime Block" created."
-    await expect(page.getByText("Bedtime Block", { exact: true })).toBeVisible();
+    // exact:true avoids matching the transient creation toast.
+    await expect(page.getByText(scheduleName, { exact: true })).toBeVisible();
   });
 
   test("after creating a schedule the empty state is gone", async ({ page }) => {

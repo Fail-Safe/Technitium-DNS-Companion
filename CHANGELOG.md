@@ -9,6 +9,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-07-31
+
+### Added
+
+- **Advanced Blocking comments are visible and manageable in the Domains UI.** Existing line and block comments associated with allowed, blocked, and regex entries can be viewed, staged for editing or removal, and added to one or multiple groups before applying Pending Changes (closes #101).
+- **Advanced Blocking raw JSONC editor.** Operators can inspect and edit the exact configuration document, including comments that are not associated with an individual domain, with syntax validation and revision-conflict protection before writes.
+
+### Changed
+
+- **Structured Advanced Blocking saves preserve user-authored JSONC.** Comments, unknown fields, whitespace style, line endings, and source ordering remain canonical while supported configuration values are patched in place. Concurrent changes are rejected instead of overwriting a newer document.
+- **Comment mutations participate in Pending Changes.** Domain comment additions, edits, and removals are committed atomically with domain membership changes only when **Save Changes** is selected; Reset discards the entire staged batch.
+
+### Testing
+
+- Added backend JSONC preservation, mutation, revision, cluster-routing, and atomic-save regression coverage; frontend component coverage; and Playwright verification across Chromium, Firefox, WebKit, Mobile Chrome, and Mobile Safari.
+- Isolated backend E2E databases in memory and made parallel browser fixtures collision-safe so the complete E2E suites run deterministically.
+
 ## [1.9.2] - 2026-07-28
 
 ### Fixed
