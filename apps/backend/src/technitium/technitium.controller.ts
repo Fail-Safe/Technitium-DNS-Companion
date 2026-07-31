@@ -17,7 +17,11 @@ import {
 import { Throttle } from "@nestjs/throttler";
 import type { Response } from "express";
 import { AdvancedBlockingService } from "./advanced-blocking.service";
-import type { AdvancedBlockingUpdateRequest } from "./advanced-blocking.types";
+import type {
+  AdvancedBlockingCommentMutationRequest,
+  AdvancedBlockingRawConfigUpdateRequest,
+  AdvancedBlockingUpdateRequest,
+} from "./advanced-blocking.types";
 import { DnsFilteringSnapshotService } from "./dns-filtering-snapshot.service";
 import { NodeOverviewCacheInterceptor } from "./node-overview-cache.interceptor";
 import { QueryLogSqliteService } from "./query-log-sqlite.service";
@@ -541,6 +545,74 @@ export class TechnitiumController {
     return this.technitiumService.createDhcpScope(nodeId, payload);
   }
 
+  @Get(":nodeId/advanced-blocking/raw")
+  async getAdvancedBlockingRawConfig(@Param("nodeId") nodeId: string) {
+    const { perCandidate } =
+      await this.technitiumService.resolveClusterWriteTargets([nodeId]);
+    const writeNodeId = perCandidate.get(nodeId)?.writeTarget ?? nodeId;
+    return this.advancedBlockingService.getRawConfig(writeNodeId);
+  }
+
+  @Post(":nodeId/advanced-blocking/raw")
+  async updateAdvancedBlockingRawConfig(
+    @Param("nodeId") nodeId: string,
+    @Body() body: AdvancedBlockingRawConfigUpdateRequest,
+  ) {
+    if (
+      !body ||
+      typeof body.rawConfig !== "string" ||
+      typeof body.configRevision !== "string"
+    ) {
+      throw new BadRequestException(
+        "Raw config and config revision are required.",
+      );
+    }
+
+    const { perCandidate } =
+      await this.technitiumService.resolveClusterWriteTargets([nodeId]);
+    const writeNodeId = perCandidate.get(nodeId)?.writeTarget ?? nodeId;
+
+    try {
+      await this.dnsFilteringSnapshotService.saveSnapshot(
+        writeNodeId,
+        "advanced-blocking",
+        "automatic",
+        "Automatic snapshot before raw Advanced Blocking JSONC save",
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to create automatic DNS filtering snapshot before raw Advanced Blocking save for node ${writeNodeId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return this.advancedBlockingService.setRawConfig(
+      writeNodeId,
+      body.rawConfig,
+      body.configRevision,
+    );
+  }
+
+  @Post(":nodeId/advanced-blocking/comments")
+  async updateAdvancedBlockingComment(
+    @Param("nodeId") nodeId: string,
+    @Body() body: AdvancedBlockingCommentMutationRequest,
+  ) {
+    if (
+      !body ||
+      typeof body.action !== "string" ||
+      typeof body.configRevision !== "string"
+    ) {
+      throw new BadRequestException(
+        "Comment mutation and config revision are required.",
+      );
+    }
+
+    const { perCandidate } =
+      await this.technitiumService.resolveClusterWriteTargets([nodeId]);
+    const writeNodeId = perCandidate.get(nodeId)?.writeTarget ?? nodeId;
+    return this.advancedBlockingService.mutateDomainComment(writeNodeId, body);
+  }
+
   @Get(":nodeId/advanced-blocking")
   getAdvancedBlockingSnapshot(@Param("nodeId") nodeId: string) {
     return this.advancedBlockingService.getSnapshot(nodeId);
@@ -586,6 +658,8 @@ export class TechnitiumController {
     const snapshot = await this.advancedBlockingService.setConfig(
       writeNodeId,
       body.config,
+      body.configNodeId === writeNodeId ? body.configRevision : undefined,
+      body.commentMutations ?? [],
     );
 
     if (cacheDomain) {

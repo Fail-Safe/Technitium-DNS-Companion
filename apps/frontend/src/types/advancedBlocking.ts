@@ -54,6 +54,7 @@ export interface AdvancedBlockingSnapshot {
   baseUrl: string;
   fetchedAt: string;
   metrics: AdvancedBlockingMetrics;
+  configRevision?: string;
   config?: AdvancedBlockingConfig;
   error?: string;
 }
@@ -62,6 +63,63 @@ export interface AdvancedBlockingOverview {
   fetchedAt: string;
   aggregate: AdvancedBlockingMetrics;
   nodes: AdvancedBlockingSnapshot[];
+}
+
+export type AdvancedBlockingDomainListField =
+  | "allowed"
+  | "blocked"
+  | "allowedRegex"
+  | "blockedRegex";
+
+export interface AdvancedBlockingDomainComment {
+  id: string;
+  groupName: string;
+  field: AdvancedBlockingDomainListField;
+  value: string;
+  occurrence: number;
+  placement: "leading" | "trailing";
+  style: "line" | "block";
+  text: string;
+  raw: string;
+}
+
+export interface AdvancedBlockingRawConfig {
+  nodeId: string;
+  rawConfig: string;
+  configRevision: string;
+  domainComments: AdvancedBlockingDomainComment[];
+  snapshot?: AdvancedBlockingSnapshot;
+}
+
+export type AdvancedBlockingCommentMutation =
+  | {
+      action: "add";
+      groupName: string;
+      field: AdvancedBlockingDomainListField;
+      value: string;
+      occurrence: number;
+      text: string;
+      style?: "line" | "block";
+    }
+  | {
+      action: "edit";
+      commentId: string;
+      text: string;
+    }
+  | {
+      action: "remove";
+      commentId: string;
+    };
+
+export type AdvancedBlockingCommentMutationRequest =
+  AdvancedBlockingCommentMutation & {
+    configRevision: string;
+  };
+
+export interface AdvancedBlockingCommentSaveBatch {
+  mutations: AdvancedBlockingCommentMutation[];
+  configRevision: string;
+  configNodeId: string;
 }
 
 /**

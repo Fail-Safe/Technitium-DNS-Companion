@@ -8,9 +8,12 @@ import {
     triggerNodesConfigLoadFailed,
 } from "../config";
 import type {
-    AdvancedBlockingConfig,
-    AdvancedBlockingOverview,
-    AdvancedBlockingSnapshot,
+  AdvancedBlockingCommentSaveBatch,
+  AdvancedBlockingCommentMutationRequest,
+  AdvancedBlockingConfig,
+  AdvancedBlockingOverview,
+  AdvancedBlockingRawConfig,
+  AdvancedBlockingSnapshot,
 } from "../types/advancedBlocking";
 import type {
     BlockingMethod,
@@ -123,7 +126,20 @@ export interface TechnitiumState {
     config: AdvancedBlockingConfig,
     snapshotNote?: string,
     cacheDomain?: string,
+    commentBatch?: AdvancedBlockingCommentSaveBatch,
   ) => Promise<AdvancedBlockingSnapshot | undefined>;
+  loadAdvancedBlockingRawConfig: (
+    nodeId: string,
+  ) => Promise<AdvancedBlockingRawConfig>;
+  saveAdvancedBlockingRawConfig: (
+    nodeId: string,
+    rawConfig: string,
+    configRevision: string,
+  ) => Promise<AdvancedBlockingRawConfig>;
+  mutateAdvancedBlockingComment: (
+    nodeId: string,
+    mutation: AdvancedBlockingCommentMutationRequest,
+  ) => Promise<AdvancedBlockingRawConfig>;
   // Built-in Blocking state
   builtInBlocking?: BuiltInBlockingOverview;
   loadingBuiltInBlocking: boolean;
@@ -372,6 +388,64 @@ export interface TechnitiumState {
   importUnifiedConfig: (
     request: UnifiedImportRequest,
   ) => Promise<UnifiedImportResult>;
+}
+
+function replaceAdvancedBlockingSnapshot(
+  previous: AdvancedBlockingOverview | undefined,
+  snapshot: AdvancedBlockingSnapshot,
+): AdvancedBlockingOverview | undefined {
+  if (!previous) {
+    return previous;
+  }
+
+  const nodes = previous.nodes.map((node) =>
+    node.nodeId === snapshot.nodeId ? snapshot : node,
+  );
+  const empty: AdvancedBlockingOverview["aggregate"] = {
+    groupCount: 0,
+    blockedDomainCount: 0,
+    allowedDomainCount: 0,
+    blockListUrlCount: 0,
+    allowListUrlCount: 0,
+    adblockListUrlCount: 0,
+    allowedRegexCount: 0,
+    blockedRegexCount: 0,
+    regexAllowListUrlCount: 0,
+    regexBlockListUrlCount: 0,
+    localEndpointMappingCount: 0,
+    networkMappingCount: 0,
+    scheduledNodeCount: 0,
+  };
+  const aggregate = nodes.reduce((acc, node) => {
+    const metrics = node.metrics;
+    return {
+      groupCount: acc.groupCount + metrics.groupCount,
+      blockedDomainCount:
+        acc.blockedDomainCount + metrics.blockedDomainCount,
+      allowedDomainCount:
+        acc.allowedDomainCount + metrics.allowedDomainCount,
+      blockListUrlCount: acc.blockListUrlCount + metrics.blockListUrlCount,
+      allowListUrlCount: acc.allowListUrlCount + metrics.allowListUrlCount,
+      adblockListUrlCount:
+        acc.adblockListUrlCount + metrics.adblockListUrlCount,
+      allowedRegexCount:
+        acc.allowedRegexCount + metrics.allowedRegexCount,
+      blockedRegexCount:
+        acc.blockedRegexCount + metrics.blockedRegexCount,
+      regexAllowListUrlCount:
+        acc.regexAllowListUrlCount + metrics.regexAllowListUrlCount,
+      regexBlockListUrlCount:
+        acc.regexBlockListUrlCount + metrics.regexBlockListUrlCount,
+      localEndpointMappingCount:
+        acc.localEndpointMappingCount + metrics.localEndpointMappingCount,
+      networkMappingCount:
+        acc.networkMappingCount + metrics.networkMappingCount,
+      scheduledNodeCount:
+        acc.scheduledNodeCount + metrics.scheduledNodeCount,
+    };
+  }, empty);
+
+  return { fetchedAt: new Date().toISOString(), aggregate, nodes };
 }
 
 // Load nodes from backend API (configured on server side via environment variables)
@@ -1167,20 +1241,46 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       config: AdvancedBlockingConfig,
       snapshotNote?: string,
       cacheDomain?: string,
+      commentBatch?: AdvancedBlockingCommentSaveBatch,
     ) => {
       try {
+        const sourceSnapshot = advancedBlocking?.nodes.find(
+          (snapshot) => snapshot.nodeId === nodeId,
+        );
         const response = await apiFetch(
           `/nodes/${encodeURIComponent(nodeId)}/advanced-blocking`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ config, snapshotNote, cacheDomain }),
+            body: JSON.stringify({
+              config,
+              configRevision:
+                commentBatch?.configRevision ?? sourceSnapshot?.configRevision,
+              configNodeId:
+                commentBatch?.configNodeId ?? sourceSnapshot?.nodeId,
+              commentMutations: commentBatch?.mutations,
+              snapshotNote,
+              cacheDomain,
+            }),
           },
         );
 
         if (!response.ok) {
+          let message: string | undefined;
+          try {
+            const errorBody = (await response.json()) as {
+              message?: unknown;
+            };
+            message =
+              typeof errorBody.message === "string"
+                ? errorBody.message
+                : undefined;
+          } catch {
+            // Fall back to the status-based message below.
+          }
           throw new Error(
-            `Failed to save Advanced Blocking config (${response.status})`,
+            message ??
+              `Failed to save Advanced Blocking config (${response.status})`,
           );
         }
 
@@ -1189,65 +1289,9 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         // The GET `/nodes/advanced-blocking` endpoint is intentionally cached on the backend.
         // To avoid a confusing "save succeeded but UI didn't change" moment, patch the
         // in-memory overview with the authoritative snapshot we just received.
-        setAdvancedBlocking((previous) => {
-          if (!previous) {
-            return previous;
-          }
-
-          const nodes = previous.nodes.map((node) =>
-            node.nodeId === snapshot.nodeId ? snapshot : node,
-          );
-
-          const empty: AdvancedBlockingOverview["aggregate"] = {
-            groupCount: 0,
-            blockedDomainCount: 0,
-            allowedDomainCount: 0,
-            blockListUrlCount: 0,
-            allowListUrlCount: 0,
-            adblockListUrlCount: 0,
-            allowedRegexCount: 0,
-            blockedRegexCount: 0,
-            regexAllowListUrlCount: 0,
-            regexBlockListUrlCount: 0,
-            localEndpointMappingCount: 0,
-            networkMappingCount: 0,
-            scheduledNodeCount: 0,
-          };
-
-          const aggregate = nodes.reduce((acc, node) => {
-            const metrics = node.metrics;
-            return {
-              groupCount: acc.groupCount + metrics.groupCount,
-              blockedDomainCount:
-                acc.blockedDomainCount + metrics.blockedDomainCount,
-              allowedDomainCount:
-                acc.allowedDomainCount + metrics.allowedDomainCount,
-              blockListUrlCount:
-                acc.blockListUrlCount + metrics.blockListUrlCount,
-              allowListUrlCount:
-                acc.allowListUrlCount + metrics.allowListUrlCount,
-              adblockListUrlCount:
-                acc.adblockListUrlCount + metrics.adblockListUrlCount,
-              allowedRegexCount:
-                acc.allowedRegexCount + metrics.allowedRegexCount,
-              blockedRegexCount:
-                acc.blockedRegexCount + metrics.blockedRegexCount,
-              regexAllowListUrlCount:
-                acc.regexAllowListUrlCount + metrics.regexAllowListUrlCount,
-              regexBlockListUrlCount:
-                acc.regexBlockListUrlCount + metrics.regexBlockListUrlCount,
-              localEndpointMappingCount:
-                acc.localEndpointMappingCount +
-                metrics.localEndpointMappingCount,
-              networkMappingCount:
-                acc.networkMappingCount + metrics.networkMappingCount,
-              scheduledNodeCount:
-                acc.scheduledNodeCount + metrics.scheduledNodeCount,
-            };
-          }, empty);
-
-          return { fetchedAt: new Date().toISOString(), aggregate, nodes };
-        });
+        setAdvancedBlocking((previous) =>
+          replaceAdvancedBlockingSnapshot(previous, snapshot),
+        );
 
         return snapshot;
       } catch (error) {
@@ -1255,6 +1299,102 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
             new Error("Failed to save Advanced Blocking config.")
           );
       }
+    },
+    [advancedBlocking],
+  );
+
+  const loadAdvancedBlockingRawConfig = useCallback(
+    async (nodeId: string): Promise<AdvancedBlockingRawConfig> => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/advanced-blocking/raw`,
+      );
+      if (!response.ok) {
+        throw new Error(
+          `Failed to load Advanced Blocking JSONC (${response.status})`,
+        );
+      }
+      const result = (await response.json()) as AdvancedBlockingRawConfig;
+      if (result.snapshot) {
+        setAdvancedBlocking((previous) =>
+          replaceAdvancedBlockingSnapshot(previous, result.snapshot!),
+        );
+      }
+      return result;
+    },
+    [],
+  );
+
+  const saveAdvancedBlockingRawConfig = useCallback(
+    async (
+      nodeId: string,
+      rawConfig: string,
+      configRevision: string,
+    ): Promise<AdvancedBlockingRawConfig> => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/advanced-blocking/raw`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rawConfig, configRevision }),
+        },
+      );
+      if (!response.ok) {
+        let message: string | undefined;
+        try {
+          const body = (await response.json()) as { message?: unknown };
+          message = typeof body.message === "string" ? body.message : undefined;
+        } catch {
+          // Fall back to the status-based message below.
+        }
+        throw new Error(
+          message ??
+            `Failed to save Advanced Blocking JSONC (${response.status})`,
+        );
+      }
+      const result = (await response.json()) as AdvancedBlockingRawConfig;
+      if (result.snapshot) {
+        setAdvancedBlocking((previous) =>
+          replaceAdvancedBlockingSnapshot(previous, result.snapshot!),
+        );
+      }
+      return result;
+    },
+    [],
+  );
+
+  const mutateAdvancedBlockingComment = useCallback(
+    async (
+      nodeId: string,
+      mutation: AdvancedBlockingCommentMutationRequest,
+    ): Promise<AdvancedBlockingRawConfig> => {
+      const response = await apiFetch(
+        `/nodes/${encodeURIComponent(nodeId)}/advanced-blocking/comments`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(mutation),
+        },
+      );
+      if (!response.ok) {
+        let message: string | undefined;
+        try {
+          const body = (await response.json()) as { message?: unknown };
+          message = typeof body.message === "string" ? body.message : undefined;
+        } catch {
+          // Fall back to the status-based message below.
+        }
+        throw new Error(
+          message ??
+            `Failed to update Advanced Blocking comment (${response.status})`,
+        );
+      }
+      const result = (await response.json()) as AdvancedBlockingRawConfig;
+      if (result.snapshot) {
+        setAdvancedBlocking((previous) =>
+          replaceAdvancedBlockingSnapshot(previous, result.snapshot!),
+        );
+      }
+      return result;
     },
     [],
   );
@@ -3048,6 +3188,9 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       reloadAdvancedBlocking,
       fetchNodeOverviews,
       saveAdvancedBlockingConfig,
+      loadAdvancedBlockingRawConfig,
+      saveAdvancedBlockingRawConfig,
+      mutateAdvancedBlockingComment,
       // Built-in Blocking
       builtInBlocking,
       loadingBuiltInBlocking,
@@ -3134,6 +3277,9 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       reloadAdvancedBlocking,
       fetchNodeOverviews,
       saveAdvancedBlockingConfig,
+      loadAdvancedBlockingRawConfig,
+      saveAdvancedBlockingRawConfig,
+      mutateAdvancedBlockingComment,
       // Built-in Blocking
       builtInBlocking,
       loadingBuiltInBlocking,
