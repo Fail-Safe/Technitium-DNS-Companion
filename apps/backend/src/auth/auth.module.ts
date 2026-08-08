@@ -9,6 +9,6 @@ import { AuthService } from "./auth.service";
   imports: [TechnitiumModule],
   controllers: [AuthController],
   providers: [AuthService, AuthSessionService, AuthRequestContextMiddleware],
-  exports: [AuthSessionService, AuthRequestContextMiddleware],
+  exports: [AuthService, AuthSessionService, AuthRequestContextMiddleware],
 })
 export class AuthModule {}

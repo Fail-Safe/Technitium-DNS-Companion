@@ -207,6 +207,117 @@ export class AuthService {
     return undefined;
   }
 
+  /**
+   * Resolve the Technitium credentials to log in with for a given
+   * proxy-provided identity.
+   *
+   * Per-user mode (optional): TRUSTED_SSO_USER_CREDS is a JSON object mapping
+   * the identity (as it appears in the header, e.g. an email) to that user's
+   * own Technitium { username, password }. When the identity has an entry,
+   * the Companion signs in as that user — preserving per-user Technitium RBAC
+   * and audit. Lookup is case-insensitive on the identity key.
+   *
+   * Shared-admin fallback: when no per-user entry matches, fall back to the
+   * shared service account (TRUSTED_SSO_SERVICE_USER / _SERVICE_PASS). This
+   * is the intended mode when the SSO gate is itself the access boundary.
+   *
+   * Returns undefined when neither is configured (feature effectively off).
+   */
+  private resolveTrustedCreds(
+    displayUser: string,
+  ): { username: string; password: string } | undefined {
+    const raw = process.env.TRUSTED_SSO_USER_CREDS;
+    if (raw && raw.trim()) {
+      try {
+        const map = JSON.parse(raw) as Record<
+          string,
+          { username?: string; password?: string } | undefined
+        >;
+        const lowered = displayUser.toLowerCase();
+        const entry =
+          map[displayUser] ??
+          Object.entries(map).find(([k]) => k.toLowerCase() === lowered)?.[1];
+        if (entry?.username && entry?.password) {
+          return { username: entry.username, password: entry.password };
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unknown error";
+        this.logger.warn(`TRUSTED_SSO_USER_CREDS parse failed: ${message}`);
+      }
+    }
+
+    const serviceUser =
+      (process.env.TRUSTED_SSO_SERVICE_USER ?? "").trim() || "admin";
+    const servicePass = process.env.TRUSTED_SSO_SERVICE_PASS ?? "";
+    if (!servicePass) {
+      return undefined;
+    }
+    return { username: serviceUser, password: servicePass };
+  }
+
+  /**
+   * Trusted-header (reverse-proxy SSO) auto-login.
+   *
+   * When the app sits behind a forward-auth reverse proxy (e.g. Authentik),
+   * the proxy has already authenticated the user and injects an identity
+   * header. Rather than prompt for a second, in-app Technitium login, we
+   * establish the Companion session on the user's behalf using resolved
+   * credentials (per-user if configured, else a shared service account),
+   * then relabel the session to the proxy-provided identity for
+   * display/audit.
+   *
+   * Opt-in and inert unless enabled + configured — see
+   * trustedHeaderAuthEnabled().
+   */
+  async loginViaTrustedHeader(
+    displayUser: string,
+  ): Promise<{ session: AuthSession } | undefined> {
+    const creds = this.resolveTrustedCreds(displayUser);
+    if (!creds) {
+      return undefined;
+    }
+
+    try {
+      const { session } = await this.login(creds);
+      // Relabel to the SSO identity (session is the stored reference).
+      session.user = displayUser;
+      return { session };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      this.logger.warn(`Trusted-header auto-login failed: ${message}`);
+      return undefined;
+    }
+  }
+
+  /** Whether trusted-header SSO auto-login is enabled and fully configured. */
+  trustedHeaderAuthEnabled(): boolean {
+    if (process.env.TRUSTED_SSO_HEADER_AUTH !== "true") {
+      return false;
+    }
+    const hasService = !!(process.env.TRUSTED_SSO_SERVICE_PASS ?? "");
+    const hasUserMap = !!(process.env.TRUSTED_SSO_USER_CREDS ?? "").trim();
+    return hasService || hasUserMap;
+  }
+
+  /**
+   * Extract the proxy-injected identity from the configured header
+   * (default x-forwarded-user). Returns undefined when absent/empty so
+   * the caller falls through to the normal (break-glass) login form.
+   */
+  extractTrustedUser(
+    headers: Record<string, string | string[] | undefined>,
+  ): string | undefined {
+    const headerName =
+      ((process.env.TRUSTED_SSO_HEADER ?? "").trim() || "x-forwarded-user")
+        .toLowerCase();
+    const raw = headers[headerName];
+    const value =
+      typeof raw === "string" ? raw : Array.isArray(raw) ? raw[0] : undefined;
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
   async login(
     dto: AuthLoginRequestDto,
   ): Promise<{ session: AuthSession; response: AuthLoginResponseDto }> {
