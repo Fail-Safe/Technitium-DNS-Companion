@@ -223,8 +223,14 @@ export default defineConfig({
             },
           },
           {
-            // API calls: Network-first (no timeout fallback).
-            urlPattern: /^https?:\/\/.*\/api\/.*/i,
+            // API calls: Network-first (no timeout fallback). Live typeahead
+            // endpoints bypass the service worker so AbortController can cancel
+            // superseded searches instead of leaving Workbox fetches running.
+            urlPattern: ({ url }) =>
+              url.pathname.startsWith("/api/") &&
+              !/^\/api\/domain-lists\/[^/]+\/(?:all-domains|check)$/i.test(
+                url.pathname,
+              ),
             handler: "NetworkFirst",
             options: {
               cacheName: "api-cache",
