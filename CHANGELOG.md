@@ -9,6 +9,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-08-13
+
+### Fixed
+
+- **Domain Groups can be bound to every Advanced Blocking group from the Domains tab.** Dropping a Domain Group onto **All Groups** now applies the selected allow/block binding across all groups, skips matching bindings, replaces opposite bindings, and reports success, no-op, or failure feedback instead of silently doing nothing.
+- **DNS Lookup typeahead avoids superseded request storms.** All Domains and exact-match searches now share a 750 ms debounce, cancel obsolete requests, retain the active search during pagination, and bypass service-worker interception for live search endpoints so browser cancellation reaches the network.
+
+### Testing
+
+- Added frontend regression coverage for bulk Domain Group binding plans and settled DNS Lookup searches.
+
 ## [1.10.0] - 2026-07-31
 
 ### Added
