@@ -92,6 +92,7 @@ import {
   isRegexDomainType,
   type AdvancedBlockingDomainType,
 } from "../utils/advanced-blocking-domain-entries";
+import { planDomainGroupBindings } from "../utils/domain-group-bindings";
 import "./ConfigurationPage.css";
 import { AppInput } from "../components/common/AppInput";
 
@@ -1198,60 +1199,104 @@ export function ConfigurationPage() {
     };
   }, [closeDgPopover, dgPopoverDgId]);
 
-  const handleBindDomainGroupToGroup = useCallback(
-    async (dgId: string, abGroupName: string, action: "allow" | "block") => {
-      // If the opposite binding exists, delete it first
-      const existingOpp = domainGroupPreview?.allBindings.find(
-        (b) =>
-          b.domainGroupId === dgId &&
-          b.advancedBlockingGroupName.toLowerCase() ===
-            abGroupName.toLowerCase() &&
-          b.action !== action,
+  const handleBindDomainGroupToGroups = useCallback(
+    async (
+      dgId: string,
+      targetGroupNames: string[],
+      action: "allow" | "block",
+    ) => {
+      const plan = planDomainGroupBindings(
+        domainGroupPreview?.allBindings ?? [],
+        dgId,
+        targetGroupNames,
+        action,
       );
-      if (existingOpp) {
-        await deleteDomainGroupBinding(dgId, existingOpp.bindingId);
-      }
+      const dgName =
+        domainGroupsList.find((group) => group.id === dgId)?.name ??
+        "Domain Group";
 
-      // If the same binding already exists, no-op
-      const existingSame = domainGroupPreview?.allBindings.find(
-        (b) =>
-          b.domainGroupId === dgId &&
-          b.advancedBlockingGroupName.toLowerCase() ===
-            abGroupName.toLowerCase() &&
-          b.action === action,
-      );
-      if (existingSame) {
-        await refreshDomainGroupsPreview();
+      if (plan.targetGroupNames.length === 0) {
+        pushToast({
+          message: `There are no Advanced Blocking groups available for "${dgName}".`,
+          tone: "info",
+        });
         return;
       }
 
-      await addDomainGroupBinding(dgId, {
-        advancedBlockingGroupName: abGroupName,
-        action,
-      });
-      setSessionAddedBindingKeys((prev) => {
-        const next = new Set(prev);
-        next.add(`${dgId}||${abGroupName.toLowerCase()}||${action}`);
-        return next;
-      });
-      await refreshDomainGroupsPreview();
-      if (selectedDomainGroup?.id === dgId) {
-        await loadSelectedDomainGroup(dgId);
+      if (
+        plan.bindingIdsToDelete.length === 0 &&
+        plan.groupNamesToAdd.length === 0
+      ) {
+        const targetDescription =
+          plan.targetGroupNames.length === 1 ?
+            `"${plan.targetGroupNames[0]}"`
+          : `all ${plan.targetGroupNames.length} groups`;
+        pushToast({
+          message: `"${dgName}" is already bound to ${targetDescription} for ${action} entries.`,
+          tone: "info",
+        });
+        return;
       }
 
-      const dgName =
-        domainGroupsList.find((g) => g.id === dgId)?.name ?? "Domain Group";
-      pushToast({
-        message: `"${dgName}" bound to ${abGroupName} — Apply in Domain Groups to sync DNS.`,
-        tone: "success",
-        timeout: 7000,
-      });
+      setDomainGroupsActionLoading(true);
+      setDomainGroupsError(null);
+      const addedGroupNames: string[] = [];
+
+      try {
+        for (const bindingId of plan.bindingIdsToDelete) {
+          await deleteDomainGroupBinding(dgId, bindingId);
+        }
+        for (const advancedBlockingGroupName of plan.groupNamesToAdd) {
+          await addDomainGroupBinding(dgId, {
+            advancedBlockingGroupName,
+            action,
+          });
+          addedGroupNames.push(advancedBlockingGroupName);
+        }
+
+        if (addedGroupNames.length > 0) {
+          setSessionAddedBindingKeys((previous) => {
+            const next = new Set(previous);
+            for (const groupName of addedGroupNames) {
+              next.add(`${dgId}||${groupName.toLowerCase()}||${action}`);
+            }
+            return next;
+          });
+        }
+
+        await refreshDomainGroupsPreview();
+        if (selectedDomainGroup?.id === dgId) {
+          await loadSelectedDomainGroup(dgId);
+        }
+
+        const targetDescription =
+          plan.targetGroupNames.length === 1 ?
+            plan.targetGroupNames[0]
+          : `all ${plan.targetGroupNames.length} groups`;
+        pushToast({
+          message: `"${dgName}" bound to ${targetDescription} — Apply in Domain Groups to sync DNS.`,
+          tone: "success",
+          timeout: 7000,
+        });
+      } catch (error) {
+        const message = getErrorMessage(error);
+        setDomainGroupsError(message);
+        pushToast({
+          message: `Could not bind "${dgName}": ${message}`,
+          tone: "error",
+          timeout: 7000,
+        });
+        await refreshDomainGroupsPreview();
+      } finally {
+        setDomainGroupsActionLoading(false);
+      }
     },
     [
       addDomainGroupBinding,
       deleteDomainGroupBinding,
       domainGroupPreview,
       domainGroupsList,
+      getErrorMessage,
       loadSelectedDomainGroup,
       pushToast,
       refreshDomainGroupsPreview,
@@ -1967,11 +2012,19 @@ export function ConfigurationPage() {
   ) => {
     e.preventDefault();
 
-    // Handle Domain Group pill drop (bind DG to AB group)
+    // Handle Domain Group pill drop (bind DG to one or all AB groups)
     const dgId = e.dataTransfer.getData("text/domain-group-id");
-    if (dgId && groupName !== "ALL_GROUPS") {
+    if (dgId) {
       setDragOverGroup(null);
-      void handleBindDomainGroupToGroup(dgId, groupName, activeDomainTypeAction);
+      setIsDraggingDomainGroup(false);
+      setDraggedDomainGroupId(null);
+      const targetGroupNames =
+        groupName === "ALL_GROUPS" ? groups : [groupName];
+      void handleBindDomainGroupToGroups(
+        dgId,
+        targetGroupNames,
+        activeDomainTypeAction,
+      );
       return;
     }
 

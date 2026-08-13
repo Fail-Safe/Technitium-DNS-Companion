@@ -26,6 +26,8 @@ import { AppInput } from "../components/common/AppInput";
 import { extractDomainFromInput } from "../utils/urlParsing";
 import "./DnsLookupPage.css";
 
+const DOMAIN_SEARCH_DEBOUNCE_MS = 750;
+
 export const DnsLookupPage: React.FC = () => {
   const { nodes } = useTechnitiumState();
   const { pushToast } = useToast();
@@ -178,8 +180,8 @@ export const DnsLookupPage: React.FC = () => {
 
   const loadAllDomains = useCallback(
     async (
-      page: number = 1,
-      searchTerm?: string,
+      page: number,
+      searchTerm: string,
       forceRefresh: boolean = false,
       abortSignal?: AbortSignal,
     ) => {
@@ -191,10 +193,6 @@ export const DnsLookupPage: React.FC = () => {
       setLoadingDomains(true);
       setIsSearchPending(false);
 
-      // Use provided search term or current searchFilter
-      const effectiveSearchTerm =
-        searchTerm !== undefined ? searchTerm : searchFilter;
-
       try {
         // If we have a full cache and not forcing refresh, try client-side filtering first
         if (
@@ -204,7 +202,7 @@ export const DnsLookupPage: React.FC = () => {
         ) {
           // Client-side filtering for datasets under 100k
           setUseClientSideFiltering(true);
-          setActiveSearchTerm(effectiveSearchTerm);
+          setActiveSearchTerm(searchTerm);
           setLoadingDomains(false);
           return;
         }
@@ -214,8 +212,8 @@ export const DnsLookupPage: React.FC = () => {
 
         // Build query parameters
         const params = new URLSearchParams();
-        if (effectiveSearchTerm.trim()) {
-          params.append("search", effectiveSearchTerm.trim());
+        if (searchTerm.trim()) {
+          params.append("search", searchTerm.trim());
           params.append("searchMode", searchMode);
         }
         if (typeFilter !== "all") {
@@ -239,11 +237,11 @@ export const DnsLookupPage: React.FC = () => {
         setCurrentPage(result.pagination.page);
         setTotalPages(result.pagination.totalPages);
         setTotalDomains(result.pagination.total);
-        setActiveSearchTerm(effectiveSearchTerm);
+        setActiveSearchTerm(searchTerm);
 
         // Cache full results if it's a reasonable size (no filters and under 100k)
         if (
-          !effectiveSearchTerm &&
+          !searchTerm &&
           typeFilter === "all" &&
           result.pagination.total <= 100000
         ) {
@@ -264,7 +262,6 @@ export const DnsLookupPage: React.FC = () => {
     [
       selectedNodeId,
       pushToast,
-      searchFilter,
       typeFilter,
       pageSize,
       searchMode,
@@ -314,13 +311,6 @@ export const DnsLookupPage: React.FC = () => {
     threshold: 80,
     disabled: !selectedNodeId,
   });
-
-  // Load domains when tab is activated
-  React.useEffect(() => {
-    if (activeTab === "domains" && selectedNodeId && allDomains.length === 0) {
-      loadAllDomains();
-    }
-  }, [activeTab, selectedNodeId, allDomains.length, loadAllDomains]);
 
   // Validate regex as user types (only in regex mode)
   React.useEffect(() => {
@@ -401,7 +391,7 @@ export const DnsLookupPage: React.FC = () => {
           setExactCheckLoading(false);
         }
       }
-    }, 300);
+    }, DOMAIN_SEARCH_DEBOUNCE_MS);
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -470,7 +460,7 @@ export const DnsLookupPage: React.FC = () => {
     // Show pending indicator immediately for server-side
     setIsSearchPending(true);
 
-    // Shorter debounce for server-side (150ms instead of 250ms)
+    // Debounce server-side search so intermediate keystrokes do not reach the API.
     const timeoutId = setTimeout(() => {
       // Create new abort controller for this request
       const abortController = new AbortController();
@@ -478,7 +468,7 @@ export const DnsLookupPage: React.FC = () => {
 
       setCurrentPage(1); // Reset to page 1 on new search
       loadAllDomains(1, searchFilter, false, abortController.signal);
-    }, 150); // 150ms debounce - aggressive but still prevents too many requests
+    }, DOMAIN_SEARCH_DEBOUNCE_MS);
 
     return () => {
       clearTimeout(timeoutId);
@@ -1542,14 +1532,16 @@ export const DnsLookupPage: React.FC = () => {
                         <div className="dns-lookup__pagination-controls">
                           <button
                             className="dns-lookup__pagination-button"
-                            onClick={() => loadAllDomains(1)}
+                            onClick={() => loadAllDomains(1, searchFilter)}
                             disabled={currentPage === 1 || loadingDomains}
                           >
                             First
                           </button>
                           <button
                             className="dns-lookup__pagination-button"
-                            onClick={() => loadAllDomains(currentPage - 1)}
+                            onClick={() =>
+                              loadAllDomains(currentPage - 1, searchFilter)
+                            }
                             disabled={currentPage === 1 || loadingDomains}
                           >
                             Previous
@@ -1559,7 +1551,9 @@ export const DnsLookupPage: React.FC = () => {
                           </span>
                           <button
                             className="dns-lookup__pagination-button"
-                            onClick={() => loadAllDomains(currentPage + 1)}
+                            onClick={() =>
+                              loadAllDomains(currentPage + 1, searchFilter)
+                            }
                             disabled={
                               currentPage === totalPages || loadingDomains
                             }
@@ -1568,7 +1562,9 @@ export const DnsLookupPage: React.FC = () => {
                           </button>
                           <button
                             className="dns-lookup__pagination-button"
-                            onClick={() => loadAllDomains(totalPages)}
+                            onClick={() =>
+                              loadAllDomains(totalPages, searchFilter)
+                            }
                             disabled={
                               currentPage === totalPages || loadingDomains
                             }
