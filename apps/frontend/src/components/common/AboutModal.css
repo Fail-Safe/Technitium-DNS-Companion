@@ -109,6 +109,13 @@
   justify-content: center;
 }
 
+.about-modal__revision {
+  color: var(--color-text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 0.8rem;
+}
+
 .about-modal__update-pill {
   display: inline-flex;
   align-items: center;

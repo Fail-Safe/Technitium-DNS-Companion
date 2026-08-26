@@ -28,6 +28,8 @@ describe("AuthSessionService — create + get + delete (baseline)", () => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
     expect(session.user).toBe("alice");
+    expect(session.authSource).toBe("password");
+    expect(session.technitiumUser).toBe("alice");
     expect(session.tokensByNodeId).toEqual({ node1: "tok-1" });
     expect(session.nodeAuthStatesByNodeId).toEqual({
       node1: { status: "authenticated" },
@@ -63,6 +65,62 @@ describe("AuthSessionService — create + get + delete (baseline)", () => {
     const fetched = service.get(session.id);
     expect(fetched).toBeDefined();
     expect(fetched!.lastSeenAt).toBeGreaterThan(created);
+    service.onModuleDestroy();
+  });
+
+  it("bounds one auth source for one user without evicting other sessions", () => {
+    const service = new AuthSessionService();
+    const oldestSsoSession = service.create(
+      "alice@example.test",
+      {},
+      undefined,
+      {
+        authSource: "trusted-sso",
+        technitiumUser: "alice",
+        maxSessionsForUser: 2,
+      },
+    );
+    const passwordSession = service.create("alice@example.test", {});
+    const otherSsoSession = service.create("bob@example.test", {}, undefined, {
+      authSource: "trusted-sso",
+      technitiumUser: "bob",
+      maxSessionsForUser: 2,
+    });
+    const retainedSsoSession = service.create(
+      "alice@example.test",
+      {},
+      undefined,
+      {
+        authSource: "trusted-sso",
+        technitiumUser: "alice",
+        maxSessionsForUser: 2,
+      },
+    );
+    const newestSsoSession = service.create(
+      "alice@example.test",
+      {},
+      undefined,
+      {
+        authSource: "trusted-sso",
+        technitiumUser: "alice",
+        maxSessionsForUser: 2,
+      },
+    );
+
+    expect(service.get(oldestSsoSession.id)).toBeUndefined();
+    expect(service.get(retainedSsoSession.id)).toBe(retainedSsoSession);
+    expect(service.get(newestSsoSession.id)).toBe(newestSsoSession);
+    expect(service.get(passwordSession.id)).toBe(passwordSession);
+    expect(service.get(otherSsoSession.id)).toBe(otherSsoSession);
+    expect(service.count()).toBe(4);
+    service.onModuleDestroy();
+  });
+
+  it("rejects invalid per-user session limits", () => {
+    const service = new AuthSessionService();
+    expect(() =>
+      service.create("alice", {}, undefined, { maxSessionsForUser: 0 }),
+    ).toThrow("maxSessionsForUser must be a positive integer");
     service.onModuleDestroy();
   });
 });

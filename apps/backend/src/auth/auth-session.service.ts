@@ -49,12 +49,27 @@ export class AuthSessionService implements OnModuleDestroy {
     user: string,
     tokensByNodeId: Record<string, string>,
     nodeAuthStatesByNodeId?: Record<string, AuthNodeSessionState>,
+    options?: {
+      authSource?: AuthSession["authSource"];
+      technitiumUser?: string;
+      maxSessionsForUser?: number;
+    },
   ): AuthSession {
+    if (options?.maxSessionsForUser !== undefined) {
+      this.evictOldestMatchingSessions(
+        user,
+        options.authSource ?? "password",
+        options.maxSessionsForUser,
+      );
+    }
+
     const id = randomUUID();
     const now = Date.now();
     const session: AuthSession = {
       id,
       user,
+      authSource: options?.authSource ?? "password",
+      technitiumUser: options?.technitiumUser ?? user,
       createdAt: new Date(now).toISOString(),
       lastSeenAt: now,
       tokensByNodeId,
@@ -63,6 +78,27 @@ export class AuthSessionService implements OnModuleDestroy {
 
     this.sessions.set(id, session);
     return session;
+  }
+
+  private evictOldestMatchingSessions(
+    user: string,
+    authSource: AuthSession["authSource"],
+    maxSessions: number,
+  ): void {
+    if (!Number.isInteger(maxSessions) || maxSessions < 1) {
+      throw new Error("maxSessionsForUser must be a positive integer");
+    }
+
+    this.sweepExpired();
+    const matchingSessionIds: string[] = [];
+    for (const [id, session] of this.sessions) {
+      if (session.user === user && session.authSource === authSource) {
+        matchingSessionIds.push(id);
+      }
+    }
+    while (matchingSessionIds.length >= maxSessions) {
+      this.sessions.delete(matchingSessionIds.shift()!);
+    }
   }
 
   get(sessionId: string): AuthSession | undefined {

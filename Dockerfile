@@ -15,6 +15,7 @@ COPY apps/frontend/package.json ./apps/frontend/
 # Stage 1: Build frontend
 FROM --platform=$BUILDPLATFORM node:24-alpine3.22 AS frontend-builder
 ARG BUILDPLATFORM
+ARG BUILD_REVISION=unknown
 ARG NPM_VERSION
 
 WORKDIR /app
@@ -38,7 +39,7 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY apps/frontend/ ./apps/frontend/
 
 # Build frontend
-RUN npm run build --workspace=apps/frontend
+RUN BUILD_REVISION="$BUILD_REVISION" npm run build --workspace=apps/frontend
 
 # Stage 2: Build backend
 FROM --platform=$BUILDPLATFORM node:24-alpine3.22 AS backend-builder

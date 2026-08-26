@@ -331,6 +331,7 @@ export class AuthService {
       username,
       tokensByNodeId,
       nodeAuthStatesByNodeId,
+      { authSource: "password", technitiumUser: username },
     );
 
     return { session, response: { authenticated: true, nodes: results } };
@@ -341,26 +342,30 @@ export class AuthService {
       return;
     }
 
-    // Best-effort logout at Technitium nodes (invalidates the tokens)
-    for (const node of this.nodeConfigs) {
-      const token = session.tokensByNodeId[node.id];
-      if (!token) {
-        continue;
-      }
+    if (session.authSource === "password") {
+      // Password-login tokens are ephemeral Technitium sessions and should be
+      // revoked upstream. Trusted-SSO tokens are operator-managed mappings and
+      // must survive a local Companion logout.
+      for (const node of this.nodeConfigs) {
+        const token = session.tokensByNodeId[node.id];
+        if (!token) {
+          continue;
+        }
 
-      try {
-        await axios.get(`${node.baseUrl}/api/user/logout`, {
-          params: { token },
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 15_000,
-          httpsAgent: this.httpsAgent,
-        });
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Unknown error";
-        this.logger.debug(
-          `Logout failed for node ${node.id} (ignored): ${message}`,
-        );
+        try {
+          await axios.get(`${node.baseUrl}/api/user/logout`, {
+            params: { token },
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 15_000,
+            httpsAgent: this.httpsAgent,
+          });
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : "Unknown error";
+          this.logger.debug(
+            `Logout failed for node ${node.id} (ignored): ${message}`,
+          );
+        }
       }
     }
 

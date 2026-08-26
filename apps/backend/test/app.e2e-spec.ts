@@ -42,4 +42,18 @@ describe("AppController (e2e)", () => {
         );
       });
   });
+
+  it("does not establish a session from forwarded proto and identity headers alone", async () => {
+    const agent = request.agent(app.getHttpServer());
+    await agent
+      .get("/api/auth/me")
+      .set("X-Forwarded-Proto", "https")
+      .set("X-Forwarded-User", "alice@example.test")
+      .expect(200)
+      .expect((res) => {
+        expect(res.body).toMatchObject({ authenticated: false });
+        expect(res.headers["set-cookie"]).toBeUndefined();
+      });
+
+  });
 });

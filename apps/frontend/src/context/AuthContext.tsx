@@ -8,15 +8,25 @@ import {
     triggerAuthRedirect,
 } from "../config";
 import { AuthContext } from "./authContextInstance";
+import { redirectToTrustedSsoLogout } from "../utils/trustedSso";
 
 export type AuthStatus = {
   sessionAuthEnabled?: boolean;
   authenticated: boolean;
   user?: string;
+  authSource?: "password" | "trusted-sso";
+  technitiumUser?: string;
   nodeIds?: string[];
   unreachableNodeIds?: string[];
   failedNodeIds?: string[];
   configuredNodeIds?: string[];
+  trustedSso?: {
+    enabled: boolean;
+    available: boolean;
+    manualLoginAllowed: boolean;
+    error?: "identity-not-authorized" | "invalid-proxy-assertion";
+    logoutUrl?: string;
+  };
   transport?: AuthTransportInfo;
   backgroundPtrToken?: BackgroundPtrTokenValidationSummary;
 };
@@ -32,7 +42,34 @@ export type AuthContextValue = {
     totp?: string;
   }) => Promise<void>;
   logout: () => Promise<void>;
+  continueWithSso: () => Promise<void>;
+  ssoSuppressed: boolean;
 };
+
+const TRUSTED_SSO_SUPPRESSED_KEY = "trusted-sso-login-suppressed";
+
+function readSsoSuppressed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return (
+      window.sessionStorage?.getItem(TRUSTED_SSO_SUPPRESSED_KEY) === "true"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function writeSsoSuppressed(suppressed: boolean): void {
+  try {
+    if (suppressed) {
+      window.sessionStorage?.setItem(TRUSTED_SSO_SUPPRESSED_KEY, "true");
+    } else {
+      window.sessionStorage?.removeItem(TRUSTED_SSO_SUPPRESSED_KEY);
+    }
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts.
+  }
+}
 
 async function safeReadError(response: Response): Promise<string> {
   try {
@@ -101,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [ssoSuppressed, setSsoSuppressed] = useState(readSsoSuppressed);
 
   const statusRef = useRef<AuthStatus | null>(null);
 
@@ -110,6 +148,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const lastPresenceRefreshAtRef = useRef<number>(0);
+  const ssoBootstrapAttemptedRef = useRef(false);
+  const ssoBootstrapErrorRef = useRef<string | null>(null);
 
   useEffect(() => {
     statusRef.current = status;
@@ -126,18 +166,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!silent) {
         setLoading(true);
       }
-      setError(null);
+      if (!ssoBootstrapErrorRef.current) {
+        setError(null);
+      }
       try {
         const wasAuthenticated = statusRef.current?.authenticated === true;
         const res = await apiFetch("/auth/me");
         if (!res.ok) {
           setStatus((prev) => ({
+            ...prev,
             sessionAuthEnabled: prev?.sessionAuthEnabled,
             authenticated: false,
           }));
           return;
         }
-        const data = (await res.json()) as AuthStatus;
+        let data = (await res.json()) as AuthStatus;
+        setStatus(data);
+
+        if (
+          !data.authenticated &&
+          data.trustedSso?.available === true &&
+          !readSsoSuppressed() &&
+          !ssoBootstrapAttemptedRef.current
+        ) {
+          ssoBootstrapAttemptedRef.current = true;
+          const ssoResponse = await apiFetch("/auth/sso/login", {
+            method: "POST",
+          });
+          if (ssoResponse.ok) {
+            const refreshedResponse = await apiFetch("/auth/me");
+            if (refreshedResponse.ok) {
+              data = (await refreshedResponse.json()) as AuthStatus;
+              if (!data.authenticated) {
+                const message =
+                  "SSO sign-in completed, but the session could not be confirmed.";
+                ssoBootstrapErrorRef.current = message;
+                setError(message);
+              }
+            } else {
+              const message = await safeReadError(refreshedResponse);
+              ssoBootstrapErrorRef.current = message;
+              setError(message);
+            }
+          } else {
+            const message = await safeReadError(ssoResponse);
+            ssoBootstrapErrorRef.current = message;
+            setError(message);
+          }
+        }
+
+        if (data.authenticated) {
+          ssoBootstrapAttemptedRef.current = false;
+          ssoBootstrapErrorRef.current = null;
+          setError(null);
+        } else if (data.trustedSso?.available !== true) {
+          ssoBootstrapAttemptedRef.current = false;
+          ssoBootstrapErrorRef.current = null;
+          setError(null);
+        }
 
         // If the user previously had an authenticated Companion session and it
         // is now gone, treat it as an expiry and use the existing redirect/toast
@@ -153,10 +239,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus(data);
       } catch (e) {
         setStatus((prev) => ({
+          ...prev,
           sessionAuthEnabled: prev?.sessionAuthEnabled,
           authenticated: false,
         }));
-        setError(e instanceof Error ? e.message : "Failed to check session");
+        const message =
+          e instanceof Error ? e.message : "Failed to check session";
+        if (ssoBootstrapAttemptedRef.current) {
+          ssoBootstrapErrorRef.current = message;
+        }
+        setError(message);
       } finally {
         if (!silent) {
           setLoading(false);
@@ -248,19 +340,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     setError(null);
+    const trustedSsoSession = statusRef.current?.authSource === "trusted-sso";
+    const logoutUrl = statusRef.current?.trustedSso?.logoutUrl;
     try {
       await apiFetch("/auth/logout", { method: "POST" });
     } finally {
-      await refresh();
+      if (trustedSsoSession && !logoutUrl) {
+        writeSsoSuppressed(true);
+        setSsoSuppressed(true);
+      }
+      if (trustedSsoSession && logoutUrl) {
+        redirectToTrustedSsoLogout(logoutUrl);
+      } else {
+        await refresh();
+      }
     }
+  }, [refresh]);
+
+  const continueWithSso = useCallback(async () => {
+    writeSsoSuppressed(false);
+    setSsoSuppressed(false);
+    ssoBootstrapAttemptedRef.current = false;
+    ssoBootstrapErrorRef.current = null;
+    setError(null);
+    await refresh();
   }, [refresh]);
 
   const value = useMemo<AuthContextValue>(() => {
     // Ensure the context value identity changes for auth-related events even
     // when `status` is still null and other exposed fields haven't changed.
     void authEventNonce;
-    return { status, loading, error, refresh, login, logout };
-  }, [status, loading, error, refresh, login, logout, authEventNonce]);
+    return {
+      status,
+      loading,
+      error,
+      refresh,
+      login,
+      logout,
+      continueWithSso,
+      ssoSuppressed,
+    };
+  }, [
+    status,
+    loading,
+    error,
+    refresh,
+    login,
+    logout,
+    continueWithSso,
+    ssoSuppressed,
+    authEventNonce,
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

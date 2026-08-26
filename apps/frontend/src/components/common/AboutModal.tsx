@@ -15,6 +15,10 @@ interface AboutModalProps {
 }
 
 export function AboutModal({ isOpen, onClose }: AboutModalProps) {
+  const buildRevision =
+    __BUILD_REVISION__ === "development" || __BUILD_REVISION__ === "unknown" ?
+      null
+    : __BUILD_REVISION__.slice(0, 7);
   const {
     latestVersion,
     latestReleaseUrl,
@@ -67,6 +71,14 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
           </h2>
           <div className="about-modal__version-row">
             <span className="about-modal__version">v{__APP_VERSION__}</span>
+            {buildRevision && (
+              <span
+                className="about-modal__revision"
+                title={`Build revision ${__BUILD_REVISION__}`}
+              >
+                {buildRevision}
+              </span>
+            )}
           </div>
           <div className="about-modal__version-check">
             {isUpdateAvailable && latestVersion ?
