@@ -2,7 +2,7 @@ services:
   technitium-dns-companion:
     # Production default: pull the published image. For local builds, use:
     # docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d --build
-    image: ghcr.io/fail-safe/technitium-dns-companion:latest
+    image: ${COMPANION_IMAGE:-ghcr.io/fail-safe/technitium-dns-companion:latest}
     # Stable name retained for compatibility with existing scripts and tooling.
     container_name: technitium-dns-companion
     restart: unless-stopped

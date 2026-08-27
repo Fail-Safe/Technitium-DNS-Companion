@@ -25,7 +25,43 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  quality:
+    name: Test release candidate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint frontend
+        run: npm run lint --workspace apps/frontend
+
+      - name: Lint backend without modifying source
+        working-directory: apps/backend
+        run: npx eslint "{src,apps,libs,test}/**/*.ts"
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Run backend end-to-end tests
+        run: npm run test:e2e --workspace apps/backend
+
+      - name: Build all workspaces
+        run: npm run build
+
   build-and-push:
+    needs: quality
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -75,9 +111,10 @@ jobs:
             type=raw,value=next,enable=${{ github.ref == 'refs/heads/next' }}
             type=raw,value=beta,enable=${{ github.ref == 'refs/heads/next' }}
             type=raw,value=${{ steps.package-version.outputs.version }}-beta,enable=${{ github.ref == 'refs/heads/next' }}
-            # Manual runs: stable name + sha tag (safe for optional pushing)
-            type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' }}
-            type=sha,enable=${{ github.event_name == 'workflow_dispatch' }}
+            # Every published branch/tag image also gets an immutable source-revision tag.
+            type=sha,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+            # Manual runs from non-channel refs retain a discoverable rolling alias.
+            type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/next' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7

@@ -13,12 +13,14 @@ import { AuthRequestContext } from "./auth-request-context";
 import { AuthService } from "./auth.service";
 import type { AuthLoginRequestDto, AuthMeResponseDto } from "./auth.types";
 import { Public } from "./public.decorator";
+import { TrustedSsoService } from "./trusted-sso.service";
 
 @Controller("auth")
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly technitiumService: TechnitiumService,
+    private readonly trustedSsoService: TrustedSsoService,
   ) {}
 
   @Public()
@@ -51,12 +53,14 @@ export class AuthController {
       this.technitiumService.getBackgroundPtrTokenValidationSummary();
 
     const configuredNodeIds = this.technitiumService.getConfiguredNodeIds();
+    const trustedSso = this.trustedSsoService.getStatus(req);
 
     if (!session) {
       return {
         sessionAuthEnabled,
         authenticated: false,
         configuredNodeIds,
+        trustedSso,
         ...(transport ? { transport } : {}),
         backgroundPtrToken,
       };
@@ -74,10 +78,13 @@ export class AuthController {
       sessionAuthEnabled,
       authenticated: true,
       user: session.user,
+      authSource: session.authSource,
+      technitiumUser: session.technitiumUser,
       nodeIds: Object.keys(session.tokensByNodeId),
       unreachableNodeIds,
       failedNodeIds,
       configuredNodeIds,
+      trustedSso,
       ...(transport ? { transport } : {}),
       backgroundPtrToken,
     };
@@ -95,6 +102,7 @@ export class AuthController {
         "Session authentication requires HTTPS (direct HTTPS or a TLS-terminating reverse proxy with TRUST_PROXY=true).",
       );
     }
+    this.trustedSsoService.assertPasswordLoginAllowed(req);
 
     const { session, response } = await this.authService.login(body);
 
@@ -104,6 +112,23 @@ export class AuthController {
       this.authService.cookieOptions(req.secure),
     );
 
+    return response;
+  }
+
+  @Public()
+  @Post("sso/login")
+  async ssoLogin(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { session, response } =
+      await this.trustedSsoService.loginForRequest(req);
+
+    res.cookie(
+      this.authService.cookieName(),
+      session.id,
+      this.authService.cookieOptions(req.secure),
+    );
     return response;
   }
 

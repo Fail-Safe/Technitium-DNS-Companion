@@ -22,6 +22,8 @@ describe("env-file utilities", () => {
     delete process.env.TEST_VAR_FILE;
     delete process.env.TECHNITIUM_BACKGROUND_TOKEN;
     delete process.env.TECHNITIUM_BACKGROUND_TOKEN_FILE;
+    delete process.env.TRUSTED_SSO_PROXY_SECRET;
+    delete process.env.TRUSTED_SSO_PROXY_SECRET_FILE;
     delete process.env.TECHNITIUM_NODES;
     delete process.env.TECHNITIUM_NODE1_TOKEN;
     delete process.env.TECHNITIUM_NODE1_TOKEN_FILE;
@@ -104,6 +106,18 @@ describe("env-file utilities", () => {
       resolveEnvFileVariables();
 
       expect(process.env.TECHNITIUM_NODE1_TOKEN).toBe("node1-secret-token");
+    });
+
+    it("should resolve the trusted SSO proxy secret from file", () => {
+      const filePath = join(testDir, "trusted-sso-secret.txt");
+      writeFileSync(filePath, "trusted-sso-secret-value");
+      process.env.TRUSTED_SSO_PROXY_SECRET_FILE = filePath;
+
+      resolveEnvFileVariables();
+
+      expect(process.env.TRUSTED_SSO_PROXY_SECRET).toBe(
+        "trusted-sso-secret-value",
+      );
     });
 
     it("should not overwrite existing env values", () => {

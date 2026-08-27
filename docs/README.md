@@ -8,6 +8,7 @@ Welcome to the documentation for Technitium DNS Companion. This guide will help 
 
 - **[../README.md](../README.md)** - Project overview and quick start
 - **[../DOCKER.md](../DOCKER.md)** - Docker deployment guide (production & development)
+- **[BETA_TESTING.md](./BETA_TESTING.md)** - Opt-in beta soak testing, reporting, and rollback
 - **[../DEVELOPMENT.md](../DEVELOPMENT.md)** - Development setup and contributing guide
 
 ### Architecture & Design
@@ -62,6 +63,7 @@ Detailed documentation for specific features:
 
 - **[features/HEALTH_CHECK_API.md](./features/HEALTH_CHECK_API.md)** - Health check API for monitoring and Docker health checks
 - **[features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](./features/SESSION_AUTH_AND_TOKEN_MIGRATION.md)** - Session auth (v1.2+) overview, recommended deployment model, Technitium permissions map, and cluster-token → background-token migration
+- **[features/TRUSTED_HEADER_SSO.md](./features/TRUSTED_HEADER_SSO.md)** - Hardened trusted-proxy SSO, per-user token maps, rotation, break-glass access, and reverse-proxy requirements
 - **[features/TECHNITIUM_VERSION_COMPATIBILITY.md](./features/TECHNITIUM_VERSION_COMPATIBILITY.md)** - Technitium DNS v14/v15 API compatibility baseline and upgrade notes
 - **[features/AUTHENTICATION_DECISION.md](./features/AUTHENTICATION_DECISION.md)** - Authentication approach and token strategy rationale
 - **[features/CONFIG_CHANGE_DETECTION.md](./features/CONFIG_CHANGE_DETECTION.md)** - Unsaved changes detection

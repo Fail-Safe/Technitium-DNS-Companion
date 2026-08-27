@@ -1,8 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { AuthSession } from "./auth.types";
+import type {
+  AuthSession,
+  TrustedSsoRequestClassification,
+} from "./auth.types";
 
 interface AuthRequestContextState {
   session?: AuthSession;
+  trustedSsoRequest?: TrustedSsoRequestClassification;
 }
 
 const storage = new AsyncLocalStorage<AuthRequestContextState>();
@@ -23,5 +27,9 @@ export const AuthRequestContext = {
     }
 
     store.session = session;
+  },
+
+  getTrustedSsoRequest(): TrustedSsoRequestClassification | undefined {
+    return storage.getStore()?.trustedSsoRequest;
   },
 };

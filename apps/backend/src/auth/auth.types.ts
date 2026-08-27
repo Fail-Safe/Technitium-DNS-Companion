@@ -3,9 +3,28 @@ export interface AuthSession {
   createdAt: string;
   lastSeenAt: number;
   user: string;
+  authSource: "password" | "trusted-sso";
+  technitiumUser: string;
   tokensByNodeId: Record<string, string>;
   nodeAuthStatesByNodeId?: Record<string, AuthNodeSessionState>;
 }
+
+export type TrustedSsoError =
+  | "identity-not-authorized"
+  | "invalid-proxy-assertion";
+
+export interface TrustedSsoStatus {
+  enabled: boolean;
+  available: boolean;
+  manualLoginAllowed: boolean;
+  error?: TrustedSsoError;
+  logoutUrl?: string;
+}
+
+export type TrustedSsoRequestClassification =
+  | { kind: "disabled" | "direct" }
+  | { kind: "invalid"; error: "invalid-proxy-assertion" }
+  | { kind: "valid"; identity: string };
 
 export interface AuthLoginRequestDto {
   username: string;
@@ -50,10 +69,13 @@ export interface AuthMeResponseDto {
   sessionAuthEnabled: boolean;
   authenticated: boolean;
   user?: string;
+  authSource?: AuthSession["authSource"];
+  technitiumUser?: string;
   nodeIds?: string[];
   unreachableNodeIds?: string[];
   failedNodeIds?: string[];
   configuredNodeIds?: string[];
+  trustedSso: TrustedSsoStatus;
   transport?: {
     requestSecure: boolean;
     httpsEnabled: boolean;

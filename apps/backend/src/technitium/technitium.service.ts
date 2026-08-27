@@ -504,6 +504,40 @@ export class TechnitiumService {
     return this.nodeConfigs.map((node) => node.id);
   }
 
+  async validateExplicitSessionToken(
+    nodeId: string,
+    token: string,
+  ): Promise<{ username: string }> {
+    const node = this.findNode(nodeId);
+    type SessionInfo = { username?: string };
+    const envelope = await this.requestWithExplicitToken<
+      TechnitiumApiResponse<SessionInfo>
+    >(node, { method: "GET", url: "/api/user/session/get" }, token, {
+      suppressNetworkErrorLog: true,
+    });
+    const envelopeObject = envelope as TechnitiumApiResponse<SessionInfo> &
+      SessionInfo;
+    if (envelopeObject.status !== "ok") {
+      if (envelopeObject.status === "invalid-token") {
+        throw new UnauthorizedException(
+          `Technitium DNS node "${node.id}" rejected the mapped session token.`,
+        );
+      }
+      throw new UnauthorizedException(
+        `Technitium DNS node "${node.id}" could not validate the mapped session token.`,
+      );
+    }
+
+    const username =
+      envelopeObject.response?.username ?? envelopeObject.username;
+    if (!username) {
+      throw new UnauthorizedException(
+        `Technitium DNS node "${node.id}" did not identify the mapped token owner.`,
+      );
+    }
+    return { username };
+  }
+
   /**
    * Resolve a hostname to IP address with timeout.
    * Used to match cluster nodes when hostnames don't resolve to the configured baseUrl IPs.

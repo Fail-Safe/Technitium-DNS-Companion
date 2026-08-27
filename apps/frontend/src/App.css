@@ -15,6 +15,28 @@
   backdrop-filter: blur(2px) !important;
 }
 
+.login__sso-state {
+  margin: 0 0 1rem;
+  padding: 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  background: var(--color-bg-secondary);
+}
+
+.login__sso-state h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+}
+
+.login__sso-state p {
+  margin: 0 0 1rem;
+  color: var(--color-text-secondary);
+}
+
+.login__sso-state p:last-child {
+  margin-bottom: 0;
+}
+
 /* Ensure font applies to all content inside tooltip */
 .domain-tooltip *,
 .domain-tooltip div,

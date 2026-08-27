@@ -53,6 +53,9 @@ export default defineConfig({
     __APP_NAME__: JSON.stringify(APP_NAME),
     __APP_SHORT_NAME__: JSON.stringify(APP_SHORT_NAME),
     __APP_VERSION__: JSON.stringify(rootPackageJson.version),
+    __BUILD_REVISION__: JSON.stringify(
+      process.env.BUILD_REVISION || "development",
+    ),
   },
   resolve: {
     // Ensure a single React instance to avoid invalid hook calls during dev HMR

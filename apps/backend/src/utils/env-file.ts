@@ -88,6 +88,7 @@ export function resolveEnvFileVariables(): void {
   const sensitiveVars = [
     "TECHNITIUM_BACKGROUND_TOKEN",
     "TECHNITIUM_SCHEDULE_TOKEN",
+    "TRUSTED_SSO_PROXY_SECRET",
   ];
 
   // Resolve statically-known sensitive variables

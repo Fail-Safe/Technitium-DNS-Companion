@@ -9,6 +9,32 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Hardened trusted-header SSO.** An authenticating reverse proxy can establish identity-bound Companion sessions using a constant-time-verified proxy secret, optional immediate-peer IPv4/IPv6 CIDRs, and exact per-user Technitium cluster API-token mappings. The feature preserves Technitium RBAC and audit attribution, validates the replicated token owner on every reachable node, fails closed on malformed proxy assertions, supports direct-network break-glass login, and provides deliberate local or IdP logout behavior.
+
+### Security
+
+- Trusted-SSO sessions are re-bound to the same proxy assertion on every API request; missing or changed identities invalidate the local session before protected work. Identity headers and `X-Forwarded-Proto` alone cannot authenticate, mapped credentials are never returned to the browser, and operator-managed SSO tokens are not revoked by local logout.
+- Trusted-SSO session creation is bounded to eight active sessions per mapped identity, preventing a valid user from growing the in-memory session store without limit while preserving multi-device access.
+
+### Changed
+
+- Docker Compose accepts `COMPANION_IMAGE` so operators can opt into `:beta` or pin an immutable `sha-<commit>` build without editing the maintained Compose file. Published images expose their source revision in OCI metadata and the About dialog.
+- The Docker publisher now runs lint, unit tests, backend E2E tests, and the full build before pushing an image. Every published branch or release image receives an immutable source-revision tag.
+
+### Fixed
+
+- Release reconciliation now explicitly republishes the updated `next` branch, preventing GitHub's workflow-token fan-out suppression from leaving the rolling `:beta` image behind the branch.
+
+### Testing
+
+- Added regression coverage for trusted-SSO per-identity session bounds and isolation from password or other-user sessions.
+
+### Documentation
+
+- Added token-map creation and rotation guidance plus nginx, Caddy, and Traefik examples that remove client assertions and inject authenticated identity and the proxy secret only after forward authentication. Shared-account SSO is explicitly unsupported because it would collapse Technitium's per-user authorization boundary.
+
 ## [1.10.1] - 2026-08-13
 
 ### Fixed
