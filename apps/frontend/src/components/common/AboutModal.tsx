@@ -7,6 +7,10 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useLatestRelease } from "../../hooks/useLatestRelease";
+import {
+  describeBuildChannel,
+  formatBuildChannelStatus,
+} from "../../utils/build-channel";
 import "./AboutModal.css";
 
 interface AboutModalProps {
@@ -26,6 +30,12 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
     isUpdateAvailable,
     error: versionCheckError,
   } = useLatestRelease(__APP_VERSION__);
+  const buildChannel = describeBuildChannel(__BUILD_CHANNEL__);
+  const buildChannelStatus = formatBuildChannelStatus(
+    buildChannel,
+    latestVersion,
+    Boolean(versionCheckError),
+  );
 
   if (!isOpen) return null;
 
@@ -71,6 +81,13 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
           </h2>
           <div className="about-modal__version-row">
             <span className="about-modal__version">v{__APP_VERSION__}</span>
+            {buildChannel.badge && (
+              <span
+                className={`about-modal__channel about-modal__channel--${buildChannel.kind}`}
+              >
+                {buildChannel.badge}
+              </span>
+            )}
             {buildRevision && (
               <span
                 className="about-modal__revision"
@@ -81,7 +98,11 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
             )}
           </div>
           <div className="about-modal__version-check">
-            {isUpdateAvailable && latestVersion ?
+            {buildChannelStatus ?
+              <span className="about-modal__version-status about-modal__version-status--preview">
+                {buildChannelStatus}
+              </span>
+            : isUpdateAvailable && latestVersion ?
               <a
                 href={
                   latestReleaseUrl ||

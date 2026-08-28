@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - Release reconciliation now explicitly republishes the updated `next` branch, preventing GitHub's workflow-token fan-out suppression from leaving the rolling `:beta` image behind the branch.
+- The About dialog now identifies beta and other preview builds explicitly and reports the latest stable release separately instead of saying a beta build is simply “up to date.”
 
 ### Testing
 

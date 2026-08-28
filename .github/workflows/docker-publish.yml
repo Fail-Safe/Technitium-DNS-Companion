@@ -81,6 +81,18 @@ jobs:
           PKG_VERSION: ${{ steps.package-version.outputs.version }}
         run: echo "major_minor=${PKG_VERSION%.*}" >> "$GITHUB_OUTPUT"
 
+      - name: Derive build channel
+        id: build-channel
+        env:
+          BUILD_REF: ${{ github.ref }}
+        run: |
+          case "$BUILD_REF" in
+            refs/heads/next) channel=beta ;;
+            refs/tags/v*) channel=stable ;;
+            *) channel=preview ;;
+          esac
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -127,6 +139,7 @@ jobs:
           build-args: |
             BUILD_VERSION=${{ steps.package-version.outputs.version }}
             BUILD_REVISION=${{ github.sha }}
+            BUILD_CHANNEL=${{ steps.build-channel.outputs.channel }}
           cache-from: ${{ inputs.no_cache && '' || 'type=gha' }}
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
