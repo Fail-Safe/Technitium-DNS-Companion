@@ -35,13 +35,14 @@ with the build.
 
 ## Record the exact build
 
-The About dialog shows the application version and short source revision. The
-complete revision is also stored in the image metadata:
+The About dialog labels the build as **BETA**, shows the application version and
+short source revision, and reports the latest stable release separately. The
+complete revision and build channel are also stored in the image metadata:
 
 ```bash
 docker image inspect \
   ghcr.io/fail-safe/technitium-dns-companion:beta \
-  --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+  --format 'revision={{ index .Config.Labels "org.opencontainers.image.revision" }} channel={{ index .Config.Labels "io.github.fail-safe.technitium-dns-companion.build-channel" }}'
 ```
 
 Include that revision, the image digest, your Technitium DNS version, browser,

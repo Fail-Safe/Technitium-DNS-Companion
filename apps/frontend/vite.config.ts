@@ -56,6 +56,9 @@ export default defineConfig({
     __BUILD_REVISION__: JSON.stringify(
       process.env.BUILD_REVISION || "development",
     ),
+    __BUILD_CHANNEL__: JSON.stringify(
+      process.env.BUILD_CHANNEL || "development",
+    ),
   },
   resolve: {
     // Ensure a single React instance to avoid invalid hook calls during dev HMR
