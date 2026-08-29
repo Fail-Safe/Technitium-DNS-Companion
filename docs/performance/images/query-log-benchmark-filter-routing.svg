@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="650" viewBox="0 0 1200 650" role="img" aria-labelledby="chart-title chart-desc">
+  <title id="chart-title">Adaptive routing preserves filtered-query performance</title>
+  <desc id="chart-desc">Grouped bars compare filter-aware window queries, the rejected grouped-for-all iteration, and the adaptive final route for five filtered dedup searches. The grouped-for-all iteration regressed Google plus A-record search from 261 to 562 milliseconds, while adaptive routing restored it to 271 milliseconds.</desc>
+  <defs>
+    <pattern id="solid-blue" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#2563eb"/></pattern>
+    <pattern id="diagonal-orange" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="8" fill="#fff7ed"/><line x1="0" y1="0" x2="0" y2="8" stroke="#d97706" stroke-width="3"/></pattern>
+    <pattern id="dots-teal" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#f0fdfa"/><circle cx="4" cy="4" r="2.4" fill="#0f766e"/></pattern>
+</defs>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172033; }
+    .title { font-size: 24px; font-weight: 700; }
+    .subtitle { font-size: 13px; fill: #526078; }
+    .panel-title { font-size: 15px; font-weight: 650; }
+    .axis { font-size: 11px; fill: #526078; }
+    .value { font-size: 11px; font-weight: 650; }
+    .grid { stroke: #dbe2ea; stroke-width: 1; }
+  </style>
+<text x="50" y="42" class="title">Adaptive routing preserves filtered-query performance</text>
+<text x="50" y="66" class="subtitle">Warm medians in milliseconds. The all-filter grouped iteration helped common searches but regressed selective filters.</text>
+<line x1="90" y1="540.0" x2="1150" y2="540.0" class="grid"/>
+<text x="80" y="544.0" text-anchor="end" class="axis">0ms</text>
+<line x1="90" y1="470.0" x2="1150" y2="470.0" class="grid"/>
+<text x="80" y="474.0" text-anchor="end" class="axis">150ms</text>
+<line x1="90" y1="400.0" x2="1150" y2="400.0" class="grid"/>
+<text x="80" y="404.0" text-anchor="end" class="axis">300ms</text>
+<line x1="90" y1="330.0" x2="1150" y2="330.0" class="grid"/>
+<text x="80" y="334.0" text-anchor="end" class="axis">450ms</text>
+<line x1="90" y1="260.0" x2="1150" y2="260.0" class="grid"/>
+<text x="80" y="264.0" text-anchor="end" class="axis">600ms</text>
+<line x1="90" y1="190.0" x2="1150" y2="190.0" class="grid"/>
+<text x="80" y="194.0" text-anchor="end" class="axis">750ms</text>
+<line x1="90" y1="120.0" x2="1150" y2="120.0" class="grid"/>
+<text x="80" y="124.0" text-anchor="end" class="axis">900ms</text>
+<rect x="125.0" y="186.7" width="42" height="353.3" fill="url(#solid-blue)" stroke="#2563eb" stroke-width="1"/>
+<text x="146.0" y="179.7" text-anchor="middle" class="value">757</text>
+<rect x="175.0" y="346.3" width="42" height="193.7" fill="url(#diagonal-orange)" stroke="#d97706" stroke-width="1"/>
+<text x="196.0" y="339.3" text-anchor="middle" class="value">415</text>
+<rect x="225.0" y="167.6" width="42" height="372.4" fill="url(#dots-teal)" stroke="#0f766e" stroke-width="1"/>
+<text x="246.0" y="160.6" text-anchor="middle" class="value">798</text>
+<text x="196.0" y="564" text-anchor="middle" class="axis">YouTube</text>
+<text x="196.0" y="579" text-anchor="middle" class="axis">domain</text>
+<rect x="337.0" y="418.2" width="42" height="121.8" fill="url(#solid-blue)" stroke="#2563eb" stroke-width="1"/>
+<text x="358.0" y="411.2" text-anchor="middle" class="value">261</text>
+<rect x="387.0" y="277.7" width="42" height="262.3" fill="url(#diagonal-orange)" stroke="#d97706" stroke-width="1"/>
+<text x="408.0" y="270.7" text-anchor="middle" class="value">562</text>
+<rect x="437.0" y="413.5" width="42" height="126.5" fill="url(#dots-teal)" stroke="#0f766e" stroke-width="1"/>
+<text x="458.0" y="406.5" text-anchor="middle" class="value">271</text>
+<text x="408.0" y="564" text-anchor="middle" class="axis">Google + A</text>
+<text x="408.0" y="579" text-anchor="middle" class="axis">record</text>
+<rect x="549.0" y="461.1" width="42" height="78.9" fill="url(#solid-blue)" stroke="#2563eb" stroke-width="1"/>
+<text x="570.0" y="454.1" text-anchor="middle" class="value">169</text>
+<rect x="599.0" y="443.9" width="42" height="96.1" fill="url(#diagonal-orange)" stroke="#d97706" stroke-width="1"/>
+<text x="620.0" y="436.9" text-anchor="middle" class="value">206</text>
+<rect x="649.0" y="460.2" width="42" height="79.8" fill="url(#dots-teal)" stroke="#0f766e" stroke-width="1"/>
+<text x="670.0" y="453.2" text-anchor="middle" class="value">171</text>
+<text x="620.0" y="564" text-anchor="middle" class="axis">google.com</text>
+<text x="620.0" y="579" text-anchor="middle" class="axis">domain</text>
+<rect x="761.0" y="183.9" width="42" height="356.1" fill="url(#solid-blue)" stroke="#2563eb" stroke-width="1"/>
+<text x="782.0" y="176.9" text-anchor="middle" class="value">763</text>
+<rect x="811.0" y="335.1" width="42" height="204.9" fill="url(#diagonal-orange)" stroke="#d97706" stroke-width="1"/>
+<text x="832.0" y="328.1" text-anchor="middle" class="value">439</text>
+<rect x="861.0" y="200.3" width="42" height="339.7" fill="url(#dots-teal)" stroke="#0f766e" stroke-width="1"/>
+<text x="882.0" y="193.3" text-anchor="middle" class="value">728</text>
+<text x="832.0" y="564" text-anchor="middle" class="axis">Phone</text>
+<text x="832.0" y="579" text-anchor="middle" class="axis">client</text>
+<rect x="973.0" y="418.7" width="42" height="121.3" fill="url(#solid-blue)" stroke="#2563eb" stroke-width="1"/>
+<text x="994.0" y="411.7" text-anchor="middle" class="value">260</text>
+<rect x="1023.0" y="418.2" width="42" height="121.8" fill="url(#diagonal-orange)" stroke="#d97706" stroke-width="1"/>
+<text x="1044.0" y="411.2" text-anchor="middle" class="value">261</text>
+<rect x="1073.0" y="416.8" width="42" height="123.2" fill="url(#dots-teal)" stroke="#0f766e" stroke-width="1"/>
+<text x="1094.0" y="409.8" text-anchor="middle" class="value">264</text>
+<text x="1044.0" y="564" text-anchor="middle" class="axis">Guest</text>
+<text x="1044.0" y="579" text-anchor="middle" class="axis">client</text>
+<rect x="330" y="596" width="24" height="14" fill="url(#solid-blue)" stroke="#2563eb"/>
+<text x="362" y="608" class="axis">Filter-aware</text>
+<rect x="540" y="596" width="24" height="14" fill="url(#diagonal-orange)" stroke="#d97706"/>
+<text x="572" y="608" class="axis">Grouped for all</text>
+<rect x="750" y="596" width="24" height="14" fill="url(#dots-teal)" stroke="#0f766e"/>
+<text x="782" y="608" class="axis">Adaptive final</text>
+</svg>

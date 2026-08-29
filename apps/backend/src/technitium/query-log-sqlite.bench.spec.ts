@@ -10,7 +10,7 @@ import { createHash } from "crypto";
 // test run — gated by RUN_QLOG_BENCHMARKS=true. Each run produces a Markdown
 // table of cold/warm timings for a fixed matrix of representative queries
 // against a synthetic dataset, so results are directly comparable across
-// optimization phases (baseline → tier 1 → tier 2).
+// cumulative optimization stages against one reusable snapshot.
 //
 // Usage:
 //   RUN_QLOG_BENCHMARKS=true QLOG_BENCHMARK_PHASE=baseline \
@@ -23,6 +23,13 @@ import { createHash } from "crypto";
 //   QLOG_BENCHMARK_PHASE       Label printed in the output header (default "baseline")
 //   QLOG_BENCHMARK_APPLY_TIER1 Apply Tier 1 PRAGMA tunables to each connection
 //   QLOG_BENCHMARK_USE_FTS     Use FTS5 table for domain/client substring queries
+//   QLOG_BENCHMARK_SKIP_INITIAL_ANALYZE
+//                              Generate without planner stats (default false)
+//   QLOG_BENCHMARK_WARM_SAMPLES
+//                              Warm samples after priming (default 5)
+//   QLOG_BENCHMARK_STAGE       Cumulative schema/query stage (default baseline):
+//                              baseline, planner-stats, distinct-count,
+//                              status-index, dedup-rewrite, dedup-adaptive
 //
 // Synthetic dataset shape mirrors what a household DNS resolver with
 // ~36h retention and realistic family-of-5 traffic produces: power-law
@@ -37,6 +44,36 @@ const REGEN = process.env.QLOG_BENCHMARK_REGENERATE === "true";
 const PHASE = process.env.QLOG_BENCHMARK_PHASE ?? "baseline";
 const APPLY_TIER1 = process.env.QLOG_BENCHMARK_APPLY_TIER1 === "true";
 const USE_FTS = process.env.QLOG_BENCHMARK_USE_FTS === "true";
+const SKIP_INITIAL_ANALYZE =
+  process.env.QLOG_BENCHMARK_SKIP_INITIAL_ANALYZE === "true";
+const WARM_SAMPLES = Math.max(
+  1,
+  Number.parseInt(process.env.QLOG_BENCHMARK_WARM_SAMPLES ?? "5", 10) || 5,
+);
+
+const BENCHMARK_STAGES = [
+  "baseline",
+  "planner-stats",
+  "distinct-count",
+  "status-index",
+  "dedup-rewrite",
+  "dedup-adaptive",
+] as const;
+type BenchmarkStage = (typeof BENCHMARK_STAGES)[number];
+
+const requestedStage = process.env.QLOG_BENCHMARK_STAGE ?? "baseline";
+if (!BENCHMARK_STAGES.includes(requestedStage as BenchmarkStage)) {
+  throw new Error(
+    `Invalid QLOG_BENCHMARK_STAGE=${requestedStage}. Expected one of: ${BENCHMARK_STAGES.join(", ")}`,
+  );
+}
+const BENCHMARK_STAGE = requestedStage as BenchmarkStage;
+const BENCHMARK_STAGE_INDEX = BENCHMARK_STAGES.indexOf(BENCHMARK_STAGE);
+const USE_PLANNER_STATS = BENCHMARK_STAGE_INDEX >= 1;
+const USE_DISTINCT_COUNT = BENCHMARK_STAGE_INDEX >= 2;
+const ADD_STATUS_INDEX = BENCHMARK_STAGE_INDEX >= 3;
+const USE_DEDUP_REWRITE = BENCHMARK_STAGE_INDEX >= 4;
+const USE_ADAPTIVE_DEDUP = BENCHMARK_STAGE_INDEX >= 5;
 
 const describeOrSkip = RUN ? describe : describe.skip;
 
@@ -342,7 +379,9 @@ function generateSyntheticDb(path: string, rowCount: number): void {
       throw error;
     }
   }
-  db.prepare("ANALYZE").run();
+  if (!SKIP_INITIAL_ANALYZE) {
+    db.prepare("ANALYZE").run();
+  }
   db.close();
 }
 
@@ -372,6 +411,32 @@ function ensureFtsTable(db: DatabaseSync): void {
   ).run();
 }
 
+function applyBenchmarkStage(db: DatabaseSync): void {
+  if (ADD_STATUS_INDEX) {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_query_log_blockedRank_ts
+      ON query_log_entries(blockedRank, ts)
+    `);
+  }
+
+  if (USE_DEDUP_REWRITE) {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_query_log_dedup_rank
+      ON query_log_entries(
+        qnameLc,
+        clientIpLc,
+        blockedRank DESC,
+        aRank DESC,
+        ts DESC
+      )
+    `);
+  }
+
+  if (USE_PLANNER_STATS) {
+    db.exec("PRAGMA optimize=0x10002");
+  }
+}
+
 // ── Benchmark harness ──────────────────────────────────────────────────────
 
 interface QueryCase {
@@ -386,22 +451,62 @@ function buildQueryCases(): QueryCase[] {
   const tsClause = "ts >= ? AND ts <= ?";
   const tsParams = [startTs, endTs];
 
-  const ftsLikeSubquery = (column: "qnameLc" | "clientNameLc") =>
-    USE_FTS
+  const substringPredicate = (
+    column: "qnameLc" | "clientNameLc",
+    deduplicateDomains: boolean,
+  ) =>
+    USE_FTS && deduplicateDomains
       ? `rowid IN (SELECT rowid FROM query_log_fts WHERE ${column} MATCH ?)`
       : `${column} LIKE ?`;
   // Mirror QueryLogSqliteService.buildFtsMatchExpression: split on
   // non-alphanumerics and prefix-star the last token. Without this, a term
   // like "google.com" crashes FTS5 with "syntax error near ." — which is
   // the bug that took down the test container last night.
-  const ftsLikeParam = (term: string) => {
-    if (!USE_FTS) return `%${term}%`;
+  const substringParam = (term: string, deduplicateDomains: boolean) => {
+    if (!USE_FTS || !deduplicateDomains) return `%${term}%`;
     const tokens = term
       .toLowerCase()
       .split(/[^a-z0-9]+/)
       .filter((t) => t.length > 0);
     if (tokens.length === 0) return "*";
     return [...tokens.slice(0, -1), `${tokens[tokens.length - 1]}*`].join(" ");
+  };
+
+  const buildDedupPageSql = (
+    whereSql: string,
+    partition: "qnameLc" | "qnameLc, clientIpLc" = "qnameLc",
+    offset = 0,
+    hasEntryFilters = false,
+  ): string => {
+    const useIndexedGrouping =
+      USE_DEDUP_REWRITE && (!USE_ADAPTIVE_DEDUP || !hasEntryFilters);
+    if (!useIndexedGrouping) {
+      return `WITH ranked AS (
+        SELECT nodeId, data, ts,
+          ROW_NUMBER() OVER (
+            PARTITION BY ${partition}
+            ORDER BY blockedRank DESC, aRank DESC, ts DESC
+          ) AS rn
+        FROM query_log_entries
+        WHERE ${whereSql} AND qnameLc IS NOT NULL
+      )
+      SELECT nodeId, data FROM ranked WHERE rn = 1
+      ORDER BY ts DESC LIMIT 50 OFFSET ${offset}`;
+    }
+
+    return `WITH best AS (
+      SELECT nodeId, data, ts,
+        MAX(
+          blockedRank * 4000000000000000 +
+          aRank * 2000000000000000 +
+          ts
+        ) AS priority
+      FROM query_log_entries INDEXED BY idx_query_log_dedup_rank
+      WHERE ${whereSql} AND qnameLc IS NOT NULL
+      GROUP BY ${partition}
+    )
+    SELECT nodeId, data FROM best
+    ORDER BY ts DESC LIMIT 50 OFFSET ${offset}`;
   };
 
   return [
@@ -412,36 +517,32 @@ function buildQueryCases(): QueryCase[] {
     },
     {
       name: "02 recent unfiltered page 1 (dedup on)",
-      sql: `WITH ranked AS (
-        SELECT nodeId, data, ts,
-          ROW_NUMBER() OVER (PARTITION BY qnameLc ORDER BY blockedRank DESC, aRank DESC, ts DESC) AS rn
-        FROM query_log_entries WHERE ${tsClause} AND qnameLc IS NOT NULL
-      ) SELECT nodeId, data FROM ranked WHERE rn = 1 ORDER BY ts DESC LIMIT 50`,
+      sql: buildDedupPageSql(tsClause),
       params: [...tsParams],
     },
     {
       name: "03 domain substring 'youtube' (dedup off)",
       sql: `SELECT nodeId, data FROM query_log_entries
-            WHERE ${tsClause} AND ${ftsLikeSubquery("qnameLc", "youtube")}
+            WHERE ${tsClause} AND ${substringPredicate("qnameLc", false)}
             ORDER BY ts DESC LIMIT 50`,
-      params: [...tsParams, ftsLikeParam("youtube")],
+      params: [...tsParams, substringParam("youtube", false)],
     },
     {
       name: "04 domain substring 'youtube' (dedup on)",
-      sql: `WITH ranked AS (
-        SELECT nodeId, data, ts,
-          ROW_NUMBER() OVER (PARTITION BY qnameLc ORDER BY blockedRank DESC, aRank DESC, ts DESC) AS rn
-        FROM query_log_entries
-        WHERE ${tsClause} AND qnameLc IS NOT NULL AND ${ftsLikeSubquery("qnameLc", "youtube")}
-      ) SELECT nodeId, data FROM ranked WHERE rn = 1 ORDER BY ts DESC LIMIT 50`,
-      params: [...tsParams, ftsLikeParam("youtube")],
+      sql: buildDedupPageSql(
+        `${tsClause} AND ${substringPredicate("qnameLc", true)}`,
+        "qnameLc",
+        0,
+        true,
+      ),
+      params: [...tsParams, substringParam("youtube", true)],
     },
     {
       name: "05 client substring 'phone' (dedup off)",
       sql: `SELECT nodeId, data FROM query_log_entries
-            WHERE ${tsClause} AND ${ftsLikeSubquery("clientNameLc", "phone")}
+            WHERE ${tsClause} AND ${substringPredicate("clientNameLc", false)}
             ORDER BY ts DESC LIMIT 50`,
-      params: [...tsParams, ftsLikeParam("phone")],
+      params: [...tsParams, substringParam("phone", false)],
     },
     {
       name: "06 qtype=AAAA equality (dedup off)",
@@ -457,21 +558,17 @@ function buildQueryCases(): QueryCase[] {
     },
     {
       name: "08 typical: domain 'google' + qtype A + dedup",
-      sql: `WITH ranked AS (
-        SELECT nodeId, data, ts,
-          ROW_NUMBER() OVER (PARTITION BY qnameLc ORDER BY blockedRank DESC, aRank DESC, ts DESC) AS rn
-        FROM query_log_entries
-        WHERE ${tsClause} AND qnameLc IS NOT NULL AND ${ftsLikeSubquery("qnameLc", "google")} AND qtype = ?
-      ) SELECT nodeId, data FROM ranked WHERE rn = 1 ORDER BY ts DESC LIMIT 50`,
-      params: [...tsParams, ftsLikeParam("google"), "A"],
+      sql: buildDedupPageSql(
+        `${tsClause} AND ${substringPredicate("qnameLc", true)} AND qtype = ?`,
+        "qnameLc",
+        0,
+        true,
+      ),
+      params: [...tsParams, substringParam("google", true), "A"],
     },
     {
       name: "09 deep pagination (dedup on, offset 2500)",
-      sql: `WITH ranked AS (
-        SELECT nodeId, data, ts,
-          ROW_NUMBER() OVER (PARTITION BY qnameLc ORDER BY blockedRank DESC, aRank DESC, ts DESC) AS rn
-        FROM query_log_entries WHERE ${tsClause} AND qnameLc IS NOT NULL
-      ) SELECT nodeId, data FROM ranked WHERE rn = 1 ORDER BY ts DESC LIMIT 50 OFFSET 2500`,
+      sql: buildDedupPageSql(tsClause, "qnameLc", 2500),
       params: [...tsParams],
     },
     {
@@ -485,17 +582,17 @@ function buildQueryCases(): QueryCase[] {
     {
       name: "11 rare domain substring 'iphone' (dedup off)",
       sql: `SELECT nodeId, data FROM query_log_entries
-            WHERE ${tsClause} AND ${ftsLikeSubquery("qnameLc", "iphone")}
+            WHERE ${tsClause} AND ${substringPredicate("qnameLc", false)}
             ORDER BY ts DESC LIMIT 50`,
-      params: [...tsParams, ftsLikeParam("iphone")],
+      params: [...tsParams, substringParam("iphone", false)],
     },
     // No-match case: worst-case unsargable LIKE — must scan the full window.
     {
       name: "12 no-match substring 'zzznoexistxxx' (dedup off)",
       sql: `SELECT nodeId, data FROM query_log_entries
-            WHERE ${tsClause} AND ${ftsLikeSubquery("qnameLc", "zzznoexistxxx")}
+            WHERE ${tsClause} AND ${substringPredicate("qnameLc", false)}
             ORDER BY ts DESC LIMIT 50`,
-      params: [...tsParams, ftsLikeParam("zzznoexistxxx")],
+      params: [...tsParams, substringParam("zzznoexistxxx", false)],
     },
     // Per-node COUNT(*) loop — UI runs one of these per configured node on
     // every page load (N+1 count pattern in the production code).
@@ -510,13 +607,13 @@ function buildQueryCases(): QueryCase[] {
     // it becomes "google com*" and works.
     {
       name: "14 dotted domain 'google.com' (dedup on)",
-      sql: `WITH ranked AS (
-        SELECT nodeId, data, ts,
-          ROW_NUMBER() OVER (PARTITION BY qnameLc ORDER BY blockedRank DESC, aRank DESC, ts DESC) AS rn
-        FROM query_log_entries
-        WHERE ${tsClause} AND qnameLc IS NOT NULL AND ${ftsLikeSubquery("qnameLc", "google.com")}
-      ) SELECT nodeId, data FROM ranked WHERE rn = 1 ORDER BY ts DESC LIMIT 50`,
-      params: [...tsParams, ftsLikeParam("google.com")],
+      sql: buildDedupPageSql(
+        `${tsClause} AND ${substringPredicate("qnameLc", true)}`,
+        "qnameLc",
+        0,
+        true,
+      ),
+      params: [...tsParams, substringParam("google.com", true)],
     },
     // The case that motivated last night's incident: client hostname
     // substring search with dedup enabled. The UI default sends dedup=true,
@@ -525,26 +622,56 @@ function buildQueryCases(): QueryCase[] {
     // full scan on the IP side.
     {
       name: "15 client substring 'phone' + dedup on",
-      sql: `WITH ranked AS (
-        SELECT nodeId, data, ts,
-          ROW_NUMBER() OVER (PARTITION BY qnameLc ORDER BY blockedRank DESC, aRank DESC, ts DESC) AS rn
-        FROM query_log_entries
-        WHERE ${tsClause} AND qnameLc IS NOT NULL AND ${ftsLikeSubquery("clientNameLc", "phone")}
-      ) SELECT nodeId, data FROM ranked WHERE rn = 1 ORDER BY ts DESC LIMIT 50`,
-      params: [...tsParams, ftsLikeParam("phone")],
+      sql: buildDedupPageSql(
+        `${tsClause} AND ${substringPredicate("clientNameLc", true)}`,
+        "qnameLc",
+        0,
+        true,
+      ),
+      params: [...tsParams, substringParam("phone", true)],
     },
     // Rare-client-substring + dedup: worst-case combination in production
     // — rare matches mean no LIMIT short-circuit, dedup means window
     // function over the full filtered result.
     {
       name: "16 client substring 'guest' + dedup on",
-      sql: `WITH ranked AS (
-        SELECT nodeId, data, ts,
-          ROW_NUMBER() OVER (PARTITION BY qnameLc ORDER BY blockedRank DESC, aRank DESC, ts DESC) AS rn
-        FROM query_log_entries
-        WHERE ${tsClause} AND qnameLc IS NOT NULL AND ${ftsLikeSubquery("clientNameLc", "guest")}
-      ) SELECT nodeId, data FROM ranked WHERE rn = 1 ORDER BY ts DESC LIMIT 50`,
-      params: [...tsParams, ftsLikeParam("guest")],
+      sql: buildDedupPageSql(
+        `${tsClause} AND ${substringPredicate("clientNameLc", true)}`,
+        "qnameLc",
+        0,
+        true,
+      ),
+      params: [...tsParams, substringParam("guest", true)],
+    },
+    {
+      name: "17 unique-domain count (dedup on)",
+      sql: USE_DISTINCT_COUNT
+        ? `SELECT COUNT(DISTINCT qnameLc) AS count
+           FROM query_log_entries
+           WHERE ${tsClause} AND qnameLc IS NOT NULL`
+        : `SELECT COUNT(*) AS count FROM (
+             SELECT qnameLc
+             FROM query_log_entries
+             WHERE ${tsClause} AND qnameLc IS NOT NULL
+             GROUP BY qnameLc
+           )`,
+      params: [...tsParams],
+    },
+    {
+      name: "18 blocked COUNT(*) window-scoped",
+      sql: `SELECT COUNT(*) AS count FROM query_log_entries
+            WHERE ${tsClause} AND blockedRank = 1`,
+      params: [...tsParams],
+    },
+    {
+      name: "19 recent 1h page 1 (dedup on)",
+      sql: buildDedupPageSql(tsClause),
+      params: [NOW_MS - 60 * 60 * 1000, endTs],
+    },
+    {
+      name: "20 recent page 1 (dedup per client)",
+      sql: buildDedupPageSql(tsClause, "qnameLc, clientIpLc"),
+      params: [...tsParams],
     },
   ];
 }
@@ -647,6 +774,12 @@ describeOrSkip(
           db.close();
         }
 
+        {
+          const db = openBenchmarkDb(BENCH_DB_PATH);
+          applyBenchmarkStage(db);
+          db.close();
+        }
+
         const results: Array<{
           name: string;
           coldMs: number;
@@ -661,11 +794,11 @@ describeOrSkip(
           const cold = timeQuery(coldDb, queryCase.sql, queryCase.params);
           coldDb.close();
 
-          // Warm: same connection, 5 samples after one priming call.
+          // Warm: same connection, configurable samples after one priming call.
           const warmDb = openBenchmarkDb(BENCH_DB_PATH);
           timeQuery(warmDb, queryCase.sql, queryCase.params); // prime
           const warmSamples: number[] = [];
-          for (let i = 0; i < 5; i++) {
+          for (let i = 0; i < WARM_SAMPLES; i++) {
             const { durationMs } = timeQuery(
               warmDb,
               queryCase.sql,
@@ -698,6 +831,7 @@ describeOrSkip(
             "",
             `### Query-log SQLite benchmark — phase="${PHASE}"`,
             `DB: ${BENCH_DB_PATH} (${(stats.size / 1024 / 1024).toFixed(1)} MB)  `,
+            `Stage: ${BENCHMARK_STAGE}  |  Warm samples: ${WARM_SAMPLES}  `,
             `Tier1 PRAGMAs: ${APPLY_TIER1 ? "on" : "off"}  |  FTS5: ${USE_FTS ? "on" : "off"}`,
             "",
             header,

@@ -1369,3 +1369,212 @@ describe("TechnitiumService — cluster probe failover", () => {
     );
   });
 });
+
+describe("TechnitiumService — DHCP scope capability routing", () => {
+  const nodes: TechnitiumNodeConfig[] = [
+    { id: "active", baseUrl: "https://active.test", token: "token" },
+    { id: "inactive", baseUrl: "https://inactive.test", token: "token" },
+    { id: "unknown", baseUrl: "https://unknown.test", token: "token" },
+  ];
+
+  interface CapabilityState {
+    enabledScopeNames: Set<string>;
+    checkedAt: number;
+    retryAfter: number;
+    hasSuccessfulScan: boolean;
+  }
+
+  interface DhcpCapabilityInternals {
+    request: jest.Mock;
+    getDhcpLeases: jest.MockedFunction<
+      (
+        node: TechnitiumNodeConfig,
+        options?: { authMode?: "session" | "background" },
+        enabledScopeNames?: ReadonlySet<string>,
+      ) => Promise<Map<string, string>>
+    >;
+    getAllDhcpLeasesWithOptions: (options: {
+      authMode: "session" | "background";
+    }) => Promise<Map<string, string>>;
+    refreshDhcpScopeCapabilitiesIfNeeded: () => Promise<void>;
+    enrichQueryLogEntriesWithCachedHostnames: <T>(entries: T[]) => T[];
+    invalidateDhcpScopeCapability: (nodeId: string) => void;
+    isDhcpScopeMutation: (url: string | undefined) => boolean;
+    dhcpScopeCapabilities: Map<string, CapabilityState>;
+    dhcpLeaseCacheForBackground?: {
+      map: Map<string, string>;
+      fetchedAt: number;
+    };
+    logger: { log: jest.Mock; warn: jest.Mock };
+  }
+
+  let service: TechnitiumService;
+  let internal: DhcpCapabilityInternals;
+
+  beforeEach(() => {
+    service = new TechnitiumService(nodes, new DhcpSnapshotService());
+    internal = service as unknown as DhcpCapabilityInternals;
+    internal.logger = { log: jest.fn(), warn: jest.fn() };
+  });
+
+  afterEach(() => {
+    service.onModuleDestroy();
+    jest.restoreAllMocks();
+  });
+
+  it("queries leases only from nodes with at least one enabled scope", async () => {
+    internal.request = jest.fn((node: TechnitiumNodeConfig) =>
+      Promise.resolve({
+        status: "ok",
+        response: {
+          scopes: [
+            {
+              name: `${node.id}-scope`,
+              enabled: node.id === "active",
+            },
+          ],
+        },
+      }),
+    );
+    internal.getDhcpLeases = jest.fn((node: TechnitiumNodeConfig) =>
+      Promise.resolve(new Map([["192.0.2.10", node.id]])),
+    );
+
+    const leases = await internal.getAllDhcpLeasesWithOptions({
+      authMode: "background",
+    });
+
+    expect(internal.request).toHaveBeenCalledTimes(3);
+    expect(internal.getDhcpLeases).toHaveBeenCalledTimes(1);
+    expect(internal.getDhcpLeases.mock.calls[0][0].id).toBe("active");
+    expect(internal.getDhcpLeases.mock.calls[0][2]).toEqual(
+      new Set(["active-scope"]),
+    );
+    expect(leases.get("192.0.2.10")).toBe("active");
+  });
+
+  it("filters a candidate node's leases to its enabled scopes", async () => {
+    jest.spyOn(service, "listDhcpLeases").mockResolvedValue({
+      nodeId: "active",
+      fetchedAt: new Date().toISOString(),
+      data: {
+        leases: [
+          {
+            scope: "OFFICE",
+            type: "Dynamic",
+            hardwareAddress: "00-00-00-00-00-01",
+            address: "192.0.2.50",
+            hostName: "included-client",
+            leaseObtained: "2026-08-29T12:00:00Z",
+            leaseExpires: "2026-08-30T12:00:00Z",
+          },
+          {
+            scope: "Disabled",
+            type: "Dynamic",
+            hardwareAddress: "00-00-00-00-00-02",
+            address: "192.0.2.51",
+            hostName: "excluded-client",
+            leaseObtained: "2026-08-29T12:00:00Z",
+            leaseExpires: "2026-08-30T12:00:00Z",
+          },
+        ],
+      },
+    });
+    const leases = await internal.getDhcpLeases(
+      nodes[0],
+      { authMode: "background" },
+      new Set(["office"]),
+    );
+
+    expect([...leases.entries()]).toEqual([["192.0.2.50", "included-client"]]);
+  });
+
+  it("skips an unclassified node after discovery fails and retries later", async () => {
+    internal.request = jest.fn(() => Promise.reject(new Error("offline")));
+    internal.getDhcpLeases = jest.fn(() => Promise.resolve(new Map()));
+
+    await internal.getAllDhcpLeasesWithOptions({ authMode: "background" });
+
+    expect(internal.request).toHaveBeenCalledTimes(3);
+    expect(internal.getDhcpLeases).not.toHaveBeenCalled();
+    expect(internal.logger.warn).toHaveBeenCalledTimes(3);
+    for (const state of internal.dhcpScopeCapabilities.values()) {
+      expect(state.hasSuccessfulScan).toBe(false);
+      expect(state.retryAfter).toBeGreaterThan(Date.now());
+    }
+  });
+
+  it("retains last-known active state across a transient refresh failure", async () => {
+    internal.request = jest.fn(() =>
+      Promise.resolve({
+        status: "ok",
+        response: { scopes: [{ name: "Office", enabled: true }] },
+      }),
+    );
+    internal.getDhcpLeases = jest.fn(() =>
+      Promise.resolve(new Map([["192.0.2.20", "office-client"]])),
+    );
+
+    await internal.getAllDhcpLeasesWithOptions({ authMode: "background" });
+    internal.dhcpLeaseCacheForBackground = undefined;
+    for (const state of internal.dhcpScopeCapabilities.values()) {
+      state.checkedAt = 0;
+    }
+    internal.request = jest.fn(() => Promise.reject(new Error("temporary")));
+    internal.getDhcpLeases.mockClear();
+
+    const leases = await internal.getAllDhcpLeasesWithOptions({
+      authMode: "background",
+    });
+
+    expect(internal.getDhcpLeases).toHaveBeenCalledTimes(3);
+    expect(leases.get("192.0.2.20")).toBe("office-client");
+    expect(
+      [...internal.dhcpScopeCapabilities.values()].every(
+        (state) => state.hasSuccessfulScan,
+      ),
+    ).toBe(true);
+  });
+
+  it("enriches stored entries from local caches without node requests", () => {
+    internal.dhcpLeaseCacheForBackground = {
+      map: new Map([["192.0.2.30", "cached-client"]]),
+      fetchedAt: Date.now(),
+    };
+    internal.getDhcpLeases = jest.fn(() =>
+      Promise.reject(new Error("must not be called")),
+    );
+
+    const entries = internal.enrichQueryLogEntriesWithCachedHostnames([
+      {
+        timestamp: new Date().toISOString(),
+        clientIpAddress: "192.0.2.30",
+      },
+    ]);
+
+    expect(entries[0]).toEqual(
+      expect.objectContaining({ clientName: "cached-client" }),
+    );
+    expect(internal.getDhcpLeases).not.toHaveBeenCalled();
+  });
+
+  it("invalidates capability and lease caches after scope mutations", () => {
+    internal.dhcpScopeCapabilities.set("active", {
+      enabledScopeNames: new Set(["office"]),
+      checkedAt: Date.now(),
+      retryAfter: 0,
+      hasSuccessfulScan: true,
+    });
+    internal.dhcpLeaseCacheForBackground = {
+      map: new Map([["192.0.2.30", "cached-client"]]),
+      fetchedAt: Date.now(),
+    };
+
+    expect(internal.isDhcpScopeMutation("/api/dhcp/scopes/enable")).toBe(true);
+    expect(internal.isDhcpScopeMutation("/api/dhcp/scopes/list")).toBe(false);
+    internal.invalidateDhcpScopeCapability("active");
+
+    expect(internal.dhcpScopeCapabilities.has("active")).toBe(false);
+    expect(internal.dhcpLeaseCacheForBackground).toBeUndefined();
+  });
+});

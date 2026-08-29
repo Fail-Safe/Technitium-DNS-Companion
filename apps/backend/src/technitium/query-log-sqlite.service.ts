@@ -258,6 +258,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     // existing installs), then build FTS against post-VACUUM rowids.
     this.maybeMigrateAutoVacuum();
     this.initializeFtsIndex();
+    this.optimizePlannerStats(true);
 
     this.logger.log(
       `SQLite query log storage enabled (path=${dbPath}, retention=${this.retentionHours}h, poll=${this.pollIntervalMs}ms).`,
@@ -364,6 +365,14 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       CREATE INDEX IF NOT EXISTS idx_query_log_clientNameLc_ts ON query_log_entries(clientNameLc, ts);
       CREATE INDEX IF NOT EXISTS idx_query_log_responseType_ts ON query_log_entries(responseType, ts);
       CREATE INDEX IF NOT EXISTS idx_query_log_qtype_ts ON query_log_entries(qtype, ts);
+      CREATE INDEX IF NOT EXISTS idx_query_log_blockedRank_ts ON query_log_entries(blockedRank, ts);
+      CREATE INDEX IF NOT EXISTS idx_query_log_dedup_rank ON query_log_entries(
+        qnameLc,
+        clientIpLc,
+        blockedRank DESC,
+        aRank DESC,
+        ts DESC
+      );
     `);
   }
 
@@ -694,6 +703,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     // Reclaim up to ~4 MB worth of free pages per pass (1000 pages × 4096B).
     // If more pages are free the next nightly pass picks them up.
     this.db.exec("PRAGMA incremental_vacuum(1000);");
+    this.optimizePlannerStats(false);
 
     const afterPages = this.readPageCount();
     const afterFree = this.readFreelistCount();
@@ -704,6 +714,17 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
         `Pages: ${beforePages} → ${afterPages} (free ${beforeFree} → ${afterFree}). ` +
         `WAL truncated.`,
     );
+  }
+
+  /**
+   * Keeps SQLite's query-planner statistics current for this long-lived
+   * connection. The opening mask considers every table, which also repairs
+   * existing databases that predate planner-statistics maintenance. Later
+   * calls use SQLite's bounded, usually-no-op periodic optimization path.
+   */
+  private optimizePlannerStats(onOpen: boolean): void {
+    if (!this.db) return;
+    this.db.exec(onOpen ? "PRAGMA optimize=0x10002;" : "PRAGMA optimize;");
   }
 
   private readPageCount(): number {
@@ -1156,6 +1177,107 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private countDeduplicatedEntries(
+    base: { whereSql: string; params: Array<string | number> },
+    deduplicatePerClient: boolean,
+  ): number {
+    if (!this.db) return 0;
+
+    const sql = deduplicatePerClient
+      ? `SELECT COUNT(*) AS count FROM (
+           SELECT qnameLc, clientIpLc
+           FROM query_log_entries
+           ${base.whereSql}
+           AND qnameLc IS NOT NULL
+           GROUP BY qnameLc, clientIpLc
+         )`
+      : `SELECT COUNT(DISTINCT qnameLc) AS count
+         FROM query_log_entries
+         ${base.whereSql}
+         AND qnameLc IS NOT NULL`;
+
+    const row = this.db.prepare(sql).get(...base.params) as { count: number };
+    return row?.count ?? 0;
+  }
+
+  private selectDeduplicatedRows(
+    base: { whereSql: string; params: Array<string | number> },
+    deduplicatePerClient: boolean,
+    useIndexedGrouping: boolean,
+    sortDir: "ASC" | "DESC",
+    entriesPerPage: number,
+    offset: number,
+  ): StoredLogRowWithClient[] {
+    if (!this.db) return [];
+
+    const partition = deduplicatePerClient ? "qnameLc, clientIpLc" : "qnameLc";
+
+    if (!useIndexedGrouping) {
+      return this.db
+        .prepare(
+          `WITH ranked AS (
+            SELECT nodeId, baseUrl, clientIpAddress, clientName, data, ts,
+              ROW_NUMBER() OVER (
+                PARTITION BY ${partition}
+                ORDER BY blockedRank DESC, aRank DESC, ts DESC
+              ) AS rn
+            FROM query_log_entries
+            ${base.whereSql}
+            AND qnameLc IS NOT NULL
+          )
+          SELECT nodeId, baseUrl, clientIpAddress, clientName, data
+          FROM ranked
+          WHERE rn = 1
+          ORDER BY ts ${sortDir}
+          LIMIT ? OFFSET ?`,
+        )
+        .all(
+          ...base.params,
+          entriesPerPage,
+          offset,
+        ) as StoredLogRowWithClient[];
+    }
+
+    // SQLite guarantees that bare columns in a grouped query with exactly one
+    // MAX() come from the row containing that maximum. Encoding the existing
+    // blocked/A/newest priority into that value avoids ranking every log row.
+    return this.db
+      .prepare(
+        `WITH best AS (
+          SELECT nodeId, baseUrl, clientIpAddress, clientName, data, ts,
+            MAX(
+              blockedRank * 4000000000000000 +
+              aRank * 2000000000000000 +
+              ts
+            ) AS priority
+          FROM query_log_entries INDEXED BY idx_query_log_dedup_rank
+          ${base.whereSql}
+          AND qnameLc IS NOT NULL
+          GROUP BY ${partition}
+        )
+        SELECT nodeId, baseUrl, clientIpAddress, clientName, data
+        FROM best
+        ORDER BY ts ${sortDir}
+        LIMIT ? OFFSET ?`,
+      )
+      .all(...base.params, entriesPerPage, offset) as StoredLogRowWithClient[];
+  }
+
+  private canUseIndexedDeduplication(
+    filters: TechnitiumQueryLogFilters,
+  ): boolean {
+    return !(
+      filters.qname?.trim() ||
+      filters.clientIpAddress?.trim() ||
+      filters.protocol ||
+      filters.responseType ||
+      filters.rcode ||
+      filters.qtype ||
+      filters.qclass ||
+      filters.statusFilter
+    );
+  }
+
   private parseRowsToEntries(
     rows: Array<StoredLogRow | StoredLogRowWithClient>,
   ): TechnitiumCombinedQueryLogEntry[] {
@@ -1258,15 +1380,15 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       .map((r) => ({ qnameLc: r.qnameLc, count: r.count ?? 0 }));
   }
 
-  async getStoredCombinedLogs(
+  getStoredCombinedLogs(
     filters: TechnitiumQueryLogFilters = {},
-    options?: { authMode?: "session" | "background" },
-  ): Promise<TechnitiumCombinedQueryLogPage> {
+  ): TechnitiumCombinedQueryLogPage {
     if (!this.db) {
       throw new Error("SQLite query log storage is not enabled.");
     }
 
     const db = this.db;
+    const benchmarkStartedAt = performance.now();
 
     const disableCache = !!filters.disableCache;
     const cacheKey = !disableCache
@@ -1304,10 +1426,6 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     // up what?" instead of "what domains showed up?".
     const deduplicatePerClient =
       deduplicateDomains && !!filters.deduplicatePerClient;
-    const dedupPartition = deduplicatePerClient
-      ? "qnameLc, clientIpLc"
-      : "qnameLc";
-
     let totalMatchingEntries = 0;
     let duplicatesRemoved: number | undefined;
 
@@ -1320,18 +1438,10 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       totalMatchingEntries = countRow?.count ?? 0;
     } else {
       // Count of unique (domain [, client]) keys in the filtered set.
-      const countRow = this.db
-        .prepare(
-          `SELECT COUNT(*) AS count FROM (
-            SELECT ${dedupPartition}
-            FROM query_log_entries
-            ${base.whereSql}
-            AND qnameLc IS NOT NULL
-            GROUP BY ${dedupPartition}
-          )`,
-        )
-        .get(...base.params) as { count: number };
-      totalMatchingEntries = countRow?.count ?? 0;
+      totalMatchingEntries = this.countDeduplicatedEntries(
+        base,
+        deduplicatePerClient,
+      );
 
       const preDedupCountRow = this.db
         .prepare(
@@ -1342,6 +1452,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       duplicatesRemoved =
         Math.max(0, preDedupCount - totalMatchingEntries) || undefined;
     }
+    const countsCompletedAt = performance.now();
 
     const totalPages =
       entriesPerPage > 0
@@ -1368,41 +1479,24 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           offset,
         ) as StoredLogRowWithClient[];
     } else {
-      // Deduplicate using a rank that approximates existing behavior:
-      // 1) blocked over allowed, 2) A over non-A, 3) newest timestamp.
-      // Partition key is either qnameLc alone (by-domain) or
-      // (qnameLc, clientIpLc) (per-client) depending on the caller's choice.
-      rows = this.db
-        .prepare(
-          `WITH ranked AS (
-            SELECT nodeId, baseUrl, clientIpAddress, clientName, data, ts,
-              ROW_NUMBER() OVER (
-                PARTITION BY ${dedupPartition}
-                ORDER BY blockedRank DESC, aRank DESC, ts DESC
-              ) AS rn
-            FROM query_log_entries
-            ${base.whereSql}
-            AND qnameLc IS NOT NULL
-          )
-          SELECT nodeId, baseUrl, clientIpAddress, clientName, data
-          FROM ranked
-          WHERE rn = 1
-          ORDER BY ts ${sortDir}
-          LIMIT ? OFFSET ?`,
-        )
-        .all(
-          ...base.params,
-          entriesPerPage,
-          offset,
-        ) as StoredLogRowWithClient[];
+      rows = this.selectDeduplicatedRows(
+        base,
+        deduplicatePerClient,
+        this.canUseIndexedDeduplication(filters),
+        sortDir,
+        entriesPerPage,
+        offset,
+      );
     }
+    const selectionCompletedAt = performance.now();
 
     const entries = this.parseRowsToEntries(rows);
+    // Stored browsing must remain independent of live node availability.
+    // Hostnames are persisted at ingest and supplemented from local caches;
+    // never turn a SQLite page request into an all-node DHCP request.
     const enriched =
-      await this.technitiumService.enrichQueryLogEntriesWithHostnames(
-        entries,
-        options,
-      );
+      this.technitiumService.enrichQueryLogEntriesWithCachedHostnames(entries);
+    const enrichmentCompletedAt = performance.now();
 
     const nodeSnapshots = this.nodeConfigs.map((node) => {
       const nodeWindowWhere = this.buildWhereClause({}, window, node.id);
@@ -1431,6 +1525,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
         error: undefined,
       };
     });
+    const nodeCountsCompletedAt = performance.now();
 
     const result: TechnitiumCombinedQueryLogPage = {
       fetchedAt: new Date().toISOString(),
@@ -1450,13 +1545,27 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       this.setResponseCache(cacheKey, result);
     }
 
+    const totalDurationMs = performance.now() - benchmarkStartedAt;
+    const benchmarkMessage =
+      `[BENCHMARK] getStoredCombinedLogs: Total=${totalDurationMs.toFixed(2)}ms, ` +
+      `Counts=${(countsCompletedAt - benchmarkStartedAt).toFixed(2)}ms, ` +
+      `Select=${(selectionCompletedAt - countsCompletedAt).toFixed(2)}ms, ` +
+      `Parse+cached-hostnames=${(enrichmentCompletedAt - selectionCompletedAt).toFixed(2)}ms, ` +
+      `NodeCounts=${(nodeCountsCompletedAt - enrichmentCompletedAt).toFixed(2)}ms, ` +
+      `Entries=${enriched.length}, Dedup=${deduplicateDomains}`;
+    if (totalDurationMs >= 100) {
+      this.logger.log(benchmarkMessage);
+    } else {
+      this.logger.debug(benchmarkMessage);
+    }
+
     return result;
   }
 
-  async getStoredNodeLogs(
+  getStoredNodeLogs(
     nodeId: string,
     filters: TechnitiumQueryLogFilters = {},
-  ): Promise<TechnitiumStatusEnvelopeForStoredNodeLogs> {
+  ): TechnitiumStatusEnvelopeForStoredNodeLogs {
     if (!this.db) {
       throw new Error("SQLite query log storage is not enabled.");
     }
@@ -1496,10 +1605,6 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const deduplicateDomains = !!filters.deduplicateDomains;
     const deduplicatePerClient =
       deduplicateDomains && !!filters.deduplicatePerClient;
-    const dedupPartition = deduplicatePerClient
-      ? "qnameLc, clientIpLc"
-      : "qnameLc";
-
     let totalMatchingEntries = 0;
     let duplicatesRemoved: number | undefined;
 
@@ -1511,18 +1616,10 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
         .get(...base.params) as { count: number };
       totalMatchingEntries = countRow?.count ?? 0;
     } else {
-      const countRow = this.db
-        .prepare(
-          `SELECT COUNT(*) AS count FROM (
-            SELECT ${dedupPartition}
-            FROM query_log_entries
-            ${base.whereSql}
-            AND qnameLc IS NOT NULL
-            GROUP BY ${dedupPartition}
-          )`,
-        )
-        .get(...base.params) as { count: number };
-      totalMatchingEntries = countRow?.count ?? 0;
+      totalMatchingEntries = this.countDeduplicatedEntries(
+        base,
+        deduplicatePerClient,
+      );
 
       const preDedupCountRow = this.db
         .prepare(
@@ -1559,34 +1656,19 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           offset,
         ) as StoredLogRowWithClient[];
     } else {
-      rows = this.db
-        .prepare(
-          `WITH ranked AS (
-            SELECT nodeId, baseUrl, clientIpAddress, clientName, data, ts,
-              ROW_NUMBER() OVER (
-                PARTITION BY ${dedupPartition}
-                ORDER BY blockedRank DESC, aRank DESC, ts DESC
-              ) AS rn
-            FROM query_log_entries
-            ${base.whereSql}
-            AND qnameLc IS NOT NULL
-          )
-          SELECT nodeId, baseUrl, clientIpAddress, clientName, data
-          FROM ranked
-          WHERE rn = 1
-          ORDER BY ts ${sortDir}
-          LIMIT ? OFFSET ?`,
-        )
-        .all(
-          ...base.params,
-          entriesPerPage,
-          offset,
-        ) as StoredLogRowWithClient[];
+      rows = this.selectDeduplicatedRows(
+        base,
+        deduplicatePerClient,
+        this.canUseIndexedDeduplication(filters),
+        sortDir,
+        entriesPerPage,
+        offset,
+      );
     }
 
     const entries = this.parseRowsToEntries(rows);
     const enriched =
-      await this.technitiumService.enrichQueryLogEntriesWithHostnames(entries);
+      this.technitiumService.enrichQueryLogEntriesWithCachedHostnames(entries);
 
     const data: TechnitiumQueryLogPage = {
       pageNumber,

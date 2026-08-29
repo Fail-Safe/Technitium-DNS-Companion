@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="chart-title chart-desc">
+  <title id="chart-title">Final path removes the four seconds-long DNS Logs hotspots</title>
+  <desc id="chart-desc">Four small line charts show warm median query time across baseline, planner statistics, distinct count, status index, grouped dedup rewrite, and adaptive routing. Unfiltered domain dedup falls from 2.98 seconds to 136 milliseconds; per-client dedup from 3.25 seconds to 196 milliseconds; unique count from 1.68 seconds to 5 milliseconds; blocked count from 1.30 seconds to 2 milliseconds.</desc>
+  <defs></defs>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172033; }
+    .title { font-size: 24px; font-weight: 700; }
+    .subtitle { font-size: 13px; fill: #526078; }
+    .panel-title { font-size: 15px; font-weight: 650; }
+    .axis { font-size: 11px; fill: #526078; }
+    .value { font-size: 11px; font-weight: 650; }
+    .grid { stroke: #dbe2ea; stroke-width: 1; }
+  </style>
+<text x="50" y="42" class="title">Final path removes the four seconds-long DNS Logs hotspots</text>
+<text x="50" y="66" class="subtitle">Warm medians, 1,000,000 synthetic rows; each panel uses a zero baseline and its own labeled millisecond scale.</text>
+<text x="55" y="123" class="panel-title">Unfiltered domain dedup</text>
+<line x1="117" y1="315.0" x2="565" y2="315.0" class="grid"/>
+<text x="109" y="319.0" text-anchor="end" class="axis">0.00ms</text>
+<line x1="117" y1="273.0" x2="565" y2="273.0" class="grid"/>
+<text x="109" y="277.0" text-anchor="end" class="axis">856ms</text>
+<line x1="117" y1="231.0" x2="565" y2="231.0" class="grid"/>
+<text x="109" y="235.0" text-anchor="end" class="axis">1.71s</text>
+<line x1="117" y1="189.0" x2="565" y2="189.0" class="grid"/>
+<text x="109" y="193.0" text-anchor="end" class="axis">2.57s</text>
+<line x1="117" y1="147.0" x2="565" y2="147.0" class="grid"/>
+<text x="109" y="151.0" text-anchor="end" class="axis">3.42s</text>
+<polyline points="117.0,168.8 206.6,171.2 296.2,159.4 385.8,161.4 475.4,308.0 565.0,308.3" fill="none" stroke="#2563eb" stroke-width="3"/>
+<circle cx="117.0" cy="168.8" r="4" fill="#2563eb"/>
+<text x="117.0" y="334" text-anchor="middle" class="axis">Base</text>
+<circle cx="206.6" cy="171.2" r="4" fill="#2563eb"/>
+<text x="206.6" y="334" text-anchor="middle" class="axis">Stats</text>
+<circle cx="296.2" cy="159.4" r="4" fill="#2563eb"/>
+<text x="296.2" y="334" text-anchor="middle" class="axis">Distinct</text>
+<circle cx="385.8" cy="161.4" r="4" fill="#2563eb"/>
+<text x="385.8" y="334" text-anchor="middle" class="axis">Status</text>
+<circle cx="475.4" cy="308.0" r="4" fill="#2563eb"/>
+<text x="475.4" y="334" text-anchor="middle" class="axis">Grouped</text>
+<circle cx="565.0" cy="308.3" r="6" fill="#d97706"/>
+<text x="565.0" y="334" text-anchor="middle" class="axis">Adaptive</text>
+<text x="557.0" y="298.3" text-anchor="end" class="value" fill="#9a4e00">136ms</text>
+<text x="635" y="123" class="panel-title">Unfiltered per-client dedup</text>
+<line x1="697" y1="315.0" x2="1145" y2="315.0" class="grid"/>
+<text x="689" y="319.0" text-anchor="end" class="axis">0.00ms</text>
+<line x1="697" y1="273.0" x2="1145" y2="273.0" class="grid"/>
+<text x="689" y="277.0" text-anchor="end" class="axis">923ms</text>
+<line x1="697" y1="231.0" x2="1145" y2="231.0" class="grid"/>
+<text x="689" y="235.0" text-anchor="end" class="axis">1.85s</text>
+<line x1="697" y1="189.0" x2="1145" y2="189.0" class="grid"/>
+<text x="689" y="193.0" text-anchor="end" class="axis">2.77s</text>
+<line x1="697" y1="147.0" x2="1145" y2="147.0" class="grid"/>
+<text x="689" y="151.0" text-anchor="end" class="axis">3.69s</text>
+<polyline points="697.0,167.2 786.6,169.9 876.2,159.4 965.8,162.6 1055.4,306.0 1145.0,306.1" fill="none" stroke="#2563eb" stroke-width="3"/>
+<circle cx="697.0" cy="167.2" r="4" fill="#2563eb"/>
+<text x="697.0" y="334" text-anchor="middle" class="axis">Base</text>
+<circle cx="786.6" cy="169.9" r="4" fill="#2563eb"/>
+<text x="786.6" y="334" text-anchor="middle" class="axis">Stats</text>
+<circle cx="876.2" cy="159.4" r="4" fill="#2563eb"/>
+<text x="876.2" y="334" text-anchor="middle" class="axis">Distinct</text>
+<circle cx="965.8" cy="162.6" r="4" fill="#2563eb"/>
+<text x="965.8" y="334" text-anchor="middle" class="axis">Status</text>
+<circle cx="1055.4" cy="306.0" r="4" fill="#2563eb"/>
+<text x="1055.4" y="334" text-anchor="middle" class="axis">Grouped</text>
+<circle cx="1145.0" cy="306.1" r="6" fill="#d97706"/>
+<text x="1145.0" y="334" text-anchor="middle" class="axis">Adaptive</text>
+<text x="1137.0" y="296.1" text-anchor="end" class="value" fill="#9a4e00">196ms</text>
+<text x="55" y="423" class="panel-title">Unique-domain count</text>
+<line x1="117" y1="615.0" x2="565" y2="615.0" class="grid"/>
+<text x="109" y="619.0" text-anchor="end" class="axis">0.00ms</text>
+<line x1="117" y1="573.0" x2="565" y2="573.0" class="grid"/>
+<text x="109" y="577.0" text-anchor="end" class="axis">454ms</text>
+<line x1="117" y1="531.0" x2="565" y2="531.0" class="grid"/>
+<text x="109" y="535.0" text-anchor="end" class="axis">907ms</text>
+<line x1="117" y1="489.0" x2="565" y2="489.0" class="grid"/>
+<text x="109" y="493.0" text-anchor="end" class="axis">1.36s</text>
+<line x1="117" y1="447.0" x2="565" y2="447.0" class="grid"/>
+<text x="109" y="451.0" text-anchor="end" class="axis">1.81s</text>
+<polyline points="117.0,459.4 206.6,610.0 296.2,614.5 385.8,614.5 475.4,614.5 565.0,614.5" fill="none" stroke="#2563eb" stroke-width="3"/>
+<circle cx="117.0" cy="459.4" r="4" fill="#2563eb"/>
+<text x="117.0" y="634" text-anchor="middle" class="axis">Base</text>
+<circle cx="206.6" cy="610.0" r="4" fill="#2563eb"/>
+<text x="206.6" y="634" text-anchor="middle" class="axis">Stats</text>
+<circle cx="296.2" cy="614.5" r="4" fill="#2563eb"/>
+<text x="296.2" y="634" text-anchor="middle" class="axis">Distinct</text>
+<circle cx="385.8" cy="614.5" r="4" fill="#2563eb"/>
+<text x="385.8" y="634" text-anchor="middle" class="axis">Status</text>
+<circle cx="475.4" cy="614.5" r="4" fill="#2563eb"/>
+<text x="475.4" y="634" text-anchor="middle" class="axis">Grouped</text>
+<circle cx="565.0" cy="614.5" r="6" fill="#d97706"/>
+<text x="565.0" y="634" text-anchor="middle" class="axis">Adaptive</text>
+<text x="557.0" y="604.5" text-anchor="end" class="value" fill="#9a4e00">5.0ms</text>
+<text x="635" y="423" class="panel-title">Blocked count</text>
+<line x1="697" y1="615.0" x2="1145" y2="615.0" class="grid"/>
+<text x="689" y="619.0" text-anchor="end" class="axis">0.00ms</text>
+<line x1="697" y1="573.0" x2="1145" y2="573.0" class="grid"/>
+<text x="689" y="577.0" text-anchor="end" class="axis">370ms</text>
+<line x1="697" y1="531.0" x2="1145" y2="531.0" class="grid"/>
+<text x="689" y="535.0" text-anchor="end" class="axis">740ms</text>
+<line x1="697" y1="489.0" x2="1145" y2="489.0" class="grid"/>
+<text x="689" y="493.0" text-anchor="end" class="axis">1.11s</text>
+<line x1="697" y1="447.0" x2="1145" y2="447.0" class="grid"/>
+<text x="689" y="451.0" text-anchor="end" class="axis">1.48s</text>
+<polyline points="697.0,467.4 786.6,462.9 876.2,459.4 965.8,614.8 1055.4,614.8 1145.0,614.8" fill="none" stroke="#2563eb" stroke-width="3"/>
+<circle cx="697.0" cy="467.4" r="4" fill="#2563eb"/>
+<text x="697.0" y="634" text-anchor="middle" class="axis">Base</text>
+<circle cx="786.6" cy="462.9" r="4" fill="#2563eb"/>
+<text x="786.6" y="634" text-anchor="middle" class="axis">Stats</text>
+<circle cx="876.2" cy="459.4" r="4" fill="#2563eb"/>
+<text x="876.2" y="634" text-anchor="middle" class="axis">Distinct</text>
+<circle cx="965.8" cy="614.8" r="4" fill="#2563eb"/>
+<text x="965.8" y="634" text-anchor="middle" class="axis">Status</text>
+<circle cx="1055.4" cy="614.8" r="4" fill="#2563eb"/>
+<text x="1055.4" y="634" text-anchor="middle" class="axis">Grouped</text>
+<circle cx="1145.0" cy="614.8" r="6" fill="#d97706"/>
+<text x="1145.0" y="634" text-anchor="middle" class="axis">Adaptive</text>
+<text x="1137.0" y="604.8" text-anchor="end" class="value" fill="#9a4e00">2.0ms</text>
+</svg>

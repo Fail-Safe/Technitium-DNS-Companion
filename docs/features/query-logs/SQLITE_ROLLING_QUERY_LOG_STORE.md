@@ -60,6 +60,18 @@ The stored endpoints accept the same query filter shape used elsewhere in the Lo
 - It deduplicates inserts (so overlap polling is safe) and keeps only a rolling window (`QUERY_LOG_SQLITE_RETENTION_HOURS`).
 - A small overlap (`QUERY_LOG_SQLITE_OVERLAP_SECONDS`) is used to reduce the risk of missing entries between polls.
 
+## Query performance and maintenance
+
+- SQLite runs in WAL mode with a 64 MiB page cache and up to 256 MiB of memory-mapped I/O.
+- Planner statistics are refreshed when the long-lived connection opens and during daily maintenance.
+- Status counts use a `(blockedRank, ts)` covering index.
+- Unfiltered domain and per-client deduplication share a priority index. Requests with entry filters retain their filter-aware window-function path.
+- Stored-page hostname enrichment uses persisted names and local caches only; browsing SQLite never waits for live DHCP nodes.
+- Background hostname collection discovers enabled DHCP scopes every five minutes and requests leases only from active DHCP nodes.
+- Daily maintenance truncates the WAL and incrementally reclaims free pages created by rolling retention.
+
+See [Query Log SQLite Performance Iterations](../../performance/QUERY_LOG_SQLITE_BENCHMARKS.md) and [DHCP Capability Discovery and Stored-Log Isolation](../../performance/DHCP_HOSTNAME_ENRICHMENT_BENCHMARKS.md) for staged benchmarks, charts, raw data, and tradeoffs.
+
 ## Authentication / tokens (important)
 
 ### Session auth (v1.4+: always enabled for interactive UI)

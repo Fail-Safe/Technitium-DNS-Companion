@@ -229,6 +229,13 @@ interface HostnameCacheEntry {
   source: "dhcp" | "ptr";
 }
 
+interface DhcpScopeCapabilityState {
+  enabledScopeNames: Set<string>;
+  checkedAt: number;
+  retryAfter: number;
+  hasSuccessfulScan: boolean;
+}
+
 @Injectable()
 export class TechnitiumService {
   private readonly logger = new Logger(TechnitiumService.name);
@@ -290,10 +297,19 @@ export class TechnitiumService {
   // DHCP lease caching (background-only). Do NOT cache across interactive users
   // because permission scope may differ per session.
   private readonly DHCP_LEASE_CACHE_TTL_MS = 30 * 1000; // 30 seconds
+  private readonly DHCP_SCOPE_CAPABILITY_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly DHCP_SCOPE_DISCOVERY_RETRY_MS = 30 * 1000; // 30 seconds
+  private readonly DHCP_SCOPE_DISCOVERY_TIMEOUT_MS = 5 * 1000; // 5 seconds
   private dhcpLeaseCacheForBackground?: {
     map: Map<string, string>;
     fetchedAt: number;
   };
+  private readonly dhcpScopeCapabilities = new Map<
+    string,
+    DhcpScopeCapabilityState
+  >();
+  private dhcpScopeDiscoveryInFlight?: Promise<void>;
+  private lastDhcpScopeTopologyFingerprint?: string;
 
   private didWarnBackgroundDhcpDenied = false;
   private ptrFailureLogState = new Map<
@@ -1525,6 +1541,7 @@ export class TechnitiumService {
   private async getDhcpLeases(
     node: TechnitiumNodeConfig,
     options?: { authMode?: "session" | "background" },
+    enabledScopeNames?: ReadonlySet<string>,
   ): Promise<Map<string, string>> {
     try {
       const envelope = await this.listDhcpLeases(node.id, options);
@@ -1533,6 +1550,13 @@ export class TechnitiumService {
 
       if (data.leases && Array.isArray(data.leases)) {
         for (const lease of data.leases) {
+          if (
+            enabledScopeNames &&
+            !enabledScopeNames.has(this.normalizeDhcpScopeKey(lease.scope))
+          ) {
+            continue;
+          }
+
           if (
             lease.address &&
             lease.hostName &&
@@ -1596,8 +1620,25 @@ export class TechnitiumService {
       }
     }
 
+    if (authMode === "background") {
+      await this.refreshDhcpScopeCapabilitiesIfNeeded();
+    } else if (this.backgroundToken) {
+      // Interactive requests must not wait for topology discovery. The
+      // background refresh populates a shared capability map containing only
+      // node IDs and enabled-scope names; it never caches session responses.
+      void this.refreshDhcpScopeCapabilitiesIfNeeded();
+    }
+
+    const candidateNodes = this.getDhcpLeaseCandidateNodes(authMode);
+
     const allLeases = await Promise.all(
-      this.nodeConfigs.map((node) => this.getDhcpLeases(node, options)),
+      candidateNodes.map((node) => {
+        const capability = this.dhcpScopeCapabilities.get(node.id);
+        const enabledScopeNames = capability?.hasSuccessfulScan
+          ? capability.enabledScopeNames
+          : undefined;
+        return this.getDhcpLeases(node, options, enabledScopeNames);
+      }),
     );
 
     // Merge all lease maps into one (later entries override earlier ones)
@@ -1613,6 +1654,156 @@ export class TechnitiumService {
     }
 
     return merged;
+  }
+
+  private getDhcpLeaseCandidateNodes(
+    authMode: "session" | "background",
+  ): TechnitiumNodeConfig[] {
+    return this.nodeConfigs.filter((node) => {
+      const capability = this.dhcpScopeCapabilities.get(node.id);
+
+      if (!capability?.hasSuccessfulScan) {
+        // Background collection fails cheap when discovery is unavailable.
+        // Interactive live logs retain their old all-node fallback until the
+        // background scanner has classified the node.
+        return authMode === "session";
+      }
+
+      return capability.enabledScopeNames.size > 0;
+    });
+  }
+
+  private async refreshDhcpScopeCapabilitiesIfNeeded(): Promise<void> {
+    const now = Date.now();
+    const nodesToRefresh = this.nodeConfigs.filter((node) => {
+      const state = this.dhcpScopeCapabilities.get(node.id);
+      if (!state) return true;
+      if (now < state.retryAfter) return false;
+      return (
+        !state.hasSuccessfulScan ||
+        now - state.checkedAt >= this.DHCP_SCOPE_CAPABILITY_TTL_MS
+      );
+    });
+
+    if (nodesToRefresh.length === 0) return;
+    if (this.dhcpScopeDiscoveryInFlight) {
+      await this.dhcpScopeDiscoveryInFlight;
+      return;
+    }
+
+    const refresh = Promise.all(
+      nodesToRefresh.map(async (node) => {
+        const previous = this.dhcpScopeCapabilities.get(node.id);
+
+        try {
+          const envelope = await this.request<
+            TechnitiumApiResponse<TechnitiumDhcpScopeList>
+          >(
+            node,
+            {
+              method: "GET",
+              url: "/api/dhcp/scopes/list",
+              timeout: this.DHCP_SCOPE_DISCOVERY_TIMEOUT_MS,
+            },
+            { authMode: "background", suppressNetworkErrorLog: true },
+          );
+          const payload = this.unwrapApiResponse(
+            envelope,
+            node.id,
+            "DHCP scope discovery",
+          );
+          const enabledScopeNames = new Set(
+            (Array.isArray(payload.scopes) ? payload.scopes : [])
+              .filter((scope) => scope.enabled === true)
+              .map((scope) => this.normalizeDhcpScopeKey(scope.name))
+              .filter(Boolean),
+          );
+
+          if (
+            !previous?.hasSuccessfulScan ||
+            !this.haveSameSet(previous.enabledScopeNames, enabledScopeNames)
+          ) {
+            this.dhcpLeaseCacheForBackground = undefined;
+          }
+
+          this.dhcpScopeCapabilities.set(node.id, {
+            enabledScopeNames,
+            checkedAt: Date.now(),
+            retryAfter: 0,
+            hasSuccessfulScan: true,
+          });
+        } catch (error) {
+          this.dhcpScopeCapabilities.set(node.id, {
+            enabledScopeNames: previous?.enabledScopeNames ?? new Set(),
+            checkedAt: previous?.checkedAt ?? 0,
+            retryAfter: Date.now() + this.DHCP_SCOPE_DISCOVERY_RETRY_MS,
+            hasSuccessfulScan: previous?.hasSuccessfulScan ?? false,
+          });
+          this.logger.warn(
+            `DHCP scope discovery failed for node "${node.id}"; ${previous?.hasSuccessfulScan ? "retaining last-known capability" : "skipping lease collection until retry"}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }),
+    ).then(() => {
+      this.logDhcpScopeTopologyIfChanged();
+    });
+
+    this.dhcpScopeDiscoveryInFlight = refresh;
+    try {
+      await refresh;
+    } finally {
+      if (this.dhcpScopeDiscoveryInFlight === refresh) {
+        this.dhcpScopeDiscoveryInFlight = undefined;
+      }
+    }
+  }
+
+  private haveSameSet(
+    left: ReadonlySet<string>,
+    right: ReadonlySet<string>,
+  ): boolean {
+    return (
+      left.size === right.size && [...left].every((value) => right.has(value))
+    );
+  }
+
+  private logDhcpScopeTopologyIfChanged(): void {
+    const states = this.nodeConfigs.map((node) => {
+      const capability = this.dhcpScopeCapabilities.get(node.id);
+      if (!capability?.hasSuccessfulScan) return `${node.id}:unknown`;
+      return `${node.id}:${capability.enabledScopeNames.size}`;
+    });
+    const fingerprint = states.join("|");
+    if (fingerprint === this.lastDhcpScopeTopologyFingerprint) return;
+
+    this.lastDhcpScopeTopologyFingerprint = fingerprint;
+    const activeNodes = this.nodeConfigs.filter(
+      (node) =>
+        (this.dhcpScopeCapabilities.get(node.id)?.enabledScopeNames.size ?? 0) >
+        0,
+    );
+    const unknownNodes = this.nodeConfigs.filter(
+      (node) => !this.dhcpScopeCapabilities.get(node.id)?.hasSuccessfulScan,
+    ).length;
+
+    this.logger.log(
+      `DHCP scope discovery: ${activeNodes.length}/${this.nodeConfigs.length} node(s) have enabled scopes${unknownNodes > 0 ? `; ${unknownNodes} unknown` : ""}.`,
+    );
+  }
+
+  private invalidateDhcpScopeCapability(nodeId: string): void {
+    this.dhcpScopeCapabilities.delete(nodeId);
+    this.dhcpLeaseCacheForBackground = undefined;
+    this.lastDhcpScopeTopologyFingerprint = undefined;
+  }
+
+  private isDhcpScopeMutation(url: string | undefined): boolean {
+    return (
+      url === "/api/dhcp/scopes/set" ||
+      url === "/api/dhcp/scopes/enable" ||
+      url === "/api/dhcp/scopes/disable" ||
+      url === "/api/dhcp/scopes/delete"
+    );
   }
 
   /**
@@ -1679,6 +1870,19 @@ export class TechnitiumService {
 
     const ipToHostname = await this.getAllDhcpLeasesWithOptions(options);
     return this.enrichWithHostnames(entries, ipToHostname);
+  }
+
+  /**
+   * Enrich stored entries without initiating Technitium node requests. SQLite
+   * already persists the best-known name at ingest; these caches cover the
+   * short interval before the next poll backfills newly resolved clients.
+   */
+  enrichQueryLogEntriesWithCachedHostnames<T extends TechnitiumQueryLogEntry>(
+    entries: T[],
+  ): T[] {
+    const cachedDhcp: Map<string, string> =
+      this.dhcpLeaseCacheForBackground?.map ?? new Map<string, string>();
+    return this.enrichWithHostnames(entries, cachedDhcp);
   }
 
   /**
@@ -5463,6 +5667,10 @@ export class TechnitiumService {
         );
       }
 
+      if (this.isDhcpScopeMutation(config.url)) {
+        this.invalidateDhcpScopeCapability(node.id);
+      }
+
       return response.data;
     } catch (error) {
       if (error instanceof HttpException) {
@@ -5552,6 +5760,10 @@ export class TechnitiumService {
 
   private normalizeScopeName(name: string): string {
     return (name ?? "").trim();
+  }
+
+  private normalizeDhcpScopeKey(name: string): string {
+    return this.normalizeScopeName(name).toLowerCase();
   }
 
   private buildDhcpScopeFormData(scope: TechnitiumDhcpScope): URLSearchParams {

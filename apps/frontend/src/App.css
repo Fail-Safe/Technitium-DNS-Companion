@@ -4882,6 +4882,13 @@ button.secondary:disabled,
   outline-offset: 2px;
 }
 
+.logs-page__filter-hint {
+  max-width: 18rem;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
 .logs-page__filters-reset {
   border: none;
   background: var(--color-primary-light);

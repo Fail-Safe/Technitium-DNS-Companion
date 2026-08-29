@@ -1,0 +1,4 @@
+scenario,metric,before,after,unit,reduction_pct,method
+type a to ab to abc,automatic stored requests,3,1,requests,66.7,"Production hook; 100 ms between generic inputs; 400 ms debounce"
+pause on one character,automatic stored requests,1,0,requests,100.0,"Production hook; wait full 400 ms debounce"
+submit one character with Enter,explicit stored requests,1,1,requests,0.0,"Production hook; explicit commit preserves access to broad searches"

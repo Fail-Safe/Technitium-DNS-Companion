@@ -29,6 +29,7 @@ import { PullToRefreshIndicator } from "../components/common/PullToRefreshIndica
 import { apiFetch, apiFetchStatus, getAuthRedirectReason } from "../config";
 import { useTechnitiumState } from "../context/useTechnitiumState";
 import { useToast } from "../context/useToast";
+import { useDebouncedLogFilters } from "../hooks/useDebouncedLogFilters";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import type {
   AdvancedBlockingConfig,
@@ -60,13 +61,16 @@ import {
   buildDomainExclusionMatchers,
   isDomainExcluded,
 } from "../utils/domainExclusion";
+import {
+  isLogsRequestBusy,
+  type LogsLoadingState,
+  refreshSecondsForDisplayMode,
+} from "../utils/logs-request-policy";
 import { AppInput, AppTextarea } from "../components/common/AppInput";
 
 type ViewMode = "combined" | "node";
 
 type DisplayMode = "paginated" | "tail";
-
-type LoadingState = "idle" | "loading" | "refreshing" | "error";
 
 const DEFAULT_ENTRIES_PER_PAGE = 25;
 const PAGINATED_ROWS_PER_PAGE_OPTIONS = [25, 50, 100, 200];
@@ -3468,7 +3472,8 @@ export function LogsPage() {
     () => nodes[0]?.id ?? "",
   );
   const [pageNumber, setPageNumber] = useState<number>(1);
-  const [loadingState, setLoadingState] = useState<LoadingState>("idle");
+  const [loadingState, setLoadingState] =
+    useState<LogsLoadingState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
   const [combinedPage, setCombinedPage] = useState<
     TechnitiumCombinedQueryLogPage | undefined
@@ -3650,6 +3655,17 @@ export function LogsPage() {
     loadDomainExclusionList,
   );
   const [clientFilter, setClientFilter] = useState<string>("");
+  const {
+    queryDomainFilter,
+    queryClientFilter,
+    clientFilterPending,
+    commitDomainFilter,
+    commitClientFilter,
+  } = useDebouncedLogFilters(domainFilter, clientFilter);
+  const clientFilterRequiresExplicitSubmit =
+    displayMode === "paginated" &&
+    clientFilter.trim().length === 1 &&
+    clientFilterPending;
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [responseFilter, setResponseFilter] = useState<string>("all");
   const [qtypeFilter, setQtypeFilter] = useState<string>("all");
@@ -3864,13 +3880,16 @@ export function LogsPage() {
       if (shiftKey) {
         // Shift+click: keep domain filter, set client filter
         setClientFilter(filterValue);
+        commitClientFilter(filterValue);
       } else {
         // Normal click: set client filter, clear domain filter
         setClientFilter(filterValue);
+        commitClientFilter(filterValue);
         setDomainFilter("");
+        commitDomainFilter("");
       }
     },
-    [displayMode],
+    [commitClientFilter, commitDomainFilter, displayMode],
   );
 
   const handleDomainClick = useCallback(
@@ -3884,13 +3903,16 @@ export function LogsPage() {
       if (shiftKey) {
         // Shift+click: keep client filter, set domain filter
         setDomainFilter(domain);
+        commitDomainFilter(domain);
       } else {
         // Normal click: set domain filter, clear client filter
         setDomainFilter(domain);
+        commitDomainFilter(domain);
         setClientFilter("");
+        commitClientFilter("");
       }
     },
-    [],
+    [commitClientFilter, commitDomainFilter],
   );
 
   const dismissFilterTip = useCallback(() => {
@@ -5509,8 +5531,8 @@ export function LogsPage() {
   useEffect(() => {
     setPageNumber(1);
   }, [
-    domainFilter,
-    clientFilter,
+    queryDomainFilter,
+    queryClientFilter,
     statusFilter,
     responseFilter,
     qtypeFilter,
@@ -5610,6 +5632,14 @@ export function LogsPage() {
   const handleDisplayModeChange = useCallback(
     (nextMode: DisplayMode) => {
       setDisplayMode(nextMode);
+      setIsAutoRefresh(false);
+      setRefreshSeconds((current) =>
+        refreshSecondsForDisplayMode(
+          nextMode,
+          current,
+          TAIL_MODE_DEFAULT_REFRESH,
+        ),
+      );
 
       if (nextMode === "tail") {
         // Entering tail mode
@@ -5618,10 +5648,6 @@ export function LogsPage() {
         setTailNewestTimestamp(null);
         setTailPaused(false);
 
-        // Auto-enable refresh if not already on
-        if (refreshSeconds === 0) {
-          setRefreshSeconds(TAIL_MODE_DEFAULT_REFRESH);
-        }
       } else {
         // Exiting tail mode
         setTailBuffer([]);
@@ -5629,7 +5655,7 @@ export function LogsPage() {
         setTailPaused(false);
       }
     },
-    [refreshSeconds],
+    [],
   );
 
   useEffect(() => {
@@ -5686,9 +5712,9 @@ export function LogsPage() {
             ...(displayMode !== "tail" &&
               endDate && { end: formatDateForApi(endDate) }),
             ...(displayMode !== "tail" &&
-              domainFilter.trim() && { qname: domainFilter.trim() }),
+              queryDomainFilter && { qname: queryDomainFilter }),
             ...(displayMode !== "tail" &&
-              clientFilter.trim() && { clientIpAddress: clientFilter.trim() }),
+              queryClientFilter && { clientIpAddress: queryClientFilter }),
             ...(displayMode !== "tail" &&
               statusFilter !== "all" && { statusFilter }),
             ...(displayMode !== "tail" &&
@@ -5780,10 +5806,10 @@ export function LogsPage() {
               ...(displayMode !== "tail" &&
                 endDate && { end: formatDateForApi(endDate) }),
               ...(displayMode !== "tail" &&
-                domainFilter.trim() && { qname: domainFilter.trim() }),
+                queryDomainFilter && { qname: queryDomainFilter }),
               ...(displayMode !== "tail" &&
-                clientFilter.trim() && {
-                  clientIpAddress: clientFilter.trim(),
+                queryClientFilter && {
+                  clientIpAddress: queryClientFilter,
                 }),
               ...(displayMode !== "tail" &&
                 statusFilter !== "all" && { statusFilter }),
@@ -5924,8 +5950,8 @@ export function LogsPage() {
     startDate,
     endDate,
     formatDateForApi,
-    domainFilter,
-    clientFilter,
+    queryDomainFilter,
+    queryClientFilter,
     statusFilter,
     responseFilter,
     qtypeFilter,
@@ -6207,13 +6233,15 @@ export function LogsPage() {
   const resetFilters = useCallback(() => {
     setDomainExclusionList("");
     setDomainFilter("");
+    commitDomainFilter("");
     setClientFilter("");
+    commitClientFilter("");
     setStatusFilter("all");
     setResponseFilter("all");
     setQtypeFilter("all");
     setStartDate("");
     setEndDate("");
-  }, []);
+  }, [commitClientFilter, commitDomainFilter]);
 
   const totalPages = useMemo(() => {
     if (mode === "combined") {
@@ -6288,6 +6316,8 @@ export function LogsPage() {
 
     return false;
   }, [displayMode, mode, combinedPage, nodeSnapshot]);
+
+  const logsRequestBusy = isLogsRequestBusy(loadingState);
 
   const pauseAutoRefreshForManualPaging = useCallback(() => {
     // Manual paging implies the user is inspecting a specific page.
@@ -7795,7 +7825,27 @@ export function LogsPage() {
                   }
                   value={clientFilter}
                   onChange={(event) => setClientFilter(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      commitClientFilter();
+                    }
+                  }}
+                  aria-describedby={
+                    clientFilterRequiresExplicitSubmit
+                      ? "client-filter-submit-hint"
+                      : undefined
+                  }
                 />
+                {clientFilterRequiresExplicitSubmit && (
+                  <small
+                    id="client-filter-submit-hint"
+                    className="logs-page__filter-hint"
+                    role="status"
+                  >
+                    Press Enter to search all stored logs for one character.
+                  </small>
+                )}
               </label>
               <label className="logs-page__quick-filter">
                 <span>Response</span>
@@ -7857,6 +7907,12 @@ export function LogsPage() {
                   placeholder="Contains… (or click domain)"
                   value={domainFilter}
                   onChange={(event) => setDomainFilter(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      commitDomainFilter();
+                    }
+                  }}
                 />
               </label>
               <label className="logs-page__quick-filter">
@@ -8171,7 +8227,7 @@ export function LogsPage() {
                             type="button"
                             onClick={handlePrevPage}
                             disabled={
-                              pageNumber <= 1 || loadingState === "loading"
+                              pageNumber <= 1 || logsRequestBusy
                             }
                           >
                             Prev
@@ -8187,6 +8243,7 @@ export function LogsPage() {
                                   min={1}
                                   max={totalPages}
                                   value={pageJumpValue}
+                                  disabled={logsRequestBusy}
                                   onChange={(event) =>
                                     setPageJumpValue(event.target.value)
                                   }
@@ -8214,6 +8271,7 @@ export function LogsPage() {
                                 type="button"
                                 className="logs-page__pager-page-button"
                                 onClick={openPageJump}
+                                disabled={logsRequestBusy}
                                 title="Jump to page"
                               >
                                 {pageNumber} / {totalPages}
@@ -8233,7 +8291,7 @@ export function LogsPage() {
                             onClick={handleNextPage}
                             disabled={
                               pageNumber >= totalPages ||
-                              loadingState === "loading"
+                              logsRequestBusy
                             }
                           >
                             Next

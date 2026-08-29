@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="480" viewBox="0 0 1040 480" role="img" aria-labelledby="title desc">
+  <title id="title">DNS Logs live production-test results</title>
+  <desc id="desc">Two before-and-after bar charts. Completed backend requests per minute fall from 25.5 to 7.8. Across ten exact matched queries, median latency changes from 3327 to 3465 milliseconds, p90 falls from 7012 to 4835 milliseconds, and maximum falls from 8672 to 5505 milliseconds.</desc>
+  <rect width="1040" height="480" fill="#ffffff"/>
+  <g font-family="system-ui, sans-serif">
+    <text x="520" y="32" text-anchor="middle" font-size="21" font-weight="700" fill="#0f172a">69.5% fewer backend requests; lower tail latency</text>
+    <text x="520" y="55" text-anchor="middle" font-size="13" fill="#475569">Authenticated production-test HARs · matched latency uses 10 exact query URLs</text>
+
+    <text x="205" y="88" text-anchor="middle" font-size="16" font-weight="700" fill="#0f172a">Completed requests per minute</text>
+    <line x1="55" y1="350" x2="355" y2="350" stroke="#94a3b8" stroke-width="1"/>
+    <line x1="55" y1="90" x2="55" y2="350" stroke="#94a3b8" stroke-width="1"/>
+    <text x="45" y="354" text-anchor="end" font-size="11" fill="#64748b">0</text>
+    <text x="45" y="224" text-anchor="end" font-size="11" fill="#64748b">15</text>
+    <text x="45" y="94" text-anchor="end" font-size="11" fill="#64748b">30</text>
+    <rect x="112" y="129" width="72" height="221" rx="4" fill="#64748b"/>
+    <rect x="226" y="282" width="72" height="68" rx="4" fill="#2563eb"/>
+    <text x="148" y="119" text-anchor="middle" font-size="14" font-weight="700" fill="#334155">25.5</text>
+    <text x="262" y="272" text-anchor="middle" font-size="14" font-weight="700" fill="#1d4ed8">7.8</text>
+    <text x="148" y="374" text-anchor="middle" font-size="13" fill="#334155">Before</text>
+    <text x="262" y="374" text-anchor="middle" font-size="13" fill="#1d4ed8">After</text>
+    <text x="205" y="405" text-anchor="middle" font-size="15" font-weight="700" fill="#1d4ed8">−69.5%</text>
+
+    <text x="720" y="88" text-anchor="middle" font-size="16" font-weight="700" fill="#0f172a">Exact matched-query latency</text>
+    <line x1="430" y1="350" x2="995" y2="350" stroke="#94a3b8" stroke-width="1"/>
+    <line x1="430" y1="90" x2="430" y2="350" stroke="#94a3b8" stroke-width="1"/>
+    <text x="420" y="354" text-anchor="end" font-size="11" fill="#64748b">0</text>
+    <text x="420" y="224" text-anchor="end" font-size="11" fill="#64748b">4,500</text>
+    <text x="420" y="94" text-anchor="end" font-size="11" fill="#64748b">9,000 ms</text>
+
+    <rect x="480" y="254" width="48" height="96" rx="4" fill="#64748b"/>
+    <rect x="534" y="250" width="48" height="100" rx="4" fill="#2563eb"/>
+    <text x="531" y="374" text-anchor="middle" font-size="13" fill="#334155">Median</text>
+    <text x="531" y="395" text-anchor="middle" font-size="12" fill="#475569">3,327 → 3,465</text>
+    <text x="531" y="416" text-anchor="middle" font-size="13" font-weight="700" fill="#475569">+4.1%</text>
+
+    <rect x="660" y="147" width="48" height="203" rx="4" fill="#64748b"/>
+    <rect x="714" y="210" width="48" height="140" rx="4" fill="#2563eb"/>
+    <text x="711" y="374" text-anchor="middle" font-size="13" fill="#334155">p90</text>
+    <text x="711" y="395" text-anchor="middle" font-size="12" fill="#475569">7,012 → 4,835</text>
+    <text x="711" y="416" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4ed8">−31.0%</text>
+
+    <rect x="840" y="100" width="48" height="250" rx="4" fill="#64748b"/>
+    <rect x="894" y="191" width="48" height="159" rx="4" fill="#2563eb"/>
+    <text x="891" y="374" text-anchor="middle" font-size="13" fill="#334155">Maximum</text>
+    <text x="891" y="395" text-anchor="middle" font-size="12" fill="#475569">8,672 → 5,505</text>
+    <text x="891" y="416" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4ed8">−36.5%</text>
+
+    <rect x="420" y="448" width="16" height="12" rx="2" fill="#64748b"/>
+    <text x="443" y="459" font-size="13" fill="#334155">Before</text>
+    <rect x="514" y="448" width="16" height="12" rx="2" fill="#2563eb"/>
+    <text x="537" y="459" font-size="13" fill="#334155">After</text>
+  </g>
+</svg>

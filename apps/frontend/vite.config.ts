@@ -229,14 +229,28 @@ export default defineConfig({
             },
           },
           {
-            // API calls: Network-first (no timeout fallback). Live typeahead
-            // endpoints bypass the service worker so AbortController can cancel
-            // superseded searches instead of leaving Workbox fetches running.
-            urlPattern: ({ url }) =>
-              url.pathname.startsWith("/api/") &&
-              !/^\/api\/domain-lists\/[^/]+\/(?:all-domains|check)$/i.test(
-                url.pathname,
-              ),
+            // API calls: Network-first (no timeout fallback). Abortable search
+            // and query-log endpoints bypass the service worker so AbortController
+            // can cancel superseded requests instead of leaving Workbox fetches running.
+            // Keep this callback self-contained: generateSW serializes it without
+            // module-scope imports or closures.
+            urlPattern: ({ url }) => {
+              const pathname = url.pathname;
+              const isAbortableSearch =
+                /^\/api\/domain-lists\/[^/]+\/(?:all-domains|check)$/i.test(
+                  pathname,
+                );
+              const isQueryLogData =
+                /^\/api\/nodes\/(?:logs\/combined(?:\/stored)?|[^/]+\/logs(?:\/stored)?)$/i.test(
+                  pathname,
+                );
+
+              return (
+                pathname.startsWith("/api/") &&
+                !isAbortableSearch &&
+                !isQueryLogData
+              );
+            },
             handler: "NetworkFirst",
             options: {
               cacheName: "api-cache",
