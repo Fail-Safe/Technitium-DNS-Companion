@@ -14,7 +14,14 @@ function isTotpRequiredError(message: string): boolean {
 }
 
 export default function LoginPage() {
-  const { status, loading, login } = useAuth();
+  const {
+    status,
+    loading,
+    error: authError,
+    login,
+    continueWithSso,
+    ssoSuppressed,
+  } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -41,6 +48,8 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [totpRequired, setTotpRequired] = useState(false);
   const totpInputRef = useRef<HTMLInputElement>(null);
+  const trustedSso = status?.trustedSso;
+  const manualLoginAllowed = trustedSso?.manualLoginAllowed ?? true;
 
   if (
     !loading &&
@@ -94,8 +103,67 @@ export default function LoginPage() {
           color: "var(--color-text-secondary)",
         }}
       >
-        Use your Technitium DNS username and password.
+        {manualLoginAllowed ?
+          "Use your Technitium DNS username and password."
+        : "Authentication is managed by your trusted identity provider."}
       </p>
+
+      {!manualLoginAllowed &&
+        trustedSso?.error === "identity-not-authorized" && (
+          <div role="alert" className="login__sso-state">
+            <h2>Access denied</h2>
+            <p>
+              Your SSO identity is valid but is not authorized for Technitium
+              DNS Companion. Ask an administrator to add an exact identity and
+              Technitium user mapping.
+            </p>
+          </div>
+        )}
+
+      {!manualLoginAllowed &&
+        trustedSso?.error === "invalid-proxy-assertion" && (
+          <div role="alert" className="login__sso-state">
+            <h2>SSO is unavailable</h2>
+            <p>
+              The trusted proxy assertion is missing or invalid. Contact the
+              administrator responsible for the reverse proxy configuration.
+            </p>
+          </div>
+        )}
+
+      {!manualLoginAllowed && trustedSso?.available && ssoSuppressed && (
+        <div role="status" className="login__sso-state">
+          <h2>Signed out locally</h2>
+          <p>
+            Automatic SSO sign-in is paused for this browser tab until you
+            choose to continue.
+          </p>
+          <button
+            className="button primary"
+            type="button"
+            onClick={() => void continueWithSso()}
+          >
+            Continue with SSO
+          </button>
+        </div>
+      )}
+
+      {!manualLoginAllowed &&
+        trustedSso?.available &&
+        !ssoSuppressed &&
+        authError && (
+          <div role="alert" className="login__sso-state">
+            <h2>SSO sign-in failed</h2>
+            <p style={{ whiteSpace: "pre-line" }}>{authError}</p>
+            <button
+              className="button primary"
+              type="button"
+              onClick={() => void continueWithSso()}
+            >
+              Continue with SSO
+            </button>
+          </div>
+        )}
 
       {redirectedReason === "node-session-expired" && (
         <div
@@ -130,7 +198,7 @@ export default function LoginPage() {
         </div>
       )}
 
-      <form
+      {manualLoginAllowed && <form
         onSubmit={onSubmit}
         className="login__form"
         style={{
@@ -235,7 +303,7 @@ export default function LoginPage() {
         >
           Sign in
         </button>
-      </form>
+      </form>}
     </div>
   );
 }

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title desc">
+  <title id="title">DNS Logs filter request coalescing</title>
+  <desc id="desc">Two paired bar charts. Typing a, ab, abc falls from three automatic stored requests before to one after a 400 millisecond debounce. Pausing on one character falls from one automatic request before to zero after; pressing Enter still submits it explicitly.</desc>
+  <defs>
+    <pattern id="beforePattern" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="10" height="10" fill="#F4B183"/>
+      <rect width="3" height="10" fill="#C65911"/>
+    </pattern>
+    <pattern id="afterPattern" width="10" height="10" patternUnits="userSpaceOnUse">
+      <rect width="10" height="10" fill="#9DC3E6"/>
+      <circle cx="5" cy="5" r="2" fill="#2F75B5"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="520" fill="#FFFFFF"/>
+  <text x="600" y="48" text-anchor="middle" font-family="Arial, sans-serif" font-size="28" font-weight="700" fill="#1F2937">DNS Logs filter request coalescing</text>
+  <text x="600" y="78" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#4B5563">Exact automatic request counts from the production hook with virtual time</text>
+
+  <g transform="translate(80 115)">
+    <rect width="490" height="315" rx="14" fill="#F8FAFC" stroke="#CBD5E1"/>
+    <text x="245" y="38" text-anchor="middle" font-family="Arial, sans-serif" font-size="19" font-weight="700" fill="#1F2937">Type “a” → “ab” → “abc”</text>
+    <line x1="55" y1="245" x2="435" y2="245" stroke="#64748B" stroke-width="2"/>
+    <rect x="105" y="65" width="100" height="180" rx="5" fill="url(#beforePattern)"/>
+    <rect x="285" y="185" width="100" height="60" rx="5" fill="url(#afterPattern)"/>
+    <text x="155" y="55" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#7A3510">3</text>
+    <text x="335" y="175" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#173F68">1</text>
+    <text x="155" y="274" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#374151">Before</text>
+    <text x="335" y="274" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#374151">400 ms debounce</text>
+    <text x="245" y="304" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#276749">66.7% fewer automatic requests</text>
+  </g>
+
+  <g transform="translate(630 115)">
+    <rect width="490" height="315" rx="14" fill="#F8FAFC" stroke="#CBD5E1"/>
+    <text x="245" y="38" text-anchor="middle" font-family="Arial, sans-serif" font-size="19" font-weight="700" fill="#1F2937">Pause on one character</text>
+    <line x1="55" y1="245" x2="435" y2="245" stroke="#64748B" stroke-width="2"/>
+    <rect x="105" y="185" width="100" height="60" rx="5" fill="url(#beforePattern)"/>
+    <rect x="285" y="245" width="100" height="0" fill="url(#afterPattern)"/>
+    <text x="155" y="175" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#7A3510">1</text>
+    <text x="335" y="232" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#173F68">0</text>
+    <text x="155" y="274" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#374151">Before</text>
+    <text x="335" y="274" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" fill="#374151">Automatic after</text>
+    <text x="245" y="304" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="#276749">Enter still submits explicitly</text>
+  </g>
+
+  <g transform="translate(377 468)">
+    <rect width="18" height="18" fill="url(#beforePattern)"/>
+    <text x="28" y="14" font-family="Arial, sans-serif" font-size="14" fill="#374151">Before</text>
+    <rect x="150" width="18" height="18" fill="url(#afterPattern)"/>
+    <text x="178" y="14" font-family="Arial, sans-serif" font-size="14" fill="#374151">After</text>
+    <text x="310" y="14" font-family="Arial, sans-serif" font-size="14" fill="#6B7280">Lower is better</text>
+  </g>
+</svg>

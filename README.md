@@ -65,6 +65,11 @@ Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_
 | `1.6`, `1.6.9` | Pinned version tags |
 | `beta` | Pre-release from the `next` branch — may include features not yet in stable |
 | `next` | Rolling `next` branch head (same image as `beta`, dev-facing alias) |
+| `sha-<commit>` | Immutable build for reproducing a beta result or rollback |
+
+Want to help soak-test upcoming changes? See the opt-in [Beta Testing
+Guide](docs/BETA_TESTING.md) for install, verification, reporting, and rollback
+steps. Beta is never selected unless you explicitly choose it.
 
 The fastest path is the download-and-run script (no repo clone required). For full options and HTTPS details, see [DOCKER.md](DOCKER.md).
 

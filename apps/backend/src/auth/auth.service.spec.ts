@@ -214,4 +214,32 @@ describe("AuthService.login", () => {
       service.login({ username: "alice", password: "pw" }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
+
+  it("revokes password tokens but only deletes local trusted-SSO sessions", async () => {
+    const { service, sessionService, axiosMock } = createService([
+      { id: "nodeA", baseUrl: "https://n1" },
+    ]);
+    axiosMock.get.mockResolvedValue({ data: { status: "ok" } });
+
+    const passwordSession = sessionService.create("alice", {
+      nodeA: "password-token",
+    });
+    await service.logout(passwordSession);
+    expect(axiosMock.get).toHaveBeenCalledWith(
+      "https://n1/api/user/logout",
+      expect.objectContaining({ params: { token: "password-token" } }),
+    );
+
+    axiosMock.get.mockClear();
+    const ssoSession = sessionService.create(
+      "alice@example.test",
+      { nodeA: "operator-token" },
+      undefined,
+      { authSource: "trusted-sso", technitiumUser: "alice" },
+    );
+    await service.logout(ssoSession);
+    expect(axiosMock.get).not.toHaveBeenCalled();
+    expect(sessionService.get(ssoSession.id)).toBeUndefined();
+    sessionService.onModuleDestroy();
+  });
 });

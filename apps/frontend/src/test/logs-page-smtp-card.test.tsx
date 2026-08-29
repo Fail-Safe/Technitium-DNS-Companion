@@ -650,4 +650,62 @@ describe("LogsPage SMTP card", () => {
       );
     });
   });
+
+  it("pauses automatic refresh when entering paginated mode", async () => {
+    technitiumStateMock.loadQueryLogStorageStatus.mockResolvedValue({
+      enabled: true,
+      ready: true,
+      retentionHours: 72,
+      pollIntervalMs: 10000,
+    });
+
+    render(<LogsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Paginated/i }));
+
+    await waitFor(() => {
+      expect(technitiumStateMock.loadStoredCombinedLogs).toHaveBeenCalled();
+    });
+    expect(screen.getByRole("button", { name: /Paused/i })).toBeInTheDocument();
+  });
+
+  it("disables paginated navigation during a subsequent refresh", async () => {
+    const now = new Date().toISOString();
+    const page = {
+      fetchedAt: now,
+      pageNumber: 1,
+      entriesPerPage: 25,
+      totalPages: 20,
+      totalEntries: 500,
+      totalMatchingEntries: 500,
+      descendingOrder: true,
+      entries: [],
+      nodes: [],
+    };
+    technitiumStateMock.loadQueryLogStorageStatus.mockResolvedValue({
+      enabled: true,
+      ready: true,
+      retentionHours: 72,
+      pollIntervalMs: 10000,
+    });
+    technitiumStateMock.loadStoredCombinedLogs.mockResolvedValue(page);
+
+    render(<LogsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Paginated/i }));
+
+    const nextButton = await screen.findByRole("button", { name: "Next" });
+    await waitFor(() => expect(nextButton).toBeEnabled());
+
+    let resolvePage: ((value: typeof page) => void) | undefined;
+    technitiumStateMock.loadStoredCombinedLogs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePage = resolve;
+        }),
+    );
+    fireEvent.click(nextButton);
+
+    await waitFor(() => expect(nextButton).toBeDisabled());
+    resolvePage?.({ ...page, pageNumber: 2 });
+    await waitFor(() => expect(nextButton).toBeEnabled());
+  });
 });

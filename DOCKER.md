@@ -162,6 +162,35 @@ Compose also limits the service's local `json-file` logs to three 10 MB files
 by default. Use `COMPANION_LOG_MAX_SIZE` and `COMPANION_LOG_MAX_FILES` in
 `.env` to tune those limits.
 
+### Opt into the beta channel
+
+Set the image override in `.env`:
+
+```bash
+COMPANION_IMAGE=ghcr.io/fail-safe/technitium-dns-companion:beta
+```
+
+Then pull and recreate the service:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The `beta` and `next` tags move with the `next` branch. Each published build
+also has an immutable `sha-<commit>` tag. Record the revision shown in the
+About dialog or inspect the image labels before reporting a problem:
+
+```bash
+docker image inspect "$COMPANION_IMAGE" \
+  --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+```
+
+To return to stable, change `COMPANION_IMAGE` back to
+`ghcr.io/fail-safe/technitium-dns-companion:latest`, then run the same pull and
+up commands. See the [Beta Testing Guide](docs/BETA_TESTING.md) for exact-build
+pinning and rollback guidance.
+
 ## Troubleshooting
 
 - Container will not start: `docker compose logs` then `docker compose config` to validate env vars.

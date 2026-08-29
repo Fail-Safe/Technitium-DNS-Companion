@@ -4,6 +4,7 @@ import { AuthRequestContext } from "./auth-request-context";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import type { AuthSession } from "./auth.types";
+import { TrustedSsoService } from "./trusted-sso.service";
 
 describe("AuthController /auth/me", () => {
   beforeEach(() => {
@@ -12,6 +13,13 @@ describe("AuthController /auth/me", () => {
 
   async function createController(getBackgroundSummaryImpl?: jest.Mock) {
     const authServiceMock: Partial<AuthService> = {};
+    const trustedSsoServiceMock: Partial<TrustedSsoService> = {
+      getStatus: jest.fn().mockReturnValue({
+        enabled: false,
+        available: false,
+        manualLoginAllowed: true,
+      }),
+    };
 
     const getBackgroundPtrTokenValidationSummaryMock =
       getBackgroundSummaryImpl ??
@@ -32,6 +40,7 @@ describe("AuthController /auth/me", () => {
       providers: [
         { provide: AuthService, useValue: authServiceMock },
         { provide: TechnitiumService, useValue: technitiumServiceMock },
+        { provide: TrustedSsoService, useValue: trustedSsoServiceMock },
       ],
     }).compile();
 
@@ -68,6 +77,11 @@ describe("AuthController /auth/me", () => {
       sessionAuthEnabled: true,
       authenticated: false,
       configuredNodeIds: ["nodeA", "nodeB"],
+      trustedSso: {
+        enabled: false,
+        available: false,
+        manualLoginAllowed: true,
+      },
       backgroundPtrToken,
     });
 
@@ -82,6 +96,8 @@ describe("AuthController /auth/me", () => {
       createdAt: new Date().toISOString(),
       lastSeenAt: Date.now(),
       user: "alice",
+      authSource: "password",
+      technitiumUser: "alice",
       tokensByNodeId: { nodeA: "t1", nodeB: "t2" },
     };
 
@@ -90,6 +106,8 @@ describe("AuthController /auth/me", () => {
     expect(res.authenticated).toBe(true);
     expect(res.sessionAuthEnabled).toBe(true);
     expect(res.user).toBe("alice");
+    expect(res.authSource).toBe("password");
+    expect(res.technitiumUser).toBe("alice");
     expect(res.nodeIds?.sort()).toEqual(["nodeA", "nodeB"]);
     expect(res.unreachableNodeIds).toEqual([]);
     expect(res.failedNodeIds).toEqual([]);
@@ -105,6 +123,8 @@ describe("AuthController /auth/me", () => {
       createdAt: new Date().toISOString(),
       lastSeenAt: Date.now(),
       user: "alice",
+      authSource: "password",
+      technitiumUser: "alice",
       tokensByNodeId: { nodeB: "t2" },
       nodeAuthStatesByNodeId: {
         nodeA: { status: "unreachable", error: "timeout" },

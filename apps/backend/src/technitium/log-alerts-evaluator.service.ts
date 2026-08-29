@@ -251,7 +251,7 @@ export class LogAlertsEvaluatorService
       const rules = this.logAlertsRulesService
         .listRules()
         .filter((rule) => rule.enabled);
-      const entries = await this.fetchRecentEntries();
+      const entries = this.fetchRecentEntries();
       const preparedRules = rules.map((rule) => this.prepareRule(rule));
       const entriesByRule = this.createAccumulators(preparedRules);
       const groupLookups = await this.loadNodeGroupLookups(
@@ -370,9 +370,7 @@ export class LogAlertsEvaluatorService
     }
   }
 
-  private async fetchRecentEntries(): Promise<
-    TechnitiumCombinedQueryLogEntry[]
-  > {
+  private fetchRecentEntries(): TechnitiumCombinedQueryLogEntry[] {
     const entries: TechnitiumCombinedQueryLogEntry[] = [];
     const end = new Date();
     const start = new Date(end.getTime() - this.lookbackSeconds * 1000);
@@ -386,10 +384,7 @@ export class LogAlertsEvaluatorService
         entriesPerPage: this.maxEntriesPerPage,
       };
 
-      const payload = await this.queryLogSqliteService.getStoredCombinedLogs(
-        filters,
-        { authMode: "background" },
-      );
+      const payload = this.queryLogSqliteService.getStoredCombinedLogs(filters);
       entries.push(...payload.entries);
       if (page >= payload.totalPages || payload.entries.length === 0) {
         break;

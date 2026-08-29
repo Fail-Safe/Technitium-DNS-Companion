@@ -48,7 +48,7 @@ describe("LogAlertsEvaluatorService", () => {
   }) => {
     const queryLogSqliteService = {
       getIsEnabled: jest.fn().mockReturnValue(true),
-      getStoredCombinedLogs: jest.fn().mockResolvedValue({
+      getStoredCombinedLogs: jest.fn().mockReturnValue({
         fetchedAt: nowIso,
         pageNumber: 1,
         entriesPerPage: 500,

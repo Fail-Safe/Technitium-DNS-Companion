@@ -9,6 +9,46 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-08-29
+
+### Added
+
+- **Hardened trusted-header SSO.** An authenticating reverse proxy can establish identity-bound Companion sessions using a constant-time-verified proxy secret, optional immediate-peer IPv4/IPv6 CIDRs, and exact per-user Technitium cluster API-token mappings. The feature preserves Technitium RBAC and audit attribution, validates the replicated token owner on every reachable node, fails closed on malformed proxy assertions, supports direct-network break-glass login, and provides deliberate local or IdP logout behavior.
+
+### Security
+
+- Trusted-SSO sessions are re-bound to the same proxy assertion on every API request; missing or changed identities invalidate the local session before protected work. Identity headers and `X-Forwarded-Proto` alone cannot authenticate, mapped credentials are never returned to the browser, and operator-managed SSO tokens are not revoked by local logout.
+- Trusted-SSO session creation is bounded to eight active sessions per mapped identity, preventing a valid user from growing the in-memory session store without limit while preserving multi-device access.
+
+### Changed
+
+- Docker Compose accepts `COMPANION_IMAGE` so operators can opt into `:beta` or pin an immutable `sha-<commit>` build without editing the maintained Compose file. Published images expose their source revision in OCI metadata and the About dialog.
+- The Docker publisher now runs lint, unit tests, backend E2E tests, and the full build before pushing an image. Every published branch or release image receives an immutable source-revision tag.
+- DNS Logs SQLite browsing now maintains query-planner statistics, uses an indexed status count, and selects unfiltered deduplicated rows through a shared domain/client priority index. Filtered deduplication retains its existing FTS/equality-aware path so selective searches do not regress.
+- Stored DNS Logs browsing no longer contacts live DNS nodes for DHCP hostname enrichment. Background enrichment discovers enabled DHCP scopes per node, skips inactive nodes, filters leases to active scopes, and retains last-known capability across transient discovery failures.
+- Paginated DNS Logs domain and client filters now coalesce typing with a 400 ms debounce. One-character client searches require explicit Enter submission, preventing broad abandoned FTS queries while preserving access to them.
+- DNS Logs data requests now bypass PWA runtime caching so browser cancellation reaches the network path. Paginated navigation is serialized while a load is active, and switching from Live Tail to Paginated mode pauses automatic refresh.
+
+### Fixed
+
+- Release reconciliation now explicitly republishes the updated `next` branch, preventing GitHub's workflow-token fan-out suppression from leaving the rolling `:beta` image behind the branch.
+- The About dialog now identifies beta and other preview builds explicitly and reports the latest stable release separately instead of saying a beta build is simply “up to date.”
+
+### Testing
+
+- Added regression coverage for trusted-SSO per-identity session bounds and isolation from password or other-user sessions.
+- Expanded the opt-in query-log benchmark to six cumulative stages and 20 representative queries, including production-style FTS routing, planner-statistics recovery, filtered-query regression detection, per-client deduplication, and short-window behavior.
+- Added a deterministic DHCP capability benchmark covering all-node fan-out, slow inactive nodes, capability routing, and cached-only stored-page enrichment.
+- Added a deterministic DNS Logs interaction benchmark covering typed-request coalescing and explicit one-character client searches.
+- Extended DNS Logs interaction coverage with production-HAR-derived cancellation, pagination-admission, and paginated-refresh scenarios.
+
+### Documentation
+
+- Added token-map creation and rotation guidance plus nginx, Caddy, and Traefik examples that remove client assertions and inject authenticated identity and the proxy secret only after forward authentication. Shared-account SSO is explicitly unsupported because it would collapse Technitium's per-user authorization boundary.
+- Added the Query Log SQLite performance report with reproducible commands, raw benchmark data, accessible charts, migration costs, and the rejected all-filter dedup iteration.
+- Added the DHCP capability-discovery and stored-log-isolation performance report with controlled and anonymized deployment measurements.
+- Added an anonymized DNS Logs browser-request report, raw aggregates, an accessible chart, and a secret-safe HAR analyzer.
+
 ## [1.10.1] - 2026-08-13
 
 ### Fixed

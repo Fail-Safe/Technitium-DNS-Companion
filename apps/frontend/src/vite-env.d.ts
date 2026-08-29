@@ -5,6 +5,8 @@
 declare const __APP_NAME__: string;
 declare const __APP_SHORT_NAME__: string;
 declare const __APP_VERSION__: string;
+declare const __BUILD_REVISION__: string;
+declare const __BUILD_CHANNEL__: string;
 
 interface ImportMetaEnv {
     readonly VITE_API_URL?: string;

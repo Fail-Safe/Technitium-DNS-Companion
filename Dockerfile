@@ -15,6 +15,8 @@ COPY apps/frontend/package.json ./apps/frontend/
 # Stage 1: Build frontend
 FROM --platform=$BUILDPLATFORM node:24-alpine3.22 AS frontend-builder
 ARG BUILDPLATFORM
+ARG BUILD_REVISION=unknown
+ARG BUILD_CHANNEL=development
 ARG NPM_VERSION
 
 WORKDIR /app
@@ -38,7 +40,7 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY apps/frontend/ ./apps/frontend/
 
 # Build frontend
-RUN npm run build --workspace=apps/frontend
+RUN BUILD_REVISION="$BUILD_REVISION" BUILD_CHANNEL="$BUILD_CHANNEL" npm run build --workspace=apps/frontend
 
 # Stage 2: Build backend
 FROM --platform=$BUILDPLATFORM node:24-alpine3.22 AS backend-builder
@@ -80,6 +82,7 @@ FROM node:24-alpine3.22
 
 ARG BUILD_VERSION=unknown
 ARG BUILD_REVISION=unknown
+ARG BUILD_CHANNEL=development
 
 LABEL \
     org.opencontainers.image.title="Technitium DNS Companion" \
@@ -89,7 +92,8 @@ LABEL \
     org.opencontainers.image.documentation="https://fail-safe.github.io/Technitium-DNS-Companion" \
     org.opencontainers.image.licenses="MIT" \
     org.opencontainers.image.version="$BUILD_VERSION" \
-    org.opencontainers.image.revision="$BUILD_REVISION"
+    org.opencontainers.image.revision="$BUILD_REVISION" \
+    io.github.fail-safe.technitium-dns-companion.build-channel="$BUILD_CHANNEL"
 
 WORKDIR /app
 

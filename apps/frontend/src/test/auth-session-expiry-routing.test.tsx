@@ -8,7 +8,11 @@ import { isNodeSessionRequiredButMissing } from "../utils/authSession";
 
 const authMock = vi.hoisted(() => ({
   login: vi.fn(),
+  continueWithSso: vi.fn(),
 }));
+
+let mockedAuthError: string | null = null;
+let mockedSsoSuppressed = false;
 
 let mockedAuthStatus: {
   sessionAuthEnabled: boolean;
@@ -16,6 +20,12 @@ let mockedAuthStatus: {
   configuredNodeIds: string[];
   nodeIds: string[];
   unreachableNodeIds?: string[];
+  trustedSso?: {
+    enabled: boolean;
+    available: boolean;
+    manualLoginAllowed: boolean;
+    error?: "identity-not-authorized" | "invalid-proxy-assertion";
+  };
 } | null = null;
 
 vi.mock("../context/useAuth", async () => {
@@ -33,12 +43,15 @@ vi.mock("../context/useAuth", async () => {
         configuredNodeIds: mockedAuthStatus?.configuredNodeIds ?? ["node1"],
         nodeIds: mockedAuthStatus?.nodeIds ?? [],
         unreachableNodeIds: mockedAuthStatus?.unreachableNodeIds ?? [],
+        trustedSso: mockedAuthStatus?.trustedSso,
       },
       loading: false,
-      error: null,
+      error: mockedAuthError,
       refresh: vi.fn(async () => {}),
       login: authMock.login,
       logout: vi.fn(async () => {}),
+      continueWithSso: authMock.continueWithSso,
+      ssoSuppressed: mockedSsoSuppressed,
     }),
   };
 });
@@ -47,6 +60,10 @@ describe("Auth routing when node session expires", () => {
   beforeEach(() => {
     authMock.login.mockReset();
     authMock.login.mockResolvedValue(undefined);
+    authMock.continueWithSso.mockReset();
+    authMock.continueWithSso.mockResolvedValue(undefined);
+    mockedAuthError = null;
+    mockedSsoSuppressed = false;
   });
 
   it("shows login page (does not redirect) when cookie is valid but nodeIds is empty", () => {
@@ -177,5 +194,81 @@ describe("Auth routing when node session expires", () => {
         unreachableNodeIds: [],
       }),
     ).toBe(true);
+  });
+
+  it.each([
+    ["identity-not-authorized" as const, "Access denied"],
+    ["invalid-proxy-assertion" as const, "SSO is unavailable"],
+  ])("shows the %s SSO state without a password form", (error, heading) => {
+    mockedAuthStatus = {
+      sessionAuthEnabled: true,
+      authenticated: false,
+      configuredNodeIds: ["node1"],
+      nodeIds: [],
+      trustedSso: {
+        enabled: true,
+        available: false,
+        manualLoginAllowed: false,
+        error,
+      },
+    };
+
+    render(
+      <MemoryRouter initialEntries={["/login"]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+  });
+
+  it("keeps the password form visible for direct break-glass access", () => {
+    mockedAuthStatus = {
+      sessionAuthEnabled: true,
+      authenticated: false,
+      configuredNodeIds: ["node1"],
+      nodeIds: [],
+      trustedSso: {
+        enabled: true,
+        available: false,
+        manualLoginAllowed: true,
+      },
+    };
+    render(
+      <MemoryRouter initialEntries={["/login"]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
+  });
+
+  it("offers Continue with SSO after a deliberate local logout", async () => {
+    const user = userEvent.setup();
+    mockedSsoSuppressed = true;
+    mockedAuthStatus = {
+      sessionAuthEnabled: true,
+      authenticated: false,
+      configuredNodeIds: ["node1"],
+      nodeIds: [],
+      trustedSso: {
+        enabled: true,
+        available: true,
+        manualLoginAllowed: false,
+      },
+    };
+    render(
+      <MemoryRouter initialEntries={["/login"]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole("button", { name: "Continue with SSO" }));
+    expect(authMock.continueWithSso).toHaveBeenCalledTimes(1);
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
   });
 });

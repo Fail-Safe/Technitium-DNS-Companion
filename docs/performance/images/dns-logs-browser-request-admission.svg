@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360" role="img" aria-labelledby="title desc">
+  <title id="title">DNS Logs browser request admission before and after</title>
+  <desc id="desc">Three paired bar charts. Cancelled requests continuing through Workbox fall from ten to zero. Requests admitted from five rapid page selections fall from five to one. Automatic refreshes during thirty seconds of paginated browsing fall from ten to zero.</desc>
+  <rect width="960" height="360" fill="#ffffff"/>
+  <text x="480" y="30" text-anchor="middle" font-family="system-ui, sans-serif" font-size="20" font-weight="700" fill="#0f172a">DNS Logs request admission</text>
+  <g font-family="system-ui, sans-serif">
+    <rect x="95" y="75" width="54" height="200" rx="4" fill="#64748b"/>
+    <rect x="163" y="273" width="54" height="2" rx="1" fill="#2563eb"/>
+    <text x="122" y="67" text-anchor="middle" font-size="15" font-weight="700" fill="#334155">10</text>
+    <text x="190" y="267" text-anchor="middle" font-size="15" font-weight="700" fill="#1d4ed8">0</text>
+    <text x="156" y="303" text-anchor="middle" font-size="14" fill="#0f172a">Cancelled work</text>
+    <text x="156" y="322" text-anchor="middle" font-size="14" fill="#0f172a">continued by SW</text>
+
+    <rect x="405" y="175" width="54" height="100" rx="4" fill="#64748b"/>
+    <rect x="473" y="255" width="54" height="20" rx="4" fill="#2563eb"/>
+    <text x="432" y="167" text-anchor="middle" font-size="15" font-weight="700" fill="#334155">5</text>
+    <text x="500" y="247" text-anchor="middle" font-size="15" font-weight="700" fill="#1d4ed8">1</text>
+    <text x="466" y="303" text-anchor="middle" font-size="14" fill="#0f172a">Rapid page</text>
+    <text x="466" y="322" text-anchor="middle" font-size="14" fill="#0f172a">requests admitted</text>
+
+    <rect x="715" y="75" width="54" height="200" rx="4" fill="#64748b"/>
+    <rect x="783" y="273" width="54" height="2" rx="1" fill="#2563eb"/>
+    <text x="742" y="67" text-anchor="middle" font-size="15" font-weight="700" fill="#334155">10</text>
+    <text x="810" y="267" text-anchor="middle" font-size="15" font-weight="700" fill="#1d4ed8">0</text>
+    <text x="776" y="303" text-anchor="middle" font-size="14" fill="#0f172a">30-second</text>
+    <text x="776" y="322" text-anchor="middle" font-size="14" fill="#0f172a">paginated polls</text>
+
+    <rect x="380" y="338" width="16" height="12" rx="2" fill="#64748b"/>
+    <text x="403" y="349" font-size="13" fill="#334155">Before</text>
+    <rect x="474" y="338" width="16" height="12" rx="2" fill="#2563eb"/>
+    <text x="497" y="349" font-size="13" fill="#334155">After</text>
+  </g>
+</svg>

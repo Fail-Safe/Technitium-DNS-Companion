@@ -109,6 +109,31 @@
   justify-content: center;
 }
 
+.about-modal__revision {
+  color: var(--color-text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  font-size: 0.8rem;
+}
+
+.about-modal__channel {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--color-warning);
+  border-radius: 999px;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-dark);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.about-modal__channel--development {
+  border-color: var(--color-border);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
 .about-modal__update-pill {
   display: inline-flex;
   align-items: center;
@@ -136,6 +161,10 @@
 
 .about-modal__version-status--ok {
   color: var(--color-success-text);
+}
+
+.about-modal__version-status--preview {
+  color: var(--color-warning-dark);
 }
 
 .about-modal__version-status--error {

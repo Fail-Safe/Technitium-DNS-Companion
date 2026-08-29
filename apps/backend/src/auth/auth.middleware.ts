@@ -4,12 +4,16 @@ import type { NextFunction, Request, Response } from "express";
 import { AuthRequestContext } from "./auth-request-context";
 import { AuthSessionService } from "./auth-session.service";
 import { AUTH_SESSION_COOKIE_NAME } from "./auth.constants";
+import { TrustedSsoService } from "./trusted-sso.service";
 
 @Injectable()
 export class AuthRequestContextMiddleware implements NestMiddleware {
-  constructor(private readonly sessionService: AuthSessionService) {}
+  constructor(
+    private readonly sessionService: AuthSessionService,
+    private readonly trustedSsoService: TrustedSsoService,
+  ) {}
 
-  use(req: Request, _res: Response, next: NextFunction): void {
+  use(req: Request, res: Response, next: NextFunction): void {
     const cookiesValue: unknown = (req as unknown as { cookies?: unknown })
       .cookies;
     const sessionId =
@@ -19,10 +23,21 @@ export class AuthRequestContextMiddleware implements NestMiddleware {
 
     const resolvedSessionId =
       typeof sessionId === "string" ? sessionId : undefined;
-    const session = resolvedSessionId
+    let session = resolvedSessionId
       ? this.sessionService.get(resolvedSessionId)
       : undefined;
+    const trustedSsoRequest = this.trustedSsoService.classify(req);
 
-    AuthRequestContext.run({ session }, () => next());
+    if (
+      session?.authSource === "trusted-sso" &&
+      (trustedSsoRequest.kind !== "valid" ||
+        trustedSsoRequest.identity !== session.user)
+    ) {
+      this.sessionService.delete(session.id);
+      session = undefined;
+      res.clearCookie(AUTH_SESSION_COOKIE_NAME, { path: "/" });
+    }
+
+    AuthRequestContext.run({ session, trustedSsoRequest }, () => next());
   }
 }

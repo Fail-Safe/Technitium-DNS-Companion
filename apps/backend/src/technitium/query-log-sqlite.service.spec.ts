@@ -15,6 +15,7 @@ interface MaintenanceShape {
   db: DatabaseSync | null;
   logger: { warn: jest.Mock; log: jest.Mock; debug: jest.Mock };
   maybeMigrateAutoVacuum: () => void;
+  optimizePlannerStats: (onOpen: boolean) => void;
   runMaintenance: () => void;
 }
 
@@ -22,6 +23,31 @@ interface PollShape {
   logger: { warn: jest.Mock };
   pollOnce: jest.Mock<Promise<void>, []>;
   safePollOnce: () => Promise<void>;
+}
+
+interface DedupCountShape {
+  db: DatabaseSync | null;
+  countDeduplicatedEntries: (
+    base: { whereSql: string; params: Array<string | number> },
+    deduplicatePerClient: boolean,
+  ) => number;
+}
+
+interface SchemaShape {
+  db: DatabaseSync | null;
+  initializeSchema: () => void;
+}
+
+interface DedupSelectShape extends SchemaShape {
+  selectDeduplicatedRows: (
+    base: { whereSql: string; params: Array<string | number> },
+    deduplicatePerClient: boolean,
+    useIndexedGrouping: boolean,
+    sortDir: "ASC" | "DESC",
+    entriesPerPage: number,
+    offset: number,
+  ) => Array<{ data: string }>;
+  canUseIndexedDeduplication: (filters: Record<string, unknown>) => boolean;
 }
 
 function runSql(database: DatabaseSync, sql: string): void {
@@ -135,6 +161,29 @@ describe("QueryLogSqliteService — SQLite maintenance", () => {
     expect(msgs).toContain("WAL truncated");
   });
 
+  it("creates planner statistics when optimizing a newly opened database", () => {
+    runSql(db, "CREATE INDEX idx_query_log_ts ON query_log_entries(ts)");
+    const insert = db.prepare(
+      "INSERT INTO query_log_entries (ts, payload) VALUES (?, ?)",
+    );
+    for (let i = 0; i < 100; i++) {
+      insert.run(i, `payload-${i}`);
+    }
+
+    internal.optimizePlannerStats(true);
+
+    const statTable = db
+      .prepare(
+        "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'sqlite_stat1'",
+      )
+      .get() as { name?: string } | undefined;
+    const indexStat = db
+      .prepare("SELECT stat FROM sqlite_stat1 WHERE idx = ?")
+      .get("idx_query_log_ts") as { stat?: string } | undefined;
+    expect(statTable?.name).toBe("sqlite_stat1");
+    expect(indexStat?.stat).toBeTruthy();
+  });
+
   it("runMaintenance is a safe no-op when the DB is closed", () => {
     internal.db = null;
     expect(() => internal.runMaintenance()).not.toThrow();
@@ -181,6 +230,257 @@ describe("QueryLogSqliteService — poll failure logging", () => {
       expect.stringContaining("SQLite query log poll failed: Error: boom"),
     );
     expect(internal.logger.warn.mock.calls[0]).toHaveLength(1);
+  });
+});
+
+describe("QueryLogSqliteService — deduplicated counts", () => {
+  let tmpDir: string;
+  let db: DatabaseSync;
+  let internal: DedupCountShape;
+
+  beforeEach(() => {
+    process.env.NODE_ENV = "test";
+    tmpDir = mkdtempSync(join(tmpdir(), "qlogs-count-spec-"));
+    db = new DatabaseSync(join(tmpDir, "query-logs.sqlite"));
+    runSql(
+      db,
+      `CREATE TABLE query_log_entries (
+        ts INTEGER NOT NULL,
+        qnameLc TEXT,
+        clientIpLc TEXT
+      )`,
+    );
+    const insert = db.prepare(
+      "INSERT INTO query_log_entries (ts, qnameLc, clientIpLc) VALUES (?, ?, ?)",
+    );
+    insert.run(10, "one.example", "192.0.2.1");
+    insert.run(11, "one.example", "192.0.2.1");
+    insert.run(12, "one.example", "192.0.2.2");
+    insert.run(13, "two.example", "192.0.2.1");
+    insert.run(14, null, "192.0.2.3");
+
+    internal = new QueryLogSqliteService(
+      {} as never,
+      [] as never,
+    ) as unknown as DedupCountShape;
+    internal.db = db;
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("counts distinct domains without a grouped subquery", () => {
+    expect(
+      internal.countDeduplicatedEntries(
+        { whereSql: "WHERE ts >= ? AND ts <= ?", params: [0, 100] },
+        false,
+      ),
+    ).toBe(2);
+  });
+
+  it("preserves grouped counting for per-client deduplication", () => {
+    expect(
+      internal.countDeduplicatedEntries(
+        { whereSql: "WHERE ts >= ? AND ts <= ?", params: [0, 100] },
+        true,
+      ),
+    ).toBe(3);
+  });
+});
+
+describe("QueryLogSqliteService — query indexes", () => {
+  let tmpDir: string;
+  let db: DatabaseSync;
+
+  beforeEach(() => {
+    process.env.NODE_ENV = "test";
+    tmpDir = mkdtempSync(join(tmpdir(), "qlogs-index-spec-"));
+    db = new DatabaseSync(join(tmpDir, "query-logs.sqlite"));
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("creates a covering status-and-time index for existing databases", () => {
+    const internal = new QueryLogSqliteService(
+      {} as never,
+      [] as never,
+    ) as unknown as SchemaShape;
+    internal.db = db;
+
+    internal.initializeSchema();
+
+    const index = db
+      .prepare(
+        "SELECT name FROM sqlite_schema WHERE type = 'index' AND name = ?",
+      )
+      .get("idx_query_log_blockedRank_ts") as { name?: string } | undefined;
+    const plan = db
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT COUNT(*) FROM query_log_entries
+         WHERE blockedRank = ? AND ts >= ? AND ts <= ?`,
+      )
+      .all(1, 0, 100) as Array<{ detail?: string }>;
+
+    expect(index?.name).toBe("idx_query_log_blockedRank_ts");
+    expect(plan.some((row) => row.detail?.includes(index.name ?? ""))).toBe(
+      true,
+    );
+  });
+
+  it("creates one priority index that supports both deduplication keys", () => {
+    const internal = new QueryLogSqliteService(
+      {} as never,
+      [] as never,
+    ) as unknown as SchemaShape;
+    internal.db = db;
+
+    internal.initializeSchema();
+
+    const columns = db
+      .prepare("PRAGMA index_xinfo('idx_query_log_dedup_rank')")
+      .all() as Array<{ name?: string; desc?: number; key?: number }>;
+    expect(
+      columns
+        .filter((column) => column.key === 1)
+        .map((column) => [column.name, column.desc]),
+    ).toEqual([
+      ["qnameLc", 0],
+      ["clientIpLc", 0],
+      ["blockedRank", 1],
+      ["aRank", 1],
+      ["ts", 1],
+    ]);
+  });
+});
+
+describe("QueryLogSqliteService — deduplicated row selection", () => {
+  let tmpDir: string;
+  let db: DatabaseSync;
+  let internal: DedupSelectShape;
+
+  beforeEach(() => {
+    process.env.NODE_ENV = "test";
+    tmpDir = mkdtempSync(join(tmpdir(), "qlogs-dedup-spec-"));
+    db = new DatabaseSync(join(tmpDir, "query-logs.sqlite"));
+    internal = new QueryLogSqliteService(
+      {} as never,
+      [] as never,
+    ) as unknown as DedupSelectShape;
+    internal.db = db;
+    internal.initializeSchema();
+
+    const insert = db.prepare(
+      `INSERT INTO query_log_entries (
+        nodeId, baseUrl, ts, timestamp,
+        qnameLc, clientIpLc,
+        blockedRank, aRank,
+        entryHash, data
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const add = (
+      ts: number,
+      qnameLc: string,
+      clientIpLc: string,
+      blockedRank: number,
+      aRank: number,
+      data: string,
+    ) => {
+      insert.run(
+        "node-a",
+        "https://node-a.example.test",
+        ts,
+        new Date(ts).toISOString(),
+        qnameLc,
+        clientIpLc,
+        blockedRank,
+        aRank,
+        `${qnameLc}-${clientIpLc}-${ts}`,
+        data,
+      );
+    };
+
+    add(40, "one.example", "192.0.2.1", 0, 0, "newest-allowed");
+    add(30, "one.example", "192.0.2.1", 0, 1, "allowed-a");
+    add(20, "one.example", "192.0.2.1", 1, 0, "blocked-other");
+    add(10, "one.example", "192.0.2.1", 1, 1, "blocked-a");
+    add(50, "one.example", "192.0.2.2", 0, 0, "second-client");
+    add(60, "two.example", "192.0.2.1", 0, 0, "second-domain");
+  });
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const base = { whereSql: "WHERE ts >= ? AND ts <= ?", params: [0, 100] };
+
+  it("preserves blocked, A-record, then timestamp priority by domain", () => {
+    const rows = internal.selectDeduplicatedRows(
+      base,
+      false,
+      true,
+      "DESC",
+      50,
+      0,
+    );
+
+    expect(rows.map((row) => row.data)).toEqual(["second-domain", "blocked-a"]);
+  });
+
+  it("uses the same priority independently for each domain-and-client pair", () => {
+    const rows = internal.selectDeduplicatedRows(
+      base,
+      true,
+      true,
+      "DESC",
+      50,
+      0,
+    );
+
+    expect(rows.map((row) => row.data)).toEqual([
+      "second-domain",
+      "second-client",
+      "blocked-a",
+    ]);
+  });
+
+  it("preserves ascending order and offset pagination", () => {
+    const rows = internal.selectDeduplicatedRows(base, true, true, "ASC", 1, 1);
+
+    expect(rows.map((row) => row.data)).toEqual(["second-client"]);
+  });
+
+  it("keeps filtered deduplication on the filter-aware window path", () => {
+    expect(
+      internal.canUseIndexedDeduplication({
+        start: "2026-01-01T00:00:00.000Z",
+        end: "2026-01-02T00:00:00.000Z",
+        pageNumber: 2,
+      }),
+    ).toBe(true);
+    expect(internal.canUseIndexedDeduplication({ qname: "example" })).toBe(
+      false,
+    );
+    expect(internal.canUseIndexedDeduplication({ qtype: "AAAA" })).toBe(false);
+    expect(
+      internal.canUseIndexedDeduplication({ statusFilter: "blocked" }),
+    ).toBe(false);
+
+    const rows = internal.selectDeduplicatedRows(
+      base,
+      false,
+      false,
+      "DESC",
+      50,
+      0,
+    );
+    expect(rows.map((row) => row.data)).toEqual(["second-domain", "blocked-a"]);
   });
 });
 
@@ -377,5 +677,75 @@ describe("QueryLogSqliteService — buildWhereClause FTS5 routing", () => {
     expect(whereSql).not.toContain("query_log_fts");
     expect(whereSql).not.toContain("clientNameLc LIKE");
     expect(params).toContain("%!!!%");
+  });
+});
+
+describe("QueryLogSqliteService — stored hostname isolation", () => {
+  let tmpDir: string;
+  let db: DatabaseSync;
+
+  afterEach(() => {
+    db.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("serves stored rows through cached enrichment without live DHCP calls", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "qlogs-stored-hostname-spec-"));
+    db = new DatabaseSync(join(tmpDir, "query-logs.sqlite"));
+    const cachedEnrichment = jest.fn((entries: unknown[]) => entries);
+    const liveEnrichment = jest.fn(() =>
+      Promise.reject(new Error("live DHCP must not be called")),
+    );
+    const service = new QueryLogSqliteService(
+      {
+        enrichQueryLogEntriesWithCachedHostnames: cachedEnrichment,
+        enrichQueryLogEntriesWithHostnames: liveEnrichment,
+      } as never,
+      [] as never,
+    );
+    const internal = service as unknown as SchemaShape;
+    internal.db = db;
+    internal.initializeSchema();
+
+    const now = Date.now();
+    const timestamp = new Date(now).toISOString();
+    db.prepare(
+      `INSERT INTO query_log_entries (
+        nodeId, baseUrl, ts, timestamp,
+        qname, qnameLc, clientIpAddress, clientIpLc,
+        clientName, clientNameLc,
+        blockedRank, aRank, entryHash, data
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "node-a",
+      "https://node-a.example.test",
+      now,
+      timestamp,
+      "example.test",
+      "example.test",
+      "192.0.2.40",
+      "192.0.2.40",
+      "stored-client",
+      "stored-client",
+      0,
+      1,
+      "entry-1",
+      JSON.stringify({
+        timestamp,
+        qname: "example.test",
+        clientIpAddress: "192.0.2.40",
+        clientName: "stored-client",
+      }),
+    );
+
+    const result = service.getStoredCombinedLogs({
+      start: new Date(now - 1000).toISOString(),
+      end: new Date(now + 1000).toISOString(),
+      disableCache: true,
+    });
+
+    expect(result.entries).toHaveLength(1);
+    expect(cachedEnrichment).toHaveBeenCalledTimes(1);
+    expect(liveEnrichment).not.toHaveBeenCalled();
   });
 });

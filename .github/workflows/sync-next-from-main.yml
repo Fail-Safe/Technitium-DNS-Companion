@@ -25,6 +25,7 @@ jobs:
     name: Merge main into next
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
 
     steps:
@@ -64,3 +65,11 @@ jobs:
       - name: Push updated next
         if: steps.check.outputs.needs_merge == 'true'
         run: git push origin next
+
+      # Pushes made with GITHUB_TOKEN do not trigger other workflows. Dispatch
+      # the beta publisher explicitly so next and :beta cannot silently drift.
+      - name: Publish the reconciled next beta
+        if: steps.check.outputs.needs_merge == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run docker-publish.yml --ref next -f push_image=true
