@@ -9,6 +9,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Documentation
+
+- Published a user-facing DNS Logs performance overview connecting the
+  reproducible million-row SQLite results, stored-page hostname isolation, and
+  browser request-control measurements. The README, public documentation
+  navigation, beta guide, and About dialog now link operators to the results,
+  methodology, trade-offs, raw data, and reproduction commands.
+
 ## [1.11.0] - 2026-08-29
 
 ### Added

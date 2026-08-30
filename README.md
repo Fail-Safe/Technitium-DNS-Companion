@@ -41,6 +41,32 @@ Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_
 - **Advanced Blocking** - Easy management of domain lists
 - **DHCP Overview** - Compare and sync DHCP scopes across nodes
 
+## DNS Logs at scale
+
+Companion's stored DNS Logs path is tested against a deterministic database of
+1,000,000 query-log rows. The final adaptive SQLite path preserves ordinary
+page-one performance while removing the largest deduplication and count
+hotspots:
+
+| Stored DNS Logs operation | Before | After | Reduction |
+| --- | ---: | ---: | ---: |
+| Domain deduplication | 2,980 ms | 136 ms | 95.4% |
+| Per-client deduplication | 3,250 ms | 196 ms | 94.0% |
+| Blocked-entry count | 1,300 ms | 2 ms | 99.8% |
+
+![Four line charts showing the measured improvements for domain and per-client deduplication, unique-domain counts, and blocked-entry counts.](https://fail-safe.github.io/Technitium-DNS-Companion/performance/images/query-log-benchmark-iterations.svg)
+
+Stored browsing also makes zero live Technitium calls for DHCP hostname
+enrichment, so an unavailable non-DHCP node no longer holds historical pages
+until the network timeout. Production-derived browser validation recorded 69.5%
+fewer completed backend requests and lower tail latency after request
+amplification was removed; the matched median was approximately unchanged.
+
+Absolute timings vary with hardware, storage, retention, and workload. Read the
+[DNS Logs performance overview](https://fail-safe.github.io/Technitium-DNS-Companion/performance/)
+for the methodology, raw results, trade-offs, remaining hotspot, and
+reproduction commands.
+
 ## Web-based User Interface
 
 [Features Light & Dark Mode](https://fail-safe.github.io/Technitium-DNS-Companion/#screenshots)
