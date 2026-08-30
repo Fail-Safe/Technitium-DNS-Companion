@@ -1,0 +1,192 @@
+name: technitium-companion-multi-cluster-sso-test
+
+x-technitium-common: &technitium-common
+  image: technitium/dns-server:${TECHNITIUM_MULTI_CLUSTER_TEST_TAG:-15.3.0}
+  restart: "no"
+  env_file:
+    - ./.multi-cluster-sso-test/technitium.env
+
+services:
+  site-a-primary:
+    <<: *technitium-common
+    hostname: site-a-primary
+    environment:
+      DNS_SERVER_DOMAIN: a-primary.site-a.test
+    ports:
+      - "127.0.0.1:${SITE_A_PRIMARY_HTTP_PORT:-15380}:5380"
+      - "127.0.0.1:${SITE_A_PRIMARY_HTTPS_PORT:-15480}:53443"
+    volumes:
+      - site-a-primary-config:/etc/dns
+    networks:
+      site-a:
+        ipv4_address: 172.30.111.10
+
+  site-a-secondary:
+    <<: *technitium-common
+    hostname: site-a-secondary
+    environment:
+      DNS_SERVER_DOMAIN: a-secondary.site-a.test
+    ports:
+      - "127.0.0.1:${SITE_A_SECONDARY_HTTP_PORT:-15381}:5380"
+    volumes:
+      - site-a-secondary-config:/etc/dns
+    networks:
+      site-a:
+        ipv4_address: 172.30.111.11
+
+  site-b-primary:
+    <<: *technitium-common
+    hostname: site-b-primary
+    environment:
+      DNS_SERVER_DOMAIN: b-primary.site-b.test
+    ports:
+      - "127.0.0.1:${SITE_B_PRIMARY_HTTP_PORT:-15382}:5380"
+      - "127.0.0.1:${SITE_B_PRIMARY_HTTPS_PORT:-15482}:53443"
+    volumes:
+      - site-b-primary-config:/etc/dns
+    networks:
+      site-b:
+        ipv4_address: 172.30.112.10
+
+  site-b-secondary:
+    <<: *technitium-common
+    hostname: site-b-secondary
+    environment:
+      DNS_SERVER_DOMAIN: b-secondary.site-b.test
+    ports:
+      - "127.0.0.1:${SITE_B_SECONDARY_HTTP_PORT:-15383}:5380"
+    volumes:
+      - site-b-secondary-config:/etc/dns
+    networks:
+      site-b:
+        ipv4_address: 172.30.112.11
+
+  technitium-dns-companion-test:
+    image: technitium-dns-companion:multi-cluster-sso-test
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: "no"
+    depends_on:
+      - site-a-primary
+      - site-a-secondary
+      - site-b-primary
+      - site-b-secondary
+    environment:
+      NODE_ENV: production
+      HTTPS_ENABLED: "false"
+      TRUST_PROXY: "true"
+      TRUST_PROXY_HOPS: "1"
+      TRUSTED_SSO_ENABLED: "true"
+      TRUSTED_SSO_IDENTITY_HEADER: X-Forwarded-User
+      TRUSTED_SSO_PROXY_SECRET_HEADER: X-Trusted-Proxy-Secret
+      TRUSTED_SSO_PROXY_SECRET_FILE: /run/secrets/trusted-sso-proxy-secret
+      TRUSTED_SSO_TOKEN_MAP_FILE: /run/secrets/trusted-sso-token-map.json
+      TRUSTED_SSO_PROXY_CIDRS: 172.30.113.0/24
+      TECHNITIUM_BACKGROUND_TOKEN_MAP_FILE: /run/secrets/background-token-map.json
+      TECHNITIUM_SCHEDULE_TOKEN_MAP_FILE: /run/secrets/schedule-token-map.json
+      TECHNITIUM_NODES: site-a-primary,site-a-secondary,site-b-primary,site-b-secondary
+      TECHNITIUM_SITEAPRIMARY_NAME: Site A Primary
+      TECHNITIUM_SITEAPRIMARY_BASE_URL: http://site-a-primary:5380
+      TECHNITIUM_SITEAPRIMARY_GROUP: site-a
+      TECHNITIUM_SITEASECONDARY_NAME: Site A Secondary
+      TECHNITIUM_SITEASECONDARY_BASE_URL: http://site-a-secondary:5380
+      TECHNITIUM_SITEASECONDARY_GROUP: site-a
+      TECHNITIUM_SITEBPRIMARY_NAME: Site B Primary
+      TECHNITIUM_SITEBPRIMARY_BASE_URL: http://site-b-primary:5380
+      TECHNITIUM_SITEBPRIMARY_GROUP: site-b
+      TECHNITIUM_SITEBSECONDARY_NAME: Site B Secondary
+      TECHNITIUM_SITEBSECONDARY_BASE_URL: http://site-b-secondary:5380
+      TECHNITIUM_SITEBSECONDARY_GROUP: site-b
+      COMPANION_DB_PATH: /data/companion.sqlite
+    ports:
+      - "127.0.0.1:${MULTI_CLUSTER_COMPANION_HTTP_PORT:-15300}:3000"
+    volumes:
+      - companion-data:/data
+      - type: bind
+        source: ./.multi-cluster-sso-test/proxy-secret
+        target: /run/secrets/trusted-sso-proxy-secret
+        read_only: true
+      - type: bind
+        source: ./.multi-cluster-sso-test/trusted-sso-token-map.json
+        target: /run/secrets/trusted-sso-token-map.json
+        read_only: true
+      - type: bind
+        source: ./.multi-cluster-sso-test/background-token-map.json
+        target: /run/secrets/background-token-map.json
+        read_only: true
+      - type: bind
+        source: ./.multi-cluster-sso-test/schedule-token-map.json
+        target: /run/secrets/schedule-token-map.json
+        read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - site-a
+      - site-b
+      - sso-front
+
+  trusted-sso-test-proxy:
+    image: nginx:1.29-alpine
+    restart: "no"
+    depends_on:
+      - technitium-dns-companion-test
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        export TRUSTED_SSO_PROXY_SECRET="$$(cat /run/secrets/trusted-sso-proxy-secret)"
+        envsubst '$$TRUSTED_SSO_PROXY_SECRET' < /etc/nginx/templates/trusted-sso.conf.template > /tmp/nginx.conf
+        exec nginx -c /tmp/nginx.conf -g 'daemon off;'
+    ports:
+      - "127.0.0.1:${MULTI_CLUSTER_PROXY_HTTPS_PORT:-15443}:8443"
+    volumes:
+      - type: bind
+        source: ./deploy/sso-test/nginx.conf.template
+        target: /etc/nginx/templates/trusted-sso.conf.template
+        read_only: true
+      - type: bind
+        source: ./.multi-cluster-sso-test/proxy-secret
+        target: /run/secrets/trusted-sso-proxy-secret
+        read_only: true
+      - type: bind
+        source: ./.multi-cluster-sso-test/htpasswd
+        target: /etc/nginx/auth/htpasswd
+        read_only: true
+      - type: bind
+        source: ./.multi-cluster-sso-test/tls
+        target: /etc/nginx/tls
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      sso-front:
+        ipv4_address: 172.30.113.10
+
+volumes:
+  site-a-primary-config:
+  site-a-secondary-config:
+  site-b-primary-config:
+  site-b-secondary-config:
+  companion-data:
+
+networks:
+  site-a:
+    ipam:
+      config:
+        - subnet: 172.30.111.0/24
+  site-b:
+    ipam:
+      config:
+        - subnet: 172.30.112.0/24
+  sso-front:
+    ipam:
+      config:
+        - subnet: 172.30.113.0/24

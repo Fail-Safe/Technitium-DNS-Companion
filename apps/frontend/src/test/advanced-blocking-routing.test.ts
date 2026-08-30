@@ -14,6 +14,28 @@ describe("Advanced Blocking write routing", () => {
     expect(resolveAdvancedBlockingWriteNodeId(nodes, "eq14")).toBe("eq10");
   });
 
+  it("routes a secondary only to the primary in its group", () => {
+    const nodes = [
+      { id: "site-a-primary", groupId: "site-a", isPrimary: true },
+      { id: "site-a-secondary", groupId: "site-a", isPrimary: false },
+      { id: "site-b-primary", groupId: "site-b", isPrimary: true },
+      { id: "site-b-secondary", groupId: "site-b", isPrimary: false },
+    ];
+
+    expect(
+      resolveAdvancedBlockingWriteNodeId(nodes, "site-b-secondary"),
+    ).toBe("site-b-primary");
+  });
+
+  it("keeps an unknown source instead of guessing a group", () => {
+    expect(
+      resolveAdvancedBlockingWriteNodeId(
+        [{ id: "site-a-primary", groupId: "site-a", isPrimary: true }],
+        "unknown-node",
+      ),
+    ).toBe("unknown-node");
+  });
+
   it("keeps the source node as the target outside a cluster", () => {
     expect(
       resolveAdvancedBlockingWriteNodeId(
@@ -46,5 +68,32 @@ describe("Advanced Blocking write routing", () => {
         snapshots,
       ),
     ).toEqual(snapshots);
+  });
+
+  it("keeps one primary target per group for bulk writes", () => {
+    const snapshots = [
+      { nodeId: "site-a-primary" },
+      { nodeId: "site-a-secondary" },
+      { nodeId: "site-b-primary" },
+      { nodeId: "site-b-secondary" },
+      { nodeId: "standalone" },
+    ];
+
+    expect(
+      selectAdvancedBlockingWriteSnapshots(
+        [
+          { id: "site-a-primary", groupId: "site-a", isPrimary: true },
+          { id: "site-a-secondary", groupId: "site-a", isPrimary: false },
+          { id: "site-b-primary", groupId: "site-b", isPrimary: true },
+          { id: "site-b-secondary", groupId: "site-b", isPrimary: false },
+          { id: "standalone", groupId: "standalone" },
+        ],
+        snapshots,
+      ),
+    ).toEqual([
+      { nodeId: "site-a-primary" },
+      { nodeId: "site-b-primary" },
+      { nodeId: "standalone" },
+    ]);
   });
 });

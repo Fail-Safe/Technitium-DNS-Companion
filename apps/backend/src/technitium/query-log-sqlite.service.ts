@@ -10,6 +10,7 @@ import { accessSync, constants, existsSync, mkdirSync } from "fs";
 import { DatabaseSync } from "node:sqlite";
 import { dirname } from "path";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
+import { nodeGroupId } from "./technitium-config";
 import { TechnitiumService } from "./technitium.service";
 import type {
   TechnitiumCombinedQueryLogEntry,
@@ -38,10 +39,16 @@ export interface QueryLogSqliteStatus {
   };
 }
 
-type StoredLogRow = { nodeId: string; baseUrl: string; data: string };
+type StoredLogRow = {
+  nodeId: string;
+  baseUrl: string;
+  groupId: string;
+  data: string;
+};
 type StoredLogRowWithClient = {
   nodeId: string;
   baseUrl: string;
+  groupId: string;
   clientIpAddress: string | null;
   clientName: string | null;
   data: string;
@@ -338,6 +345,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       CREATE TABLE IF NOT EXISTS query_log_entries (
         nodeId TEXT NOT NULL,
         baseUrl TEXT NOT NULL,
+        groupId TEXT NOT NULL DEFAULT '__default__',
         ts INTEGER NOT NULL,
         timestamp TEXT NOT NULL,
         qname TEXT,
@@ -366,14 +374,64 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       CREATE INDEX IF NOT EXISTS idx_query_log_responseType_ts ON query_log_entries(responseType, ts);
       CREATE INDEX IF NOT EXISTS idx_query_log_qtype_ts ON query_log_entries(qtype, ts);
       CREATE INDEX IF NOT EXISTS idx_query_log_blockedRank_ts ON query_log_entries(blockedRank, ts);
-      CREATE INDEX IF NOT EXISTS idx_query_log_dedup_rank ON query_log_entries(
-        qnameLc,
-        clientIpLc,
-        blockedRank DESC,
-        aRank DESC,
-        ts DESC
-      );
     `);
+    // Existing databases do not have groupId until the migration below. Any
+    // index that references it must be created after the column is present.
+    this.migrateQueryLogGroupIds();
+  }
+
+  private migrateQueryLogGroupIds(): void {
+    if (!this.db) return;
+    const columns = this.db
+      .prepare("PRAGMA table_info(query_log_entries)")
+      .all() as Array<{
+      name?: string;
+    }>;
+    if (!columns.some((column) => column.name === "groupId")) {
+      this.db.exec(
+        "ALTER TABLE query_log_entries ADD COLUMN groupId TEXT NOT NULL DEFAULT '__default__'",
+      );
+    }
+    const update = this.db.prepare(
+      "UPDATE query_log_entries SET groupId = ? WHERE nodeId = ? AND groupId <> ?",
+    );
+    for (const node of this.nodeConfigs) {
+      const groupId = nodeGroupId(node);
+      update.run(groupId, node.id, groupId);
+    }
+    const expectedDedupColumns = [
+      "qnameLc",
+      "groupId",
+      "clientIpLc",
+      "blockedRank",
+      "aRank",
+      "ts",
+    ];
+    const currentDedupColumns = this.db
+      .prepare("PRAGMA index_info(idx_query_log_dedup_rank)")
+      .all()
+      .map((column) => (column as { name?: string }).name ?? "");
+    if (
+      currentDedupColumns.length !== expectedDedupColumns.length ||
+      currentDedupColumns.some(
+        (column, index) => column !== expectedDedupColumns[index],
+      )
+    ) {
+      this.db.exec(`
+        DROP INDEX IF EXISTS idx_query_log_dedup_rank;
+        CREATE INDEX idx_query_log_dedup_rank ON query_log_entries(
+          qnameLc,
+          groupId,
+          clientIpLc,
+          blockedRank DESC,
+          aRank DESC,
+          ts DESC
+        );
+      `);
+    }
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_query_log_group_ts ON query_log_entries(groupId, ts)",
+    );
   }
 
   /**
@@ -802,7 +860,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       const enrichedEntries =
         await this.technitiumService.enrichQueryLogEntriesWithHostnames(
           entries,
-          { authMode: "background" },
+          { authMode: "background", sourceGroupId: nodeGroupId(node) },
         );
 
       let newestTs = this.lastIngestedTsByNode.get(node.id) ?? 0;
@@ -812,7 +870,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       try {
         const insert = this.db.prepare(
           `INSERT OR IGNORE INTO query_log_entries (
-            nodeId, baseUrl, ts, timestamp,
+            nodeId, baseUrl, groupId, ts, timestamp,
             qname, qnameLc,
             clientIpAddress, clientIpLc,
             clientName, clientNameLc,
@@ -820,7 +878,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
             blockedRank, aRank,
             entryHash, data
           ) VALUES (
-            ?, ?, ?, ?,
+            ?, ?, ?, ?, ?,
             ?, ?,
             ?, ?,
             ?, ?,
@@ -853,7 +911,10 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
             clientName.trim().length > 0 &&
             (!clientIpAddress || clientName !== clientIpAddress)
           ) {
-            hostnamesByIpLc.set(clientIpLc, clientName);
+            hostnamesByIpLc.set(
+              this.clientNamespaceKey(nodeGroupId(node), clientIpLc),
+              clientName,
+            );
           }
 
           const responseType = entry.responseType ?? null;
@@ -869,6 +930,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           insert.run(
             node.id,
             node.baseUrl,
+            nodeGroupId(node),
             ts,
             entry.timestamp ?? "",
             qname,
@@ -885,7 +947,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
             blockedRank,
             aRank,
             entryHash,
-            JSON.stringify(entry),
+            JSON.stringify({ ...entry, groupId: nodeGroupId(node) }),
           );
 
           if (ts > newestTs) {
@@ -923,7 +985,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     const update = this.db.prepare(
       `UPDATE query_log_entries
        SET clientName = ?, clientNameLc = ?
-       WHERE clientIpLc = ?
+       WHERE groupId = ? AND clientIpLc = ?
          AND (
            clientName IS NULL OR clientName = '' OR clientName = clientIpAddress
            OR clientNameLc IS NULL OR clientNameLc = '' OR clientNameLc = clientIpLc
@@ -932,7 +994,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
 
     let updatedIps = 0;
 
-    for (const [ipLc, hostname] of hostnamesByIpLc.entries()) {
+    for (const [clientKey, hostname] of hostnamesByIpLc.entries()) {
       if (updatedIps >= MAX_UPDATES_PER_POLL) {
         this.logger.debug(
           `Hostname backfill capped at ${MAX_UPDATES_PER_POLL} IPs per poll (skipped ${hostnamesByIpLc.size - updatedIps}).`,
@@ -943,9 +1005,25 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
       const name = hostname.trim();
       if (!name) continue;
 
-      update.run(name, name.toLowerCase(), ipLc);
+      const { groupId, ipLc } = this.parseClientNamespaceKey(clientKey);
+      update.run(name, name.toLowerCase(), groupId, ipLc);
       updatedIps += 1;
     }
+  }
+
+  private clientNamespaceKey(groupId: string, ipLc: string): string {
+    return `${groupId}\u0000${ipLc}`;
+  }
+
+  private parseClientNamespaceKey(key: string): {
+    groupId: string;
+    ipLc: string;
+  } {
+    const separator = key.indexOf("\u0000");
+    return {
+      groupId: separator === -1 ? "__default__" : key.slice(0, separator),
+      ipLc: separator === -1 ? key : key.slice(separator + 1),
+    };
   }
 
   private computeEntryHash(
@@ -1185,11 +1263,11 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
 
     const sql = deduplicatePerClient
       ? `SELECT COUNT(*) AS count FROM (
-           SELECT qnameLc, clientIpLc
+           SELECT qnameLc, groupId, clientIpLc
            FROM query_log_entries
            ${base.whereSql}
            AND qnameLc IS NOT NULL
-           GROUP BY qnameLc, clientIpLc
+           GROUP BY qnameLc, groupId, clientIpLc
          )`
       : `SELECT COUNT(DISTINCT qnameLc) AS count
          FROM query_log_entries
@@ -1210,13 +1288,15 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
   ): StoredLogRowWithClient[] {
     if (!this.db) return [];
 
-    const partition = deduplicatePerClient ? "qnameLc, clientIpLc" : "qnameLc";
+    const partition = deduplicatePerClient
+      ? "qnameLc, groupId, clientIpLc"
+      : "qnameLc";
 
     if (!useIndexedGrouping) {
       return this.db
         .prepare(
           `WITH ranked AS (
-            SELECT nodeId, baseUrl, clientIpAddress, clientName, data, ts,
+            SELECT nodeId, baseUrl, groupId, clientIpAddress, clientName, data, ts,
               ROW_NUMBER() OVER (
                 PARTITION BY ${partition}
                 ORDER BY blockedRank DESC, aRank DESC, ts DESC
@@ -1225,7 +1305,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
             ${base.whereSql}
             AND qnameLc IS NOT NULL
           )
-          SELECT nodeId, baseUrl, clientIpAddress, clientName, data
+          SELECT nodeId, baseUrl, groupId, clientIpAddress, clientName, data
           FROM ranked
           WHERE rn = 1
           ORDER BY ts ${sortDir}
@@ -1244,7 +1324,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     return this.db
       .prepare(
         `WITH best AS (
-          SELECT nodeId, baseUrl, clientIpAddress, clientName, data, ts,
+          SELECT nodeId, baseUrl, groupId, clientIpAddress, clientName, data, ts,
             MAX(
               blockedRank * 4000000000000000 +
               aRank * 2000000000000000 +
@@ -1255,7 +1335,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           AND qnameLc IS NOT NULL
           GROUP BY ${partition}
         )
-        SELECT nodeId, baseUrl, clientIpAddress, clientName, data
+        SELECT nodeId, baseUrl, groupId, clientIpAddress, clientName, data
         FROM best
         ORDER BY ts ${sortDir}
         LIMIT ? OFFSET ?`,
@@ -1310,6 +1390,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
           ...parsedUnknown,
           nodeId: row.nodeId,
           baseUrl: row.baseUrl,
+          groupId: row.groupId,
         };
 
         if (
@@ -1467,7 +1548,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     if (!deduplicateDomains) {
       rows = this.db
         .prepare(
-          `SELECT nodeId, baseUrl, clientIpAddress, clientName, data
+          `SELECT nodeId, baseUrl, groupId, clientIpAddress, clientName, data
            FROM query_log_entries
            ${base.whereSql}
            ORDER BY ts ${sortDir}
@@ -1644,7 +1725,7 @@ export class QueryLogSqliteService implements OnModuleInit, OnModuleDestroy {
     if (!deduplicateDomains) {
       rows = this.db
         .prepare(
-          `SELECT nodeId, baseUrl, clientIpAddress, clientName, data
+          `SELECT nodeId, baseUrl, groupId, clientIpAddress, clientName, data
            FROM query_log_entries
            ${base.whereSql}
            ORDER BY ts ${sortDir}

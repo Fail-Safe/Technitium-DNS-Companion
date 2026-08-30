@@ -420,6 +420,7 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
           s: DnsSchedule,
           n: string,
           flushNodeIds: string[],
+          skippedFlushNodeIds: string[],
           stateNodeIds: string[],
           now: Date,
           dryRun: boolean,
@@ -429,6 +430,7 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
       makeSchedule({ startTime: "09:00", endTime: "17:00", timezone: "UTC" }),
       "nodeA",
       ["nodeA"],
+      [],
       ["nodeA"],
       utcDate(2024, 1, 15, 12, 0),
       false,
@@ -463,6 +465,7 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
           s: DnsSchedule,
           n: string,
           flushNodeIds: string[],
+          skippedFlushNodeIds: string[],
           stateNodeIds: string[],
           now: Date,
           dryRun: boolean,
@@ -472,6 +475,7 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
       makeSchedule({ startTime: "09:00", endTime: "17:00", timezone: "UTC" }),
       "nodeA",
       ["nodeA"],
+      [],
       ["nodeA"],
       utcDate(2024, 1, 15, 18, 0),
       false,
@@ -654,6 +658,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
           s: DnsSchedule,
           n: string,
           flushNodeIds: string[],
+          skippedFlushNodeIds: string[],
           stateNodeIds: string[],
           now: Date,
           dryRun: boolean,
@@ -671,6 +676,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
       }),
       "nodeA",
       ["nodeA", "nodeB", "nodeC"],
+      [],
       ["nodeA", "nodeB"],
       new Date("2026-06-25T00:15:00.000Z"),
       false,
@@ -706,6 +712,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
           s: DnsSchedule,
           n: string,
           flushNodeIds: string[],
+          skippedFlushNodeIds: string[],
           stateNodeIds: string[],
           now: Date,
           dryRun: boolean,
@@ -723,6 +730,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
       }),
       "nodeA",
       ["nodeA", "nodeB", "nodeC"],
+      [],
       ["nodeA", "nodeB"],
       new Date("2026-06-25T01:15:00.000Z"),
       false,
@@ -1591,5 +1599,40 @@ describe("DnsSchedulesEvaluatorService — temporary override alert window", () 
         enabled: true,
       }),
     );
+  });
+});
+
+describe("DnsSchedulesEvaluatorService — cache flush admission results", () => {
+  it("reports admitted successes and unavailable or unauthorized members separately", async () => {
+    const service = new DnsSchedulesEvaluatorService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const internal = service as unknown as {
+      flushDomainsCache: jest.Mock<Promise<boolean>, [DnsSchedule, string]>;
+      flushAdmittedCaches: (
+        schedule: DnsSchedule,
+        admitted: string[],
+        skipped: string[],
+      ) => Promise<{ flushedNodeIds: string[]; skippedNodeIds: string[] }>;
+    };
+    internal.flushDomainsCache = jest
+      .fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    await expect(
+      internal.flushAdmittedCaches(
+        makeSchedule({ flushCacheOnChange: true }),
+        ["primary", "secondary-a"],
+        ["secondary-b"],
+      ),
+    ).resolves.toEqual({
+      flushedNodeIds: ["primary"],
+      skippedNodeIds: ["secondary-b", "secondary-a"],
+    });
   });
 });

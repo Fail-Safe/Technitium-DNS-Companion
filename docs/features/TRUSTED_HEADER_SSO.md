@@ -17,23 +17,30 @@ successful authentication.
 
 ## Authorization model
 
-Every SSO identity maps exactly to one Technitium username and one cluster-wide
-API token. Technitium replicates users, permissions, and API tokens created on
-the Primary to every node in its cluster. Companion validates the same token
-against every configured node with
-`/api/user/session/get` and requires the returned owner to equal the configured
-username before creating a session. Unreachable nodes may produce the existing
-degraded partial session; an invalid token or owner mismatch fails the complete
-login.
+Every SSO identity maps to a non-empty subset of configured Technitium groups.
+Each authorized group has its own Technitium username and cluster-wide API
+token. Companion validates that token against members of that group with
+`/api/user/session/get`; token owner, permissions, and reported topology are
+never borrowed from another group. An owner, token, permission, or topology
+mismatch fails only that group. The login succeeds when at least one authorized
+group has usable nodes.
+
+Admission is recorded per node and operation. `DnsClient: View` admits PTR
+reads, `DhcpServer: View` admits DHCP reads, `Apps: Modify` admits configuration
+writes only on a validated Primary in the same group, and `Cache: Delete`
+admits cache flushes. An unreachable member can make a group degraded without
+granting that member access. When it returns, Companion retries with bounded
+backoff and revalidates owner, permissions, group membership, and topology role
+before first use.
 
 Companion retains at most eight active trusted-SSO sessions for one mapped
 identity. Creating a ninth evicts that identity's oldest SSO session without
 affecting password sessions or another identity. This supports normal
 multi-device use while bounding server-side session state.
 
-Trusted SSO therefore expects all configured Companion nodes to belong to the
-same Technitium cluster. Independent clusters or standalone nodes require
-separate Companion deployments for this authentication mode.
+Independent clusters and standalone sites can share one Companion deployment
+when every node declares an explicit group. A group is the routing, credential,
+DHCP/PTR hostname, and private-address namespace boundary.
 
 Shared-account mode and fallback for unmapped identities are intentionally not
 supported. Both would make multiple people operate as one Technitium principal,
@@ -52,6 +59,21 @@ TRUSTED_SSO_LOGOUT_URL=https://idp.example.com/application/o/companion/end-sessi
 TRUST_PROXY=true
 TRUST_PROXY_HOPS=1
 ```
+
+Declare groups on nodes before using a version-2 token map:
+
+```dotenv
+TECHNITIUM_NODES=site-a-primary,site-a-secondary,site-b-primary
+TECHNITIUM_SITEAPRIMARY_GROUP=site-a
+TECHNITIUM_SITEASECONDARY_GROUP=site-a
+TECHNITIUM_SITEBPRIMARY_GROUP=site-b
+```
+
+Node IDs are normalized to uppercase alphanumeric environment keys. Group IDs
+are case-sensitive lowercase slugs matching
+`[a-z0-9][a-z0-9._-]{0,62}`; names beginning with `__` are reserved. If any
+node declares a group, every configured node must declare one. Omitting all
+group variables retains the implicit single-cluster `__default__` mode.
 
 `TRUSTED_SSO_PROXY_SECRET` may be set directly, but the `_FILE` form is
 recommended. The value must be at least 32 characters. Generate it with a
@@ -74,15 +96,16 @@ The application validates all enabled SSO configuration once during startup.
 Invalid headers, CIDRs, secrets, URLs, or token-map schemas stop the backend
 instead of silently weakening authentication.
 
-## Token map
+## Token maps
 
 Create a separate Technitium user for each person on the cluster Primary, grant
 only the permissions that person needs, and create one API token owned by that
 user on the Primary through **Administration → Sessions → Create Token** or
 `/api/admin/sessions/createToken`. Save the returned token immediately.
 Technitium synchronizes the user, permissions, and API token to its Secondary
-nodes. Store the mapping in a root-readable file mounted read-only into the
-container:
+nodes. Store mappings in a root-readable file mounted read-only into the
+container. Version 1 remains supported only when all nodes use the implicit
+`__default__` group:
 
 ```json
 {
@@ -104,6 +127,35 @@ Identity matching is exact and case-sensitive. Companion expands the replicated
 cluster token into its server-side per-node session state only for nodes that
 successfully validate it. Tokens never enter the browser or API response.
 
+Use version 2 for explicit groups. Omitted groups are intentionally
+`not-authorized` for that identity:
+
+```json
+{
+  "version": 2,
+  "identities": {
+    "operator@example.com": {
+      "groups": {
+        "site-a": {
+          "username": "operator-a",
+          "token": "cluster-a-token"
+        },
+        "site-b": {
+          "username": "operator-b",
+          "token": "cluster-b-token"
+        }
+      }
+    }
+  }
+}
+```
+
+Every identity must authorize at least one known group. Unknown groups,
+duplicate JSON keys, extra fields, malformed credentials, and empty mappings
+make enabled SSO startup-fatal. Status responses contain every configured group
+with `anyReady` and `allReady`; intentionally unauthorized groups do not count
+against `allReady` and are not presented as expired sessions.
+
 Technitium documents that API tokens created on the cluster Primary are
 synchronized to every node, while ordinary interactive login sessions remain
 node-local. See [Understanding Clustering And How To Configure It](https://blog.technitium.com/2025/11/understanding-clustering-and-how-to.html).
@@ -112,7 +164,7 @@ node-local. See [Understanding Clustering And How To Configure It](https://blog.
 
 1. Create a replacement token under the same Technitium principal on the
    cluster Primary and allow it to synchronize to the Secondary nodes.
-2. Write a complete version-1 map to a new file, set restrictive file
+2. Write a complete map to a new file, set restrictive file
    permissions, and atomically replace the mounted map.
 3. Restart Companion so it loads and validates the new configuration.
 4. Sign in through SSO and verify the expected username and node access.
@@ -182,6 +234,57 @@ docker compose \
 
 Basic Auth is only a stand-in for local validation. Do not deploy this overlay
 as the production identity provider.
+
+### Test two independent clusters
+
+The repository also includes an opt-in acceptance harness for the explicit
+multi-group boundary. It starts four real Technitium DNS v15.3 containers as
+two genuinely independent Primary/Secondary clusters, provisions separate
+operator and least-privilege automation principals in each cluster, builds
+Companion from the current worktree, and places the existing test nginx proxy
+in front of it.
+
+Run the complete scenario from the repository root:
+
+```bash
+npm run test:multicluster:sso -- --reset
+```
+
+The harness verifies:
+
+- a token replicated inside one cluster is rejected by the other cluster;
+- one SSO identity can use both groups while a subset identity sees the
+  omitted group as `not-authorized`;
+- interactive, Primary-write, background PTR, schedule-write, and cache-flush
+  admissions stay group-local;
+- a hard credential failure in one group does not invalidate the other;
+- loss and recovery of one Primary removes its write admission until the
+  returning node has been revalidated; and
+- loss of every node in one group leaves an independently healthy group usable.
+
+The image tag defaults to `technitium/dns-server:15.3.0`; set
+`TECHNITIUM_MULTI_CLUSTER_TEST_TAG` to exercise another v15 release. The proxy
+is available at `https://127.0.0.1:15443`, and every directly exposed test port
+is loopback-only. Generated credentials are written with restrictive
+permissions beneath ignored `.multi-cluster-sso-test/`; their values are not
+printed. Docker named volumes preserve the two clusters between runs.
+
+Use `--cleanup` to remove the harness containers and named volumes after a
+successful run:
+
+```bash
+npm run test:multicluster:sso -- --cleanup
+```
+
+`--reset` and `--cleanup` affect only the Compose project named
+`technitium-companion-multi-cluster-sso-test`. The generated credential files
+remain for reproducible reruns. The backend unit suite separately covers the
+same private client IP appearing in different groups for DHCP/PTR enrichment,
+known-client suggestions, SQLite backfill, and per-client deduplication.
+
+Basic Auth deliberately substitutes only for Authentik's authenticated header
+delivery. A beta rollout should still be validated behind the deployment's
+actual Authentik provider and network policy before stable promotion.
 
 ## Reverse-proxy requirements
 

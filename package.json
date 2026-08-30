@@ -1,7 +1,7 @@
 {
   "name": "technitium-dns-companion",
   "private": true,
-  "version": "1.11.0",
+  "version": "1.12.0",
   "license": "MIT",
   "workspaces": [
     "apps/backend",
@@ -12,6 +12,7 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:technitium:v15": "npm run test:technitium:v15 --workspace apps/backend",
+    "test:multicluster:sso": "./scripts/run-multi-cluster-sso-test.sh",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "overrides": {

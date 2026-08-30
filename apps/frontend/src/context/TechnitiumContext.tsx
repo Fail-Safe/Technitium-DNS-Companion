@@ -105,6 +105,7 @@ export interface TechnitiumNode {
   id: string;
   name: string;
   baseUrl: string;
+  groupId: string;
   status: NodeStatus;
   lastSync: string;
   issues?: string[];
@@ -484,6 +485,7 @@ const fetchConfiguredNodes = async (): Promise<TechnitiumNode[]> => {
         id: string;
         name: string;
         baseUrl: string;
+        groupId: string;
         clusterState?: TechnitiumClusterState;
         isPrimary?: boolean;
       }> = await response.json();
@@ -493,6 +495,7 @@ const fetchConfiguredNodes = async (): Promise<TechnitiumNode[]> => {
         id: node.id,
         name: node.name || node.id,
         baseUrl: node.baseUrl,
+        groupId: node.groupId,
         status: "unknown" as NodeStatus,
         lastSync: new Date().toISOString(),
         clusterState: node.clusterState,
@@ -905,6 +908,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
         id: string;
         name: string;
         baseUrl: string;
+        groupId: string;
         clusterState?: TechnitiumClusterState;
         isPrimary?: boolean;
       }> = await response.json();
@@ -943,6 +947,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
                 ...node,
                 clusterState: updated.clusterState,
                 isPrimary: updated.isPrimary,
+                groupId: updated.groupId,
               };
             }
             return node;

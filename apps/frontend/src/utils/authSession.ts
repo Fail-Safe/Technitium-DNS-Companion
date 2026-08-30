@@ -4,12 +4,14 @@ export type AuthStatusLike = {
   configuredNodeIds?: string[];
   nodeIds?: string[];
   unreachableNodeIds?: string[];
+  groupCredentials?: { groups: Array<{ state: string }> };
 };
 
 export function isNodeSessionRequiredButMissing(
   status: AuthStatusLike | null,
 ): boolean {
   if (!status?.authenticated) return false;
+  if (status.groupCredentials) return false;
 
   const configuredNodeCount = status.configuredNodeIds?.length ?? 0;
   const sessionNodeIds = new Set(status.nodeIds ?? []);

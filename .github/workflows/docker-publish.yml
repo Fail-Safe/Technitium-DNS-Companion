@@ -19,10 +19,22 @@ on:
         required: false
         type: boolean
         default: false
+      channel:
+        description: "Publication channel for manual runs"
+        required: true
+        type: choice
+        options:
+          - preview
+          - beta
+        default: preview
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+
+concurrency:
+  group: docker-publish-${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'beta' && 'beta' || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   quality:
@@ -34,6 +46,18 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+
+      - name: Validate beta promotion source
+        if: github.event_name == 'workflow_dispatch' && inputs.channel == 'beta'
+        shell: bash
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/next|refs/heads/release/*) ;;
+            *)
+              echo "::error::Beta promotions must run from next or a release/* branch, not $GITHUB_REF."
+              exit 1
+              ;;
+          esac
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -60,8 +84,24 @@ jobs:
       - name: Build all workspaces
         run: npm run build
 
-  build-and-push:
+  approve-beta:
+    name: Approve beta promotion
     needs: quality
+    if: github.event_name == 'workflow_dispatch' && inputs.push_image && inputs.channel == 'beta'
+    runs-on: ubuntu-latest
+    environment: beta
+    permissions:
+      contents: read
+
+    steps:
+      - name: Record approved candidate
+        run: echo "Approved beta promotion for $GITHUB_SHA from $GITHUB_REF."
+
+  build-and-push:
+    needs:
+      - quality
+      - approve-beta
+    if: ${{ !cancelled() && needs.quality.result == 'success' && (needs.approve-beta.result == 'success' || needs.approve-beta.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -85,12 +125,16 @@ jobs:
         id: build-channel
         env:
           BUILD_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_CHANNEL: ${{ inputs.channel || 'preview' }}
         run: |
-          case "$BUILD_REF" in
-            refs/heads/next) channel=beta ;;
-            refs/tags/v*) channel=stable ;;
-            *) channel=preview ;;
-          esac
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$REQUESTED_CHANNEL" == "beta" ]]; then
+            channel=beta
+          elif [[ "$BUILD_REF" == refs/tags/v* ]]; then
+            channel=stable
+          else
+            channel=preview
+          fi
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
@@ -119,16 +163,18 @@ jobs:
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=raw,value=${{ steps.package-version.outputs.version }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=raw,value=${{ steps.package-version-minor.outputs.major_minor }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            # next branch: rolling beta channel tags
-            type=raw,value=next,enable=${{ github.ref == 'refs/heads/next' }}
-            type=raw,value=beta,enable=${{ github.ref == 'refs/heads/next' }}
-            type=raw,value=${{ steps.package-version.outputs.version }}-beta,enable=${{ github.ref == 'refs/heads/next' }}
+            # next branch: rolling integration tag
+            type=raw,value=next,enable=${{ github.ref == 'refs/heads/next' && !(github.event_name == 'workflow_dispatch' && inputs.channel == 'beta') }}
+            # beta channel: explicitly promoted, approval-gated candidate
+            type=raw,value=beta,enable=${{ github.event_name == 'workflow_dispatch' && inputs.push_image && inputs.channel == 'beta' }}
+            type=raw,value=${{ steps.package-version.outputs.version }}-beta,enable=${{ github.event_name == 'workflow_dispatch' && inputs.push_image && inputs.channel == 'beta' }}
             # Every published branch/tag image also gets an immutable source-revision tag.
             type=sha,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
             # Manual runs from non-channel refs retain a discoverable rolling alias.
-            type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/next' }}
+            type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' && inputs.channel != 'beta' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/next' }}
 
       - name: Build and push Docker image
+        id: publish-image
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -143,3 +189,27 @@ jobs:
           cache-from: ${{ inputs.no_cache && '' || 'type=gha' }}
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
+
+      - name: Verify promoted beta tags
+        if: github.event_name == 'workflow_dispatch' && inputs.push_image && inputs.channel == 'beta'
+        shell: bash
+        env:
+          EXPECTED_DIGEST: ${{ steps.publish-image.outputs.digest }}
+          PUBLISHED_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r image_ref; do
+            [[ -n "$image_ref" ]] || continue
+            actual_digest=""
+            for attempt in {1..12}; do
+              actual_digest="$(docker buildx imagetools inspect "$image_ref" 2>/dev/null | awk '/^Digest:/ {print $2; exit}' || true)"
+              [[ -n "$actual_digest" ]] && break
+              echo "Tag $image_ref is not resolvable yet (attempt $attempt/12)."
+              sleep 10
+            done
+            if [[ "$actual_digest" != "$EXPECTED_DIGEST" ]]; then
+              echo "::error::Digest mismatch for $image_ref: expected $EXPECTED_DIGEST, got ${actual_digest:-unresolved}."
+              exit 1
+            fi
+            echo "Verified $image_ref at $actual_digest."
+          done <<<"$PUBLISHED_TAGS"

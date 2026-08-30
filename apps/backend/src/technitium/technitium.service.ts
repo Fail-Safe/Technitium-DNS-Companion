@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  ForbiddenException,
   HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
@@ -13,8 +15,28 @@ import * as dns from "dns";
 import * as https from "https";
 import { promisify } from "util";
 import { AuthRequestContext } from "../auth/auth-request-context";
+import { loadAutomationCredentialMap } from "../auth/credential-map";
+import {
+  buildGroupCredentialEnvelope,
+  emptyAdmissions,
+  notAuthorizedGroupStatus,
+  singularVerifiedUsername,
+} from "../auth/group-credentials";
+import type { GroupCredential } from "../auth/group-credentials";
+import type {
+  AuthSession,
+  GroupCredentialStatus,
+  GroupCredentialStatusEnvelope,
+} from "../auth/auth.types";
+import { getEnvOrFile } from "../utils/env-file";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
+import {
+  configuredGroupIds,
+  hasImplicitNodeGrouping,
+  INTERNAL_DEFAULT_GROUP_ID,
+  nodeGroupId,
+} from "./technitium-config";
 import {
   DhcpSnapshot,
   DhcpSnapshotMetadata,
@@ -35,6 +57,7 @@ import {
   TechnitiumCombinedZoneRecordsOverview,
   TechnitiumCreateDhcpScopeRequest,
   TechnitiumCreateDhcpScopeResult,
+  TechnitiumCredentialProbe,
   TechnitiumDashboardStatsData,
   TechnitiumDhcpLeaseList,
   TechnitiumDhcpScope,
@@ -86,6 +109,7 @@ interface TechnitiumAppsListPayload {
 interface TechnitiumNodeQueryLogSnapshot {
   nodeId: string;
   baseUrl: string;
+  groupId: string;
   fetchedAt: string;
   data?: TechnitiumQueryLogPage;
   error?: string;
@@ -236,14 +260,39 @@ interface DhcpScopeCapabilityState {
   hasSuccessfulScan: boolean;
 }
 
+interface AutomationCredentialConfig {
+  configured: boolean;
+  source: "none" | "scalar" | "map" | "invalid";
+  credentialsByGroup: Map<string, GroupCredential>;
+  reason?: string;
+}
+
 @Injectable()
 export class TechnitiumService {
   private readonly logger = new Logger(TechnitiumService.name);
   private readonly sessionAuthEnabled = true;
-  private readonly backgroundToken =
-    (process.env.TECHNITIUM_BACKGROUND_TOKEN ?? "").trim() || undefined;
-  private readonly scheduleToken =
-    (process.env.TECHNITIUM_SCHEDULE_TOKEN ?? "").trim() || undefined;
+  private readonly backgroundToken = getEnvOrFile(
+    "TECHNITIUM_BACKGROUND_TOKEN",
+  );
+  private readonly scheduleToken = getEnvOrFile("TECHNITIUM_SCHEDULE_TOKEN");
+  private readonly backgroundCredentials: AutomationCredentialConfig;
+  private readonly scheduleCredentials: AutomationCredentialConfig;
+  private backgroundGroupCredentials?: GroupCredentialStatusEnvelope;
+  private scheduleGroupCredentials?: GroupCredentialStatusEnvelope;
+  private readonly sessionNodeReadmissionFlights = new Map<
+    string,
+    Promise<void>
+  >();
+  private readonly automationNodeReadmissionFlights = new Map<
+    string,
+    Promise<void>
+  >();
+  private readonly automationNodeRetryAfter = new Map<string, number>();
+  private readonly automationNodeRetryAttempts = new Map<string, number>();
+  private readonly backgroundTopologyDomainsByGroup = new Map<string, string>();
+  private readonly scheduleTopologyDomainsByGroup = new Map<string, string>();
+  private readonly SESSION_NODE_RETRY_BASE_MS = 5_000;
+  private readonly SESSION_NODE_RETRY_MAX_MS = 60_000;
 
   // Reuse a single Agent so Node can reuse sockets (and DNS results) instead of
   // resolving/reconnecting for every Technitium request.
@@ -269,7 +318,7 @@ export class TechnitiumService {
         validated: true;
         valid: boolean;
         hasAppsModify: boolean;
-        hasCacheModify: boolean;
+        hasCacheDelete: boolean;
         username?: string;
         reason?: string;
         transient?: boolean;
@@ -279,7 +328,7 @@ export class TechnitiumService {
     string,
     TechnitiumQueryLoggerMetadata
   >();
-  private lastClusterTopologyFingerprint?: string;
+  private readonly clusterTopologyFingerprints = new Map<string, string>();
   private readonly nodeClusterMappingFingerprints = new Map<string, string>();
 
   // Hostname resolution cache: IP → { hostname, lastUpdated, source }
@@ -300,10 +349,10 @@ export class TechnitiumService {
   private readonly DHCP_SCOPE_CAPABILITY_TTL_MS = 5 * 60 * 1000; // 5 minutes
   private readonly DHCP_SCOPE_DISCOVERY_RETRY_MS = 30 * 1000; // 30 seconds
   private readonly DHCP_SCOPE_DISCOVERY_TIMEOUT_MS = 5 * 1000; // 5 seconds
-  private dhcpLeaseCacheForBackground?: {
-    map: Map<string, string>;
-    fetchedAt: number;
-  };
+  private readonly dhcpLeaseCacheForBackground = new Map<
+    string,
+    { map: Map<string, string>; fetchedAt: number }
+  >();
   private readonly dhcpScopeCapabilities = new Map<
     string,
     DhcpScopeCapabilityState
@@ -344,9 +393,34 @@ export class TechnitiumService {
     private readonly dhcpSnapshotService: DhcpSnapshotService,
     private readonly zoneSnapshotService: ZoneSnapshotService,
   ) {
+    this.backgroundCredentials = this.loadAutomationCredentials("background");
+    this.scheduleCredentials = this.loadAutomationCredentials("schedule");
+
+    if (this.backgroundCredentials.reason) {
+      this.backgroundTokenValidation = {
+        validated: true,
+        okForPtr: false,
+        reason: this.backgroundCredentials.reason,
+      };
+      this.logger.warn(this.backgroundCredentials.reason);
+    }
+    if (this.scheduleCredentials.reason) {
+      this.scheduleTokenValidation = {
+        validated: true,
+        valid: false,
+        hasAppsModify: false,
+        hasCacheDelete: false,
+        reason: this.scheduleCredentials.reason,
+      };
+      this.logger.warn(this.scheduleCredentials.reason);
+    }
+
     // If TECHNITIUM_BACKGROUND_TOKEN is set, validate it so the UI can surface
     // scope/access issues globally. Only session-auth mode uses it for background PTR.
-    if (this.backgroundToken) {
+    if (
+      this.backgroundCredentials.configured &&
+      !this.backgroundCredentials.reason
+    ) {
       this.validateBackgroundTokenForPtr()
         .then((result) => {
           if (!result.okForPtr) {
@@ -391,6 +465,68 @@ export class TechnitiumService {
     this.startPtrTimer();
   }
 
+  private loadAutomationCredentials(
+    role: "background" | "schedule",
+  ): AutomationCredentialConfig {
+    const scalarName =
+      role === "background"
+        ? "TECHNITIUM_BACKGROUND_TOKEN"
+        : "TECHNITIUM_SCHEDULE_TOKEN";
+    const mapName = `${scalarName}_MAP_FILE`;
+    const scalar =
+      role === "background" ? this.backgroundToken : this.scheduleToken;
+    const mapPath = process.env[mapName]?.trim();
+    const configured = !!scalar || !!mapPath;
+    const disabled = (reason: string): AutomationCredentialConfig => ({
+      configured,
+      source: "invalid",
+      credentialsByGroup: new Map(),
+      reason,
+    });
+
+    if (scalar && mapPath) {
+      return disabled(
+        `${scalarName} and ${mapName} cannot both be configured; ${role} automation is disabled.`,
+      );
+    }
+    if (scalar) {
+      if (!hasImplicitNodeGrouping(this.nodeConfigs)) {
+        return disabled(
+          `${scalarName} is valid only with implicit single-group node configuration; ${role} automation is disabled.`,
+        );
+      }
+      return {
+        configured: true,
+        source: "scalar",
+        credentialsByGroup: new Map([
+          [INTERNAL_DEFAULT_GROUP_ID, { username: "", token: scalar }],
+        ]),
+      };
+    }
+    if (mapPath) {
+      try {
+        return {
+          configured: true,
+          source: "map",
+          credentialsByGroup: loadAutomationCredentialMap(
+            mapPath,
+            new Set(configuredGroupIds(this.nodeConfigs)),
+            mapName,
+          ),
+        };
+      } catch {
+        return disabled(
+          `${mapName} is malformed or contains an unknown group; ${role} automation is disabled.`,
+        );
+      }
+    }
+    return {
+      configured: false,
+      source: "none",
+      credentialsByGroup: new Map(),
+    };
+  }
+
   /**
    * Eagerly validates TECHNITIUM_SCHEDULE_TOKEN at startup so operators see
    * permission or connectivity problems in the boot log instead of discovering
@@ -399,7 +535,8 @@ export class TechnitiumService {
    * on the cached result.
    */
   private scheduleEagerScheduleTokenValidation(): void {
-    if (!this.scheduleToken) return;
+    if (!this.scheduleCredentials.configured || this.scheduleCredentials.reason)
+      return;
     this.validateScheduleToken().catch((error) => {
       this.logger.warn(
         `TECHNITIUM_SCHEDULE_TOKEN validation threw: ${error instanceof Error ? error.message : String(error)}`,
@@ -430,8 +567,9 @@ export class TechnitiumService {
     reason?: string;
     tooPrivilegedSections?: string[];
     transient?: boolean;
+    groups?: GroupCredentialStatusEnvelope;
   } {
-    const configured = !!this.backgroundToken;
+    const configured = this.backgroundCredentials.configured;
     const sessionAuthEnabled = this.sessionAuthEnabled;
 
     if (!configured) {
@@ -440,11 +578,23 @@ export class TechnitiumService {
         sessionAuthEnabled,
         validated: true,
         okForPtr: true,
+        groups: this.getAutomationGroupEnvelope(
+          this.backgroundCredentials,
+          this.backgroundGroupCredentials,
+        ),
       };
     }
 
     if (!this.backgroundTokenValidation.validated) {
-      return { configured, sessionAuthEnabled, validated: false };
+      return {
+        configured,
+        sessionAuthEnabled,
+        validated: false,
+        groups: this.getAutomationGroupEnvelope(
+          this.backgroundCredentials,
+          this.backgroundGroupCredentials,
+        ),
+      };
     }
 
     return {
@@ -457,6 +607,10 @@ export class TechnitiumService {
       tooPrivilegedSections:
         this.backgroundTokenValidation.tooPrivilegedSections,
       transient: this.backgroundTokenValidation.transient,
+      groups: this.getAutomationGroupEnvelope(
+        this.backgroundCredentials,
+        this.backgroundGroupCredentials,
+      ),
     };
   }
 
@@ -470,9 +624,10 @@ export class TechnitiumService {
     username?: string;
     reason?: string;
     hasAppsModify: boolean | null;
-    hasCacheModify: boolean | null;
+    hasCacheDelete: boolean | null;
+    groups?: GroupCredentialStatusEnvelope;
   } {
-    const configured = !!this.scheduleToken;
+    const configured = this.scheduleCredentials.configured;
 
     if (!configured) {
       return {
@@ -480,7 +635,11 @@ export class TechnitiumService {
         valid: false,
         reason: "TECHNITIUM_SCHEDULE_TOKEN is not set.",
         hasAppsModify: null,
-        hasCacheModify: null,
+        hasCacheDelete: null,
+        groups: this.getAutomationGroupEnvelope(
+          this.scheduleCredentials,
+          this.scheduleGroupCredentials,
+        ),
       };
     }
 
@@ -491,7 +650,11 @@ export class TechnitiumService {
         configured,
         valid: null,
         hasAppsModify: null,
-        hasCacheModify: null,
+        hasCacheDelete: null,
+        groups: this.getAutomationGroupEnvelope(
+          this.scheduleCredentials,
+          this.scheduleGroupCredentials,
+        ),
       };
     }
 
@@ -501,7 +664,11 @@ export class TechnitiumService {
       username: this.scheduleTokenValidation.username,
       reason: this.scheduleTokenValidation.reason,
       hasAppsModify: this.scheduleTokenValidation.hasAppsModify,
-      hasCacheModify: this.scheduleTokenValidation.hasCacheModify,
+      hasCacheDelete: this.scheduleTokenValidation.hasCacheDelete,
+      groups: this.getAutomationGroupEnvelope(
+        this.scheduleCredentials,
+        this.scheduleGroupCredentials,
+      ),
     };
   }
 
@@ -523,9 +690,18 @@ export class TechnitiumService {
   async validateExplicitSessionToken(
     nodeId: string,
     token: string,
-  ): Promise<{ username: string }> {
+  ): Promise<TechnitiumCredentialProbe> {
     const node = this.findNode(nodeId);
-    type SessionInfo = { username?: string };
+    type SessionInfo = {
+      username?: string;
+      info?: {
+        permissions?: TechnitiumCredentialProbe["permissions"];
+        clusterInitialized?: boolean;
+        clusterDomain?: string;
+        dnsServerDomain?: string;
+        clusterNodes?: TechnitiumCredentialProbe["clusterNodes"];
+      };
+    };
     const envelope = await this.requestWithExplicitToken<
       TechnitiumApiResponse<SessionInfo>
     >(node, { method: "GET", url: "/api/user/session/get" }, token, {
@@ -544,21 +720,32 @@ export class TechnitiumService {
       );
     }
 
-    const username =
-      envelopeObject.response?.username ?? envelopeObject.username;
+    const sessionInfo = envelopeObject.response ?? envelopeObject;
+    const username = sessionInfo.username;
     if (!username) {
       throw new UnauthorizedException(
         `Technitium DNS node "${node.id}" did not identify the mapped token owner.`,
       );
     }
-    return { username };
+    const info = sessionInfo.info ?? {};
+    return {
+      username,
+      permissions: info.permissions ?? {},
+      clusterInitialized: info.clusterInitialized === true,
+      clusterDomain: info.clusterDomain,
+      dnsServerDomain: info.dnsServerDomain,
+      clusterNodes: Array.isArray(info.clusterNodes) ? info.clusterNodes : [],
+    };
   }
 
   /**
    * Resolve a hostname to IP address with timeout.
    * Used to match cluster nodes when hostnames don't resolve to the configured baseUrl IPs.
    */
-  private async resolveHostname(hostname: string): Promise<string | undefined> {
+  private async resolveHostname(
+    hostname: string,
+    groupId = INTERNAL_DEFAULT_GROUP_ID,
+  ): Promise<string | undefined> {
     if (!hostname) return undefined;
 
     // If it's already an IP address, return it
@@ -566,7 +753,7 @@ export class TechnitiumService {
       return hostname;
     }
 
-    const cacheKey = hostname.toLowerCase();
+    const cacheKey = `${groupId}\u0000${hostname.toLowerCase()}`;
     const cached = this.hostnameResolutionCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.ip;
@@ -602,7 +789,8 @@ export class TechnitiumService {
     clusterNodes: Array<{
       name: string;
       url: string;
-      ipAddress: string;
+      ipAddress?: string;
+      ipAddresses?: string[];
       type: "Primary" | "Secondary";
       state: string;
     }>,
@@ -612,25 +800,36 @@ export class TechnitiumService {
         name: node.name || "",
         url: node.url || "",
         ipAddress: node.ipAddress || "",
+        ipAddresses: [...(node.ipAddresses ?? [])].sort(),
         type: node.type || "Secondary",
         state: node.state || "",
       }))
       .sort((a, b) =>
-        [a.name, a.url, a.ipAddress, a.type, a.state]
+        [a.name, a.url, a.ipAddress, a.ipAddresses.join(","), a.type, a.state]
           .join("|")
           .localeCompare(
-            [b.name, b.url, b.ipAddress, b.type, b.state].join("|"),
+            [
+              b.name,
+              b.url,
+              b.ipAddress,
+              b.ipAddresses.join(","),
+              b.type,
+              b.state,
+            ].join("|"),
           ),
       );
 
     return JSON.stringify({ domain: domain || "", nodes: normalizedNodes });
   }
 
-  private shouldLogClusterTopology(fingerprint: string): boolean {
-    if (this.lastClusterTopologyFingerprint === fingerprint) {
+  private shouldLogClusterTopology(
+    groupId: string,
+    fingerprint: string,
+  ): boolean {
+    if (this.clusterTopologyFingerprints.get(groupId) === fingerprint) {
       return false;
     }
-    this.lastClusterTopologyFingerprint = fingerprint;
+    this.clusterTopologyFingerprints.set(groupId, fingerprint);
     return true;
   }
 
@@ -657,18 +856,23 @@ export class TechnitiumService {
     // OPTIMIZATION: Only query ONE node for cluster state since any node can tell us about the entire cluster
     // This reduces N API calls to 1, dramatically improving performance (e.g., 3 nodes: 3x faster)
     const authMode = opts?.authMode ?? "session";
-    let sharedClusterInfo: {
+    type SharedClusterInfo = {
       initialized: boolean;
       domain?: string;
       clusterNodes?: Array<{
         id: number;
         name: string;
         url: string;
-        ipAddress: string;
+        ipAddress?: string;
+        ipAddresses?: string[];
         type: "Primary" | "Secondary";
         state: string;
       }>;
-    } | null = null;
+    };
+    const sharedClusterInfoByGroup = new Map<
+      string,
+      SharedClusterInfo | null
+    >();
 
     // Try to get cluster info from a node we are authenticated to.
     // - "session" mode (default, request-scoped): require a per-user session
@@ -680,20 +884,21 @@ export class TechnitiumService {
     //   would see all nodes as Standalone and skip cluster-aware behavior.
     if (this.nodeConfigs.length > 0) {
       const session = AuthRequestContext.getSession();
-      const probeNodes =
-        authMode === "session"
-          ? this.sessionAuthEnabled
-            ? this.nodeConfigs.filter(
-                (node) => !!session?.tokensByNodeId?.[node.id],
-              )
-            : this.nodeConfigs
-          : this.nodeConfigs;
-
-      if (probeNodes.length === 0) {
-        // No authenticated nodes available (or no nodes configured)
-        // -> treat as standalone.
-        sharedClusterInfo = null;
-      } else {
+      for (const groupId of configuredGroupIds(this.nodeConfigs)) {
+        const groupNodes = this.nodeConfigs.filter(
+          (node) => nodeGroupId(node) === groupId,
+        );
+        const probeNodes =
+          authMode === "session"
+            ? this.sessionAuthEnabled
+              ? groupNodes.filter(
+                  (node) =>
+                    !!session?.tokensByNodeId?.[node.id] ||
+                    !!session?.pendingTokensByNodeId?.[node.id],
+                )
+              : groupNodes
+            : groupNodes;
+        sharedClusterInfoByGroup.set(groupId, null);
         for (const probeNode of probeNodes) {
           try {
             // Get full cluster state from first node
@@ -708,7 +913,8 @@ export class TechnitiumService {
                   id: number;
                   name: string;
                   url: string;
-                  ipAddress: string;
+                  ipAddress?: string;
+                  ipAddresses?: string[];
                   type: "Primary" | "Secondary";
                   state: string;
                 }>;
@@ -724,24 +930,31 @@ export class TechnitiumService {
               { authMode },
             );
 
+            if (
+              response.status === "ok" &&
+              !response.info?.clusterInitialized
+            ) {
+              sharedClusterInfoByGroup.set(groupId, { initialized: false });
+              break;
+            }
             if (response.status === "ok" && response.info?.clusterInitialized) {
               const clusterNodes = response.info.clusterNodes || [];
-              sharedClusterInfo = {
+              sharedClusterInfoByGroup.set(groupId, {
                 initialized: true,
                 domain: response.info.clusterDomain,
                 clusterNodes,
-              };
+              });
               const topologyFingerprint = this.buildClusterTopologyFingerprint(
                 response.info.clusterDomain,
                 clusterNodes,
               );
-              if (this.shouldLogClusterTopology(topologyFingerprint)) {
+              if (this.shouldLogClusterTopology(groupId, topologyFingerprint)) {
                 this.logger.log(
-                  `Cluster detected: ${response.info.clusterDomain} with ${clusterNodes.length} nodes`,
+                  `Cluster detected for group "${groupId}": ${response.info.clusterDomain} with ${clusterNodes.length} nodes`,
                 );
                 for (const cn of clusterNodes) {
                   this.logger.debug(
-                    `  Cluster node: name="${cn.name}", url="${cn.url}", ip="${cn.ipAddress}", type="${cn.type}"`,
+                    `  Cluster node: name="${cn.name}", url="${cn.url}", ips="${[cn.ipAddress, ...(cn.ipAddresses ?? [])].filter(Boolean).join(",")}", type="${cn.type}"`,
                   );
                 }
               }
@@ -759,7 +972,10 @@ export class TechnitiumService {
     // Build node summaries using shared cluster info
     // Note: This needs to be async for DNS resolution
     const nodeSummariesPromise = this.nodeConfigs.map(
-      async ({ id, name, baseUrl }) => {
+      async ({ id, name, baseUrl, groupId }) => {
+        const configuredGroupId = groupId ?? INTERNAL_DEFAULT_GROUP_ID;
+        const sharedClusterInfo =
+          sharedClusterInfoByGroup.get(configuredGroupId) ?? null;
         try {
           if (!sharedClusterInfo?.initialized) {
             // No clustering or failed to detect - return standalone
@@ -767,6 +983,7 @@ export class TechnitiumService {
               id,
               name: name || id,
               baseUrl,
+              groupId: configuredGroupId,
               clusterState: { initialized: false, type: "Standalone" as const },
               isPrimary: false,
             };
@@ -774,7 +991,7 @@ export class TechnitiumService {
 
           // Try to find this node in the cluster topology using multiple matching strategies:
           // 1. Match by name prefix (our node ID "node1" should match "node1.home.arpa")
-          // 2. Match by IP address (extract IP from baseUrl and compare to clusterNode.ipAddress/resolved IP)
+          // 2. Match by IP address (supports legacy singular and current plural fields)
           // 3. Match by URL hostname (compare baseUrl hostname to cluster node URL hostname)
 
           // Extract IP/hostname from our baseUrl for matching
@@ -793,7 +1010,11 @@ export class TechnitiumService {
             }
 
             // Strategy 2: IP address match (direct)
-            if (baseUrlHost && n.ipAddress && baseUrlHost === n.ipAddress) {
+            if (
+              baseUrlHost &&
+              (baseUrlHost === n.ipAddress ||
+                n.ipAddresses?.includes(baseUrlHost) === true)
+            ) {
               return true;
             }
 
@@ -825,8 +1046,10 @@ export class TechnitiumService {
                     const clusterHostname = clusterUrl.hostname;
                     // Skip if cluster URL is also an IP (already checked in Strategy 3)
                     if (!/^\d+\.\d+\.\d+\.\d+$/.test(clusterHostname)) {
-                      const resolvedClusterIp =
-                        await this.resolveHostname(clusterHostname);
+                      const resolvedClusterIp = await this.resolveHostname(
+                        clusterHostname,
+                        configuredGroupId,
+                      );
                       if (resolvedClusterIp === baseUrlHost) {
                         clusterNode = cn;
                         this.logger.debug(
@@ -842,15 +1065,21 @@ export class TechnitiumService {
               }
             } else {
               // baseUrl is a hostname - resolve it and compare to cluster node IPs/resolved hostnames
-              const resolvedBaseUrlIp = await this.resolveHostname(baseUrlHost);
+              const resolvedBaseUrlIp = await this.resolveHostname(
+                baseUrlHost,
+                configuredGroupId,
+              );
 
               if (resolvedBaseUrlIp) {
                 for (const cn of sharedClusterInfo.clusterNodes || []) {
-                  // Check against cluster node's ipAddress field
-                  if (cn.ipAddress && cn.ipAddress === resolvedBaseUrlIp) {
+                  // Check against legacy singular and current plural IP fields.
+                  if (
+                    cn.ipAddress === resolvedBaseUrlIp ||
+                    cn.ipAddresses?.includes(resolvedBaseUrlIp) === true
+                  ) {
                     clusterNode = cn;
                     this.logger.debug(
-                      `  DNS match: ${baseUrlHost} → ${resolvedBaseUrlIp} matches cluster node IP ${cn.ipAddress}`,
+                      `  DNS match: ${baseUrlHost} → ${resolvedBaseUrlIp} matches cluster node ${cn.name}`,
                     );
                     break;
                   }
@@ -861,6 +1090,7 @@ export class TechnitiumService {
                       const clusterUrl = new URL(cn.url);
                       const resolvedClusterIp = await this.resolveHostname(
                         clusterUrl.hostname,
+                        configuredGroupId,
                       );
                       if (resolvedClusterIp === resolvedBaseUrlIp) {
                         clusterNode = cn;
@@ -891,6 +1121,7 @@ export class TechnitiumService {
             id,
             name: name || id,
             baseUrl,
+            groupId: configuredGroupId,
             clusterState: {
               initialized: true,
               domain: sharedClusterInfo.domain,
@@ -909,6 +1140,7 @@ export class TechnitiumService {
             id,
             name: name || id,
             baseUrl,
+            groupId: configuredGroupId,
             clusterState: {
               initialized: false,
               type: "Standalone" as const,
@@ -939,8 +1171,8 @@ export class TechnitiumService {
    *   flushNodes  = every physical node in the cluster (Primary + secondaries)
    *
    * Standalone candidates are passed through unchanged (write == flush == self).
-   * If a candidate is part of a cluster but no Primary is discoverable, falls
-   * back to direct-write with a WARN so the caller still makes progress.
+   * Direct-write fallback is limited to the implicit legacy group. Explicit
+   * groups fail closed when no validated, admitted Primary is available.
    *
    * Pre-fetched `summaries` can be passed to avoid a duplicate `listNodes()`
    * call when the caller already has them.
@@ -949,30 +1181,57 @@ export class TechnitiumService {
     candidateNodeIds: string[],
     summaries?: TechnitiumNodeSummary[],
   ): Promise<{
-    perCandidate: Map<string, { writeTarget: string; flushNodes: string[] }>;
+    perCandidate: Map<
+      string,
+      {
+        writeTarget?: string;
+        flushNodes: string[];
+        skippedFlushNodes?: string[];
+        reason?: string;
+      }
+    >;
     writeTargets: string[];
   }> {
     const nodes = summaries ?? (await this.listNodes());
     const byId = new Map(nodes.map((s) => [s.id, s]));
 
-    // Index: clusterDomain → Primary summary. Multiple Primaries per domain
-    // shouldn't happen; we take the first one encountered.
-    const primaryByDomain = new Map<string, TechnitiumNodeSummary>();
-    // Index: clusterDomain → all physical node IDs in that cluster.
+    const primaryByGroup = new Map<string, TechnitiumNodeSummary>();
     const clusterMembers = new Map<string, string[]>();
+    const skippedClusterMembers = new Map<string, string[]>();
+    let admittedWriteNodeIds = this.getAdmittedNodeIds("primaryConfigWrite");
+    let admittedFlushNodeIds = this.getAdmittedNodeIds("cacheFlush");
+    if (this.nodeConfigs.length === 0) {
+      admittedWriteNodeIds = new Set(nodes.map((node) => node.id));
+      admittedFlushNodeIds = new Set(nodes.map((node) => node.id));
+    }
     for (const s of nodes) {
-      const domain = s.clusterState?.domain;
-      if (!s.clusterState?.initialized || !domain) continue;
-      if (s.isPrimary && !primaryByDomain.has(domain)) {
-        primaryByDomain.set(domain, s);
+      const groupId = s.groupId ?? INTERNAL_DEFAULT_GROUP_ID;
+      if (
+        s.isPrimary &&
+        !primaryByGroup.has(groupId) &&
+        admittedWriteNodeIds.has(s.id)
+      ) {
+        primaryByGroup.set(groupId, s);
       }
-      if (!clusterMembers.has(domain)) clusterMembers.set(domain, []);
-      clusterMembers.get(domain)!.push(s.id);
+      if (!clusterMembers.has(groupId)) clusterMembers.set(groupId, []);
+      if (admittedFlushNodeIds.has(s.id)) {
+        clusterMembers.get(groupId)!.push(s.id);
+      } else {
+        if (!skippedClusterMembers.has(groupId)) {
+          skippedClusterMembers.set(groupId, []);
+        }
+        skippedClusterMembers.get(groupId)!.push(s.id);
+      }
     }
 
     const perCandidate = new Map<
       string,
-      { writeTarget: string; flushNodes: string[] }
+      {
+        writeTarget?: string;
+        flushNodes: string[];
+        skippedFlushNodes?: string[];
+        reason?: string;
+      }
     >();
     const writeTargetSet = new Set<string>();
 
@@ -981,47 +1240,92 @@ export class TechnitiumService {
       // Unknown node: pass through — legacy behavior, will error at request time
       // if truly invalid. Callers can decide what to do with the result.
       if (!summary) {
-        perCandidate.set(nodeId, {
-          writeTarget: nodeId,
-          flushNodes: [nodeId],
-        });
-        writeTargetSet.add(nodeId);
+        if (this.nodeConfigs.length === 0) {
+          perCandidate.set(nodeId, {
+            writeTarget: nodeId,
+            flushNodes: [nodeId],
+          });
+          writeTargetSet.add(nodeId);
+        } else if (hasImplicitNodeGrouping(this.nodeConfigs)) {
+          perCandidate.set(nodeId, {
+            writeTarget: nodeId,
+            flushNodes: admittedFlushNodeIds.has(nodeId) ? [nodeId] : [],
+            ...(!admittedFlushNodeIds.has(nodeId)
+              ? { skippedFlushNodes: [nodeId] }
+              : {}),
+          });
+          writeTargetSet.add(nodeId);
+        } else {
+          perCandidate.set(nodeId, {
+            flushNodes: [],
+            reason:
+              "The requested node is not a validated member of a configured group.",
+          });
+        }
         continue;
       }
 
       const domain = summary.clusterState?.domain;
       const clustered = summary.clusterState?.initialized === true;
+      const groupId = summary.groupId ?? INTERNAL_DEFAULT_GROUP_ID;
 
       if (!clustered || !domain) {
         // Standalone — self-write, self-flush.
-        perCandidate.set(nodeId, {
-          writeTarget: nodeId,
-          flushNodes: [nodeId],
-        });
-        writeTargetSet.add(nodeId);
+        if (admittedWriteNodeIds.has(nodeId)) {
+          perCandidate.set(nodeId, {
+            writeTarget: nodeId,
+            flushNodes: admittedFlushNodeIds.has(nodeId) ? [nodeId] : [],
+            ...(!admittedFlushNodeIds.has(nodeId)
+              ? { skippedFlushNodes: [nodeId] }
+              : {}),
+          });
+          writeTargetSet.add(nodeId);
+        } else {
+          perCandidate.set(nodeId, {
+            flushNodes: [],
+            reason:
+              "The standalone node is not admitted for configuration writes.",
+          });
+        }
         continue;
       }
 
-      const primary = primaryByDomain.get(domain);
+      const primary = primaryByGroup.get(groupId);
       if (!primary) {
         // Clustered but Primary wasn't discoverable (probe failed, or this
         // node's cluster has no node marked Primary in our summaries).
         // Fall back to direct write so we make progress; warn once.
-        this.logger.warn(
-          `Cluster "${domain}" has no discoverable Primary — falling back to direct write on "${nodeId}".`,
-        );
-        perCandidate.set(nodeId, {
-          writeTarget: nodeId,
-          flushNodes: [nodeId],
-        });
-        writeTargetSet.add(nodeId);
+        if (
+          this.nodeConfigs.length === 0 ||
+          hasImplicitNodeGrouping(this.nodeConfigs)
+        ) {
+          this.logger.warn(
+            `Cluster "${domain}" has no discoverable Primary — falling back to direct write on "${nodeId}" in implicit legacy mode.`,
+          );
+          perCandidate.set(nodeId, {
+            writeTarget: nodeId,
+            flushNodes: admittedFlushNodeIds.has(nodeId) ? [nodeId] : [],
+            ...(!admittedFlushNodeIds.has(nodeId)
+              ? { skippedFlushNodes: [nodeId] }
+              : {}),
+          });
+          writeTargetSet.add(nodeId);
+        } else {
+          perCandidate.set(nodeId, {
+            flushNodes: [],
+            reason: `Group "${groupId}" has no reachable, validated, admitted Primary.`,
+          });
+        }
         continue;
       }
 
-      const flushNodes = clusterMembers.get(domain) ?? [nodeId];
+      const flushNodes = clusterMembers.get(groupId) ?? [];
       perCandidate.set(nodeId, {
         writeTarget: primary.id,
         flushNodes,
+        ...(skippedClusterMembers.get(groupId)?.length
+          ? { skippedFlushNodes: skippedClusterMembers.get(groupId) }
+          : {}),
       });
       writeTargetSet.add(primary.id);
     }
@@ -1030,6 +1334,28 @@ export class TechnitiumService {
       perCandidate,
       writeTargets: [...writeTargetSet],
     };
+  }
+
+  private getAdmittedNodeIds(
+    role: keyof GroupCredentialStatus["admittedNodeIds"],
+  ): Set<string> {
+    const session = AuthRequestContext.getSession();
+    const envelope = session?.groupCredentials ?? this.scheduleGroupCredentials;
+    if (envelope) {
+      return new Set(
+        envelope.groups.flatMap((group) => group.admittedNodeIds[role]),
+      );
+    }
+    if (session) {
+      return new Set(Object.keys(session.tokensByNodeId));
+    }
+    if (this.scheduleCredentials.source === "scalar") {
+      return new Set(this.nodeConfigs.map((node) => node.id));
+    }
+    if (hasImplicitNodeGrouping(this.nodeConfigs)) {
+      return new Set(this.nodeConfigs.map((node) => node.id));
+    }
+    return new Set();
   }
 
   /**
@@ -1053,7 +1379,8 @@ export class TechnitiumService {
             id: number;
             name: string;
             url: string;
-            ipAddress: string;
+            ipAddress?: string;
+            ipAddresses?: string[];
             type: "Primary" | "Secondary";
             state: string;
           }>;
@@ -1562,7 +1889,10 @@ export class TechnitiumService {
             lease.hostName &&
             typeof lease.hostName === "string"
           ) {
-            ipToHostname.set(lease.address, lease.hostName);
+            ipToHostname.set(
+              this.clientNamespaceKey(nodeGroupId(node), lease.address),
+              lease.hostName,
+            );
           }
         }
       }
@@ -1607,29 +1937,32 @@ export class TechnitiumService {
 
   private async getAllDhcpLeasesWithOptions(options?: {
     authMode?: "session" | "background";
+    sourceGroupId?: string;
   }): Promise<Map<string, string>> {
     const authMode = options?.authMode ?? "session";
     const now = Date.now();
+    const cacheKey = options?.sourceGroupId ?? "__all__";
+    const cachedLeases = this.dhcpLeaseCacheForBackground.get(cacheKey);
 
-    if (authMode === "background" && this.dhcpLeaseCacheForBackground) {
-      if (
-        now - this.dhcpLeaseCacheForBackground.fetchedAt <
-        this.DHCP_LEASE_CACHE_TTL_MS
-      ) {
-        return new Map(this.dhcpLeaseCacheForBackground.map);
+    if (authMode === "background" && cachedLeases) {
+      if (now - cachedLeases.fetchedAt < this.DHCP_LEASE_CACHE_TTL_MS) {
+        return new Map(cachedLeases.map);
       }
     }
 
     if (authMode === "background") {
-      await this.refreshDhcpScopeCapabilitiesIfNeeded();
-    } else if (this.backgroundToken) {
+      await this.refreshDhcpScopeCapabilitiesIfNeeded(options?.sourceGroupId);
+    } else if (this.backgroundCredentials.configured) {
       // Interactive requests must not wait for topology discovery. The
       // background refresh populates a shared capability map containing only
       // node IDs and enabled-scope names; it never caches session responses.
       void this.refreshDhcpScopeCapabilitiesIfNeeded();
     }
 
-    const candidateNodes = this.getDhcpLeaseCandidateNodes(authMode);
+    const candidateNodes = this.getDhcpLeaseCandidateNodes(
+      authMode,
+      options?.sourceGroupId,
+    );
 
     const allLeases = await Promise.all(
       candidateNodes.map((node) => {
@@ -1650,7 +1983,10 @@ export class TechnitiumService {
     }
 
     if (authMode === "background") {
-      this.dhcpLeaseCacheForBackground = { map: merged, fetchedAt: now };
+      this.dhcpLeaseCacheForBackground.set(cacheKey, {
+        map: merged,
+        fetchedAt: now,
+      });
     }
 
     return merged;
@@ -1658,8 +1994,26 @@ export class TechnitiumService {
 
   private getDhcpLeaseCandidateNodes(
     authMode: "session" | "background",
+    sourceGroupId?: string,
   ): TechnitiumNodeConfig[] {
+    const session = AuthRequestContext.getSession();
+    const credentialGroups =
+      authMode === "background"
+        ? this.backgroundGroupCredentials
+        : session?.groupCredentials;
     return this.nodeConfigs.filter((node) => {
+      if (sourceGroupId && nodeGroupId(node) !== sourceGroupId) {
+        return false;
+      }
+      const groupAdmission = credentialGroups?.groups.find(
+        (group) => group.groupId === nodeGroupId(node),
+      );
+      if (
+        groupAdmission &&
+        !groupAdmission.admittedNodeIds.dhcpRead.includes(node.id)
+      ) {
+        return false;
+      }
       const capability = this.dhcpScopeCapabilities.get(node.id);
 
       if (!capability?.hasSuccessfulScan) {
@@ -1673,9 +2027,12 @@ export class TechnitiumService {
     });
   }
 
-  private async refreshDhcpScopeCapabilitiesIfNeeded(): Promise<void> {
+  private async refreshDhcpScopeCapabilitiesIfNeeded(
+    sourceGroupId?: string,
+  ): Promise<void> {
     const now = Date.now();
     const nodesToRefresh = this.nodeConfigs.filter((node) => {
+      if (sourceGroupId && nodeGroupId(node) !== sourceGroupId) return false;
       const state = this.dhcpScopeCapabilities.get(node.id);
       if (!state) return true;
       if (now < state.retryAfter) return false;
@@ -1723,7 +2080,7 @@ export class TechnitiumService {
             !previous?.hasSuccessfulScan ||
             !this.haveSameSet(previous.enabledScopeNames, enabledScopeNames)
           ) {
-            this.dhcpLeaseCacheForBackground = undefined;
+            this.dhcpLeaseCacheForBackground.clear();
           }
 
           this.dhcpScopeCapabilities.set(node.id, {
@@ -1793,7 +2150,7 @@ export class TechnitiumService {
 
   private invalidateDhcpScopeCapability(nodeId: string): void {
     this.dhcpScopeCapabilities.delete(nodeId);
-    this.dhcpLeaseCacheForBackground = undefined;
+    this.dhcpLeaseCacheForBackground.clear();
     this.lastDhcpScopeTopologyFingerprint = undefined;
   }
 
@@ -1812,6 +2169,7 @@ export class TechnitiumService {
   private enrichWithHostnames<T extends TechnitiumQueryLogEntry>(
     entries: T[],
     ipToHostname: Map<string, string>,
+    defaultGroupId?: string,
   ): T[] {
     return entries.map((entry) => {
       const clientIp = entry.clientIpAddress;
@@ -1824,6 +2182,9 @@ export class TechnitiumService {
       if (!clientIp) {
         return entry;
       }
+      const groupId =
+        entry.groupId ?? defaultGroupId ?? INTERNAL_DEFAULT_GROUP_ID;
+      const clientKey = this.clientNamespaceKey(groupId, clientIp);
 
       // If the entry already has a non-IP clientName, preserve it.
       // This is important for the SQLite stored logs path where we want to
@@ -1833,24 +2194,24 @@ export class TechnitiumService {
       }
 
       // Track this IP for future PTR lookups (only when hostname is unknown)
-      this.recentClientIps.add(clientIp);
+      this.recentClientIps.add(clientKey);
 
       // Priority 1: Use DHCP hostname if available (most reliable for local devices)
-      if (ipToHostname.has(clientIp)) {
-        return { ...entry, clientName: ipToHostname.get(clientIp) };
+      if (ipToHostname.has(clientKey)) {
+        return { ...entry, groupId, clientName: ipToHostname.get(clientKey) };
       }
 
       // Priority 2: Check hostname cache (from previous PTR lookups)
-      const cached = this.hostnameCache.get(clientIp);
+      const cached = this.hostnameCache.get(clientKey);
       if (
         cached &&
         Date.now() - cached.lastUpdated < this.HOSTNAME_CACHE_TTL_MS
       ) {
-        return { ...entry, clientName: cached.hostname };
+        return { ...entry, groupId, clientName: cached.hostname };
       }
 
       // No hostname available yet - return entry as-is (will show IP only)
-      return entry;
+      return { ...entry, groupId };
     });
   }
 
@@ -1862,14 +2223,21 @@ export class TechnitiumService {
    */
   async enrichQueryLogEntriesWithHostnames<T extends TechnitiumQueryLogEntry>(
     entries: T[],
-    options?: { authMode?: "session" | "background" },
+    options?: {
+      authMode?: "session" | "background";
+      sourceGroupId?: string;
+    },
   ): Promise<T[]> {
     if (entries.length === 0) {
       return entries;
     }
 
     const ipToHostname = await this.getAllDhcpLeasesWithOptions(options);
-    return this.enrichWithHostnames(entries, ipToHostname);
+    return this.enrichWithHostnames(
+      entries,
+      ipToHostname,
+      options?.sourceGroupId,
+    );
   }
 
   /**
@@ -1880,8 +2248,12 @@ export class TechnitiumService {
   enrichQueryLogEntriesWithCachedHostnames<T extends TechnitiumQueryLogEntry>(
     entries: T[],
   ): T[] {
-    const cachedDhcp: Map<string, string> =
-      this.dhcpLeaseCacheForBackground?.map ?? new Map<string, string>();
+    const cachedDhcp = new Map<string, string>();
+    for (const cache of this.dhcpLeaseCacheForBackground.values()) {
+      for (const [clientKey, hostname] of cache.map) {
+        cachedDhcp.set(clientKey, hostname);
+      }
+    }
     return this.enrichWithHostnames(entries, cachedDhcp);
   }
 
@@ -1890,14 +2262,16 @@ export class TechnitiumService {
    * as autocomplete suggestions. Sources: DHCP leases (live) + PTR hostname
    * cache (from recent query log enrichment). DHCP takes priority.
    */
-  async getKnownClients(): Promise<{ ip: string; hostname?: string }[]> {
+  async getKnownClients(): Promise<
+    { groupId: string; ip: string; hostname?: string }[]
+  > {
     const ipToHostname = new Map<string, string>();
 
     // Source 1: live DHCP leases
     try {
       const dhcp = await this.getAllDhcpLeases();
-      for (const [ip, hostname] of dhcp.entries()) {
-        ipToHostname.set(ip, hostname);
+      for (const [clientKey, hostname] of dhcp.entries()) {
+        ipToHostname.set(clientKey, hostname);
       }
     } catch {
       // Best-effort; fall through to PTR cache
@@ -1905,19 +2279,20 @@ export class TechnitiumService {
 
     // Source 2: PTR-resolved hostname cache (IPs seen in query logs)
     const now = Date.now();
-    for (const [ip, entry] of this.hostnameCache.entries()) {
+    for (const [clientKey, entry] of this.hostnameCache.entries()) {
       if (
-        !ipToHostname.has(ip) &&
+        !ipToHostname.has(clientKey) &&
         now - entry.lastUpdated < this.HOSTNAME_CACHE_TTL_MS
       ) {
-        ipToHostname.set(ip, entry.hostname);
+        ipToHostname.set(clientKey, entry.hostname);
       }
     }
 
-    const clients: { ip: string; hostname?: string }[] = [];
+    const clients: { groupId: string; ip: string; hostname?: string }[] = [];
 
-    for (const [ip, hostname] of ipToHostname.entries()) {
-      clients.push({ ip, hostname });
+    for (const [clientKey, hostname] of ipToHostname.entries()) {
+      const parsed = this.parseClientNamespaceKey(clientKey);
+      clients.push({ ...parsed, hostname });
     }
 
     return clients.sort((a, b) => {
@@ -1931,7 +2306,7 @@ export class TechnitiumService {
    * Start periodic background PTR lookups for recently seen client IPs.
    */
   private startPeriodicPtrLookups(): void {
-    if (this.sessionAuthEnabled && !this.backgroundToken) {
+    if (this.sessionAuthEnabled && !this.backgroundCredentials.configured) {
       this.logger.log(
         "Session auth is enabled and TECHNITIUM_BACKGROUND_TOKEN is not set; skipping background PTR hostname resolution.",
       );
@@ -1947,23 +2322,23 @@ export class TechnitiumService {
       }
 
       // Take a snapshot of IPs to look up and clear the set
-      const ipsToLookup = Array.from(this.recentClientIps);
+      const clientsToLookup = Array.from(this.recentClientIps);
       this.recentClientIps.clear();
 
       // Limit to prevent overwhelming DNS
-      const limited = ipsToLookup.slice(0, this.MAX_PTR_LOOKUPS_PER_CYCLE);
+      const limited = clientsToLookup.slice(0, this.MAX_PTR_LOOKUPS_PER_CYCLE);
 
       this.logger.debug(`Running PTR lookup cycle for ${limited.length} IPs`);
 
-      // Use first available node for DNS resolution
-      const node = this.nodeConfigs[0];
-      if (!node) {
-        return;
-      }
-
       // Perform PTR lookups in parallel (but limited)
       await Promise.allSettled(
-        limited.map((ip) => this.performPtrLookup(node, ip)),
+        limited.map((clientKey) => {
+          const { groupId, ip } = this.parseClientNamespaceKey(clientKey);
+          const node = this.nodeConfigs.find(
+            (candidate) => nodeGroupId(candidate) === groupId,
+          );
+          return node ? this.performPtrLookup(node, ip) : Promise.resolve();
+        }),
       );
     };
 
@@ -1987,6 +2362,36 @@ export class TechnitiumService {
     Extract<typeof this.backgroundTokenValidation, { validated: true }>
   > {
     if (this.backgroundTokenValidation.validated) {
+      return this.backgroundTokenValidation;
+    }
+
+    if (
+      this.backgroundCredentials.source === "map" ||
+      this.backgroundCredentials.source === "scalar"
+    ) {
+      this.backgroundGroupCredentials =
+        await this.validateMappedAutomationCredentials("background");
+      const readyGroups = this.backgroundGroupCredentials.groups.filter(
+        (group) =>
+          (group.state === "ready" || group.state === "degraded") &&
+          group.capabilities.ptrRead,
+      );
+      const usernames = [
+        ...new Set(
+          readyGroups.flatMap((group) =>
+            group.verifiedUsername ? [group.verifiedUsername] : [],
+          ),
+        ),
+      ];
+      this.backgroundTokenValidation = {
+        validated: true,
+        okForPtr: readyGroups.length > 0,
+        username: usernames.length === 1 ? usernames[0] : undefined,
+        reason:
+          readyGroups.length > 0
+            ? undefined
+            : "No configured group has an admitted DnsClient: View credential for background PTR lookups.",
+      };
       return this.backgroundTokenValidation;
     }
 
@@ -2170,12 +2575,46 @@ export class TechnitiumService {
 
   private async validateScheduleToken(): Promise<void> {
     if (this.scheduleTokenValidation.validated) return;
+    if (
+      this.scheduleCredentials.source === "map" ||
+      this.scheduleCredentials.source === "scalar"
+    ) {
+      this.scheduleGroupCredentials =
+        await this.validateMappedAutomationCredentials("schedule");
+      const usableGroups = this.scheduleGroupCredentials.groups.filter(
+        (group) =>
+          (group.state === "ready" || group.state === "degraded") &&
+          group.capabilities.primaryConfigWrite,
+      );
+      const usernames = [
+        ...new Set(
+          usableGroups.flatMap((group) =>
+            group.verifiedUsername ? [group.verifiedUsername] : [],
+          ),
+        ),
+      ];
+      this.scheduleTokenValidation = {
+        validated: true,
+        valid: usableGroups.length > 0,
+        hasAppsModify: usableGroups.length > 0,
+        hasCacheDelete: usableGroups.some(
+          (group) => group.capabilities.cacheFlush,
+        ),
+        username: usernames.length === 1 ? usernames[0] : undefined,
+        reason:
+          usableGroups.length > 0
+            ? undefined
+            : "No configured group has an admitted Primary with Apps: Modify permission.",
+      };
+      this.logScheduleTokenValidationOutcome();
+      return;
+    }
     if (!this.scheduleToken) {
       this.scheduleTokenValidation = {
         validated: true,
         valid: false,
         hasAppsModify: false,
-        hasCacheModify: false,
+        hasCacheDelete: false,
         reason: "TECHNITIUM_SCHEDULE_TOKEN is not set.",
       };
       return;
@@ -2187,7 +2626,7 @@ export class TechnitiumService {
         validated: true,
         valid: false,
         hasAppsModify: false,
-        hasCacheModify: false,
+        hasCacheDelete: false,
         reason:
           "No nodes are configured; cannot validate TECHNITIUM_SCHEDULE_TOKEN.",
       };
@@ -2227,7 +2666,7 @@ export class TechnitiumService {
         validated: true,
         valid: false,
         hasAppsModify: false,
-        hasCacheModify: false,
+        hasCacheDelete: false,
         transient: true,
         reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN against node "${node.id}": ${message}`,
       };
@@ -2245,7 +2684,7 @@ export class TechnitiumService {
         validated: true,
         valid: false,
         hasAppsModify: false,
-        hasCacheModify: false,
+        hasCacheDelete: false,
         reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN: unexpected response from node "${node.id}".`,
       };
       this.logScheduleTokenValidationOutcome();
@@ -2257,7 +2696,7 @@ export class TechnitiumService {
         validated: true,
         valid: false,
         hasAppsModify: false,
-        hasCacheModify: false,
+        hasCacheDelete: false,
         reason:
           envelopeObj.status === "invalid-token"
             ? `TECHNITIUM_SCHEDULE_TOKEN was rejected by node "${node.id}": invalid token.`
@@ -2280,13 +2719,13 @@ export class TechnitiumService {
 
     const permissions = sessionInfo?.info?.permissions ?? {};
     const hasAppsModify = permissions["Apps"]?.canModify === true;
-    const hasCacheModify = permissions["Cache"]?.canModify === true;
+    const hasCacheDelete = permissions["Cache"]?.canDelete === true;
 
     this.scheduleTokenValidation = {
       validated: true,
       valid: true,
       hasAppsModify,
-      hasCacheModify,
+      hasCacheDelete,
       username: sessionInfo?.username,
       reason: hasAppsModify
         ? undefined
@@ -2324,14 +2763,14 @@ export class TechnitiumService {
       );
       return;
     }
-    if (!v.hasCacheModify) {
+    if (!v.hasCacheDelete) {
       this.logger.warn(
-        `TECHNITIUM_SCHEDULE_TOKEN is missing Cache: Modify permission — schedules with flushCacheOnChange=true will log warnings at window transitions, but apply/remove will otherwise work.`,
+        `TECHNITIUM_SCHEDULE_TOKEN is missing Cache: Delete permission — schedules with flushCacheOnChange=true will log warnings at window transitions, but apply/remove will otherwise work.`,
       );
       return;
     }
     this.logger.log(
-      `Validated TECHNITIUM_SCHEDULE_TOKEN (user: ${v.username ?? "unknown"}, Apps:Modify=true, Cache:Modify=true).`,
+      `Validated TECHNITIUM_SCHEDULE_TOKEN (user: ${v.username ?? "unknown"}, Apps:Modify=true, Cache:Delete=true).`,
     );
   }
 
@@ -2397,6 +2836,7 @@ export class TechnitiumService {
               name: "Primary",
               baseUrl: primaryOrigin,
               token: "",
+              groupId: node.groupId,
               queryLoggerAppName: undefined,
               queryLoggerClassPath: undefined,
             } satisfies TechnitiumNodeConfig)
@@ -2586,6 +3026,220 @@ export class TechnitiumService {
     }
   }
 
+  private async validateMappedAutomationCredentials(
+    role: "background" | "schedule",
+  ): Promise<GroupCredentialStatusEnvelope> {
+    const config =
+      role === "background"
+        ? this.backgroundCredentials
+        : this.scheduleCredentials;
+    const statuses: GroupCredentialStatus[] = [];
+    const topologyDomains =
+      role === "background"
+        ? this.backgroundTopologyDomainsByGroup
+        : this.scheduleTopologyDomainsByGroup;
+    topologyDomains.clear();
+
+    for (const groupId of configuredGroupIds(this.nodeConfigs)) {
+      const credential = config.credentialsByGroup.get(groupId);
+      if (!credential) {
+        statuses.push(notAuthorizedGroupStatus(groupId));
+        continue;
+      }
+      const nodes = this.nodeConfigs.filter(
+        (node) => nodeGroupId(node) === groupId,
+      );
+      const results = await Promise.all(
+        nodes.map(async (node) => {
+          try {
+            const probe = await this.validateExplicitSessionToken(
+              node.id,
+              credential.token,
+            );
+            if (
+              config.source === "map" &&
+              probe.username !== credential.username
+            ) {
+              throw new UnauthorizedException("Mapped token owner mismatch");
+            }
+            return { node, probe };
+          } catch (error) {
+            const unreachable =
+              error instanceof HttpException &&
+              [
+                HttpStatus.SERVICE_UNAVAILABLE,
+                HttpStatus.GATEWAY_TIMEOUT,
+              ].includes(error.getStatus());
+            return {
+              node,
+              error: unreachable
+                ? ("unreachable" as const)
+                : ("failed" as const),
+            };
+          }
+        }),
+      );
+      const successful = results.filter(
+        (
+          result,
+        ): result is {
+          node: TechnitiumNodeConfig;
+          probe: TechnitiumCredentialProbe;
+        } => "probe" in result,
+      );
+      const unreachableNodeIds = results.flatMap((result) =>
+        result.error === "unreachable" ? [result.node.id] : [],
+      );
+      const failedNodeIds = results.flatMap((result) =>
+        result.error === "failed" ? [result.node.id] : [],
+      );
+      const reportedTopologyDomains = new Set(
+        successful
+          .filter(({ probe }) => probe.clusterInitialized)
+          .map(({ probe }) => probe.clusterDomain ?? ""),
+      );
+      const topologyMismatch =
+        !hasImplicitNodeGrouping(this.nodeConfigs) &&
+        (reportedTopologyDomains.size > 1 ||
+          (nodes.length > 1 &&
+            successful.some(({ probe }) => !probe.clusterInitialized)) ||
+          successful.some(
+            ({ node, probe }) =>
+              probe.clusterInitialized &&
+              !this.getCredentialProbeNodeRole(node, probe),
+          ));
+      const verifiedUsernames = new Set(
+        successful.map(({ probe }) => probe.username),
+      );
+      const ownerMismatch = verifiedUsernames.size > 1;
+      const permissionMismatch = successful.some(({ probe }) =>
+        role === "background"
+          ? probe.permissions["DnsClient"]?.canView !== true ||
+            Object.values(probe.permissions).some(
+              (permission) =>
+                permission?.canModify === true ||
+                permission?.canDelete === true,
+            ) ||
+            probe.permissions["Administration"]?.canView === true
+          : probe.permissions["Apps"]?.canModify !== true,
+      );
+      if (
+        failedNodeIds.length > 0 ||
+        topologyMismatch ||
+        ownerMismatch ||
+        permissionMismatch
+      ) {
+        statuses.push({
+          groupId,
+          state: "failed",
+          authenticatedNodeIds: [],
+          unreachableNodeIds,
+          failedNodeIds: [
+            ...new Set([
+              ...failedNodeIds,
+              ...successful.map(({ node }) => node.id),
+            ]),
+          ],
+          admittedNodeIds: emptyAdmissions(),
+          capabilities: {
+            ptrRead: false,
+            dhcpRead: false,
+            primaryConfigWrite: false,
+            cacheFlush: false,
+          },
+          reason: topologyMismatch
+            ? "Configured group topology did not match the declared node group."
+            : ownerMismatch
+              ? "Configured group members reported different token owners."
+              : permissionMismatch
+                ? role === "background"
+                  ? "Background credential permissions do not satisfy the least-privilege DnsClient: View policy."
+                  : "Schedule credential lacks Apps: Modify permission."
+                : "Credential validation failed for this group.",
+        });
+        continue;
+      }
+
+      const topologyDomain = successful.find(
+        ({ probe }) => probe.clusterInitialized && probe.clusterDomain,
+      )?.probe.clusterDomain;
+      if (topologyDomain) {
+        topologyDomains.set(groupId, topologyDomain);
+      }
+
+      const admitted = emptyAdmissions();
+      for (const { node, probe } of successful) {
+        admitted.interactive.push(node.id);
+        if (probe.permissions["DnsClient"]?.canView === true)
+          admitted.ptrRead.push(node.id);
+        if (probe.permissions["DhcpServer"]?.canView === true)
+          admitted.dhcpRead.push(node.id);
+        const roleInTopology = this.getCredentialProbeNodeRole(node, probe);
+        if (
+          probe.permissions["Apps"]?.canModify === true &&
+          (roleInTopology === "Primary" || !probe.clusterInitialized)
+        )
+          admitted.primaryConfigWrite.push(node.id);
+        if (probe.permissions["Cache"]?.canDelete === true)
+          admitted.cacheFlush.push(node.id);
+      }
+      const state: GroupCredentialStatus["state"] =
+        successful.length === 0
+          ? "unreachable"
+          : unreachableNodeIds.length > 0
+            ? "degraded"
+            : "ready";
+      statuses.push({
+        groupId,
+        state,
+        verifiedUsername:
+          successful.length > 0 ? successful[0].probe.username : undefined,
+        authenticatedNodeIds: successful.map(({ node }) => node.id),
+        unreachableNodeIds,
+        failedNodeIds: [],
+        admittedNodeIds: admitted,
+        capabilities: {
+          ptrRead: admitted.ptrRead.length > 0,
+          dhcpRead: admitted.dhcpRead.length > 0,
+          primaryConfigWrite: admitted.primaryConfigWrite.length > 0,
+          cacheFlush: admitted.cacheFlush.length > 0,
+        },
+      });
+    }
+    return buildGroupCredentialEnvelope(statuses);
+  }
+
+  private getCredentialProbeNodeRole(
+    node: TechnitiumNodeConfig,
+    probe: TechnitiumCredentialProbe,
+  ): "Primary" | "Secondary" | undefined {
+    if (!probe.clusterInitialized) return undefined;
+    const configuredNodeId = node.id.toLowerCase();
+    const reportedNodeName = probe.dnsServerDomain?.toLowerCase();
+    let origin: string | undefined;
+    try {
+      origin = new URL(node.baseUrl).origin.toLowerCase();
+    } catch {
+      origin = undefined;
+    }
+    return probe.clusterNodes.find((member) => {
+      const memberName = member.name?.toLowerCase();
+      if (
+        memberName &&
+        (memberName === reportedNodeName ||
+          memberName === configuredNodeId ||
+          memberName.startsWith(`${configuredNodeId}.`))
+      )
+        return true;
+      if (!origin || !member.url) return false;
+      try {
+        return new URL(member.url).origin.toLowerCase() === origin;
+      } catch {
+        return false;
+      }
+    })?.type;
+  }
+
   private logPtrFailureWithThrottling(
     nodeId: string,
     ipAddress: string,
@@ -2652,10 +3306,21 @@ export class TechnitiumService {
   private getPtrLookupCandidateNodes(
     preferredNode: TechnitiumNodeConfig,
   ): TechnitiumNodeConfig[] {
-    const fallbackNodes = this.nodeConfigs.filter(
-      (candidate) => candidate.id !== preferredNode.id,
+    const groupId = nodeGroupId(preferredNode);
+    const admittedNodeIds = new Set(
+      this.backgroundGroupCredentials?.groups.find(
+        (group) => group.groupId === groupId,
+      )?.admittedNodeIds.ptrRead ?? [],
     );
-    return [preferredNode, ...fallbackNodes];
+    return [
+      preferredNode,
+      ...this.nodeConfigs.filter(
+        (candidate) => candidate.id !== preferredNode.id,
+      ),
+    ].filter(
+      (candidate) =>
+        nodeGroupId(candidate) === groupId && admittedNodeIds.has(candidate.id),
+    );
   }
 
   private async performPtrLookup(
@@ -2663,8 +3328,10 @@ export class TechnitiumService {
     ipAddress: string,
   ): Promise<void> {
     try {
+      const groupId = nodeGroupId(node);
+      const clientKey = this.clientNamespaceKey(groupId, ipAddress);
       // Skip if we have a fresh cache entry
-      const cached = this.hostnameCache.get(ipAddress);
+      const cached = this.hostnameCache.get(clientKey);
       if (
         cached &&
         Date.now() - cached.lastUpdated < this.HOSTNAME_CACHE_TTL_MS
@@ -2697,18 +3364,11 @@ export class TechnitiumService {
       for (let index = 0; index < candidateNodes.length; index += 1) {
         const candidate = candidateNodes[index];
         try {
-          const envelope = this.sessionAuthEnabled
-            ? await this.requestWithExplicitToken<TechnitiumApiResponse<any>>(
-                candidate,
-                requestConfig,
-                this.backgroundToken ?? "",
-                { suppressNetworkErrorLog: true },
-              )
-            : await this.request<TechnitiumApiResponse<any>>(
-                candidate,
-                requestConfig,
-                { authMode: "background", suppressNetworkErrorLog: true },
-              );
+          const envelope = await this.request<TechnitiumApiResponse<any>>(
+            candidate,
+            requestConfig,
+            { authMode: "background", suppressNetworkErrorLog: true },
+          );
 
           const data = this.unwrapApiResponse<TechnitiumPtrLookupResult>(
             envelope as unknown as TechnitiumApiResponse<TechnitiumPtrLookupResult>,
@@ -2721,7 +3381,7 @@ export class TechnitiumService {
             return;
           }
 
-          this.hostnameCache.set(ipAddress, {
+          this.hostnameCache.set(clientKey, {
             hostname,
             lastUpdated: Date.now(),
             source: "ptr",
@@ -2762,6 +3422,27 @@ export class TechnitiumService {
       // Keep logs concise by throttling repeated failures per node.
       this.logPtrFailureWithThrottling(node.id, ipAddress, error);
     }
+  }
+
+  private clientNamespaceKey(groupId: string, ipAddress: string): string {
+    const normalizedIp = ipAddress.trim().toLowerCase();
+    return groupId === INTERNAL_DEFAULT_GROUP_ID
+      ? normalizedIp
+      : `${groupId}\u0000${normalizedIp}`;
+  }
+
+  private parseClientNamespaceKey(key: string): {
+    groupId: string;
+    ip: string;
+  } {
+    const separator = key.indexOf("\u0000");
+    if (separator === -1) {
+      return { groupId: INTERNAL_DEFAULT_GROUP_ID, ip: key };
+    }
+    return {
+      groupId: key.slice(0, separator),
+      ip: key.slice(separator + 1),
+    };
   }
 
   /**
@@ -2967,13 +3648,20 @@ export class TechnitiumService {
       entries: fetchedEntries,
     };
 
-    // Fetch DHCP leases from ALL nodes to enrich with hostnames
-    // (Some nodes may not run DHCP, so we aggregate across all nodes)
-    const ipToHostname = await this.getAllDhcpLeases();
+    // Fetch DHCP leases only inside the source node's network namespace.
+    // A peer in the same group may host DHCP even when this node does not.
+    const ipToHostname = await this.getAllDhcpLeasesWithOptions({
+      authMode: "session",
+      sourceGroupId: nodeGroupId(node),
+    });
 
     // Enrich log entries with hostnames from DHCP
     if (data.entries && Array.isArray(data.entries)) {
-      data.entries = this.enrichWithHostnames(data.entries, ipToHostname);
+      data.entries = this.enrichWithHostnames(
+        data.entries,
+        ipToHostname,
+        nodeGroupId(node),
+      );
     }
 
     // Apply client-side filtering for fields not handled by Technitium DNS API
@@ -2995,9 +3683,12 @@ export class TechnitiumService {
           continue;
         }
 
-        const existing = domainMap.get(domain);
+        const dedupKey = filters.deduplicatePerClient
+          ? `${domain.toLowerCase()}\u0000${nodeGroupId(node)}\u0000${(entry.clientIpAddress ?? "").toLowerCase()}`
+          : domain.toLowerCase();
+        const existing = domainMap.get(dedupKey);
         if (!existing) {
-          domainMap.set(domain, entry);
+          domainMap.set(dedupKey, entry);
           continue;
         }
 
@@ -3010,10 +3701,10 @@ export class TechnitiumService {
           existing.responseType === "BlockedEDNS";
 
         if (entryIsBlocked && !existingIsBlocked) {
-          domainMap.set(domain, entry);
+          domainMap.set(dedupKey, entry);
         } else if (entryIsBlocked === existingIsBlocked) {
           if (entry.qtype === "A" && existing.qtype !== "A") {
-            domainMap.set(domain, entry);
+            domainMap.set(dedupKey, entry);
           }
         }
       }
@@ -3337,6 +4028,7 @@ export class TechnitiumService {
             return {
               nodeId: node.id,
               baseUrl: node.baseUrl,
+              groupId: node.groupId,
               fetchedAt,
               data,
               durationMs: performance.now() - nodeStartTime,
@@ -3350,6 +4042,7 @@ export class TechnitiumService {
             return {
               nodeId: node.id,
               baseUrl: node.baseUrl,
+              groupId: node.groupId,
               fetchedAt: new Date().toISOString(),
               error: message,
               durationMs: performance.now() - nodeStartTime,
@@ -3377,6 +4070,7 @@ export class TechnitiumService {
           ...entry,
           nodeId: snapshot.nodeId,
           baseUrl: snapshot.baseUrl,
+          groupId: snapshot.groupId,
         });
       }
     }
@@ -3422,10 +4116,13 @@ export class TechnitiumService {
           continue;
         }
 
-        const existing = domainMap.get(domain);
+        const dedupKey = effectiveFilters.deduplicatePerClient
+          ? `${domain.toLowerCase()}\u0000${entry.groupId}\u0000${(entry.clientIpAddress ?? "").toLowerCase()}`
+          : domain.toLowerCase();
+        const existing = domainMap.get(dedupKey);
         if (!existing) {
           // First entry for this domain
-          domainMap.set(domain, entry);
+          domainMap.set(dedupKey, entry);
           nodeCountMap.set(
             entry.nodeId,
             (nodeCountMap.get(entry.nodeId) ?? 0) + 1,
@@ -3469,7 +4166,7 @@ export class TechnitiumService {
 
         if (shouldReplace) {
           // Update domain map
-          domainMap.set(domain, entry);
+          domainMap.set(dedupKey, entry);
           // Update node counts
           nodeCountMap.set(
             existing.nodeId,
@@ -5570,6 +6267,7 @@ export class TechnitiumService {
       suppressNetworkErrorLog?: boolean;
     },
   ): Promise<T> {
+    const authMode = options?.authMode ?? "session";
     try {
       const axiosConfig: AxiosRequestConfig = {
         baseURL: node.baseUrl,
@@ -5581,41 +6279,61 @@ export class TechnitiumService {
 
       // Add token to request params
       const session = AuthRequestContext.getSession();
-      const sessionToken = session?.tokensByNodeId?.[node.id];
-      const authMode = options?.authMode ?? "session";
 
       let effectiveToken: string | undefined;
       if (this.sessionAuthEnabled) {
         if (authMode === "background") {
           // Background timers have no per-user session context; use a dedicated
           // least-privilege token when configured.
-          effectiveToken = this.backgroundToken;
+          effectiveToken = this.backgroundCredentials.credentialsByGroup.get(
+            nodeGroupId(node),
+          )?.token;
           if (!effectiveToken) {
             throw new UnauthorizedException(
-              `Authentication required for background access to Technitium node "${node.id}". Set TECHNITIUM_BACKGROUND_TOKEN to enable background tasks.`,
+              `Background automation is not authorized for Technitium group "${nodeGroupId(node)}".`,
             );
           }
+          await this.assertAutomationNodeAdmitted(
+            "background",
+            node,
+            this.getAdmissionRole(config),
+          );
         } else if (authMode === "schedule") {
           // DNS Schedule evaluator uses a dedicated token with Apps: Modify permission.
-          effectiveToken = this.scheduleToken;
+          effectiveToken = this.scheduleCredentials.credentialsByGroup.get(
+            nodeGroupId(node),
+          )?.token;
           if (!effectiveToken) {
             throw new UnauthorizedException(
-              `Authentication required for DNS schedule operations on node "${node.id}". Set TECHNITIUM_SCHEDULE_TOKEN to enable DNS schedules.`,
+              `Schedule automation is not authorized for Technitium group "${nodeGroupId(node)}".`,
             );
           }
+          await this.assertAutomationNodeAdmitted(
+            "schedule",
+            node,
+            this.getAdmissionRole(config),
+          );
         } else {
           // Default: interactive calls must use a per-user session token.
-          effectiveToken = sessionToken;
+          if (!session?.tokensByNodeId[node.id]) {
+            await this.tryReadmitSessionNode(session, node);
+          }
+          effectiveToken = session?.tokensByNodeId[node.id];
           if (!effectiveToken) {
             throw new UnauthorizedException(
               `Authentication required for Technitium node "${node.id}".`,
             );
           }
+          this.assertSessionNodeAdmitted(
+            session,
+            node,
+            this.getAdmissionRole(config),
+          );
         }
       } else {
         // Legacy mode: accept either a request-scoped session token (if any)
         // or a configured per-node token.
-        effectiveToken = sessionToken ?? node.token;
+        effectiveToken = session?.tokensByNodeId?.[node.id] ?? node.token;
       }
 
       const params = axiosConfig.params as unknown;
@@ -5649,21 +6367,31 @@ export class TechnitiumService {
         this.sessionAuthEnabled &&
         this.isTechnitiumInvalidTokenEnvelope(response.data)
       ) {
-        const session = AuthRequestContext.getSession();
-        if (session?.tokensByNodeId?.[node.id]) {
-          delete session.tokensByNodeId[node.id];
-          session.nodeAuthStatesByNodeId ??= {};
-          session.nodeAuthStatesByNodeId[node.id] = {
-            status: "failed",
-            error: "invalid-token",
-          };
-          this.logger.warn(
-            `Technitium rejected token for node "${node.id}" (invalid-token envelope). Dropped token from session; re-login required for this node.`,
+        if (authMode === "background" || authMode === "schedule") {
+          this.invalidateAutomationGroupAuthorization(
+            authMode,
+            node,
+            "Technitium rejected the configured automation credential.",
           );
+          this.logger.warn(
+            `Technitium rejected the ${authMode} credential for group "${nodeGroupId(node)}" (invalid-token envelope). Invalidated that group's automation admission.`,
+          );
+        } else {
+          const session = AuthRequestContext.getSession();
+          if (session?.tokensByNodeId?.[node.id]) {
+            this.invalidateSessionNodeAuthorization(
+              session,
+              node,
+              "invalid-token",
+            );
+            this.logger.warn(
+              `Technitium rejected token for node "${node.id}" (invalid-token envelope). Dropped token from session; re-login required for this node.`,
+            );
+          }
         }
 
         throw new UnauthorizedException(
-          `Technitium token is invalid for node "${node.id}". Please sign in again.`,
+          `Technitium token is invalid for node "${node.id}".`,
         );
       }
 
@@ -5677,36 +6405,778 @@ export class TechnitiumService {
         throw error;
       }
 
-      // If Technitium rejects the token, drop it from the current session.
-      // This prevents repeated 401 spam and allows the frontend to stop
-      // issuing per-node requests for nodes that are no longer authenticated.
+      // If Technitium rejects a credential, invalidate only its declared group.
       if (
         this.sessionAuthEnabled &&
         axios.isAxiosError(error) &&
-        error.response?.status === 401 &&
-        this.isLikelyInvalidTokenResponse(error.response.data)
+        (error.response?.status === 401 || error.response?.status === 403)
       ) {
-        const session = AuthRequestContext.getSession();
-        if (session?.tokensByNodeId?.[node.id]) {
-          delete session.tokensByNodeId[node.id];
-          session.nodeAuthStatesByNodeId ??= {};
-          session.nodeAuthStatesByNodeId[node.id] = {
-            status: "failed",
-            error: "invalid token",
-          };
+        const reason =
+          error.response.status === 401 ? "invalid token" : "permission denied";
+        if (authMode === "background" || authMode === "schedule") {
+          this.invalidateAutomationGroupAuthorization(
+            authMode,
+            node,
+            `Technitium rejected the configured automation credential (${reason}).`,
+          );
           this.logger.warn(
-            `Technitium rejected token for node "${node.id}" (invalid token). Dropped token from session; re-login required for this node.`,
+            `Technitium rejected the ${authMode} credential for group "${nodeGroupId(node)}" (HTTP ${error.response.status}). Invalidated that group's automation admission.`,
+          );
+        } else {
+          const session = AuthRequestContext.getSession();
+          if (session?.tokensByNodeId?.[node.id]) {
+            this.invalidateSessionNodeAuthorization(session, node, reason);
+            this.logger.warn(
+              `Technitium rejected authorization for node "${node.id}" (HTTP ${error.response.status}). Invalidated admission for its session group.`,
+            );
+          }
+        }
+        if (error.response.status === 403) {
+          throw new ForbiddenException(
+            `Technitium denied this operation for node "${node.id}".`,
           );
         }
         throw new UnauthorizedException(
-          `Technitium token is invalid for node "${node.id}". Please sign in again.`,
+          `Technitium token is invalid for node "${node.id}".`,
         );
+      }
+
+      if (
+        this.sessionAuthEnabled &&
+        (authMode === "background" || authMode === "schedule") &&
+        axios.isAxiosError(error) &&
+        (!error.response ||
+          [502, 503, 504].includes(error.response.status ?? 0))
+      ) {
+        this.markAutomationNodeUnreachable(authMode, node);
+      }
+
+      if (
+        this.sessionAuthEnabled &&
+        authMode === "session" &&
+        axios.isAxiosError(error) &&
+        (!error.response ||
+          [502, 503, 504].includes(error.response.status ?? 0))
+      ) {
+        const session = AuthRequestContext.getSession();
+        if (
+          session?.authSource === "trusted-sso" &&
+          session.tokensByNodeId[node.id]
+        ) {
+          this.markSessionNodeUnreachable(session, node);
+        }
       }
 
       throw this.normalizeAxiosError(error, node.id, {
         suppressNetworkErrorLog: options?.suppressNetworkErrorLog,
       });
     }
+  }
+
+  private invalidateAutomationGroupAuthorization(
+    authMode: "background" | "schedule",
+    node: TechnitiumNodeConfig,
+    reason: string,
+  ): void {
+    const current =
+      authMode === "background"
+        ? this.backgroundGroupCredentials
+        : this.scheduleGroupCredentials;
+    const groupId = nodeGroupId(node);
+    const group = current?.groups.find((item) => item.groupId === groupId);
+    if (!current || !group) return;
+
+    const groupNodeIds = this.nodeConfigs
+      .filter((candidate) => nodeGroupId(candidate) === groupId)
+      .map((candidate) => candidate.id);
+    group.state = "failed";
+    delete group.verifiedUsername;
+    group.authenticatedNodeIds = [];
+    group.unreachableNodeIds = [];
+    group.failedNodeIds = groupNodeIds;
+    group.admittedNodeIds = emptyAdmissions();
+    group.capabilities = {
+      ptrRead: false,
+      dhcpRead: false,
+      primaryConfigWrite: false,
+      cacheFlush: false,
+    };
+    group.reason = reason;
+    for (const groupNodeId of groupNodeIds) {
+      const key = `${authMode}\u0000${groupNodeId}`;
+      this.automationNodeRetryAfter.delete(key);
+      this.automationNodeRetryAttempts.delete(key);
+    }
+
+    this.updateAutomationCredentialSummary(authMode, current);
+  }
+
+  private updateAutomationCredentialSummary(
+    authMode: "background" | "schedule",
+    current: GroupCredentialStatusEnvelope,
+  ): void {
+    const updated = buildGroupCredentialEnvelope(current.groups);
+    const usable = updated.groups.filter(
+      (item) => item.state === "ready" || item.state === "degraded",
+    );
+    const usernames = [
+      ...new Set(
+        usable.flatMap((item) =>
+          item.verifiedUsername ? [item.verifiedUsername] : [],
+        ),
+      ),
+    ];
+    if (authMode === "background") {
+      this.backgroundGroupCredentials = updated;
+      const ptrReady = usable.filter((item) => item.capabilities.ptrRead);
+      this.backgroundTokenValidation = {
+        validated: true,
+        okForPtr: ptrReady.length > 0,
+        username: usernames.length === 1 ? usernames[0] : undefined,
+        reason:
+          ptrReady.length > 0
+            ? undefined
+            : "No configured group has an admitted DnsClient: View credential for background PTR lookups.",
+      };
+      return;
+    }
+
+    this.scheduleGroupCredentials = updated;
+    const writeReady = usable.filter(
+      (item) => item.capabilities.primaryConfigWrite,
+    );
+    this.scheduleTokenValidation = {
+      validated: true,
+      valid: writeReady.length > 0,
+      hasAppsModify: writeReady.length > 0,
+      hasCacheDelete: writeReady.some((item) => item.capabilities.cacheFlush),
+      username: usernames.length === 1 ? usernames[0] : undefined,
+      reason:
+        writeReady.length > 0
+          ? undefined
+          : "No configured group has an admitted Primary with Apps: Modify permission.",
+    };
+  }
+
+  private markAutomationNodeUnreachable(
+    authMode: "background" | "schedule",
+    node: TechnitiumNodeConfig,
+  ): void {
+    const current =
+      authMode === "background"
+        ? this.backgroundGroupCredentials
+        : this.scheduleGroupCredentials;
+    const group = current?.groups.find(
+      (item) => item.groupId === nodeGroupId(node),
+    );
+    if (!current || !group || group.state === "not-authorized") return;
+
+    group.authenticatedNodeIds = group.authenticatedNodeIds.filter(
+      (id) => id !== node.id,
+    );
+    group.failedNodeIds = group.failedNodeIds.filter((id) => id !== node.id);
+    if (!group.unreachableNodeIds.includes(node.id)) {
+      group.unreachableNodeIds.push(node.id);
+    }
+    for (const nodeIds of Object.values(group.admittedNodeIds)) {
+      const index = nodeIds.indexOf(node.id);
+      if (index >= 0) nodeIds.splice(index, 1);
+    }
+    group.capabilities = {
+      ptrRead: group.admittedNodeIds.ptrRead.length > 0,
+      dhcpRead: group.admittedNodeIds.dhcpRead.length > 0,
+      primaryConfigWrite: group.admittedNodeIds.primaryConfigWrite.length > 0,
+      cacheFlush: group.admittedNodeIds.cacheFlush.length > 0,
+    };
+    group.state =
+      group.authenticatedNodeIds.length > 0 ? "degraded" : "unreachable";
+    group.reason = "One or more group members are awaiting revalidation.";
+    this.updateAutomationCredentialSummary(authMode, current);
+    this.scheduleAutomationNodeRetry(authMode, node);
+  }
+
+  private scheduleAutomationNodeRetry(
+    authMode: "background" | "schedule",
+    node: TechnitiumNodeConfig,
+  ): void {
+    const key = `${authMode}\u0000${node.id}`;
+    const attempt = (this.automationNodeRetryAttempts.get(key) ?? 0) + 1;
+    this.automationNodeRetryAttempts.set(key, attempt);
+    const delay = Math.min(
+      this.SESSION_NODE_RETRY_MAX_MS,
+      this.SESSION_NODE_RETRY_BASE_MS * 2 ** Math.min(attempt - 1, 8),
+    );
+    this.automationNodeRetryAfter.set(key, Date.now() + delay);
+  }
+
+  private getAdmissionRole(
+    config: AxiosRequestConfig,
+  ): keyof GroupCredentialStatus["admittedNodeIds"] {
+    const url = config.url ?? "";
+    if (url === "/api/dnsClient/resolve") return "ptrRead";
+    if (url === "/api/dhcp/leases/list" || url === "/api/dhcp/scopes/list")
+      return "dhcpRead";
+    if (url === "/api/cache/delete") return "cacheFlush";
+    if (url === "/api/apps/config/set") return "primaryConfigWrite";
+    return "interactive";
+  }
+
+  private assertSessionNodeAdmitted(
+    session: ReturnType<typeof AuthRequestContext.getSession>,
+    node: TechnitiumNodeConfig,
+    role: keyof GroupCredentialStatus["admittedNodeIds"],
+  ): void {
+    if (!session?.groupCredentials) return;
+    const group = session.groupCredentials.groups.find(
+      (item) => item.groupId === nodeGroupId(node),
+    );
+    if (!group?.admittedNodeIds[role].includes(node.id)) {
+      throw new ForbiddenException(
+        `Technitium node "${node.id}" is not admitted for ${role} in group "${nodeGroupId(node)}".`,
+      );
+    }
+  }
+
+  private async tryReadmitSessionNode(
+    session: ReturnType<typeof AuthRequestContext.getSession>,
+    node: TechnitiumNodeConfig,
+  ): Promise<void> {
+    if (
+      !session ||
+      session.authSource !== "trusted-sso" ||
+      !session.pendingTokensByNodeId?.[node.id]
+    ) {
+      return;
+    }
+    const retryAfter = session.nodeRetryAfterByNodeId?.[node.id] ?? 0;
+    if (retryAfter > Date.now()) {
+      throw new ServiceUnavailableException(
+        `Technitium node "${node.id}" is awaiting a bounded credential revalidation retry.`,
+      );
+    }
+
+    const flightKey = `${session.id}\0${node.id}`;
+    let flight = this.sessionNodeReadmissionFlights.get(flightKey);
+    if (!flight) {
+      flight = this.revalidatePendingSessionNode(session, node).finally(() => {
+        this.sessionNodeReadmissionFlights.delete(flightKey);
+      });
+      this.sessionNodeReadmissionFlights.set(flightKey, flight);
+    }
+    await flight;
+  }
+
+  private async revalidatePendingSessionNode(
+    session: AuthSession,
+    node: TechnitiumNodeConfig,
+  ): Promise<void> {
+    const token = session.pendingTokensByNodeId?.[node.id];
+    if (!token) return;
+    const groupId = nodeGroupId(node);
+    try {
+      const probe = await this.validateExplicitSessionToken(node.id, token);
+      const expectedUsername = session.credentialUsernamesByGroup?.[groupId];
+      if (!expectedUsername || probe.username !== expectedUsername) {
+        throw new UnauthorizedException("Mapped token owner mismatch");
+      }
+
+      const groupNodes = this.nodeConfigs.filter(
+        (candidate) => nodeGroupId(candidate) === groupId,
+      );
+      const role = this.getCredentialProbeNodeRole(node, probe);
+      if (
+        !hasImplicitNodeGrouping(this.nodeConfigs) &&
+        ((groupNodes.length > 1 && !probe.clusterInitialized) ||
+          (probe.clusterInitialized && !role))
+      ) {
+        throw new UnauthorizedException(
+          "Returning node does not match its declared group topology",
+        );
+      }
+      const expectedDomain = session.topologyDomainsByGroup?.[groupId];
+      if (
+        expectedDomain &&
+        (!probe.clusterInitialized || probe.clusterDomain !== expectedDomain)
+      ) {
+        throw new UnauthorizedException(
+          "Returning node reported a different group topology",
+        );
+      }
+
+      const group = session.groupCredentials?.groups.find(
+        (candidate) => candidate.groupId === groupId,
+      );
+      if (!group || group.state === "not-authorized") {
+        throw new UnauthorizedException(
+          "Returning node belongs to a group not authorized by this session",
+        );
+      }
+
+      session.tokensByNodeId[node.id] = token;
+      delete session.pendingTokensByNodeId?.[node.id];
+      delete session.nodeRetryAfterByNodeId?.[node.id];
+      delete session.nodeRetryAttemptsByNodeId?.[node.id];
+      session.nodeAuthStatesByNodeId ??= {};
+      session.nodeAuthStatesByNodeId[node.id] = { status: "authenticated" };
+      group.failedNodeIds = group.failedNodeIds.filter((id) => id !== node.id);
+      group.unreachableNodeIds = group.unreachableNodeIds.filter(
+        (id) => id !== node.id,
+      );
+      if (!group.authenticatedNodeIds.includes(node.id)) {
+        group.authenticatedNodeIds.push(node.id);
+      }
+      this.addAdmission(group.admittedNodeIds.interactive, node.id);
+      if (probe.permissions["DnsClient"]?.canView === true)
+        this.addAdmission(group.admittedNodeIds.ptrRead, node.id);
+      if (probe.permissions["DhcpServer"]?.canView === true)
+        this.addAdmission(group.admittedNodeIds.dhcpRead, node.id);
+      if (
+        probe.permissions["Apps"]?.canModify === true &&
+        (role === "Primary" || !probe.clusterInitialized)
+      )
+        this.addAdmission(group.admittedNodeIds.primaryConfigWrite, node.id);
+      if (probe.permissions["Cache"]?.canDelete === true)
+        this.addAdmission(group.admittedNodeIds.cacheFlush, node.id);
+      group.capabilities = {
+        ptrRead: group.admittedNodeIds.ptrRead.length > 0,
+        dhcpRead: group.admittedNodeIds.dhcpRead.length > 0,
+        primaryConfigWrite: group.admittedNodeIds.primaryConfigWrite.length > 0,
+        cacheFlush: group.admittedNodeIds.cacheFlush.length > 0,
+      };
+      group.verifiedUsername = probe.username;
+      session.verifiedUsernamesByGroup ??= {};
+      session.verifiedUsernamesByGroup[groupId] = probe.username;
+      session.technitiumUser = singularVerifiedUsername(
+        session.verifiedUsernamesByGroup,
+      );
+      if (probe.clusterInitialized && probe.clusterDomain) {
+        session.topologyDomainsByGroup ??= {};
+        session.topologyDomainsByGroup[groupId] = probe.clusterDomain;
+      }
+      group.state =
+        group.unreachableNodeIds.length === 0 &&
+        group.failedNodeIds.length === 0 &&
+        group.authenticatedNodeIds.length === groupNodes.length
+          ? "ready"
+          : "degraded";
+      delete group.reason;
+      session.groupCredentials = buildGroupCredentialEnvelope(
+        session.groupCredentials?.groups ?? [],
+      );
+    } catch (error) {
+      if (
+        error instanceof HttpException &&
+        [HttpStatus.SERVICE_UNAVAILABLE, HttpStatus.GATEWAY_TIMEOUT].includes(
+          error.getStatus(),
+        )
+      ) {
+        this.scheduleSessionNodeRetry(session, node);
+      } else {
+        this.failSessionGroup(
+          session,
+          groupId,
+          "A returning node failed owner or topology revalidation.",
+        );
+      }
+      throw error;
+    }
+  }
+
+  private addAdmission(nodeIds: string[], nodeId: string): void {
+    if (!nodeIds.includes(nodeId)) nodeIds.push(nodeId);
+  }
+
+  private async assertAutomationNodeAdmitted(
+    authMode: "background" | "schedule",
+    node: TechnitiumNodeConfig,
+    role: keyof GroupCredentialStatus["admittedNodeIds"],
+  ): Promise<void> {
+    if (authMode === "background") {
+      await this.validateBackgroundTokenForPtr();
+    } else {
+      await this.validateScheduleToken();
+    }
+    let envelope =
+      authMode === "background"
+        ? this.backgroundGroupCredentials
+        : this.scheduleGroupCredentials;
+    let group = envelope?.groups.find(
+      (item) => item.groupId === nodeGroupId(node),
+    );
+    if (
+      group?.unreachableNodeIds.includes(node.id) &&
+      !group.admittedNodeIds[role].includes(node.id)
+    ) {
+      await this.tryReadmitAutomationNode(authMode, node);
+      envelope =
+        authMode === "background"
+          ? this.backgroundGroupCredentials
+          : this.scheduleGroupCredentials;
+      group = envelope?.groups.find(
+        (item) => item.groupId === nodeGroupId(node),
+      );
+    }
+    if (!group?.admittedNodeIds[role].includes(node.id)) {
+      throw new ForbiddenException(
+        `${authMode === "background" ? "Background" : "Schedule"} credential is not admitted for ${role} on node "${node.id}".`,
+      );
+    }
+  }
+
+  private async tryReadmitAutomationNode(
+    authMode: "background" | "schedule",
+    node: TechnitiumNodeConfig,
+  ): Promise<void> {
+    const key = `${authMode}\u0000${node.id}`;
+    const retryAfter = this.automationNodeRetryAfter.get(key) ?? 0;
+    if (retryAfter > Date.now()) {
+      throw new ServiceUnavailableException(
+        `${authMode === "background" ? "Background" : "Schedule"} credential for node "${node.id}" is awaiting a bounded revalidation retry.`,
+      );
+    }
+
+    let flight = this.automationNodeReadmissionFlights.get(key);
+    if (!flight) {
+      flight = this.revalidateAutomationNode(authMode, node).finally(() => {
+        this.automationNodeReadmissionFlights.delete(key);
+      });
+      this.automationNodeReadmissionFlights.set(key, flight);
+    }
+    await flight;
+  }
+
+  private async revalidateAutomationNode(
+    authMode: "background" | "schedule",
+    node: TechnitiumNodeConfig,
+  ): Promise<void> {
+    const config =
+      authMode === "background"
+        ? this.backgroundCredentials
+        : this.scheduleCredentials;
+    const credential = config.credentialsByGroup.get(nodeGroupId(node));
+    if (!credential) {
+      throw new UnauthorizedException(
+        `${authMode} automation is not authorized for this node group.`,
+      );
+    }
+
+    const groupId = nodeGroupId(node);
+    const key = `${authMode}\u0000${node.id}`;
+    try {
+      const probe = await this.validateExplicitSessionToken(
+        node.id,
+        credential.token,
+      );
+      const current =
+        authMode === "background"
+          ? this.backgroundGroupCredentials
+          : this.scheduleGroupCredentials;
+      const group = current?.groups.find((item) => item.groupId === groupId);
+      if (!current || !group || group.state === "not-authorized") {
+        throw new UnauthorizedException(
+          "Returning automation node belongs to an unauthorized group.",
+        );
+      }
+
+      const expectedUsername =
+        config.source === "map"
+          ? credential.username
+          : group.verifiedUsername || probe.username;
+      if (probe.username !== expectedUsername) {
+        throw new UnauthorizedException(
+          "Returning automation token owner does not match its group.",
+        );
+      }
+
+      const groupNodes = this.nodeConfigs.filter(
+        (candidate) => nodeGroupId(candidate) === groupId,
+      );
+      const role = this.getCredentialProbeNodeRole(node, probe);
+      if (
+        !hasImplicitNodeGrouping(this.nodeConfigs) &&
+        ((groupNodes.length > 1 && !probe.clusterInitialized) ||
+          (probe.clusterInitialized && !role))
+      ) {
+        throw new UnauthorizedException(
+          "Returning automation node does not match its declared topology.",
+        );
+      }
+      const topologyDomains =
+        authMode === "background"
+          ? this.backgroundTopologyDomainsByGroup
+          : this.scheduleTopologyDomainsByGroup;
+      const expectedDomain = topologyDomains.get(groupId);
+      if (
+        expectedDomain &&
+        (!probe.clusterInitialized || probe.clusterDomain !== expectedDomain)
+      ) {
+        throw new UnauthorizedException(
+          "Returning automation node reported a different group topology.",
+        );
+      }
+
+      if (authMode === "background") {
+        const tooPrivileged =
+          Object.values(probe.permissions).some(
+            (permission) =>
+              permission?.canModify === true || permission?.canDelete === true,
+          ) || probe.permissions["Administration"]?.canView === true;
+        if (probe.permissions["DnsClient"]?.canView !== true || tooPrivileged) {
+          throw new ForbiddenException(
+            "Returning background credential no longer satisfies its least-privilege policy.",
+          );
+        }
+      } else if (probe.permissions["Apps"]?.canModify !== true) {
+        throw new ForbiddenException(
+          "Returning schedule credential no longer has Apps: Modify permission.",
+        );
+      }
+
+      if (probe.clusterInitialized && probe.clusterDomain) {
+        topologyDomains.set(groupId, probe.clusterDomain);
+      }
+      group.unreachableNodeIds = group.unreachableNodeIds.filter(
+        (id) => id !== node.id,
+      );
+      group.failedNodeIds = group.failedNodeIds.filter((id) => id !== node.id);
+      this.addAdmission(group.authenticatedNodeIds, node.id);
+      this.addAdmission(group.admittedNodeIds.interactive, node.id);
+      if (probe.permissions["DnsClient"]?.canView === true)
+        this.addAdmission(group.admittedNodeIds.ptrRead, node.id);
+      if (probe.permissions["DhcpServer"]?.canView === true)
+        this.addAdmission(group.admittedNodeIds.dhcpRead, node.id);
+      if (
+        probe.permissions["Apps"]?.canModify === true &&
+        (role === "Primary" || !probe.clusterInitialized)
+      )
+        this.addAdmission(group.admittedNodeIds.primaryConfigWrite, node.id);
+      if (probe.permissions["Cache"]?.canDelete === true)
+        this.addAdmission(group.admittedNodeIds.cacheFlush, node.id);
+      group.capabilities = {
+        ptrRead: group.admittedNodeIds.ptrRead.length > 0,
+        dhcpRead: group.admittedNodeIds.dhcpRead.length > 0,
+        primaryConfigWrite: group.admittedNodeIds.primaryConfigWrite.length > 0,
+        cacheFlush: group.admittedNodeIds.cacheFlush.length > 0,
+      };
+      group.verifiedUsername = probe.username;
+      group.state =
+        group.authenticatedNodeIds.length === groupNodes.length
+          ? "ready"
+          : "degraded";
+      delete group.reason;
+      this.updateAutomationCredentialSummary(authMode, current);
+      this.automationNodeRetryAfter.delete(key);
+      this.automationNodeRetryAttempts.delete(key);
+    } catch (error) {
+      if (
+        error instanceof HttpException &&
+        [HttpStatus.SERVICE_UNAVAILABLE, HttpStatus.GATEWAY_TIMEOUT].includes(
+          error.getStatus(),
+        )
+      ) {
+        this.scheduleAutomationNodeRetry(authMode, node);
+      } else {
+        this.invalidateAutomationGroupAuthorization(
+          authMode,
+          node,
+          "A returning automation node failed owner, permission, or topology revalidation.",
+        );
+      }
+      throw error;
+    }
+  }
+
+  private getAutomationGroupEnvelope(
+    config: AutomationCredentialConfig,
+    validated: GroupCredentialStatusEnvelope | undefined,
+  ): GroupCredentialStatusEnvelope {
+    if (validated) return validated;
+    return buildGroupCredentialEnvelope(
+      configuredGroupIds(this.nodeConfigs).map((groupId) => {
+        if (config.reason) {
+          return {
+            groupId,
+            state: "failed" as const,
+            authenticatedNodeIds: [],
+            unreachableNodeIds: [],
+            failedNodeIds: this.nodeConfigs
+              .filter((node) => nodeGroupId(node) === groupId)
+              .map((node) => node.id),
+            admittedNodeIds: emptyAdmissions(),
+            capabilities: {
+              ptrRead: false,
+              dhcpRead: false,
+              primaryConfigWrite: false,
+              cacheFlush: false,
+            },
+            reason: config.reason,
+          };
+        }
+        if (!config.credentialsByGroup.has(groupId)) {
+          return notAuthorizedGroupStatus(groupId);
+        }
+        return {
+          groupId,
+          state: "unreachable" as const,
+          authenticatedNodeIds: [],
+          unreachableNodeIds: this.nodeConfigs
+            .filter((node) => nodeGroupId(node) === groupId)
+            .map((node) => node.id),
+          failedNodeIds: [],
+          admittedNodeIds: emptyAdmissions(),
+          capabilities: {
+            ptrRead: false,
+            dhcpRead: false,
+            primaryConfigWrite: false,
+            cacheFlush: false,
+          },
+          reason: "Credential validation is pending.",
+        };
+      }),
+    );
+  }
+
+  private invalidateSessionNodeAdmission(
+    session: NonNullable<ReturnType<typeof AuthRequestContext.getSession>>,
+    nodeId: string,
+  ): void {
+    const group = session.groupCredentials?.groups.find((item) =>
+      Object.values(item.admittedNodeIds).some((nodeIds) =>
+        nodeIds.includes(nodeId),
+      ),
+    );
+    if (!group) return;
+    for (const nodeIds of Object.values(group.admittedNodeIds)) {
+      const index = nodeIds.indexOf(nodeId);
+      if (index >= 0) nodeIds.splice(index, 1);
+    }
+    group.authenticatedNodeIds = group.authenticatedNodeIds.filter(
+      (id) => id !== nodeId,
+    );
+    if (!group.failedNodeIds.includes(nodeId)) group.failedNodeIds.push(nodeId);
+    group.state = group.authenticatedNodeIds.length > 0 ? "degraded" : "failed";
+    group.reason =
+      "A node credential was invalidated after an authorization failure.";
+    session.groupCredentials = buildGroupCredentialEnvelope(
+      session.groupCredentials?.groups ?? [],
+    );
+  }
+
+  private invalidateSessionNodeAuthorization(
+    session: AuthSession,
+    node: TechnitiumNodeConfig,
+    reason: string,
+  ): void {
+    delete session.tokensByNodeId[node.id];
+    delete session.pendingTokensByNodeId?.[node.id];
+    if (session.authSource === "trusted-sso" && session.groupCredentials) {
+      this.failSessionGroup(
+        session,
+        nodeGroupId(node),
+        `Technitium rejected this group's credential (${reason}).`,
+      );
+      return;
+    }
+    this.invalidateSessionNodeAdmission(session, node.id);
+    session.nodeAuthStatesByNodeId ??= {};
+    session.nodeAuthStatesByNodeId[node.id] = {
+      status: "failed",
+      error: reason,
+    };
+  }
+
+  private markSessionNodeUnreachable(
+    session: AuthSession,
+    node: TechnitiumNodeConfig,
+  ): void {
+    const token = session.tokensByNodeId[node.id];
+    if (!token) return;
+    session.pendingTokensByNodeId ??= {};
+    session.pendingTokensByNodeId[node.id] = token;
+    delete session.tokensByNodeId[node.id];
+    this.invalidateSessionNodeAdmission(session, node.id);
+    const group = session.groupCredentials?.groups.find(
+      (candidate) => candidate.groupId === nodeGroupId(node),
+    );
+    if (group) {
+      group.failedNodeIds = group.failedNodeIds.filter((id) => id !== node.id);
+      if (!group.unreachableNodeIds.includes(node.id)) {
+        group.unreachableNodeIds.push(node.id);
+      }
+      group.state =
+        group.authenticatedNodeIds.length > 0 ? "degraded" : "unreachable";
+      group.reason = "One or more group members are awaiting revalidation.";
+      session.groupCredentials = buildGroupCredentialEnvelope(
+        session.groupCredentials?.groups ?? [],
+      );
+    }
+    session.nodeAuthStatesByNodeId ??= {};
+    session.nodeAuthStatesByNodeId[node.id] = {
+      status: "unreachable",
+      error: "Technitium node is unreachable",
+    };
+    this.scheduleSessionNodeRetry(session, node);
+  }
+
+  private scheduleSessionNodeRetry(
+    session: AuthSession,
+    node: TechnitiumNodeConfig,
+  ): void {
+    session.nodeRetryAttemptsByNodeId ??= {};
+    session.nodeRetryAfterByNodeId ??= {};
+    const attempt = (session.nodeRetryAttemptsByNodeId[node.id] ?? 0) + 1;
+    session.nodeRetryAttemptsByNodeId[node.id] = attempt;
+    const delay = Math.min(
+      this.SESSION_NODE_RETRY_MAX_MS,
+      this.SESSION_NODE_RETRY_BASE_MS * 2 ** Math.min(attempt - 1, 8),
+    );
+    session.nodeRetryAfterByNodeId[node.id] = Date.now() + delay;
+  }
+
+  private failSessionGroup(
+    session: AuthSession,
+    groupId: string,
+    reason: string,
+  ): void {
+    const group = session.groupCredentials?.groups.find(
+      (candidate) => candidate.groupId === groupId,
+    );
+    if (!group) return;
+    const groupNodeIds = this.nodeConfigs
+      .filter((node) => nodeGroupId(node) === groupId)
+      .map((node) => node.id);
+    for (const nodeId of groupNodeIds) {
+      delete session.tokensByNodeId[nodeId];
+      delete session.pendingTokensByNodeId?.[nodeId];
+      delete session.nodeRetryAfterByNodeId?.[nodeId];
+      delete session.nodeRetryAttemptsByNodeId?.[nodeId];
+      session.nodeAuthStatesByNodeId ??= {};
+      session.nodeAuthStatesByNodeId[nodeId] = {
+        status: "failed",
+        error: reason,
+      };
+    }
+    group.state = "failed";
+    group.authenticatedNodeIds = [];
+    group.unreachableNodeIds = [];
+    group.failedNodeIds = groupNodeIds;
+    group.admittedNodeIds = emptyAdmissions();
+    group.capabilities = {
+      ptrRead: false,
+      dhcpRead: false,
+      primaryConfigWrite: false,
+      cacheFlush: false,
+    };
+    group.reason = reason;
+    delete session.verifiedUsernamesByGroup?.[groupId];
+    if (session.verifiedUsernamesByGroup) {
+      session.technitiumUser = singularVerifiedUsername(
+        session.verifiedUsernamesByGroup,
+      );
+    }
+    session.groupCredentials = buildGroupCredentialEnvelope(
+      session.groupCredentials?.groups ?? [],
+    );
   }
 
   private isTechnitiumInvalidTokenEnvelope(data: unknown): boolean {
