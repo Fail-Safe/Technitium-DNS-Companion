@@ -2,6 +2,7 @@ import { faGithub } from "@fortawesome/free-brands-svg-icons";
 import {
   faBalanceScale,
   faBook,
+  faChartLine,
   faExternalLinkAlt,
   faTimes,
 } from "@fortawesome/free-solid-svg-icons";
@@ -142,6 +143,19 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
           >
             <FontAwesomeIcon icon={faGithub} />
             <span>GitHub Repository</span>
+            <FontAwesomeIcon
+              icon={faExternalLinkAlt}
+              className="about-modal__link-external"
+            />
+          </a>
+          <a
+            href="https://fail-safe.github.io/Technitium-DNS-Companion/performance/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="about-modal__link"
+          >
+            <FontAwesomeIcon icon={faChartLine} />
+            <span>DNS Logs Performance</span>
             <FontAwesomeIcon
               icon={faExternalLinkAlt}
               className="about-modal__link-external"

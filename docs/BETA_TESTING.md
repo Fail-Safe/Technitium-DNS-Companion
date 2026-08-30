@@ -13,6 +13,9 @@ explicitly changed.
 - Do not test first on the only path you have to administer DNS.
 - Review the current [Unreleased changelog](../CHANGELOG.md#unreleased), with
   particular attention to upgrade notes and security-sensitive features.
+- Review the public [DNS Logs performance overview](performance/index.md) for
+  the measured database, hostname-enrichment, and browser-request improvements
+  you can compare with your own workload.
 
 ## Install with Docker Compose
 
@@ -84,6 +87,10 @@ tokens, proxy secrets, cookies, private hostnames, and private DNS data.
 - Sign in and out, then confirm the expected Technitium identity and RBAC.
 - Check node overview, query logs, zones, filtering, DHCP, and any scheduled
   automation you normally use.
+- In stored DNS Logs, exercise page one, a deep page, deduplication, and the
+  filters you use most often. Performance reports are most useful when they
+  include approximate row count, retention, storage type, page size, and
+  deduplication mode without including private query data.
 - Exercise the deployment behind its real TLS reverse proxy and from a mobile
   viewport if those are part of your environment.
 - Watch container health, restarts, memory, and logs over at least 24 hours.

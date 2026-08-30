@@ -23,6 +23,7 @@ Welcome to the documentation for Technitium DNS Companion. This guide will help 
 
 ### Performance
 
+- **[DNS Logs performance overview](./performance/index.md)** - User-facing results, operational impact, measurement boundaries, and beta feedback guidance
 - **[performance/](./performance/)** - Performance benchmarking and optimization guides
 - **[Query Log SQLite benchmarks](./performance/QUERY_LOG_SQLITE_BENCHMARKS.md)** - Cumulative DNS Logs query benchmarks, charts, and tradeoffs
 - **[DHCP hostname enrichment benchmarks](./performance/DHCP_HOSTNAME_ENRICHMENT_BENCHMARKS.md)** - DHCP capability routing, stored-log isolation, and before/after metrics
