@@ -4,11 +4,15 @@
 
 Production-derived browser evidence showed that request cancellation, pagination, and refresh behavior amplified the remaining SQLite query cost. This iteration makes query-log fetches bypass the PWA runtime cache, blocks page navigation while a request is active, and pauses automatic refresh when entering Paginated mode.
 
+In this report, **Before** means the browser behavior shipped in Companion
+v1.10.1 and earlier. **After** means the request-control behavior released in
+Companion v1.11.0.
+
 ![Three paired bar charts showing cancelled work continuing through the service worker falling from ten requests to zero, five rapid page selections admitting one request instead of five, and a thirty-second paginated dwell producing zero automatic refreshes instead of ten.](./images/dns-logs-browser-request-admission.svg)
 
 ![Two before-and-after bar charts showing completed backend request rate falling by 69.5 percent while exact-query median latency remains nearly flat and p90 and maximum latency fall by 31.0 and 36.5 percent.](./images/dns-logs-browser-live-results.svg)
 
-| Controlled interaction | Before | After | Change |
+| Controlled interaction | v1.10.1 behavior | v1.11.0 behavior | Change |
 | --- | ---: | ---: | ---: |
 | Cancelled stored-log requests routed through Workbox | 10 | 0 | 100% removed |
 | Five rapid page selections admitted | 5 | 1 | 80% fewer |
@@ -18,11 +22,11 @@ These measurements quantify request admission, not SQLite execution speed. They 
 
 Raw measurements are available in [dns-logs-browser-request-results.csv](./dns-logs-browser-request-results.csv).
 
-## Production HAR baseline
+## Production HAR baseline (v1.10.1 behavior)
 
-The before capture came from a production-test build backed by an anonymized deployment database. The capture observed 101 seconds of Combined Stored browsing with 200 rows per page and domain-plus-client deduplication enabled. It included filter changes, automatic refreshes, and navigation through deep pages.
+The v1.10.1-behavior capture came from a production-test build backed by an anonymized deployment database. The capture observed 101 seconds of Combined Stored browsing with 200 rows per page and domain-plus-client deduplication enabled. It included filter changes, automatic refreshes, and navigation through deep pages.
 
-| HAR measurement | Before |
+| HAR measurement | v1.10.1 baseline |
 | --- | ---: |
 | Browser stored-log fetches | 43 |
 | Completed network fetches | 43 |
@@ -37,11 +41,11 @@ Chrome recorded the page-to-service-worker fetch and Workbox-to-network fetch se
 
 The deepest requests overlapped. Pages 9 through 13 started within about one second; their durations ranged from 3,596 to 16,532 ms. Two requests spent about six seconds establishing a connection, including TLS, while synchronous SQLite work was active. This is evidence of request pile-up and event-loop starvation, not a single 16-second SQL execution.
 
-## Production-test after capture
+## Production-test v1.11.0 capture
 
-The accepted after capture observed 154 seconds against the same anonymized deployment database, with 200 rows and domain-plus-client deduplication. The analyzer identified direct browser routing and zero Workbox network fetches.
+The accepted v1.11.0 capture observed 154 seconds against the same anonymized deployment database, with 200 rows and domain-plus-client deduplication. The analyzer identified direct browser routing and zero Workbox network fetches.
 
-| Live measurement | Before | After | Change |
+| Live measurement | v1.10.1 behavior | v1.11.0 behavior | Change |
 | --- | ---: | ---: | ---: |
 | Completed backend requests per minute | 25.5 | 7.8 | 69.5% fewer |
 | Browser fetches per minute | 25.5 | 9.4 | 63.4% fewer |
@@ -51,11 +55,11 @@ The accepted after capture observed 154 seconds against the same anonymized depl
 | All completed requests: maximum | 16,532 ms | 5,505 ms | 66.7% lower |
 | HTTP errors | 0 | 0 | unchanged |
 
-The overall median mixes different request populations. The before capture contained 17 repeated requests and 14 sub-100 ms responses; the after capture contained no repeated exact queries and no sub-100 ms responses. The higher overall median therefore must not be interpreted as a like-for-like SQL regression.
+The overall median mixes different request populations. The v1.10.1-behavior capture contained 17 repeated requests and 14 sub-100 ms responses; the v1.11.0 capture contained no repeated exact queries and no sub-100 ms responses. The higher overall median therefore must not be interpreted as a like-for-like SQL regression.
 
 For a closer latency comparison, the analysis matched the ten exact query URLs present in both captures. This holds page number, row count, sort, deduplication, and filter values constant. Each URL is represented by its median when repeated within a capture.
 
-| Ten matched exact queries | Before | After | Change |
+| Ten matched exact queries | v1.10.1 behavior | v1.11.0 behavior | Change |
 | --- | ---: | ---: | ---: |
 | Median of query medians | 3,327 ms | 3,465 ms | 4.1% higher |
 | p90 of query medians | 7,012 ms | 4,835 ms | 31.0% lower |
@@ -85,7 +89,7 @@ The repository includes a secret-safe HAR analyzer. It reports aggregate request
 node apps/frontend/scripts/analyze-logs-har.mjs /path/to/capture.har
 ```
 
-Pass before and after HARs together to reproduce the normalized request rates and privacy-safe exact-query latency comparison:
+Pass the v1.10.1-behavior baseline and v1.11.0 HARs together to reproduce the normalized request rates and privacy-safe exact-query latency comparison:
 
 ```bash
 node apps/frontend/scripts/analyze-logs-har.mjs \
@@ -103,7 +107,7 @@ RUN_LOG_FILTER_BENCHMARKS=true \
 
 The benchmark executes the production routing and request-admission policies. The production HAR remains private because it contains DNS-log response bodies and internal identifiers; only anonymized aggregates are committed.
 
-### Comparable live after-capture
+### Comparable live v1.11.0 capture
 
 Use the deployed production-test build and the same authenticated browser profile as the baseline:
 
@@ -116,7 +120,7 @@ Use the deployed production-test build and the same authenticated browser profil
 
 The browser profile matters because Companion API requests require an authenticated session. Do not commit the HAR or session material.
 
-The first attempted after capture was rejected before comparison because the analyzer reported `routing: "service-worker"`; its open tab still used the previous application generation. After unregistering the old service worker and reopening the application, the accepted capture reported `routing: "direct"`. Rejected measurements are not included in the result tables.
+The first attempted v1.11.0 capture was rejected before comparison because the analyzer reported `routing: "service-worker"`; its open tab still used the previous application generation. After unregistering the old service worker and reopening the application, the accepted v1.11.0 capture reported `routing: "direct"`. Rejected measurements are not included in the result tables.
 
 ## Validation boundary
 

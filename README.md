@@ -48,7 +48,11 @@ Companion's stored DNS Logs path is tested against a deterministic database of
 page-one performance while removing the largest deduplication and count
 hotspots:
 
-| Stored DNS Logs operation | Before | After | Reduction |
+Here, the prior behavior is the path shipped in **v1.10.1** (and earlier
+releases using the same implementation); the optimized behavior was released
+in **v1.11.0**.
+
+| Stored DNS Logs operation | v1.10.1 baseline | v1.11.0 | Reduction |
 | --- | ---: | ---: | ---: |
 | Domain deduplication | 2,980 ms | 136 ms | 95.4% |
 | Per-client deduplication | 3,250 ms | 196 ms | 94.0% |
