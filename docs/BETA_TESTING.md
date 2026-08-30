@@ -33,7 +33,7 @@ docker compose ps
 The `beta` tag advances only after an explicit promotion and can remain fixed
 while the rolling `next` integration tag receives more changes. For a longer
 test or reliable reproduction, replace `:beta` with the immutable
-`sha-<commit>` tag associated with the promoted build.
+`sha-<commit>-beta` tag associated with the promoted build.
 
 ## Promote a candidate
 
@@ -41,8 +41,10 @@ Maintainers promote a candidate by manually running **Build and Push Docker
 Image** from `next` or a `release/*` branch with `push_image=true` and
 `channel=beta`. The workflow runs the release quality gates, validates the
 source branch, waits for approval through the protected `beta` environment,
-and publishes `:beta`, `<version>-beta`, and `sha-<commit>` to the same image
-digest.
+and publishes `:beta`, `<version>-beta`, and `sha-<commit>-beta` to the same
+image digest. The beta suffix keeps this rebuilt, channel-labelled artifact
+distinct from the `sha-<commit>` preview artifact produced by an ordinary
+`next` push.
 
 ```bash
 gh workflow run docker-publish.yml \
@@ -98,7 +100,7 @@ docker compose pull
 docker compose up -d
 ```
 
-If stable moved during the test, pin the previous known-good `sha-<commit>` tag
+If stable moved during the test, pin the previous known-good source tag
 instead. Restore persistent data only when the beta changed durable state and
 the relevant feature documentation calls for it; a normal image-only rollback
 should not replace data unnecessarily.
