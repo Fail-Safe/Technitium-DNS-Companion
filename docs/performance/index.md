@@ -6,12 +6,18 @@ project includes deterministic benchmarks, anonymized deployment measurements,
 and reproducible test commands for the database, hostname-enrichment, and
 browser request paths.
 
+> **Version context:** Throughout this overview and the linked reports,
+> **Before** means the behavior shipped in Companion v1.10.1 (and earlier
+> releases using the same implementation). **After** means the optimized
+> implementation released in Companion v1.11.0. Named intermediate stages are
+> benchmark iterations between those two released versions.
+
 ## Results at a glance
 
 On a deterministic database containing 1,000,000 query-log rows, the final
 adaptive SQLite path produced these warm median results:
 
-| Stored DNS Logs operation | Before | After | Reduction |
+| Stored DNS Logs operation | v1.10.1 baseline | v1.11.0 | Reduction |
 | --- | ---: | ---: | ---: |
 | Unfiltered domain deduplication | 2,980 ms | 136 ms | 95.4% |
 | Unfiltered per-client deduplication | 3,250 ms | 196 ms | 94.0% |
@@ -57,11 +63,12 @@ continued through the service worker, admitted one request instead of five
 rapid page selections, and produced no automatic refreshes during a 30-second
 paginated dwell.
 
-In a production-derived before/after capture, completed backend requests fell
-from 25.5 to 7.8 per minute, a 69.5% reduction. Ten exact query URLs shared by
-both captures had a nearly flat median, while p90 and maximum latency fell by
-31.0% and 36.5%. This supports a reduction in request pile-up and tail latency;
-it is not presented as a median SQL speedup.
+In production-derived captures of the v1.10.1 behavior and the v1.11.0
+implementation, completed backend requests fell from 25.5 to 7.8 per minute, a
+69.5% reduction. Ten exact query URLs shared by both captures had a nearly flat
+median, while p90 and maximum latency fell by 31.0% and 36.5%. This supports a
+reduction in request pile-up and tail latency; it is not presented as a median
+SQL speedup.
 
 ![Paired charts showing fewer completed backend requests and lower p90 and maximum latency, with a nearly unchanged matched median.](./images/dns-logs-browser-live-results.svg)
 

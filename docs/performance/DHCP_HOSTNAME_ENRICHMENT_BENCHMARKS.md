@@ -4,9 +4,13 @@
 
 DNS Logs stored browsing no longer contacts live Technitium nodes for DHCP hostname enrichment. Background hostname collection discovers which nodes have enabled DHCP scopes and requests leases only from those nodes.
 
+In this report, **Before** means the behavior shipped in Companion v1.10.1 and
+earlier. Capability routing and stored isolation are successive optimization
+stages released together in Companion v1.11.0.
+
 ![Three paired bar charts showing controlled lease-refresh latency falling from 80.91 to 11.18 milliseconds, lease calls per refresh falling from three to one, and live-node calls per stored page falling from three to zero.](./images/dhcp-capability-benchmark.svg)
 
-| Measurement | Before | Capability routing | Stored isolation |
+| Measurement | v1.10.1 baseline | v1.11.0 capability routing | v1.11.0 stored isolation |
 | --- | ---: | ---: | ---: |
 | Controlled slow-node median | 80.91 ms | 11.18 ms | — |
 | Lease calls per refresh | 3 | 1 | — |
@@ -101,7 +105,7 @@ The next iteration reduces abandoned synchronous SQL without changing the query 
 
 ![Two paired bar charts showing typing three client-filter prefixes falling from three automatic requests to one, while pausing on a one-character filter falls from one automatic request to zero.](./images/logs-filter-request-coalescing.svg)
 
-| Controlled interaction | Before | After | Change |
+| Controlled interaction | v1.10.1 behavior | v1.11.0 behavior | Change |
 | --- | ---: | ---: | ---: |
 | Type `a` → `ab` → `abc`, 100 ms apart | 3 requests | 1 request (`abc`) | 66.7% fewer |
 | Pause on `a` | 1 automatic request | 0 automatic requests | 100% fewer |
