@@ -196,7 +196,8 @@ jobs:
             exit 0
           fi
 
-          immutable_ref="$REGISTRY/$IMAGE_NAME:$immutable_tag"
+          image_name_lc="$(printf '%s' "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')"
+          immutable_ref="$REGISTRY/$image_name_lc:$immutable_tag"
           if inspect_output="$(docker buildx imagetools inspect "$immutable_ref" 2>&1)"; then
             echo "::error::Immutable source tag $immutable_ref already exists; refusing to replace it."
             exit 1
