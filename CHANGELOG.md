@@ -27,6 +27,9 @@ All notable changes to this project will be documented in this file.
 - Beta container publication is now an explicit, environment-gated promotion
   from `next` or `release/*`. The rolling `:next` integration image can advance
   without replacing a beta candidate under active soak testing.
+- Source-revision container tags are channel-qualified for beta and stable
+  rebuilds, and publication fails closed if an immutable source tag already
+  exists instead of silently replacing it with a different digest.
 - DNS Logs SQLite rows, hostname backfill, known clients, and per-client
   deduplication now include the source group, preventing identical private IPs
   in different sites from being combined.

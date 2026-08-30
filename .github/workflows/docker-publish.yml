@@ -168,10 +168,44 @@ jobs:
             # beta channel: explicitly promoted, approval-gated candidate
             type=raw,value=beta,enable=${{ github.event_name == 'workflow_dispatch' && inputs.push_image && inputs.channel == 'beta' }}
             type=raw,value=${{ steps.package-version.outputs.version }}-beta,enable=${{ github.event_name == 'workflow_dispatch' && inputs.push_image && inputs.channel == 'beta' }}
-            # Every published branch/tag image also gets an immutable source-revision tag.
-            type=sha,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+            # Channel-qualified immutable source tags prevent a beta/stable rebuild
+            # from replacing a different artifact produced from the same commit.
+            type=sha,enable=${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next') }}
+            type=sha,suffix=-beta,enable=${{ github.event_name == 'workflow_dispatch' && inputs.push_image && inputs.channel == 'beta' }}
+            type=sha,suffix=-stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             # Manual runs from non-channel refs retain a discoverable rolling alias.
             type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' && inputs.channel != 'beta' && github.ref != 'refs/heads/main' && github.ref != 'refs/heads/next' }}
+
+      - name: Protect immutable source tag
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.push_image && inputs.channel == 'beta')
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BUILD_REF: ${{ github.ref }}
+          REQUESTED_CHANNEL: ${{ inputs.channel || 'preview' }}
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::7}"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$REQUESTED_CHANNEL" == "beta" ]]; then
+            immutable_tag="sha-$short_sha-beta"
+          elif [[ "$BUILD_REF" == refs/tags/v* ]]; then
+            immutable_tag="sha-$short_sha-stable"
+          elif [[ "$BUILD_REF" == "refs/heads/main" || "$BUILD_REF" == "refs/heads/next" ]]; then
+            immutable_tag="sha-$short_sha"
+          else
+            exit 0
+          fi
+
+          immutable_ref="$REGISTRY/$IMAGE_NAME:$immutable_tag"
+          if inspect_output="$(docker buildx imagetools inspect "$immutable_ref" 2>&1)"; then
+            echo "::error::Immutable source tag $immutable_ref already exists; refusing to replace it."
+            exit 1
+          fi
+          if [[ "$inspect_output" != *": not found"* ]]; then
+            echo "::error::Unable to verify immutable source tag availability for $immutable_ref."
+            exit 1
+          fi
+          echo "Immutable source tag $immutable_ref is available."
 
       - name: Build and push Docker image
         id: publish-image

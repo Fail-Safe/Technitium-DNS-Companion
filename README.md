@@ -65,7 +65,9 @@ Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_
 | `1.6`, `1.6.9` | Pinned version tags |
 | `beta` | Approval-gated release candidate promoted from `next` or `release/*` |
 | `next` | Rolling integration build; may advance independently of `beta` |
-| `sha-<commit>` | Immutable build for reproducing a beta result or rollback |
+| `sha-<commit>` | Immutable rolling-channel build from `main` or `next` |
+| `sha-<commit>-beta` | Immutable artifact for reproducing an approved beta |
+| `sha-<commit>-stable` | Immutable artifact produced by a stable release tag |
 
 Want to help soak-test upcoming changes? See the opt-in [Beta Testing
 Guide](docs/BETA_TESTING.md) for install, verification, reporting, and rollback
