@@ -4,9 +4,12 @@
 
 The final adaptive query path removes four multi-second SQLite hotspots on the DNS Logs page without slowing normal page-one browsing or selective filtered searches.
 
+The baseline models the query path shipped in Companion v1.10.1 and earlier.
+The final column is the optimized path released in Companion v1.11.0.
+
 ![Four small line charts showing unfiltered domain dedup falling from 2.98 seconds to 136 milliseconds, per-client dedup from 3.25 seconds to 196 milliseconds, unique-domain count from 1.68 seconds to 5 milliseconds, and blocked count from 1.30 seconds to 2 milliseconds.](./images/query-log-benchmark-iterations.svg)
 
-| DNS Logs operation | Baseline warm median | Final warm median | Reduction |
+| DNS Logs operation | v1.10.1 baseline warm median | v1.11.0 warm median | Reduction |
 | --- | ---: | ---: | ---: |
 | Unfiltered domain dedup | 2,980 ms | 136 ms | 95.4% |
 | Deep domain-dedup page (offset 2,500) | 2,920 ms | 145 ms | 95.0% |
@@ -94,7 +97,7 @@ A no-match substring search with deduplication disabled still takes approximatel
 
 The benchmark measures SQLite query execution only. It excludes hostname enrichment, JSON parsing, HTTP serialization, browser rendering, and the server's 15-second stored-response cache.
 
-Hostname enrichment was measured separately after deployment exposed a live-node dependency. See [DHCP Capability Discovery and Stored-Log Isolation](./DHCP_HOSTNAME_ENRICHMENT_BENCHMARKS.md) for the subsequent before/after series.
+Hostname enrichment was measured separately after deployment exposed a live-node dependency. See [DHCP Capability Discovery and Stored-Log Isolation](./DHCP_HOSTNAME_ENRICHMENT_BENCHMARKS.md) for the subsequent v1.10.1-to-v1.11.0 series.
 
 ## Reproducing the stages
 
