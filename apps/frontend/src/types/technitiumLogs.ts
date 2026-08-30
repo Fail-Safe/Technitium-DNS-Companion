@@ -34,6 +34,7 @@ export interface TechnitiumQueryLogEntry {
   qtype?: string;
   qclass?: string;
   answer?: string;
+  groupId?: string;
 }
 
 export interface TechnitiumQueryLogPage {
@@ -48,6 +49,7 @@ export interface TechnitiumQueryLogPage {
 export interface TechnitiumCombinedQueryLogEntry extends TechnitiumQueryLogEntry {
   nodeId: string;
   baseUrl: string;
+  groupId: string;
 }
 
 export interface TechnitiumNodeQueryLogEnvelope {

@@ -35,6 +35,7 @@ type AppliedEntryTuple = {
 type ClusterWriteOperation = {
   writeTarget: string;
   flushNodes: string[];
+  skippedFlushNodes: string[];
 };
 
 type ActiveOverrideSource = {
@@ -362,10 +363,17 @@ export class DnsSchedulesEvaluatorService
           // `entry.nodeId` could be a secondary. Resolve it so the remove goes
           // to the cluster Primary (writes to secondaries race replication and
           // get reverted). Cache flush still hits all physical nodes.
-          const resolved = perCandidate.get(entry.nodeId) ?? {
-            writeTarget: entry.nodeId,
-            flushNodes: [entry.nodeId],
-          };
+          const resolved = perCandidate.get(entry.nodeId);
+          if (!resolved?.writeTarget) {
+            results.push({
+              scheduleId: schedule.id,
+              scheduleName: schedule.name,
+              nodeId: entry.nodeId,
+              action: "skipped",
+              reason: resolved?.reason ?? "no-validated-primary",
+            });
+            continue;
+          }
           try {
             await this.removeScheduleFromNode(
               schedule,
@@ -436,13 +444,24 @@ export class DnsSchedulesEvaluatorService
         const seenWriteTargets = new Set<string>();
         const operations: ClusterWriteOperation[] = [];
         for (const candidateId of candidateNodeIds) {
-          const resolved = perCandidate.get(candidateId) ?? {
-            writeTarget: candidateId,
-            flushNodes: [candidateId],
-          };
+          const resolved = perCandidate.get(candidateId);
+          if (!resolved?.writeTarget) {
+            results.push({
+              scheduleId: schedule.id,
+              scheduleName: schedule.name,
+              nodeId: candidateId,
+              action: "skipped",
+              reason: resolved?.reason ?? "no-validated-primary",
+            });
+            continue;
+          }
           if (seenWriteTargets.has(resolved.writeTarget)) continue;
           seenWriteTargets.add(resolved.writeTarget);
-          operations.push(resolved);
+          operations.push({
+            writeTarget: resolved.writeTarget,
+            flushNodes: resolved.flushNodes,
+            skippedFlushNodes: resolved.skippedFlushNodes ?? [],
+          });
         }
 
         for (const op of operations) {
@@ -450,6 +469,7 @@ export class DnsSchedulesEvaluatorService
             schedule,
             op.writeTarget,
             op.flushNodes,
+            op.skippedFlushNodes,
             this.getStateNodeIdsForWriteTarget(
               schedule.id,
               op.writeTarget,
@@ -510,7 +530,15 @@ export class DnsSchedulesEvaluatorService
     scheduleId: string,
     writeTarget: string,
     candidateNodeIds: string[],
-    perCandidate: Map<string, { writeTarget: string; flushNodes: string[] }>,
+    perCandidate: Map<
+      string,
+      {
+        writeTarget?: string;
+        flushNodes: string[];
+        skippedFlushNodes?: string[];
+        reason?: string;
+      }
+    >,
   ): string[] {
     const stateNodeIds = new Set<string>([writeTarget]);
     const candidateSet = new Set(candidateNodeIds);
@@ -519,11 +547,8 @@ export class DnsSchedulesEvaluatorService
       if (!candidateSet.has(entry.nodeId) && entry.nodeId !== writeTarget) {
         continue;
       }
-      const resolved = perCandidate.get(entry.nodeId) ?? {
-        writeTarget: entry.nodeId,
-        flushNodes: [entry.nodeId],
-      };
-      if (resolved.writeTarget === writeTarget) {
+      const resolved = perCandidate.get(entry.nodeId);
+      if (resolved?.writeTarget === writeTarget) {
         stateNodeIds.add(entry.nodeId);
       }
     }
@@ -613,6 +638,7 @@ export class DnsSchedulesEvaluatorService
     schedule: DnsSchedule,
     nodeId: string,
     flushNodeIds: string[],
+    skippedFlushNodeIds: string[],
     stateNodeIds: string[],
     now: Date,
     dryRun: boolean,
@@ -701,17 +727,21 @@ export class DnsSchedulesEvaluatorService
           // everything we want. Drift episode (if any) has resolved.
           this.resetDriftState(schedule.id, nodeId);
         }
-        if (changed && schedule.flushCacheOnChange) {
-          for (const flushNodeId of flushNodeIds) {
-            await this.flushDomainsCache(schedule, flushNodeId);
-          }
-        }
+        const cacheFlush =
+          changed && schedule.flushCacheOnChange
+            ? await this.flushAdmittedCaches(
+                schedule,
+                flushNodeIds,
+                skippedFlushNodeIds,
+              )
+            : undefined;
         if (!isCurrentlyApplied || changed) {
           return {
             scheduleId: schedule.id,
             scheduleName: schedule.name,
             nodeId,
             action: "applied",
+            ...(cacheFlush ? { cacheFlush } : {}),
           };
         }
         return {
@@ -730,16 +760,19 @@ export class DnsSchedulesEvaluatorService
         // Window closed — drop any drift bookkeeping for this pair. Next
         // window opens with a clean counter.
         this.resetDriftState(schedule.id, nodeId);
-        if (schedule.flushCacheOnChange) {
-          for (const flushNodeId of flushNodeIds) {
-            await this.flushDomainsCache(schedule, flushNodeId);
-          }
-        }
+        const cacheFlush = schedule.flushCacheOnChange
+          ? await this.flushAdmittedCaches(
+              schedule,
+              flushNodeIds,
+              skippedFlushNodeIds,
+            )
+          : undefined;
         return {
           scheduleId: schedule.id,
           scheduleName: schedule.name,
           nodeId,
           action: "removed",
+          ...(cacheFlush ? { cacheFlush } : {}),
         };
       }
     } catch (error) {
@@ -852,10 +885,13 @@ export class DnsSchedulesEvaluatorService
 
     const seenWriteTargets = new Set<string>();
     for (const entry of applied) {
-      const resolved = perCandidate.get(entry.nodeId) ?? {
-        writeTarget: entry.nodeId,
-        flushNodes: [entry.nodeId],
-      };
+      const resolved = perCandidate.get(entry.nodeId);
+      if (!resolved?.writeTarget) {
+        this.logger.warn(
+          `Skipped deactivation for schedule "${schedule.name}" on node "${entry.nodeId}": ${resolved?.reason ?? "no validated Primary is available"}.`,
+        );
+        continue;
+      }
       // Skip duplicate Primary writes when multiple secondaries of the same
       // cluster have legacy state rows for this schedule.
       const skipWrite = seenWriteTargets.has(resolved.writeTarget);
@@ -1276,29 +1312,56 @@ export class DnsSchedulesEvaluatorService
    * Technitium evaluates Advanced Blocking rules on cache misses only —
    * stale subdomain entries (e.g. www.youtube.com when youtube.com is
    * blocked) survive a per-domain flush and continue resolving from cache.
-   * Failures (e.g. missing Cache: Modify permission) are logged as
+   * Failures (e.g. missing Cache: Delete permission) are logged as
    * warnings and never propagate to callers.
    */
   private async flushDomainsCache(
     schedule: DnsSchedule,
     nodeId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await this.technitiumService.executeAction(
         nodeId,
-        { method: "GET", url: "/api/cache/flush" },
+        { method: "GET", url: "/api/cache/delete" },
         { authMode: "schedule" },
       );
       this.logger.log(
         `Full cache flush completed on node "${nodeId}" after schedule "${schedule.name}" change.`,
       );
+      return true;
     } catch (error) {
       this.logger.warn(
         `Cache flush failed for schedule "${schedule.name}" on node "${nodeId}": ` +
           `${error instanceof Error ? error.message : String(error)} ` +
-          `(token may lack Cache: Modify permission).`,
+          `(token may lack Cache: Delete permission).`,
       );
+      return false;
     }
+  }
+
+  private async flushAdmittedCaches(
+    schedule: DnsSchedule,
+    flushNodeIds: string[],
+    skippedFlushNodeIds: string[],
+  ): Promise<{ flushedNodeIds: string[]; skippedNodeIds: string[] }> {
+    const flushedNodeIds: string[] = [];
+    const skippedNodeIds = [...skippedFlushNodeIds];
+    for (const nodeId of flushNodeIds) {
+      try {
+        const flushed = await this.flushDomainsCache(schedule, nodeId);
+        if (!flushed) {
+          skippedNodeIds.push(nodeId);
+          continue;
+        }
+        flushedNodeIds.push(nodeId);
+      } catch (error) {
+        skippedNodeIds.push(nodeId);
+        this.logger.warn(
+          `Skipped cache flush for schedule "${schedule.name}" on node "${nodeId}": ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return { flushedNodeIds, skippedNodeIds };
   }
 
   /**

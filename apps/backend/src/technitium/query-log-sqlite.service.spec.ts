@@ -38,6 +38,10 @@ interface SchemaShape {
   initializeSchema: () => void;
 }
 
+interface HostnameBackfillShape extends SchemaShape {
+  backfillMissingClientNames: (hostnames: Map<string, string>) => void;
+}
+
 interface DedupSelectShape extends SchemaShape {
   selectDeduplicatedRows: (
     base: { whereSql: string; params: Array<string | number> },
@@ -247,6 +251,7 @@ describe("QueryLogSqliteService — deduplicated counts", () => {
       `CREATE TABLE query_log_entries (
         ts INTEGER NOT NULL,
         qnameLc TEXT,
+        groupId TEXT NOT NULL DEFAULT '__default__',
         clientIpLc TEXT
       )`,
     );
@@ -287,6 +292,18 @@ describe("QueryLogSqliteService — deduplicated counts", () => {
         true,
       ),
     ).toBe(3);
+  });
+
+  it("keeps identical private clients in different groups distinct", () => {
+    db.prepare(
+      "INSERT INTO query_log_entries (ts, qnameLc, groupId, clientIpLc) VALUES (?, ?, ?, ?)",
+    ).run(15, "one.example", "site-b", "192.0.2.1");
+    expect(
+      internal.countDeduplicatedEntries(
+        { whereSql: "WHERE ts >= ? AND ts <= ?", params: [0, 100] },
+        true,
+      ),
+    ).toBe(4);
   });
 });
 
@@ -351,11 +368,59 @@ describe("QueryLogSqliteService — query indexes", () => {
         .map((column) => [column.name, column.desc]),
     ).toEqual([
       ["qnameLc", 0],
+      ["groupId", 0],
       ["clientIpLc", 0],
       ["blockedRank", 1],
       ["aRank", 1],
       ["ts", 1],
     ]);
+  });
+
+  it("migrates and synchronizes group IDs for existing databases", () => {
+    runSql(
+      db,
+      `CREATE TABLE query_log_entries (
+        nodeId TEXT NOT NULL, baseUrl TEXT NOT NULL, ts INTEGER NOT NULL,
+        timestamp TEXT NOT NULL, qname TEXT, qnameLc TEXT,
+        clientIpAddress TEXT, clientIpLc TEXT, clientName TEXT,
+        clientNameLc TEXT, protocol TEXT, responseType TEXT, rcode TEXT,
+        qtype TEXT, qclass TEXT,
+        blockedRank INTEGER NOT NULL DEFAULT 0, aRank INTEGER NOT NULL DEFAULT 0,
+        entryHash TEXT NOT NULL, data TEXT NOT NULL,
+        PRIMARY KEY (nodeId, entryHash)
+      )`,
+    );
+    db.prepare(
+      "INSERT INTO query_log_entries (nodeId, baseUrl, ts, timestamp, entryHash, data) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run("node-a", "https://node-a.example.test", 1, "ts", "hash", "{}");
+    const internal = new QueryLogSqliteService(
+      {} as never,
+      [
+        {
+          id: "node-a",
+          baseUrl: "https://node-a.example.test",
+          token: "",
+          groupId: "site-a",
+        },
+      ] as never,
+    ) as unknown as SchemaShape;
+    internal.db = db;
+    internal.initializeSchema();
+
+    expect(db.prepare("SELECT groupId FROM query_log_entries").get()).toEqual({
+      groupId: "site-a",
+    });
+
+    const schemaVersionBefore = db.prepare("PRAGMA schema_version").get() as {
+      schema_version: number;
+    };
+    internal.initializeSchema();
+    const schemaVersionAfter = db.prepare("PRAGMA schema_version").get() as {
+      schema_version: number;
+    };
+    expect(schemaVersionAfter.schema_version).toBe(
+      schemaVersionBefore.schema_version,
+    );
   });
 });
 
@@ -747,5 +812,58 @@ describe("QueryLogSqliteService — stored hostname isolation", () => {
     expect(result.entries).toHaveLength(1);
     expect(cachedEnrichment).toHaveBeenCalledTimes(1);
     expect(liveEnrichment).not.toHaveBeenCalled();
+  });
+
+  it("backfills a hostname only inside its group namespace", () => {
+    tmpDir = mkdtempSync(join(tmpdir(), "qlogs-group-backfill-spec-"));
+    db = new DatabaseSync(join(tmpDir, "query-logs.sqlite"));
+    const internal = new QueryLogSqliteService(
+      {} as never,
+      [] as never,
+    ) as unknown as HostnameBackfillShape;
+    internal.db = db;
+    internal.initializeSchema();
+    const insert = db.prepare(
+      `INSERT INTO query_log_entries (
+        nodeId, baseUrl, groupId, ts, timestamp,
+        clientIpAddress, clientIpLc, entryHash, data
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    insert.run(
+      "node-a",
+      "https://node-a.example.test",
+      "site-a",
+      1,
+      "ts-a",
+      "192.168.1.20",
+      "192.168.1.20",
+      "a",
+      "{}",
+    );
+    insert.run(
+      "node-b",
+      "https://node-b.example.test",
+      "site-b",
+      2,
+      "ts-b",
+      "192.168.1.20",
+      "192.168.1.20",
+      "b",
+      "{}",
+    );
+
+    internal.backfillMissingClientNames(
+      new Map([["site-a\u0000192.168.1.20", "client-at-site-a"]]),
+    );
+    expect(
+      db
+        .prepare(
+          "SELECT groupId, clientName FROM query_log_entries ORDER BY groupId",
+        )
+        .all(),
+    ).toEqual([
+      { groupId: "site-a", clientName: "client-at-site-a" },
+      { groupId: "site-b", clientName: null },
+    ]);
   });
 });

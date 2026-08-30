@@ -53,12 +53,39 @@ The shared index supports both dedup keys:
 ```sql
 CREATE INDEX idx_query_log_dedup_rank ON query_log_entries (
   qnameLc,
+  groupId,
   clientIpLc,
   blockedRank DESC,
   aRank DESC,
   ts DESC
 );
 ```
+
+## Group-ID migration validation
+
+Issue #112 extended the synthetic million-row dataset to two independent
+network namespaces and rebuilt the production priority index around
+`(qnameLc, groupId, clientIpLc, ranking fields)`. The same adaptive stage,
+PRAGMAs, FTS routing, and three warm samples produced:
+
+| Operation | Previous final | Group-aware final | Change |
+| --- | ---: | ---: | ---: |
+| Ordinary page one, dedup off | 0.03 ms | 0.03 ms | No change |
+| Domain dedup | 136 ms | 147 ms | +11 ms |
+| Deep domain-dedup page | 145 ms | 139 ms | -6 ms |
+| Per-client dedup | 196 ms | 226 ms | +30 ms |
+| One-hour domain dedup | 36 ms | 53 ms | +17 ms |
+| Google plus A-record filter | 271 ms | 231 ms | -40 ms |
+| Phone client filter | 728 ms | 630 ms | -98 ms |
+| Unique-domain count | 5 ms | 4 ms | -1 ms |
+| Blocked count | 2 ms | 2 ms | No change |
+
+The group-aware key adds a bounded 30 ms to the operation whose result
+cardinality intentionally increases. Ordinary browsing is unchanged; the
+short-window increase remains 17 ms, and the other representative
+deduplicated/filter paths remain within or improve on the existing benchmark.
+This is not a material regression for the common DNS Logs queries. The
+generated database was 764.4 MiB including FTS and the production indexes.
 
 ## Why the final path is adaptive
 

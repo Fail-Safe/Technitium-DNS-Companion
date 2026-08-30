@@ -5,6 +5,7 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { AuthRequestContext } from "../auth/auth-request-context";
+import type { AuthSession } from "../auth/auth.types";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
 import { TechnitiumService } from "./technitium.service";
 import {
@@ -930,7 +931,7 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
           validated: true;
           valid: boolean;
           hasAppsModify: boolean;
-          hasCacheModify: boolean;
+          hasCacheDelete: boolean;
           username?: string;
           reason?: string;
           transient?: boolean;
@@ -953,7 +954,7 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
       validated: true,
       valid: true,
       hasAppsModify: true,
-      hasCacheModify: true,
+      hasCacheDelete: true,
       username: "companion-schedule",
     };
     s.logScheduleTokenValidationOutcome();
@@ -970,7 +971,7 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
       validated: true,
       valid: true,
       hasAppsModify: false,
-      hasCacheModify: true,
+      hasCacheDelete: true,
       username: "low-priv",
       reason:
         "Token authenticated but lacks Apps: Modify permission needed to update Advanced Blocking config.",
@@ -985,20 +986,20 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
     );
   });
 
-  it("warns when Cache: Modify is missing (flushCacheOnChange will fail)", () => {
+  it("warns when Cache: Delete is missing (flushCacheOnChange will fail)", () => {
     const s = build();
     s.scheduleTokenValidation = {
       validated: true,
       valid: true,
       hasAppsModify: true,
-      hasCacheModify: false,
+      hasCacheDelete: false,
       username: "apps-only",
     };
     s.logScheduleTokenValidationOutcome();
     expect(s.logger.log).not.toHaveBeenCalled();
     expect(s.logger.warn).toHaveBeenCalledTimes(1);
     const msg = s.logger.warn.mock.calls[0][0];
-    expect(msg).toContain("missing Cache: Modify");
+    expect(msg).toContain("missing Cache: Delete");
     expect(msg).toContain("flushCacheOnChange=true");
     expect(msg).toContain("apply/remove will otherwise work");
   });
@@ -1009,7 +1010,7 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
       validated: true,
       valid: false,
       hasAppsModify: false,
-      hasCacheModify: false,
+      hasCacheDelete: false,
       transient: true,
       reason: `Failed to validate TECHNITIUM_SCHEDULE_TOKEN against node "nodeB": read ECONNRESET`,
     };
@@ -1029,7 +1030,7 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
       validated: true,
       valid: false,
       hasAppsModify: false,
-      hasCacheModify: false,
+      hasCacheDelete: false,
       reason: `TECHNITIUM_SCHEDULE_TOKEN was rejected by node "nodeB": invalid token.`,
     };
     s.logScheduleTokenValidationOutcome();
@@ -1046,7 +1047,7 @@ describe("TechnitiumService — logScheduleTokenValidationOutcome", () => {
       validated: true,
       valid: false,
       hasAppsModify: false,
-      hasCacheModify: false,
+      hasCacheDelete: false,
       reason: "TECHNITIUM_SCHEDULE_TOKEN is not set.",
     };
     s.logScheduleTokenValidationOutcome();
@@ -1185,12 +1186,18 @@ describe("TechnitiumService — resolveClusterWriteTargets", () => {
 
   function summary(
     id: string,
-    opts: { domain?: string; primary?: boolean; clustered?: boolean } = {},
+    opts: {
+      domain?: string;
+      groupId?: string;
+      primary?: boolean;
+      clustered?: boolean;
+    } = {},
   ): TechnitiumNodeSummary {
     const clustered = opts.clustered ?? !!opts.domain;
     return {
       id,
       baseUrl: `https://${id}.test`,
+      groupId: opts.groupId ?? "__default__",
       clusterState: clustered
         ? {
             initialized: true,
@@ -1238,10 +1245,10 @@ describe("TechnitiumService — resolveClusterWriteTargets", () => {
 
   it("handles two independent clusters — each writes to its own Primary", async () => {
     const nodes = [
-      summary("a1", { domain: "A", primary: true }),
-      summary("a2", { domain: "A" }),
-      summary("b1", { domain: "B", primary: true }),
-      summary("b2", { domain: "B" }),
+      summary("a1", { domain: "A", groupId: "site-a", primary: true }),
+      summary("a2", { domain: "A", groupId: "site-a" }),
+      summary("b1", { domain: "B", groupId: "site-b", primary: true }),
+      summary("b2", { domain: "B", groupId: "site-b" }),
     ];
     const { perCandidate, writeTargets } =
       await service.resolveClusterWriteTargets(["a1", "a2", "b1", "b2"], nodes);
@@ -1304,6 +1311,300 @@ describe("TechnitiumService — resolveClusterWriteTargets", () => {
       flushNodes: ["ghost"],
     });
     expect(writeTargets).toEqual(["ghost"]);
+  });
+
+  it("never crosses explicit groups even when cluster domains are identical", async () => {
+    const configs: TechnitiumNodeConfig[] = [
+      {
+        id: "a-primary",
+        baseUrl: "https://a-primary.test",
+        token: "",
+        groupId: "site-a",
+      },
+      {
+        id: "a-secondary",
+        baseUrl: "https://a-secondary.test",
+        token: "",
+        groupId: "site-a",
+      },
+      {
+        id: "b-primary",
+        baseUrl: "https://b-primary.test",
+        token: "",
+        groupId: "site-b",
+      },
+      {
+        id: "b-secondary",
+        baseUrl: "https://b-secondary.test",
+        token: "",
+        groupId: "site-b",
+      },
+    ];
+    service.onModuleDestroy();
+    service = new TechnitiumService(configs, new DhcpSnapshotService());
+    (
+      service as unknown as { scheduleGroupCredentials: unknown }
+    ).scheduleGroupCredentials = {
+      anyReady: true,
+      allReady: true,
+      groups: ["site-a", "site-b"].map((groupId) => {
+        const ids = configs
+          .filter((node) => node.groupId === groupId)
+          .map((node) => node.id);
+        return {
+          groupId,
+          state: "ready",
+          authenticatedNodeIds: ids,
+          unreachableNodeIds: [],
+          failedNodeIds: [],
+          admittedNodeIds: {
+            interactive: ids,
+            ptrRead: ids,
+            dhcpRead: ids,
+            primaryConfigWrite: ids,
+            cacheFlush: ids,
+          },
+          capabilities: {
+            ptrRead: true,
+            dhcpRead: true,
+            primaryConfigWrite: true,
+            cacheFlush: true,
+          },
+        };
+      }),
+    };
+    const summaries: TechnitiumNodeSummary[] = configs.map((node) => ({
+      id: node.id,
+      baseUrl: node.baseUrl,
+      groupId: node.groupId,
+      clusterState: {
+        initialized: true,
+        domain: "same-reported-domain.example",
+        type: node.id.endsWith("primary") ? "Primary" : "Secondary",
+      },
+      isPrimary: node.id.endsWith("primary"),
+    }));
+
+    const { perCandidate } = await service.resolveClusterWriteTargets(
+      configs.map((node) => node.id),
+      summaries,
+    );
+    expect(perCandidate.get("a-secondary")).toEqual({
+      writeTarget: "a-primary",
+      flushNodes: ["a-primary", "a-secondary"],
+    });
+    expect(perCandidate.get("b-secondary")).toEqual({
+      writeTarget: "b-primary",
+      flushNodes: ["b-primary", "b-secondary"],
+    });
+  });
+
+  it("does not direct-write when an explicit group has no admitted Primary", async () => {
+    const configs: TechnitiumNodeConfig[] = [
+      {
+        id: "secondary",
+        baseUrl: "https://secondary.test",
+        token: "",
+        groupId: "site-a",
+      },
+    ];
+    service.onModuleDestroy();
+    service = new TechnitiumService(configs, new DhcpSnapshotService());
+    const result = await service.resolveClusterWriteTargets(
+      ["secondary"],
+      [
+        {
+          id: "secondary",
+          baseUrl: "https://secondary.test",
+          groupId: "site-a",
+          clusterState: {
+            initialized: true,
+            domain: "site",
+            type: "Secondary",
+          },
+          isPrimary: false,
+        },
+      ],
+    );
+    expect(result.perCandidate.get("secondary")?.writeTarget).toBeUndefined();
+    expect(result.perCandidate.get("secondary")?.reason).toContain(
+      "no reachable, validated, admitted Primary",
+    );
+  });
+});
+
+describe("TechnitiumService — trusted SSO node readmission", () => {
+  const configs: TechnitiumNodeConfig[] = [
+    {
+      id: "a-primary",
+      baseUrl: "https://a-primary.test",
+      token: "",
+      groupId: "site-a",
+    },
+    {
+      id: "a-secondary",
+      baseUrl: "https://a-secondary.test",
+      token: "",
+      groupId: "site-a",
+    },
+    {
+      id: "b-primary",
+      baseUrl: "https://b-primary.test",
+      token: "",
+      groupId: "site-b",
+    },
+  ];
+  let service: TechnitiumService;
+
+  const group = (
+    groupId: string,
+    authenticatedNodeIds: string[],
+    unreachableNodeIds: string[],
+  ) => ({
+    groupId,
+    state:
+      unreachableNodeIds.length > 0
+        ? ("degraded" as const)
+        : ("ready" as const),
+    verifiedUsername: `${groupId}-operator`,
+    authenticatedNodeIds,
+    unreachableNodeIds,
+    failedNodeIds: [],
+    admittedNodeIds: {
+      interactive: [...authenticatedNodeIds],
+      ptrRead: [...authenticatedNodeIds],
+      dhcpRead: [...authenticatedNodeIds],
+      primaryConfigWrite: groupId === "site-b" ? [...authenticatedNodeIds] : [],
+      cacheFlush: [...authenticatedNodeIds],
+    },
+    capabilities: {
+      ptrRead: authenticatedNodeIds.length > 0,
+      dhcpRead: authenticatedNodeIds.length > 0,
+      primaryConfigWrite: groupId === "site-b",
+      cacheFlush: authenticatedNodeIds.length > 0,
+    },
+  });
+
+  const session = (): AuthSession => ({
+    id: "session",
+    createdAt: new Date().toISOString(),
+    lastSeenAt: Date.now(),
+    user: "operator@example.test",
+    authSource: "trusted-sso",
+    tokensByNodeId: {
+      "a-secondary": "site-a-token",
+      "b-primary": "site-b-token",
+    },
+    pendingTokensByNodeId: { "a-primary": "site-a-token" },
+    credentialUsernamesByGroup: {
+      "site-a": "site-a-operator",
+      "site-b": "site-b-operator",
+    },
+    verifiedUsernamesByGroup: {
+      "site-a": "site-a-operator",
+      "site-b": "site-b-operator",
+    },
+    topologyDomainsByGroup: {
+      "site-a": "a.example.test",
+      "site-b": "b.example.test",
+    },
+    groupCredentials: {
+      anyReady: true,
+      allReady: false,
+      groups: [
+        group("site-a", ["a-secondary"], ["a-primary"]),
+        group("site-b", ["b-primary"], []),
+      ],
+    },
+    nodeAuthStatesByNodeId: {
+      "a-primary": { status: "unreachable" },
+      "a-secondary": { status: "authenticated" },
+      "b-primary": { status: "authenticated" },
+    },
+  });
+
+  beforeEach(() => {
+    process.env.NODE_ENV = "test";
+    service = new TechnitiumService(configs, new DhcpSnapshotService());
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    service.onModuleDestroy();
+  });
+
+  it("revalidates a returning Primary before admitting group-scoped writes", async () => {
+    jest.spyOn(service, "validateExplicitSessionToken").mockResolvedValue({
+      username: "site-a-operator",
+      permissions: {
+        DnsClient: { canView: true },
+        DhcpServer: { canView: true },
+        Apps: { canModify: true },
+        Cache: { canDelete: true },
+      },
+      clusterInitialized: true,
+      clusterDomain: "a.example.test",
+      dnsServerDomain: "a-primary.example.test",
+      clusterNodes: [
+        {
+          name: "a-primary.example.test",
+          url: "https://a-primary.test",
+          type: "Primary",
+        },
+      ],
+    });
+    const current = session();
+
+    await (
+      service as unknown as {
+        revalidatePendingSessionNode: (
+          session: AuthSession,
+          node: TechnitiumNodeConfig,
+        ) => Promise<void>;
+      }
+    ).revalidatePendingSessionNode(current, configs[0]);
+
+    expect(current.tokensByNodeId["a-primary"]).toBe("site-a-token");
+    expect(current.pendingTokensByNodeId?.["a-primary"]).toBeUndefined();
+    expect(
+      current.groupCredentials?.groups[0].admittedNodeIds.primaryConfigWrite,
+    ).toEqual(["a-primary"]);
+    expect(current.groupCredentials?.groups[0].state).toBe("ready");
+    expect(current.tokensByNodeId["b-primary"]).toBe("site-b-token");
+  });
+
+  it("fails only the returning node's group on a topology mismatch", async () => {
+    jest.spyOn(service, "validateExplicitSessionToken").mockResolvedValue({
+      username: "site-a-operator",
+      permissions: { Apps: { canModify: true } },
+      clusterInitialized: true,
+      clusterDomain: "wrong.example.test",
+      dnsServerDomain: "a-primary.example.test",
+      clusterNodes: [
+        {
+          name: "a-primary.example.test",
+          url: "https://a-primary.test",
+          type: "Primary",
+        },
+      ],
+    });
+    const current = session();
+
+    await expect(
+      (
+        service as unknown as {
+          revalidatePendingSessionNode: (
+            session: AuthSession,
+            node: TechnitiumNodeConfig,
+          ) => Promise<void>;
+        }
+      ).revalidatePendingSessionNode(current, configs[0]),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(current.groupCredentials?.groups[0].state).toBe("failed");
+    expect(current.tokensByNodeId["a-secondary"]).toBeUndefined();
+    expect(current.tokensByNodeId["b-primary"]).toBe("site-b-token");
+    expect(current.groupCredentials?.groups[1].state).toBe("ready");
   });
 });
 
@@ -1368,6 +1669,71 @@ describe("TechnitiumService — cluster probe failover", () => {
       true,
     );
   });
+
+  it("matches current plural cluster node IP addresses returned by v15", async () => {
+    const nodes: TechnitiumNodeConfig[] = [
+      {
+        id: "site-a-primary",
+        baseUrl: "http://site-a-primary:5380",
+        token: "token",
+        groupId: "site-a",
+      },
+      {
+        id: "site-a-secondary",
+        baseUrl: "http://site-a-secondary:5380",
+        token: "token",
+        groupId: "site-a",
+      },
+    ];
+    service = new TechnitiumService(nodes, new DhcpSnapshotService());
+    const internals = service as unknown as {
+      request: jest.Mock;
+      resolveHostname: jest.Mock;
+    };
+    internals.request = jest.fn().mockResolvedValue({
+      status: "ok",
+      info: {
+        clusterInitialized: true,
+        clusterDomain: "site-a.test",
+        clusterNodes: [
+          {
+            id: 1,
+            name: "a-primary.site-a.test",
+            url: "https://a-primary.site-a.test:53443/",
+            ipAddresses: ["172.30.111.10"],
+            type: "Primary",
+            state: "Self",
+          },
+          {
+            id: 2,
+            name: "a-secondary.site-a.test",
+            url: "https://a-secondary.site-a.test:53443/",
+            ipAddresses: ["172.30.111.11"],
+            type: "Secondary",
+            state: "Connected",
+          },
+        ],
+      },
+    });
+    internals.resolveHostname = jest
+      .fn()
+      .mockImplementation((hostname: string) =>
+        Promise.resolve(
+          hostname === "site-a-primary"
+            ? "172.30.111.10"
+            : hostname === "site-a-secondary"
+              ? "172.30.111.11"
+              : undefined,
+        ),
+      );
+
+    const summaries = await service.listNodes({ authMode: "background" });
+
+    expect(summaries).toEqual([
+      expect.objectContaining({ id: "site-a-primary", isPrimary: true }),
+      expect.objectContaining({ id: "site-a-secondary", isPrimary: false }),
+    ]);
+  });
 });
 
 describe("TechnitiumService — DHCP scope capability routing", () => {
@@ -1395,16 +1761,17 @@ describe("TechnitiumService — DHCP scope capability routing", () => {
     >;
     getAllDhcpLeasesWithOptions: (options: {
       authMode: "session" | "background";
+      sourceGroupId?: string;
     }) => Promise<Map<string, string>>;
     refreshDhcpScopeCapabilitiesIfNeeded: () => Promise<void>;
     enrichQueryLogEntriesWithCachedHostnames: <T>(entries: T[]) => T[];
     invalidateDhcpScopeCapability: (nodeId: string) => void;
     isDhcpScopeMutation: (url: string | undefined) => boolean;
     dhcpScopeCapabilities: Map<string, CapabilityState>;
-    dhcpLeaseCacheForBackground?: {
-      map: Map<string, string>;
-      fetchedAt: number;
-    };
+    dhcpLeaseCacheForBackground: Map<
+      string,
+      { map: Map<string, string>; fetchedAt: number }
+    >;
     logger: { log: jest.Mock; warn: jest.Mock };
   }
 
@@ -1516,7 +1883,7 @@ describe("TechnitiumService — DHCP scope capability routing", () => {
     );
 
     await internal.getAllDhcpLeasesWithOptions({ authMode: "background" });
-    internal.dhcpLeaseCacheForBackground = undefined;
+    internal.dhcpLeaseCacheForBackground.clear();
     for (const state of internal.dhcpScopeCapabilities.values()) {
       state.checkedAt = 0;
     }
@@ -1537,10 +1904,10 @@ describe("TechnitiumService — DHCP scope capability routing", () => {
   });
 
   it("enriches stored entries from local caches without node requests", () => {
-    internal.dhcpLeaseCacheForBackground = {
+    internal.dhcpLeaseCacheForBackground.set("__all__", {
       map: new Map([["192.0.2.30", "cached-client"]]),
       fetchedAt: Date.now(),
-    };
+    });
     internal.getDhcpLeases = jest.fn(() =>
       Promise.reject(new Error("must not be called")),
     );
@@ -1565,16 +1932,168 @@ describe("TechnitiumService — DHCP scope capability routing", () => {
       retryAfter: 0,
       hasSuccessfulScan: true,
     });
-    internal.dhcpLeaseCacheForBackground = {
+    internal.dhcpLeaseCacheForBackground.set("__all__", {
       map: new Map([["192.0.2.30", "cached-client"]]),
       fetchedAt: Date.now(),
-    };
+    });
 
     expect(internal.isDhcpScopeMutation("/api/dhcp/scopes/enable")).toBe(true);
     expect(internal.isDhcpScopeMutation("/api/dhcp/scopes/list")).toBe(false);
     internal.invalidateDhcpScopeCapability("active");
 
     expect(internal.dhcpScopeCapabilities.has("active")).toBe(false);
-    expect(internal.dhcpLeaseCacheForBackground).toBeUndefined();
+    expect(internal.dhcpLeaseCacheForBackground.size).toBe(0);
+  });
+});
+
+describe("TechnitiumService — grouped hostname isolation", () => {
+  it("uses groupId as the DHCP and cached PTR namespace for the same IP", async () => {
+    const nodes: TechnitiumNodeConfig[] = [
+      {
+        id: "site-a-node",
+        baseUrl: "https://site-a.example.test",
+        token: "",
+        groupId: "site-a",
+      },
+      {
+        id: "site-b-node",
+        baseUrl: "https://site-b.example.test",
+        token: "",
+        groupId: "site-b",
+      },
+      {
+        id: "site-a-unadmitted",
+        baseUrl: "https://site-a-unadmitted.example.test",
+        token: "",
+        groupId: "site-a",
+      },
+    ];
+    const service = new TechnitiumService(nodes, new DhcpSnapshotService());
+    const internal = service as unknown as {
+      enrichWithHostnames: <
+        T extends { clientIpAddress?: string; groupId?: string },
+      >(
+        entries: T[],
+        names: Map<string, string>,
+      ) => Array<T & { clientName?: string }>;
+      hostnameCache: Map<
+        string,
+        { hostname: string; lastUpdated: number; source: "ptr" }
+      >;
+      recentClientIps: Set<string>;
+      getAllDhcpLeases: jest.Mock;
+      getPtrLookupCandidateNodes: (
+        preferred: TechnitiumNodeConfig,
+      ) => TechnitiumNodeConfig[];
+      getDhcpLeaseCandidateNodes: (
+        authMode: "session" | "background",
+        sourceGroupId?: string,
+      ) => TechnitiumNodeConfig[];
+      performPtrLookup: (
+        node: TechnitiumNodeConfig,
+        ipAddress: string,
+      ) => Promise<void>;
+      request: jest.Mock;
+      backgroundGroupCredentials: {
+        anyReady: boolean;
+        allReady: boolean;
+        groups: Array<{
+          groupId: string;
+          admittedNodeIds: {
+            interactive: string[];
+            ptrRead: string[];
+            dhcpRead: string[];
+            primaryConfigWrite: string[];
+            cacheFlush: string[];
+          };
+        }>;
+      };
+      dhcpScopeCapabilities: Map<
+        string,
+        {
+          enabledScopeNames: Set<string>;
+          checkedAt: number;
+          retryAfter: number;
+          hasSuccessfulScan: boolean;
+        }
+      >;
+    };
+    internal.backgroundGroupCredentials = {
+      anyReady: true,
+      allReady: true,
+      groups: [
+        {
+          groupId: "site-a",
+          admittedNodeIds: {
+            interactive: ["site-a-node"],
+            ptrRead: ["site-a-node"],
+            dhcpRead: ["site-a-node"],
+            primaryConfigWrite: [],
+            cacheFlush: [],
+          },
+        },
+      ],
+    };
+    internal.hostnameCache.set("site-b\u0000192.168.1.20", {
+      hostname: "ptr-site-b",
+      lastUpdated: Date.now(),
+      source: "ptr",
+    });
+    const enriched = internal.enrichWithHostnames(
+      [
+        { groupId: "site-a", clientIpAddress: "192.168.1.20" },
+        { groupId: "site-b", clientIpAddress: "192.168.1.20" },
+      ],
+      new Map([["site-a\u0000192.168.1.20", "dhcp-site-a"]]),
+    );
+
+    expect(enriched.map((entry) => entry.clientName)).toEqual([
+      "dhcp-site-a",
+      "ptr-site-b",
+    ]);
+    expect(internal.recentClientIps).toEqual(
+      new Set(["site-a\u0000192.168.1.20", "site-b\u0000192.168.1.20"]),
+    );
+    internal.getAllDhcpLeases = jest.fn(() =>
+      Promise.resolve(new Map([["site-a\u0000192.168.1.20", "dhcp-site-a"]])),
+    );
+    await expect(service.getKnownClients()).resolves.toEqual([
+      {
+        groupId: "site-a",
+        ip: "192.168.1.20",
+        hostname: "dhcp-site-a",
+      },
+      {
+        groupId: "site-b",
+        ip: "192.168.1.20",
+        hostname: "ptr-site-b",
+      },
+    ]);
+    expect(
+      internal.getPtrLookupCandidateNodes(nodes[0]).map((node) => node.id),
+    ).toEqual(["site-a-node"]);
+    for (const node of nodes) {
+      internal.dhcpScopeCapabilities.set(node.id, {
+        enabledScopeNames: new Set(["scope"]),
+        checkedAt: Date.now(),
+        retryAfter: 0,
+        hasSuccessfulScan: true,
+      });
+    }
+    expect(
+      internal
+        .getDhcpLeaseCandidateNodes("background", "site-a")
+        .map((node) => node.id),
+    ).toEqual(["site-a-node"]);
+    internal.request = jest.fn(() =>
+      Promise.resolve({ status: "ok", response: {} }),
+    );
+    await internal.performPtrLookup(nodes[0], "192.168.1.21");
+    expect(internal.request).toHaveBeenCalledWith(
+      nodes[0],
+      expect.objectContaining({ url: "/api/dnsClient/resolve" }),
+      { authMode: "background", suppressNetworkErrorLog: true },
+    );
+    service.onModuleDestroy();
   });
 });

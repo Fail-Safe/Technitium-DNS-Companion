@@ -20,6 +20,9 @@ let mockedAuthStatus: {
   configuredNodeIds: string[];
   nodeIds: string[];
   unreachableNodeIds?: string[];
+  groupCredentials?: {
+    groups: Array<{ state: string }>;
+  };
   trustedSso?: {
     enabled: boolean;
     available: boolean;
@@ -43,6 +46,7 @@ vi.mock("../context/useAuth", async () => {
         configuredNodeIds: mockedAuthStatus?.configuredNodeIds ?? ["node1"],
         nodeIds: mockedAuthStatus?.nodeIds ?? [],
         unreachableNodeIds: mockedAuthStatus?.unreachableNodeIds ?? [],
+        groupCredentials: mockedAuthStatus?.groupCredentials,
         trustedSso: mockedAuthStatus?.trustedSso,
       },
       loading: false,
@@ -194,6 +198,20 @@ describe("Auth routing when node session expires", () => {
         unreachableNodeIds: [],
       }),
     ).toBe(true);
+  });
+
+  it("does not treat intentionally unauthorized groups as an expired session", () => {
+    expect(
+      isNodeSessionRequiredButMissing({
+        sessionAuthEnabled: true,
+        authenticated: true,
+        configuredNodeIds: ["site-a-primary", "site-b-primary"],
+        nodeIds: ["site-a-primary"],
+        groupCredentials: {
+          groups: [{ state: "ready" }, { state: "not-authorized" }],
+        },
+      }),
+    ).toBe(false);
   });
 
   it.each([

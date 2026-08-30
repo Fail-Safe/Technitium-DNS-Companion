@@ -1,9 +1,10 @@
 # Beta Testing
 
-The beta channel is an opt-in preview of the current `next` branch. It is for
-operators who can tolerate regressions, retain a rollback path, and report the
-exact build they tested. Stable installations continue to use `:latest` unless
-their image is explicitly changed.
+The beta channel is an opt-in, approval-gated release candidate promoted from
+a selected `next` or `release/*` commit. It is for operators who can tolerate
+regressions, retain a rollback path, and report the exact build they tested.
+Stable installations continue to use `:latest` unless their image is
+explicitly changed.
 
 ## Before you start
 
@@ -29,9 +30,36 @@ docker compose up -d
 docker compose ps
 ```
 
-The `beta` and `next` tags are rolling aliases. For a longer test or a reliable
-reproduction, replace `:beta` with the immutable `sha-<commit>` tag associated
-with the build.
+The `beta` tag advances only after an explicit promotion and can remain fixed
+while the rolling `next` integration tag receives more changes. For a longer
+test or reliable reproduction, replace `:beta` with the immutable
+`sha-<commit>` tag associated with the promoted build.
+
+## Promote a candidate
+
+Maintainers promote a candidate by manually running **Build and Push Docker
+Image** from `next` or a `release/*` branch with `push_image=true` and
+`channel=beta`. The workflow runs the release quality gates, validates the
+source branch, waits for approval through the protected `beta` environment,
+and publishes `:beta`, `<version>-beta`, and `sha-<commit>` to the same image
+digest.
+
+```bash
+gh workflow run docker-publish.yml \
+  --ref next \
+  -f push_image=true \
+  -f channel=beta
+```
+
+Ordinary pushes to `next` publish only `:next` and `sha-<commit>`. Merging a
+stable release back into `next` therefore cannot silently replace a beta that
+is already being soaked.
+
+The repository's `beta` environment must require a maintainer approval and
+limit deployment branches to `next` and `release/*`. These protection rules
+live in **Settings → Environments → beta** rather than in the workflow file;
+without them, referencing the environment records a deployment but does not
+create an approval gate.
 
 ## Record the exact build
 

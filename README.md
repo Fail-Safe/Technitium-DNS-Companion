@@ -63,8 +63,8 @@ Docs: [docs/features/SESSION_AUTH_AND_TOKEN_MIGRATION.md](docs/features/SESSION_
 |---|---|
 | `latest` | Stable release (default) |
 | `1.6`, `1.6.9` | Pinned version tags |
-| `beta` | Pre-release from the `next` branch — may include features not yet in stable |
-| `next` | Rolling `next` branch head (same image as `beta`, dev-facing alias) |
+| `beta` | Approval-gated release candidate promoted from `next` or `release/*` |
+| `next` | Rolling integration build; may advance independently of `beta` |
 | `sha-<commit>` | Immutable build for reproducing a beta result or rollback |
 
 Want to help soak-test upcoming changes? See the opt-in [Beta Testing
@@ -122,6 +122,10 @@ TECHNITIUM_SECONDARY2_BASE_URL=https://secondary2.home.arpa:53443
 # Background jobs (recommended): least-privilege token
 # TECHNITIUM_BACKGROUND_TOKEN=your-low-privilege-token
 ```
+
+To manage more than one independent cluster, assign every node a lowercase
+`TECHNITIUM_<NODE>_GROUP` and use the per-group SSO/background/schedule token
+maps documented in [`.env.example`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/.env.example).
 
 **Configuration reference:** [`.env.example`](https://github.com/Fail-Safe/Technitium-DNS-Companion/blob/main/.env.example) contains the current defaults and all supported options.
 

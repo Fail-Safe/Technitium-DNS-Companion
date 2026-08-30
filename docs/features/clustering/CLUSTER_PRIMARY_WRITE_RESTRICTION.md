@@ -10,6 +10,12 @@
 
 With Technitium DNS v14's clustering enabled, **only the Primary node can be modified**. Secondary nodes are read-only replicas that receive updates via zone transfers from the Primary.
 
+Current multi-cluster deployments declare a `TECHNITIUM_<NODE>_GROUP` for every
+node. Primary discovery and write routing are scoped to that group. An explicit
+group with an unknown, unreachable, unmatched, or unvalidated Primary has no
+write target; direct-write fallback exists only for the implicit legacy
+`__default__` group.
+
 This implementation ensures the UI respects this restriction by:
 1. Auto-selecting the Primary node for write operations
 2. Displaying an informational banner explaining cluster restrictions

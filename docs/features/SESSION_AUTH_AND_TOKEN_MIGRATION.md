@@ -47,6 +47,30 @@ Used only for backend background work (example: background PTR lookups). It shou
 
 The backend validates this token and disables background PTR work if the token is unsafe.
 
+### Grouped automation maps
+
+The scalar background and schedule tokens remain valid only when all nodes use
+the implicit single group. Explicit grouped deployments use
+`TECHNITIUM_BACKGROUND_TOKEN_MAP_FILE` and
+`TECHNITIUM_SCHEDULE_TOKEN_MAP_FILE`. Both files use this strict schema:
+
+```json
+{
+  "version": 1,
+  "groups": {
+    "site-a": {
+      "username": "automation-user",
+      "token": "server-side-token"
+    }
+  }
+}
+```
+
+A role map may cover only the groups where that automation is enabled. Omitted
+groups are `not-authorized`. Scalar-plus-map conflicts, malformed maps, and a
+scalar used with explicit groups disable that automation role and expose a
+sanitized group status without preventing Companion startup.
+
 ## Set up `TECHNITIUM_BACKGROUND_TOKEN` (manual)
 
 In v1.4+, `TECHNITIUM_CLUSTER_TOKEN` is removed and there is no guided “migration banner” flow.
@@ -145,11 +169,12 @@ Permission names below are based on the permission sections returned by Techniti
 | Dashboard/Overview totals                                      | `/api/dashboard/stats/get`                                                                                                                                                                 | Dashboard: View (or equivalent)                         | Used for “last day” totals shown in node overview cards.                                                                      |
 | Query Logs (read)                                              | `/api/logs/query`                                                                                                                                                                          | Logs: View (or equivalent)                              | Read-only, but can be high-volume.                                                                                            |
 | DNS Lookup tools                                               | `/api/dnsClient/resolve`                                                                                                                                                                   | `DnsClient`: View                                       | This aligns with the background token validator, which requires `DnsClient: View` for PTR work.                               |
-| DHCP (read)                                                    | `/api/dhcp/scopes/list`, `/api/dhcp/scopes/get`, `/api/dhcp/leases/list`                                                                                                                   | DHCP: View (or equivalent)                              | Exact permission section name depends on Technitium.                                                                          |
+| DHCP (read)                                                    | `/api/dhcp/scopes/list`, `/api/dhcp/scopes/get`, `/api/dhcp/leases/list`                                                                                                                   | `DhcpServer`: View                                      | Admission is per validated node and group.                                                                                     |
 | DHCP (write / sync / clone)                                    | `/api/dhcp/scopes/set`, `/api/dhcp/scopes/delete`                                                                                                                                          | DHCP: Modify/Delete (or equivalent)                     | In cluster mode, writes should target the Primary node.                                                                       |
 | Zones (read / compare)                                         | `/api/zones/list`, `/api/zones/options/get`                                                                                                                                                | Zones: View (or equivalent)                             | Comparison is read-only but touches many endpoints.                                                                           |
 | Advanced Blocking App (read)                                   | `/api/apps/list`, `/api/apps/config/get`                                                                                                                                                   | Apps: View (or equivalent)                              | Depends on Technitium “Apps” permissions.                                                                                     |
 | Advanced Blocking App (write)                                  | `/api/apps/config/set`                                                                                                                                                                     | Apps: Modify (or equivalent)                            | Writes should target the Primary node in cluster mode.                                                                        |
+| Full resolver cache flush                                      | `/api/cache/delete`                                                                                                                                                                        | `Cache`: Delete                                         | Cache flush is node-local; partial/skipped members are reported and never receive a fallback credential.                       |
 | Built-in allow/block lists (read)                              | `/api/settings/get`, `/api/allowed/list`, `/api/blocked/list`, `/api/allowed/export`, `/api/blocked/export`                                                                                | Settings: View + (Allow/Block list view permission)     | Technitium may gate allow/block list endpoints under Zones/DNS/Settings depending on version.                                 |
 | Built-in allow/block lists (write)                             | `/api/settings/set`, `/api/settings/forceUpdateBlockLists`, `/api/settings/temporaryDisableBlocking`, `/api/allowed/add`, `/api/allowed/delete`, `/api/blocked/add`, `/api/blocked/delete` | Settings: Modify + (Allow/Block list modify permission) | If users see “permission denied,” the simplest fix is granting the smallest additional privilege needed for that page/action. |
 | Background PTR hostname resolution                             | `/api/dnsClient/resolve` (PTR lookups)                                                                                                                                                     | `DnsClient`: View                                       | Companion explicitly rejects background tokens that are too privileged, and also rejects tokens lacking `DnsClient: View`.    |

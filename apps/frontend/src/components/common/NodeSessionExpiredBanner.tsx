@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import "./BackgroundTokenSecurityBanner.css";
+import type { GroupCredentialStatusEnvelope } from "../../types/auth";
 
 export function NodeSessionExpiredBanner({
   sessionAuthEnabled,
@@ -8,12 +9,14 @@ export function NodeSessionExpiredBanner({
   configuredNodeIds,
   nodeIds,
   unreachableNodeIds,
+  groupCredentials,
 }: {
   sessionAuthEnabled: boolean | undefined;
   authenticated: boolean;
   configuredNodeIds: string[] | undefined;
   nodeIds: string[] | undefined;
   unreachableNodeIds: string[] | undefined;
+  groupCredentials?: GroupCredentialStatusEnvelope;
 }) {
   const location = useLocation();
   const navigate = useNavigate();
@@ -36,6 +39,7 @@ export function NodeSessionExpiredBanner({
   const show =
     sessionAuthEnabled === true &&
     authenticated &&
+    !groupCredentials &&
     configured.length > 0 &&
     missingNodeIds.length > 0 &&
     !location.pathname.startsWith("/login");

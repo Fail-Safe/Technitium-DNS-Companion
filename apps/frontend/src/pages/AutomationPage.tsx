@@ -18,6 +18,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { AppInput, AppTextarea } from "../components/common/AppInput";
 import { ConfirmModal } from "../components/common/ConfirmModal";
+import { GroupCredentialStatusBanner } from "../components/common/GroupCredentialStatusBanner";
 import { apiFetch, apiFetchStatus } from "../config";
 import { useTechnitiumState } from "../context/useTechnitiumState";
 import { useToast } from "../context/useToast";
@@ -1306,17 +1307,17 @@ function ScheduleForm({
             />
             <span>Flush DNS cache when schedule activates or deactivates</span>
           </label>
-          {draft.flushCacheOnChange && tokenStatus?.hasCacheModify !== true && (
+          {draft.flushCacheOnChange && tokenStatus?.hasCacheDelete !== true && (
             <p className="log-alerts__form-hint">
-              Requires <strong>Cache: Modify</strong> permission on the
+              Requires <strong>Cache: Delete</strong> permission on the
               companion-scheduler user (Administration → Permissions → Cache →
               Edit Permissions). Flush is best-effort — schedule evaluation
               succeeds even if the flush fails.
             </p>
           )}
-          {draft.flushCacheOnChange && tokenStatus?.hasCacheModify === false && (
+          {draft.flushCacheOnChange && tokenStatus?.hasCacheDelete === false && (
             <p className="log-alerts__form-hint log-alerts__form-hint--warn">
-              The companion-scheduler token does not have Cache: Modify
+              The companion-scheduler token does not have Cache: Delete
               permission. Cache flush will be skipped.
             </p>
           )}
@@ -1910,9 +1911,9 @@ function TemporaryOverrideForm({
             />
             <span>Flush DNS cache when the override applies or ends</span>
           </label>
-          {draft.flushCacheOnChange && tokenStatus?.hasCacheModify === false && (
+          {draft.flushCacheOnChange && tokenStatus?.hasCacheDelete === false && (
             <p className="log-alerts__form-hint log-alerts__form-hint--warn">
-              The companion-scheduler token does not have Cache: Modify
+              The companion-scheduler token does not have Cache: Delete
               permission. Cache flush will be skipped.
             </p>
           )}
@@ -3038,6 +3039,10 @@ export function AutomationPage() {
         storageStatus={storageStatus}
         onRevalidate={() => void handleRevalidateToken()}
         revalidating={revalidatingToken}
+      />
+      <GroupCredentialStatusBanner
+        credentials={tokenStatus?.groups}
+        title="Schedule credential groups need attention"
       />
 
       <div className="dns-overrides__tabs" role="tablist" aria-label="DNS Overrides">
