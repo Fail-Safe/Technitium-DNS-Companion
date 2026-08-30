@@ -29,9 +29,11 @@
   border-radius: 1rem;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
   max-width: 480px;
+  max-height: calc(100dvh - 2rem);
   width: 100%;
   padding: 2rem;
   position: relative;
+  overflow-y: auto;
   animation: slideUp 0.3s ease-out;
 }
 

@@ -20,6 +20,7 @@ extra_css:
 nav:
   - Home: index.md
   - Docker: DOCKER.md
+  - Performance: performance/index.md
 markdown_extensions:
   - toc:
       permalink: true
@@ -33,7 +34,6 @@ plugins:
       glob:
         - "features/**"
         - "implementation/**"
-        - "performance/**"
         - "ui/**"
         - "zone-comparison/**"
         - "apps/**"
