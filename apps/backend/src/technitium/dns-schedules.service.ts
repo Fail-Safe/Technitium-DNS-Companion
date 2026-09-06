@@ -13,6 +13,8 @@ import type {
   DnsSchedule,
   DnsScheduleAppliedEntry,
   DnsScheduleDraft,
+  DnsScheduleManagedEntry,
+  DnsSchedulePendingRecovery,
   DnsScheduleStateEntry,
   DnsSchedulesStorageStatus,
 } from "./dns-schedules.types";
@@ -261,25 +263,34 @@ export class DnsSchedulesService implements OnModuleInit {
 
   deleteSchedule(scheduleId: string): { deleted: true; scheduleId: string } {
     const db = this.getDb();
-    // Cascade: clear schedule-state and per-entry tracking rows. The latter
-    // matters even when the schedule is currently inactive — if a delete
-    // races with a tick that hasn't run cleanup yet, leftover tracking would
-    // become orphaned references to a schedule that no longer exists.
-    db.prepare(`DELETE FROM dns_schedule_state WHERE schedule_id = ?`).run(
-      scheduleId,
-    );
-    db.prepare(
-      `DELETE FROM dns_schedule_applied_entries WHERE schedule_id = ?`,
-    ).run(scheduleId);
-    const result = db
-      .prepare(`DELETE FROM dns_schedules WHERE id = ?`)
-      .run(scheduleId);
-
-    if ((result.changes ?? 0) === 0) {
-      throw new NotFoundException("DNS schedule not found.");
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const table of [
+        "dns_schedule_state",
+        "dns_schedule_applied_entries",
+        "dns_schedule_pending_recovery",
+      ]) {
+        if (
+          db
+            .prepare(`SELECT 1 FROM ${table} WHERE schedule_id = ? LIMIT 1`)
+            .get(scheduleId)
+        ) {
+          throw new BadRequestException(
+            "Disable the schedule and wait for DNS cleanup before deleting it.",
+          );
+        }
+      }
+      const result = db
+        .prepare("DELETE FROM dns_schedules WHERE id = ?")
+        .run(scheduleId);
+      if (Number(result.changes ?? 0) === 0)
+        throw new NotFoundException("DNS schedule not found.");
+      db.exec("COMMIT");
+      return { deleted: true, scheduleId: scheduleId };
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
     }
-
-    return { deleted: true, scheduleId };
   }
 
   // ── State tracking (used by evaluator) ─────────────────────────────────────
@@ -380,6 +391,16 @@ export class DnsSchedulesService implements OnModuleInit {
       domain: string;
     }>,
   ): void {
+    this.inTransaction(() =>
+      this.replaceAppliedEntries(scheduleId, nodeId, entries),
+    );
+  }
+
+  private replaceAppliedEntries(
+    scheduleId: string,
+    nodeId: string,
+    entries: DnsScheduleManagedEntry[],
+  ): void {
     const db = this.getDb();
     const now = new Date().toISOString();
     const deleteStmt = db.prepare(
@@ -390,27 +411,134 @@ export class DnsSchedulesService implements OnModuleInit {
          (schedule_id, node_id, advanced_blocking_group_name, action, domain, applied_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     );
-    const tx = db.prepare("BEGIN");
-    const commit = db.prepare("COMMIT");
-    const rollback = db.prepare("ROLLBACK");
-    tx.run();
+    deleteStmt.run(scheduleId, nodeId);
+    for (const e of entries) {
+      insertStmt.run(
+        scheduleId,
+        nodeId,
+        e.advancedBlockingGroupName,
+        e.action,
+        e.domain,
+        now,
+      );
+    }
+  }
+
+  private inTransaction(action: () => void): void {
+    const db = this.getDb();
+    db.exec("BEGIN IMMEDIATE");
     try {
-      deleteStmt.run(scheduleId, nodeId);
-      for (const e of entries) {
-        insertStmt.run(
-          scheduleId,
-          nodeId,
-          e.advancedBlockingGroupName,
-          e.action,
-          e.domain,
-          now,
-        );
-      }
-      commit.run();
+      action();
+      db.exec("COMMIT");
     } catch (error) {
-      rollback.run();
+      db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  listPendingRecovery(): DnsSchedulePendingRecovery[] {
+    const db = this.companionDb.db;
+    if (!db) return [];
+    this.ensureSchema();
+    const rows = db
+      .prepare(
+        "SELECT schedule_id, node_id, entries_json FROM dns_schedule_pending_recovery",
+      )
+      .all() as {
+      schedule_id: string;
+      node_id: string;
+      entries_json: string;
+    }[];
+    return rows.map((row) => ({
+      scheduleId: row.schedule_id,
+      nodeId: row.node_id,
+      entries: JSON.parse(row.entries_json) as DnsScheduleManagedEntry[],
+    }));
+  }
+
+  listManagedEntries(
+    scheduleId: string,
+    nodeId: string,
+  ): DnsScheduleManagedEntry[] {
+    return [
+      ...this.listAppliedEntries(scheduleId, nodeId),
+      ...(this.listPendingRecovery().find(
+        (row) => row.scheduleId === scheduleId && row.nodeId === nodeId,
+      )?.entries ?? []),
+    ];
+  }
+
+  listTrackedTargets(): { scheduleId: string; nodeId: string }[] {
+    const db = this.companionDb.db;
+    if (!db) return [];
+    this.ensureSchema();
+    const rows = db
+      .prepare(
+        `SELECT schedule_id, node_id FROM dns_schedule_state
+      UNION SELECT schedule_id, node_id FROM dns_schedule_applied_entries
+      UNION SELECT schedule_id, node_id FROM dns_schedule_pending_recovery`,
+      )
+      .all() as { schedule_id: string; node_id: string }[];
+    return rows.map((row) => ({
+      scheduleId: row.schedule_id,
+      nodeId: row.node_id,
+    }));
+  }
+
+  prepareRecovery(
+    scheduleId: string,
+    nodeId: string,
+    entries: DnsScheduleManagedEntry[],
+  ): void {
+    this.inTransaction(() => {
+      const db = this.getDb();
+      const schedule = db
+        .prepare("SELECT 1 FROM dns_schedules WHERE id = ?")
+        .get(scheduleId);
+      const overridesExist = db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dns_temporary_overrides'",
+        )
+        .get();
+      const override =
+        overridesExist &&
+        db
+          .prepare("SELECT 1 FROM dns_temporary_overrides WHERE id = ?")
+          .get(scheduleId);
+      if (!schedule && !override)
+        throw new NotFoundException("DNS override source no longer exists.");
+      const combined = new Map<string, DnsScheduleManagedEntry>();
+      for (const { advancedBlockingGroupName, action, domain } of [
+        ...this.listManagedEntries(scheduleId, nodeId),
+        ...entries,
+      ]) {
+        combined.set(
+          JSON.stringify([advancedBlockingGroupName, action, domain]),
+          { advancedBlockingGroupName, action, domain },
+        );
+      }
+      db.prepare(
+        `INSERT INTO dns_schedule_pending_recovery (schedule_id, node_id, entries_json) VALUES (?, ?, ?)
+        ON CONFLICT(schedule_id, node_id) DO UPDATE SET entries_json = excluded.entries_json`,
+      ).run(scheduleId, nodeId, JSON.stringify([...combined.values()]));
+    });
+  }
+
+  finalizeRecovery(
+    scheduleId: string,
+    nodeId: string,
+    entries: DnsScheduleManagedEntry[] | null,
+  ): void {
+    this.inTransaction(() => {
+      this.replaceAppliedEntries(scheduleId, nodeId, entries ?? []);
+      if (entries === null) this.markRemoved(scheduleId, nodeId);
+      else this.markApplied(scheduleId, nodeId);
+      this.getDb()
+        .prepare(
+          "DELETE FROM dns_schedule_pending_recovery WHERE schedule_id = ? AND node_id = ?",
+        )
+        .run(scheduleId, nodeId);
+    });
   }
 
   /**
@@ -540,6 +668,13 @@ export class DnsSchedulesService implements OnModuleInit {
 
       CREATE INDEX IF NOT EXISTS idx_dns_schedule_applied_entries_lookup
         ON dns_schedule_applied_entries(schedule_id, node_id);
+
+      CREATE TABLE IF NOT EXISTS dns_schedule_pending_recovery (
+        schedule_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        entries_json TEXT NOT NULL,
+        PRIMARY KEY (schedule_id, node_id)
+      );
 
       CREATE TABLE IF NOT EXISTS dns_schedule_settings (
         key TEXT PRIMARY KEY,

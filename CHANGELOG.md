@@ -38,6 +38,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Schedules and temporary overrides retain Advanced Blocking cleanup records
+  across uncertain writes, expiry, and restart. Pending recovery is visible on
+  the DNS Overrides page, and deletion waits for cleanup.
 - Schedule apply and removal now pass the Advanced Blocking snapshot revision,
   preventing detected stale configuration writes from overwriting other edits.
 - Cluster role matching accepts the plural `clusterNodes[].ipAddresses` shape

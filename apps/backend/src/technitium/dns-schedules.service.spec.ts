@@ -314,14 +314,15 @@ describe("DnsSchedulesService", () => {
       ).toThrow(NotFoundException);
     });
 
-    it("clears applied state entries when the schedule is deleted", () => {
+    it("preserves applied state and rejects deletion until cleanup", () => {
       const created = service.createSchedule(makeDraft());
       service.markApplied(created.id, "node-1");
       expect(service.isApplied(created.id, "node-1")).toBe(true);
 
-      service.deleteSchedule(created.id);
-
-      expect(service.isApplied(created.id, "node-1")).toBe(false);
+      expect(() => service.deleteSchedule(created.id)).toThrow(
+        BadRequestException,
+      );
+      expect(service.isApplied(created.id, "node-1")).toBe(true);
     });
   });
 

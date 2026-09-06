@@ -84,6 +84,7 @@ export interface DnsScheduleTokenStatus {
 }
 
 export interface DnsScheduleEvaluatorStatus {
+  pendingRecoveryCount: number;
   enabled: boolean;
   running: boolean;
   intervalMs: number;
@@ -111,6 +112,7 @@ export interface DnsScheduleApplicationResult {
 }
 
 export interface RunDnsScheduleEvaluatorResponse {
+  pendingRecoveryCount: number;
   dryRun: boolean;
   triggeredAt: string;
   evaluatedSchedules: number;

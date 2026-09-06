@@ -2944,12 +2944,15 @@ export function AutomationPage() {
       const result = (await res.json()) as RunDnsScheduleEvaluatorResponse;
       setLastRunResult(result);
       setShowRunResult(true);
+      const incomplete = result.errored > 0 || result.pendingRecoveryCount > 0;
       pushToast({
-        message: dryRun
+        message: incomplete
+          ? `Evaluator finished with ${result.errored} error(s). DNS changes awaiting recovery: ${result.pendingRecoveryCount ?? 0}.`
+          : dryRun
           ? `Dry run complete: ${result.evaluatedSchedules} source(s) evaluated.`
           : `Evaluator ran: ${result.applied} applied, ${result.removed} removed.`,
-        tone: "success",
-        timeout: 4000,
+        tone: incomplete ? "error" : "success",
+        timeout: incomplete ? 6000 : 4000,
       });
       await Promise.all([refreshEvaluatorStatus(), refreshAppliedState()]);
     } catch (e) {
@@ -2977,6 +2980,9 @@ export function AutomationPage() {
     setLastRunResult(result);
     setShowRunResult(true);
     await Promise.all([refreshEvaluatorStatus(), refreshAppliedState()]);
+    if (result.errored > 0 || result.pendingRecoveryCount > 0) {
+      throw new Error(`Saved, but DNS changes are incomplete: ${result.errored} error(s), ${result.pendingRecoveryCount ?? 0} awaiting recovery.`);
+    }
   };
 
   // ── Derived ──────────────────────────────────────────────────────────────
@@ -3157,6 +3163,9 @@ export function AutomationPage() {
             <span>
               Last run:{" "}
               <strong>{formatLocalDateTime(evaluatorStatus.lastRunAt)}</strong>
+            </span>
+            <span className={evaluatorStatus.pendingRecoveryCount > 0 ? "log-alerts__warn" : undefined}>
+              DNS changes awaiting recovery: <strong>{evaluatorStatus.pendingRecoveryCount ?? 0}</strong>
             </span>
             {evaluatorStatus.lastRunError && (
               <span className="log-alerts__warn">

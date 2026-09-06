@@ -147,6 +147,7 @@ export interface DnsScheduleTokenStatus {
 }
 
 export interface DnsScheduleEvaluatorStatus {
+  pendingRecoveryCount: number;
   enabled: boolean;
   running: boolean;
   intervalMs: number;
@@ -178,6 +179,7 @@ export interface RunDnsScheduleEvaluatorRequest {
 }
 
 export interface RunDnsScheduleEvaluatorResponse {
+  pendingRecoveryCount: number;
   dryRun: boolean;
   triggeredAt: string;
   evaluatedSchedules: number;
@@ -209,4 +211,17 @@ export interface DnsScheduleAppliedEntry {
   action: DnsScheduleAction;
   domain: string;
   appliedAt: string;
+}
+
+/** Exact entries whose DNS write may need reconciliation. */
+export interface DnsScheduleManagedEntry {
+  advancedBlockingGroupName: string;
+  action: DnsScheduleAction;
+  domain: string;
+}
+
+export interface DnsSchedulePendingRecovery {
+  scheduleId: string;
+  nodeId: string;
+  entries: DnsScheduleManagedEntry[];
 }

@@ -7,6 +7,26 @@ async function gotoAutomation(page: Page) {
   await expect(page.getByRole("heading", { name: "DNS Overrides" })).toBeVisible();
 }
 
+test.describe("Automation recovery", () => {
+  for (const width of [375, 1280]) {
+    test(`pending recovery fits at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.route("**/api/nodes/dns-schedules/evaluator/status", route => route.fulfill({
+        json: { enabled: true, running: false, intervalMs: 30000, tokenReady: true, pendingRecoveryCount: 2 },
+      }));
+      await page.route("**/api/nodes/dns-overrides/temporary", route => route.fulfill({ json: [] }));
+      await gotoAutomation(page);
+      const indicator = page.getByText("DNS changes awaiting recovery: 2");
+      await expect(indicator).toBeVisible();
+      const bounds = await indicator.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+      await expect(indicator).toHaveClass(/log-alerts__warn/);
+    });
+  }
+});
+
 // ── Tests that need a guaranteed-empty schedule list ──────────────────────────
 //
 // These intercept GET /rules before navigation so they don't race with
