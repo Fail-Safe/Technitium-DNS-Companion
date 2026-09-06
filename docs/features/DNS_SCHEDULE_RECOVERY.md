@@ -1,69 +1,53 @@
 # DNS schedule recovery
 
-Schedules and temporary overrides retain cleanup records when an Advanced
-Blocking write has an uncertain outcome. For example, DNS may accept a temporary
-allow even if Companion never receives its response. The next evaluator run
-reads the current configuration and reconciles it with the source's current
-settings. This also works after expiry or a Companion restart.
+DNS can accept a temporary allow even when its response is lost. Companion
+records Advanced Blocking entries before writing so later evaluator runs can
+reconcile them after failure, expiry, or restart.
 
-The DNS Overrides page shows **DNS changes awaiting recovery**. A nonzero count
-means one or more source/node pairs still need reconciliation; it is not a count
-of domains or a confirmation that a write succeeded. Failed runs report errors
-instead of a success toast. Keep the evaluator enabled and restore the target's
-connectivity or authorization. **Run now** retries immediately. A dry run makes
-no DNS or tracking changes. Disabling the evaluator retains pending work without
-automatically retrying it.
+**DNS changes awaiting recovery** counts source/node pairs with pending work,
+not domains or confirmed writes. Run results also show unreachable or
+unconfigured targets. Incomplete runs do not show a success toast.
 
-Run results also show deferred targets, including unavailable Primary routing
-and removed nodes. These runs are incomplete even when no write is pending.
+Keep the evaluator enabled and restore the target's connectivity or
+authorization. **Run now** retries immediately. Dry runs change neither DNS nor
+tracking. Disabling the evaluator retains records but stops automatic retries.
 
-Disable a schedule or end a temporary override before deleting it, then wait for
-cleanup. Deletion is rejected while applied state, tracked entries, or pending
-recovery remain. Removing a configured node does not erase its recovery records.
-Recovery follows validated Primary routing and never falls back to an
-unauthorized target.
-
-Switching to built-in mode waits for recorded Advanced Blocking cleanup to
-finish. If cleanup fails, the evaluator retries before applying built-in entries.
+Disable a schedule or end an override and wait for cleanup before deleting it.
+Deletion cannot discard applied state, tracked entries, or pending work.
+Switching to built-in mode also waits for Advanced Blocking cleanup.
+Removing a configured node retains its records. Recovery uses validated Primary
+routing and never falls back to an unauthorized target.
 
 ## Storage and reconciliation
 
-The existing Companion SQLite database contains one pending row per source and
-original node. Its entries are exact Advanced Blocking group/action/domain
-tuples, combining previous tracking, existing pending entries, and current
-desired entries. This preserves both sides of a definition change if its write
-response is lost. No credentials or complete DNS configurations are stored.
+The existing SQLite database holds one pending row per source and original node.
+It stores exact group/action/domain tuples from previous tracking, pending work,
+and the current definition. This preserves both sides of a definition change
+without storing credentials or complete DNS configurations. The table is created
+idempotently on fresh and existing databases.
 
-Before dispatch, a transaction verifies that the source still exists and saves
-the recovery set. Storage failure prevents the DNS write. After an acknowledged
-write, or a fresh read showing no write is needed, another transaction updates
-entry tracking and applied state and clears pending recovery. A failed final
-transaction leaves pending work intact. No transaction spans a network call.
-Timer/manual evaluation and immediate deactivation are serialized.
+Before writing, a transaction verifies the source exists and saves the recovery
+set. If storage fails, no DNS write occurs. After success, or a fresh read showing
+no write is needed, another transaction updates entry tracking and applied state
+and clears pending work. Failed finalization retains the pending record. No
+transaction spans a network call. Evaluation and immediate deactivation are
+serialized.
 
-When a fresh read confirms an uncertain apply succeeded, recovery still attempts
-the requested cache flush without repeating the configuration write. Cache
-flushing remains best-effort; failures do not prevent tracking finalization.
+Active sources reconcile to their current settings. Expired, disabled, or
+deselected sources remove their recorded entries. Shared entries transfer to
+another active source's cleanup records before the retiring source clears its
+tracking. Cleanup includes pending and entry-only records without applied state.
 
-Active sources reconcile to their current desired entries. Expired, disabled,
-or deselected targets remove recorded entries, preserving requirements of other
-active sources on the same target. Pending work and entry-only tracking are
-enumerated even without an applied-state row. The new table is created
-idempotently on both fresh and existing databases.
-
-Before retiring a shared entry, Companion ensures the surviving source has a
-durable cleanup record. A failed first read by that source therefore cannot
-discard the only record of an entry that still needs eventual removal.
+Recovery attempts requested cache flushes even when another configuration write
+is unnecessary. Flushing remains best-effort and does not block finalization.
 
 ## Limits
 
-Recovery requires reachable DNS and a running evaluator. Expiry is not a
-resolver-enforced lease. Existing schedule semantics still apply: an entry
-requested by a schedule is managed by that schedule even if it already existed
-before activation. Avoid independently managing the same exact entry.
+Recovery needs reachable DNS and a running evaluator; expiry is not a
+resolver-enforced lease. A requested entry is managed even if it existed before
+activation, so avoid independently managing the same exact entry.
 
-The revision guard rejects detected concurrent changes, but an edit between the
-writer's final read and POST can still race. Historical orphaned entries with no
-tracking cannot be reconstructed automatically. Built-in allowed/blocked lists
-retain their existing behavior; this recovery mechanism covers Advanced
-Blocking writes.
+The revision guard rejects detected concurrent changes, but the final read and
+POST can still race. Historical entries without tracking cannot be reconstructed.
+Recovery covers Advanced Blocking writes; built-in lists retain their existing
+behavior.

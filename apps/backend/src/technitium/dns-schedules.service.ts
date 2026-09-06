@@ -262,9 +262,8 @@ export class DnsSchedulesService implements OnModuleInit {
   }
 
   deleteSchedule(scheduleId: string): { deleted: true; scheduleId: string } {
-    const db = this.getDb();
-    db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.inTransaction(() => {
+      const db = this.getDb();
       for (const table of [
         "dns_schedule_state",
         "dns_schedule_applied_entries",
@@ -285,12 +284,8 @@ export class DnsSchedulesService implements OnModuleInit {
         .run(scheduleId);
       if (Number(result.changes ?? 0) === 0)
         throw new NotFoundException("DNS schedule not found.");
-      db.exec("COMMIT");
-      return { deleted: true, scheduleId: scheduleId };
-    } catch (error) {
-      db.exec("ROLLBACK");
-      throw error;
-    }
+      return { deleted: true as const, scheduleId };
+    });
   }
 
   // ── State tracking (used by evaluator) ─────────────────────────────────────
@@ -385,11 +380,7 @@ export class DnsSchedulesService implements OnModuleInit {
   setAppliedEntries(
     scheduleId: string,
     nodeId: string,
-    entries: Array<{
-      advancedBlockingGroupName: string;
-      action: DnsScheduleDraft["action"];
-      domain: string;
-    }>,
+    entries: DnsScheduleManagedEntry[],
   ): void {
     this.inTransaction(() =>
       this.replaceAppliedEntries(scheduleId, nodeId, entries),
@@ -424,12 +415,13 @@ export class DnsSchedulesService implements OnModuleInit {
     }
   }
 
-  private inTransaction(action: () => void): void {
+  private inTransaction<T>(action: () => T): T {
     const db = this.getDb();
     db.exec("BEGIN IMMEDIATE");
     try {
-      action();
+      const result = action();
       db.exec("COMMIT");
+      return result;
     } catch (error) {
       db.exec("ROLLBACK");
       throw error;
@@ -462,10 +454,28 @@ export class DnsSchedulesService implements OnModuleInit {
   ): DnsScheduleManagedEntry[] {
     return [
       ...this.listAppliedEntries(scheduleId, nodeId),
-      ...(this.listPendingRecovery().find(
-        (row) => row.scheduleId === scheduleId && row.nodeId === nodeId,
-      )?.entries ?? []),
+      ...(this.getPendingRecovery(scheduleId, nodeId)?.entries ?? []),
     ];
+  }
+
+  getPendingRecovery(
+    scheduleId: string,
+    nodeId: string,
+  ): DnsSchedulePendingRecovery | undefined {
+    const db = this.companionDb.db;
+    if (!db) return;
+    this.ensureSchema();
+    const row = db
+      .prepare(
+        "SELECT entries_json FROM dns_schedule_pending_recovery WHERE schedule_id = ? AND node_id = ?",
+      )
+      .get(scheduleId, nodeId) as { entries_json: string } | undefined;
+    if (!row) return;
+    return {
+      scheduleId,
+      nodeId,
+      entries: JSON.parse(row.entries_json) as DnsScheduleManagedEntry[],
+    };
   }
 
   listTrackedTargets(): { scheduleId: string; nodeId: string }[] {

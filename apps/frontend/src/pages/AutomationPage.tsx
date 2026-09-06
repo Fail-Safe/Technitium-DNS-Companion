@@ -126,10 +126,13 @@ function getIncompleteRunDetail(result: RunDnsScheduleEvaluatorResponse): string
   const deferred = result.results.filter(isDeferredRunResult);
   const pending = result.pendingRecoveryCount ?? 0;
   if (result.errored === 0 && pending === 0 && deferred.length === 0) return;
-  const counts = `${result.errored} error(s), ${pending} awaiting recovery`;
-  if (deferred.length === 0) return `${counts}.`;
+  const issues: string[] = [];
+  if (result.errored) issues.push(`${result.errored} error${result.errored === 1 ? "" : "s"}`);
+  if (pending) issues.push(`${pending} awaiting recovery`);
+  if (deferred.length) issues.push(`${deferred.length} deferred target${deferred.length === 1 ? "" : "s"}`);
   // The result table contains every target and reason; keep the toast short.
-  return `${counts}, ${deferred.length} target(s) deferred. ${formatRunResultDetail(deferred[0])}`;
+  const detail = deferred.length ? ` ${formatRunResultDetail(deferred[0])}` : "";
+  return `${issues.join(", ")}.${detail}`;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

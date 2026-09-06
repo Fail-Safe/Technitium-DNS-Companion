@@ -87,7 +87,7 @@ describe("Automation recovery status", () => {
         expect(pushToast).toHaveBeenCalledWith(
           expect.objectContaining({
             tone: "error",
-            message: expect.stringContaining("awaiting recovery"),
+            message: expect.stringContaining(pending ? "awaiting recovery" : "error"),
           }),
         ),
       );

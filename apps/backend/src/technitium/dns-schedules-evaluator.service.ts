@@ -13,6 +13,7 @@ import type {
   DnsSchedule,
   DnsScheduleApplicationResult,
   DnsScheduleEvaluatorStatus,
+  DnsScheduleManagedEntry as AppliedEntryTuple,
   RunDnsScheduleEvaluatorResponse,
 } from "./dns-schedules.types";
 import { DnsTemporaryOverridesService } from "./dns-temporary-overrides.service";
@@ -20,17 +21,6 @@ import type { DnsTemporaryOverride } from "./dns-temporary-overrides.types";
 import { LogAlertsEmailService } from "./log-alerts-email.service";
 import { LogAlertsRulesService } from "./log-alerts-rules.service";
 import { TechnitiumService } from "./technitium.service";
-
-/**
- * Identity of a single thing the evaluator has written to (or wants to
- * write to) an Advanced Blocking config: a (group, action, domain) triple.
- * Used by the apply pass's diff against the per-entry tracking table.
- */
-type AppliedEntryTuple = {
-  advancedBlockingGroupName: string;
-  action: "block" | "allow";
-  domain: string;
-};
 
 type ClusterWriteOperation = {
   writeTarget: string;
@@ -713,31 +703,15 @@ export class DnsSchedulesEvaluatorService
 
   private hasManagedState(scheduleId: string, nodeId: string): boolean {
     return (
-      this.schedulesService.listManagedEntries(scheduleId, nodeId).length > 0 ||
-      this.schedulesService
-        .listPendingRecovery()
-        .some((row) => row.scheduleId === scheduleId && row.nodeId === nodeId)
+      this.schedulesService.getPendingRecovery(scheduleId, nodeId) !==
+        undefined ||
+      this.schedulesService.listAppliedEntries(scheduleId, nodeId).length > 0
     );
   }
 
   private clearStateRows(scheduleId: string, stateNodeIds: string[]): void {
     for (const stateNodeId of stateNodeIds) {
-      if (this.hasManagedState(scheduleId, stateNodeId)) continue;
-      this.schedulesService.markRemoved(scheduleId, stateNodeId);
-      this.schedulesService.clearAppliedEntries(scheduleId, stateNodeId);
-      this.resetDriftState(scheduleId, stateNodeId);
-    }
-  }
-
-  private clearLegacyStateRows(
-    scheduleId: string,
-    canonicalNodeId: string,
-    stateNodeIds: string[],
-  ): void {
-    for (const stateNodeId of stateNodeIds) {
-      if (stateNodeId === canonicalNodeId) continue;
-      // Alias entries have their own cleanup attempt. Never discard evidence
-      // when that attempt failed earlier in the run.
+      // Keep cleanup evidence when a previous attempt failed.
       if (this.hasManagedState(scheduleId, stateNodeId)) continue;
       this.schedulesService.markRemoved(scheduleId, stateNodeId);
       this.schedulesService.clearAppliedEntries(scheduleId, stateNodeId);
@@ -828,12 +802,8 @@ export class DnsSchedulesEvaluatorService
       if (shouldBeActive) {
         const recovering =
           schedule.targetType !== "built-in" &&
-          this.schedulesService
-            .listPendingRecovery()
-            .some(
-              (entry) =>
-                entry.scheduleId === schedule.id && entry.nodeId === nodeId,
-            );
+          this.schedulesService.getPendingRecovery(schedule.id, nodeId) !==
+            undefined;
         const changed = await this.applyScheduleToNode(
           schedule,
           nodeId,
@@ -841,7 +811,10 @@ export class DnsSchedulesEvaluatorService
         );
         if (schedule.targetType === "built-in")
           this.schedulesService.markApplied(schedule.id, nodeId);
-        this.clearLegacyStateRows(schedule.id, nodeId, stateNodeIds);
+        this.clearStateRows(
+          schedule.id,
+          stateNodeIds.filter((id) => id !== nodeId),
+        );
         if (!isCurrentlyApplied) {
           const modeDetail =
             schedule.targetType === "built-in"
@@ -922,11 +895,8 @@ export class DnsSchedulesEvaluatorService
       const message = error instanceof Error ? error.message : "Unknown error.";
       if (
         isNodeReachabilityError(message) &&
-        !this.schedulesService
-          .listPendingRecovery()
-          .some(
-            (row) => row.scheduleId === schedule.id && row.nodeId === nodeId,
-          )
+        this.schedulesService.getPendingRecovery(schedule.id, nodeId) ===
+          undefined
       ) {
         this.logger.warn(
           `Deferred ${shouldBeActive ? "apply" : "remove"} for schedule "${schedule.name}" on node "${nodeId}": ${message}`,
@@ -1216,30 +1186,16 @@ export class DnsSchedulesEvaluatorService
 
     // Desired state: every (group, action, domain) tuple the schedule
     // currently resolves to.
-    const resolvedEntries = this.resolveDomainEntries(schedule);
-    const desired = new Map<string, AppliedEntryTuple>();
-    for (const groupName of schedule.advancedBlockingGroupNames) {
-      for (const domain of resolvedEntries) {
-        const tuple: AppliedEntryTuple = {
-          advancedBlockingGroupName: groupName,
-          action: schedule.action,
-          domain,
-        };
-        desired.set(tupleKey(tuple), tuple);
-      }
-    }
+    const desired = new Map(
+      this.getDesiredTuples(schedule).map((entry) => [tupleKey(entry), entry]),
+    );
 
     // Include entries from writes whose outcomes are still uncertain.
-    const prev = this.schedulesService.listManagedEntries(schedule.id, nodeId);
-    const prevByKey = new Map<string, AppliedEntryTuple>();
-    for (const e of prev) {
-      const tuple: AppliedEntryTuple = {
-        advancedBlockingGroupName: e.advancedBlockingGroupName,
-        action: e.action,
-        domain: e.domain,
-      };
-      prevByKey.set(tupleKey(tuple), tuple);
-    }
+    const prevByKey = new Map(
+      this.schedulesService
+        .listManagedEntries(schedule.id, nodeId)
+        .map((entry) => [tupleKey(entry), entry]),
+    );
 
     // Removals: anything we tracked but no longer want (prev \ desired).
     // A definition change (group swap, action flip, etc.) surfaces here as
@@ -1347,9 +1303,8 @@ export class DnsSchedulesEvaluatorService
       changed ||
       !trackingUnchanged ||
       !this.schedulesService.isApplied(schedule.id, nodeId) ||
-      this.schedulesService
-        .listPendingRecovery()
-        .some((row) => row.scheduleId === schedule.id && row.nodeId === nodeId);
+      this.schedulesService.getPendingRecovery(schedule.id, nodeId) !==
+        undefined;
     if (needsFinalization) {
       // Transfer cleanup responsibility before retiring shared entries.
       this.retainSharedEntries(
@@ -1421,15 +1376,7 @@ export class DnsSchedulesEvaluatorService
         }
       }
       if (removalTuples.length === 0) {
-        if (
-          this.schedulesService.isApplied(schedule.id, trackingNodeId) ||
-          this.schedulesService
-            .listPendingRecovery()
-            .some(
-              (row) =>
-                row.scheduleId === schedule.id && row.nodeId === trackingNodeId,
-            )
-        ) {
+        if (this.schedulesService.isApplied(schedule.id, trackingNodeId)) {
           this.schedulesService.finalizeRecovery(
             schedule.id,
             trackingNodeId,
