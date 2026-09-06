@@ -19,6 +19,46 @@ describe("durable schedule recovery", () => {
     jest.useRealTimers();
   });
 
+  it.each(["expiry", "definition edit"])(
+    "retains shared cleanup if the surviving source cannot read DNS after %s",
+    async (retirement) => {
+      f.create();
+      await f.evaluator.runNow(false);
+      const original = f.overrides.listOverrides()[0];
+      const surviving = f.overrides.createOverride({
+        ...original,
+        name: "Surviving source",
+        expiresAt: undefined,
+      });
+      if (retirement === "expiry") {
+        f.expire();
+        f.fault = "read";
+      } else {
+        f.overrides.updateOverride(original.id, {
+          ...original,
+          domainEntries: ["replacement.test"],
+        });
+        f.writeHook = () => {
+          f.fault = "read";
+        };
+      }
+      await f.evaluator.runNow(false);
+      expect(f.schedules.listManagedEntries(surviving.id, "primary")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ domain: "managed.test" }),
+        ]),
+      );
+      for (const source of f.overrides.listOverrides())
+        f.overrides.setOverrideEnabled(source.id, false);
+      f.fault = undefined;
+      f.writeHook = undefined;
+      f.reopen();
+      await f.evaluator.runNow(false);
+      expect(f.config.groups[0].allowed).toEqual(["unrelated.test"]);
+      expect(f.schedules.listTrackedTargets()).toEqual([]);
+    },
+  );
+
   it.each(["schedule", "override"] as const)(
     "recovers a %s after a lost response, expiry and restart",
     async (kind) => {

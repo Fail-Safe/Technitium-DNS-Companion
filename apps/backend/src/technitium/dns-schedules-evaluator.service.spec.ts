@@ -813,7 +813,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
         removeAdvancedBlockingScheduleFromNode: (
           s: DnsSchedule,
           n: string,
-          protectedTupleKeys: Set<string>,
+          protectedTupleOwners: Map<string, string>,
         ) => Promise<void>;
       }
     ).removeAdvancedBlockingScheduleFromNode(
@@ -824,7 +824,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
         domainGroupNames: [],
       }),
       "nodeA",
-      new Set(["GroupA\0block\0youtube.com"]),
+      new Map([["GroupA\0block\0youtube.com", "other-source"]]),
     );
 
     expect(setConfigWithAuth).not.toHaveBeenCalled();

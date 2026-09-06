@@ -41,6 +41,10 @@ active sources on the same target. Pending work and entry-only tracking are
 enumerated even without an applied-state row. The new table is created
 idempotently on both fresh and existing databases.
 
+Before retiring a shared entry, Companion ensures the surviving source has a
+durable cleanup record. A failed first read by that source therefore cannot
+discard the only record of an entry that still needs eventual removal.
+
 ## Limits
 
 Recovery requires reachable DNS and a running evaluator. Expiry is not a

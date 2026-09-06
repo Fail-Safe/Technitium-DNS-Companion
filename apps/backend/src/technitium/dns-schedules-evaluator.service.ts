@@ -324,8 +324,8 @@ export class DnsSchedulesEvaluatorService
         );
 
       const results: DnsScheduleApplicationResult[] = [];
-      const protectedKeys = (nodeId: string, excludeId?: string) =>
-        this.getActiveDesiredTupleKeys(
+      const protectedOwners = (nodeId: string, excludeId?: string) =>
+        this.getActiveDesiredTupleOwners(
           activeSources.filter(
             (source) =>
               source.schedule.id !== excludeId &&
@@ -435,7 +435,7 @@ export class DnsSchedulesEvaluatorService
               await this.removeAdvancedBlockingScheduleFromNode(
                 schedule,
                 resolved.writeTarget,
-                protectedKeys(resolved.writeTarget),
+                protectedOwners(resolved.writeTarget),
                 entry.nodeId,
               );
             } else {
@@ -540,7 +540,7 @@ export class DnsSchedulesEvaluatorService
             now,
             options.dryRun,
             source.alwaysActive,
-            protectedKeys(op.writeTarget, schedule.id),
+            protectedOwners(op.writeTarget, schedule.id),
           );
           results.push(result);
         }
@@ -618,20 +618,43 @@ export class DnsSchedulesEvaluatorService
     return [...stateNodeIds];
   }
 
-  private getActiveDesiredTupleKeys(
+  private getActiveDesiredTupleOwners(
     activeSources: ActiveOverrideSource[],
     now: Date,
-  ): Set<string> {
-    const keys = new Set<string>();
+  ): Map<string, string> {
+    const owners = new Map<string, string>();
     for (const source of activeSources) {
       if (!source.alwaysActive && !this.isWindowActive(source.schedule, now)) {
         continue;
       }
       for (const tuple of this.getDesiredTuples(source.schedule)) {
-        keys.add(tupleKey(tuple));
+        owners.set(tupleKey(tuple), source.schedule.id);
       }
     }
-    return keys;
+    return owners;
+  }
+
+  private retainSharedEntries(
+    nodeId: string,
+    entries: AppliedEntryTuple[],
+    owners: Map<string, string>,
+  ): void {
+    const byOwner = new Map<string, AppliedEntryTuple[]>();
+    for (const entry of entries) {
+      const owner = owners.get(tupleKey(entry));
+      if (!owner) continue;
+      const retained = byOwner.get(owner) ?? [];
+      retained.push(entry);
+      byOwner.set(owner, retained);
+    }
+    for (const [owner, shared] of byOwner) {
+      const tracked = new Set(
+        this.schedulesService.listManagedEntries(owner, nodeId).map(tupleKey),
+      );
+      const missing = shared.filter((entry) => !tracked.has(tupleKey(entry)));
+      if (missing.length)
+        this.schedulesService.prepareRecovery(owner, nodeId, missing);
+    }
   }
 
   private getDesiredTuples(schedule: DnsSchedule): AppliedEntryTuple[] {
@@ -719,7 +742,7 @@ export class DnsSchedulesEvaluatorService
     now: Date,
     dryRun: boolean,
     alwaysActive = false,
-    protectedTupleKeys: Set<string> = new Set(),
+    protectedTupleOwners: Map<string, string> = new Map(),
   ): Promise<DnsScheduleApplicationResult> {
     const shouldBeActive = alwaysActive || this.isWindowActive(schedule, now);
     const isCurrentlyApplied = stateNodeIds.some((stateNodeId) =>
@@ -775,7 +798,7 @@ export class DnsSchedulesEvaluatorService
         const changed = await this.applyScheduleToNode(
           schedule,
           nodeId,
-          protectedTupleKeys,
+          protectedTupleOwners,
         );
         if (schedule.targetType === "built-in")
           this.schedulesService.markApplied(schedule.id, nodeId);
@@ -829,7 +852,11 @@ export class DnsSchedulesEvaluatorService
           reason: "already-applied",
         };
       } else {
-        await this.removeScheduleFromNode(schedule, nodeId, protectedTupleKeys);
+        await this.removeScheduleFromNode(
+          schedule,
+          nodeId,
+          protectedTupleOwners,
+        );
         this.clearStateRows(schedule.id, stateNodeIds);
         this.logger.log(
           `Removed schedule "${schedule.name}" from node "${nodeId}".`,
@@ -906,7 +933,7 @@ export class DnsSchedulesEvaluatorService
   private async applyScheduleToNode(
     schedule: DnsSchedule,
     nodeId: string,
-    protectedTupleKeys: Set<string> = new Set(),
+    protectedTupleOwners: Map<string, string> = new Map(),
   ): Promise<boolean> {
     if (schedule.targetType === "built-in") {
       await this.applyBuiltInScheduleToNode(schedule, nodeId);
@@ -915,7 +942,7 @@ export class DnsSchedulesEvaluatorService
       return this.applyAdvancedBlockingScheduleToNode(
         schedule,
         nodeId,
-        protectedTupleKeys,
+        protectedTupleOwners,
       );
     }
   }
@@ -1015,7 +1042,7 @@ export class DnsSchedulesEvaluatorService
             await this.removeAdvancedBlockingScheduleFromNode(
               schedule,
               resolved.writeTarget,
-              this.getActiveDesiredTupleKeys(
+              this.getActiveDesiredTupleOwners(
                 activeSources.filter((source) =>
                   (source.schedule.nodeIds.length
                     ? source.schedule.nodeIds
@@ -1051,7 +1078,7 @@ export class DnsSchedulesEvaluatorService
   private async removeScheduleFromNode(
     schedule: DnsSchedule,
     nodeId: string,
-    protectedTupleKeys: Set<string> = new Set(),
+    protectedTupleOwners: Map<string, string> = new Map(),
   ): Promise<void> {
     if (schedule.targetType === "built-in") {
       await this.removeBuiltInScheduleFromNode(schedule, nodeId);
@@ -1059,7 +1086,7 @@ export class DnsSchedulesEvaluatorService
       await this.removeAdvancedBlockingScheduleFromNode(
         schedule,
         nodeId,
-        protectedTupleKeys,
+        protectedTupleOwners,
       );
     }
   }
@@ -1125,7 +1152,7 @@ export class DnsSchedulesEvaluatorService
   private async applyAdvancedBlockingScheduleToNode(
     schedule: DnsSchedule,
     nodeId: string,
-    protectedTupleKeys: Set<string> = new Set(),
+    protectedTupleOwners: Map<string, string> = new Map(),
   ): Promise<boolean> {
     const snapshot = await this.advancedBlockingService.getSnapshotWithAuth(
       nodeId,
@@ -1182,7 +1209,7 @@ export class DnsSchedulesEvaluatorService
     // the cleanup of the now-stale tuple.
     const toRemove: AppliedEntryTuple[] = [];
     for (const [key, tuple] of prevByKey) {
-      if (!desired.has(key) && !protectedTupleKeys.has(key))
+      if (!desired.has(key) && !protectedTupleOwners.has(key))
         toRemove.push(tuple);
     }
 
@@ -1287,6 +1314,14 @@ export class DnsSchedulesEvaluatorService
         .listPendingRecovery()
         .some((row) => row.scheduleId === schedule.id && row.nodeId === nodeId);
     if (needsFinalization) {
+      // Transfer cleanup responsibility before retiring shared entries.
+      this.retainSharedEntries(
+        nodeId,
+        [...prevByKey.values()].filter(
+          (entry) => !desired.has(tupleKey(entry)),
+        ),
+        protectedTupleOwners,
+      );
       this.schedulesService.prepareRecovery(schedule.id, nodeId, [
         ...desired.values(),
       ]);
@@ -1309,7 +1344,7 @@ export class DnsSchedulesEvaluatorService
   private async removeAdvancedBlockingScheduleFromNode(
     schedule: DnsSchedule,
     nodeId: string,
-    protectedTupleKeys: Set<string> = new Set(),
+    protectedTupleOwners: Map<string, string> = new Map(),
     trackingNodeId = nodeId,
   ): Promise<void> {
     // Primary source of truth is the per-entry tracking table: it correctly
@@ -1370,8 +1405,9 @@ export class DnsSchedulesEvaluatorService
       );
     }
 
+    this.retainSharedEntries(nodeId, removalTuples, protectedTupleOwners);
     removalTuples = removalTuples.filter(
-      (tuple) => !protectedTupleKeys.has(tupleKey(tuple)),
+      (tuple) => !protectedTupleOwners.has(tupleKey(tuple)),
     );
     if (removalTuples.length === 0) {
       this.schedulesService.finalizeRecovery(schedule.id, trackingNodeId, null);
