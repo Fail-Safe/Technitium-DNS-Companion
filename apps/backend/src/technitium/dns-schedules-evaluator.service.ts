@@ -1151,6 +1151,7 @@ export class DnsSchedulesEvaluatorService
         nodeId,
         { ...config, groups: updatedGroups },
         "schedule",
+        snapshot.configRevision,
       );
     }
 
@@ -1297,6 +1298,7 @@ export class DnsSchedulesEvaluatorService
         nodeId,
         { ...config, groups: updatedGroups },
         "schedule",
+        snapshot.configRevision,
       );
     }
 

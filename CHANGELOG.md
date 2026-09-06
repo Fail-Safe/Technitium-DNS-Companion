@@ -38,6 +38,8 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Schedule apply and removal now pass the Advanced Blocking snapshot revision,
+  preventing detected stale configuration writes from overwriting other edits.
 - Cluster role matching accepts the plural `clusterNodes[].ipAddresses` shape
   returned by Technitium v15 and matches automation probes by each node's
   self-reported cluster DNS name when configured aliases or origins differ.
