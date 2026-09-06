@@ -14,11 +14,17 @@ connectivity or authorization. **Run now** retries immediately. A dry run makes
 no DNS or tracking changes. Disabling the evaluator retains pending work without
 automatically retrying it.
 
+Run results also show deferred targets, including unavailable Primary routing
+and removed nodes. These runs are incomplete even when no write is pending.
+
 Disable a schedule or end a temporary override before deleting it, then wait for
 cleanup. Deletion is rejected while applied state, tracked entries, or pending
 recovery remain. Removing a configured node does not erase its recovery records.
 Recovery follows validated Primary routing and never falls back to an
 unauthorized target.
+
+Switching to built-in mode waits for recorded Advanced Blocking cleanup to
+finish. If cleanup fails, the evaluator retries before applying built-in entries.
 
 ## Storage and reconciliation
 
@@ -34,6 +40,10 @@ write, or a fresh read showing no write is needed, another transaction updates
 entry tracking and applied state and clears pending recovery. A failed final
 transaction leaves pending work intact. No transaction spans a network call.
 Timer/manual evaluation and immediate deactivation are serialized.
+
+When a fresh read confirms an uncertain apply succeeded, recovery still attempts
+the requested cache flush without repeating the configuration write. Cache
+flushing remains best-effort; failures do not prevent tracking finalization.
 
 Active sources reconcile to their current desired entries. Expired, disabled,
 or deselected targets remove recorded entries, preserving requirements of other

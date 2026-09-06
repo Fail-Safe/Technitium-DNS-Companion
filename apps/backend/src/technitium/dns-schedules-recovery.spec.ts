@@ -516,4 +516,151 @@ describe("durable schedule recovery", () => {
     expect(f.writes).toBe(0);
     expect(f.schedules.listTrackedTargets()).toEqual([]);
   });
+
+  it.each(["immediate deactivation", "scheduled cleanup", "retry"])(
+    "defers built-in mode until uncertain Advanced Blocking cleanup completes: %s",
+    async (nextStep) => {
+      f.create("schedule");
+      f.fault = "after-write";
+      await f.evaluator.runNow(false);
+      f.schedules.updateSchedule(f.source.id, {
+        ...f.source,
+        targetType: "built-in",
+      });
+      f.fault = "read";
+      const deferred = await f.evaluator.runNow(false);
+      expect(deferred.results).toContainEqual(
+        expect.objectContaining({
+          action: "skipped",
+          reason: "deferred-advanced-blocking-cleanup",
+        }),
+      );
+      expect(f.builtInActions).toEqual([]);
+      expect(f.schedules.listPendingRecovery()).toHaveLength(1);
+      f.fault = undefined;
+      if (nextStep === "retry") {
+        await f.evaluator.runNow(false);
+        expect(f.builtInActions).toEqual(["/api/allowed/add"]);
+      }
+      const disabled = f.schedules.setScheduleEnabled(f.source.id, false);
+      if (nextStep === "immediate deactivation")
+        await f.evaluator.deactivateScheduleIfApplied(disabled);
+      else await f.evaluator.runNow(false);
+      expect(f.builtInActions).toEqual(
+        nextStep === "retry" ? ["/api/allowed/add", "/api/allowed/delete"] : [],
+      );
+      expect(f.config.groups[0].allowed).toEqual(["unrelated.test"]);
+      expect(f.schedules.listTrackedTargets()).toEqual([]);
+    },
+  );
+
+  it.each([true, false])(
+    "honors cache flushing (%s) after no-POST recovery",
+    async (flushCacheOnChange) => {
+      f.create();
+      const source = f.overrides.listOverrides()[0];
+      f.overrides.updateOverride(source.id, { ...source, flushCacheOnChange });
+      f.targets.set("primary", {
+        writeTarget: "primary",
+        flushNodes: ["primary"],
+        skippedFlushNodes: ["other"],
+      });
+      f.fault = "after-write";
+      await f.evaluator.runNow(false);
+      expect(f.cacheFlushes).toEqual([]);
+      const recovered = await f.evaluator.runNow(false);
+      expect(f.writes).toBe(1);
+      expect(f.cacheFlushes).toEqual(flushCacheOnChange ? ["primary"] : []);
+      if (flushCacheOnChange)
+        expect(recovered.results[0].cacheFlush).toEqual({
+          flushedNodeIds: ["primary"],
+          skippedNodeIds: ["other"],
+        });
+      expect(f.schedules.listPendingRecovery()).toEqual([]);
+      await f.evaluator.runNow(false);
+      expect(f.cacheFlushes).toHaveLength(flushCacheOnChange ? 1 : 0);
+    },
+  );
+
+  it.each(["routing", "removed node", "no nodes"])(
+    "reports a deferred first apply with %s",
+    async (missing) => {
+      f.create();
+      if (missing === "routing") f.available = false;
+      else {
+        const source = f.overrides.listOverrides()[0];
+        f.overrides.updateOverride(source.id, {
+          ...source,
+          nodeIds: missing === "removed node" ? ["removed"] : [],
+        });
+        if (missing === "no nodes") f.configuredNodeIds = [];
+      }
+      const result = await f.evaluator.runNow(false);
+      expect(result.results).toHaveLength(1);
+      expect(result.results[0]).toMatchObject({
+        action: "skipped",
+        reason:
+          missing === "routing"
+            ? "no-validated-primary"
+            : missing === "removed node"
+              ? "node-not-configured"
+              : "no-configured-nodes",
+      });
+      expect(result.applied).toBe(0);
+      expect(f.writes).toBe(0);
+    },
+  );
+
+  it("keeps an unapplied inactive schedule harmless when routing is unavailable", async () => {
+    f.create("schedule");
+    jest.setSystemTime(new Date("2026-09-05T23:59:00Z"));
+    f.available = false;
+    const result = await f.evaluator.runNow(false);
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        action: "skipped",
+        reason: "already-inactive",
+      }),
+    ]);
+    expect(f.schedules.listTrackedTargets()).toEqual([]);
+    expect(f.writes).toBe(0);
+  });
+
+  it.each(["retry", "deactivate"])(
+    "clears recorded empty recovery without legacy removal: %s",
+    async (nextStep) => {
+      f.create("schedule");
+      f.config.groups[0].allowed.push("managed.test");
+      f.schedules.updateSchedule(f.source.id, {
+        ...f.source,
+        domainEntries: [],
+        domainGroupNames: ["empty"],
+      });
+      jest.spyOn(f.schedules, "finalizeRecovery").mockImplementationOnce(() => {
+        throw new Error("injected finalization failure");
+      });
+      await f.evaluator.runNow(false);
+      expect(f.schedules.listPendingRecovery()[0].entries).toEqual([]);
+      f.schedules.updateSchedule(f.source.id, {
+        ...f.source,
+        targetType: "built-in",
+      });
+      if (nextStep === "retry") {
+        await f.evaluator.runNow(false);
+        expect(f.builtInActions).toEqual(["/api/allowed/add"]);
+        expect(f.schedules.listPendingRecovery()).toEqual([]);
+      }
+      const disabled = f.schedules.setScheduleEnabled(f.source.id, false);
+      await f.evaluator.deactivateScheduleIfApplied(disabled);
+      expect(f.builtInActions).toEqual(
+        nextStep === "retry" ? ["/api/allowed/add", "/api/allowed/delete"] : [],
+      );
+      expect(f.config.groups[0].allowed).toEqual([
+        "unrelated.test",
+        "managed.test",
+      ]);
+      expect(f.writes).toBe(0);
+      expect(f.schedules.listTrackedTargets()).toEqual([]);
+    },
+  );
 });

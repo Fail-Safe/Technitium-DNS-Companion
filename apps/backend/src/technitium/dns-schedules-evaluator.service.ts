@@ -373,16 +373,15 @@ export class DnsSchedulesEvaluatorService
             const selected = source.schedule.nodeIds.length
               ? source.schedule.nodeIds
               : allNodeIds;
-            const hasManagedEntries =
-              this.schedulesService.listManagedEntries(
-                entry.scheduleId,
-                entry.nodeId,
-              ).length > 0;
+            const hasManagedState = this.hasManagedState(
+              entry.scheduleId,
+              entry.nodeId,
+            );
             return (
               !selected.some(
                 (id) => perCandidate.get(id)?.writeTarget === writeTarget,
               ) ||
-              (hasManagedEntries &&
+              (hasManagedState &&
                 (source.schedule.targetType === "built-in" ||
                   entry.nodeId !== writeTarget))
             );
@@ -427,11 +426,10 @@ export class DnsSchedulesEvaluatorService
             continue;
           }
           try {
-            const managed = this.schedulesService.listManagedEntries(
-              schedule.id,
-              entry.nodeId,
-            );
-            if (managed.length || schedule.targetType === "advanced-blocking") {
+            if (
+              this.hasManagedState(schedule.id, entry.nodeId) ||
+              schedule.targetType === "advanced-blocking"
+            ) {
               await this.removeAdvancedBlockingScheduleFromNode(
                 schedule,
                 resolved.writeTarget,
@@ -494,10 +492,20 @@ export class DnsSchedulesEvaluatorService
 
       for (const source of activeSources) {
         const schedule = source.schedule;
+        const sourceActive =
+          source.alwaysActive || this.isWindowActive(schedule, now);
         const candidateNodeIds =
-          schedule.nodeIds.length > 0
-            ? schedule.nodeIds.filter((id) => allNodeIds.includes(id))
-            : allNodeIds;
+          schedule.nodeIds.length > 0 ? schedule.nodeIds : allNodeIds;
+
+        if (candidateNodeIds.length === 0) {
+          results.push({
+            scheduleId: schedule.id,
+            scheduleName: schedule.name,
+            nodeId: "",
+            action: "skipped",
+            reason: sourceActive ? "no-configured-nodes" : "already-inactive",
+          });
+        }
 
         // Collapse candidates to unique write targets. In a cluster, multiple
         // candidate secondaries map to the same Primary — dedupe so we write
@@ -512,7 +520,11 @@ export class DnsSchedulesEvaluatorService
               scheduleName: schedule.name,
               nodeId: candidateId,
               action: "skipped",
-              reason: resolved?.reason ?? "no-validated-primary",
+              reason: !sourceActive
+                ? "already-inactive"
+                : !allNodeIds.includes(candidateId)
+                  ? "node-not-configured"
+                  : (resolved?.reason ?? "no-validated-primary"),
             });
             continue;
           }
@@ -760,12 +772,31 @@ export class DnsSchedulesEvaluatorService
       };
     }
 
-    // Window active and already applied. For advanced-blocking schedules,
-    // fall through to re-apply so any DG entry additions since the last apply
-    // are picked up (applyAdvancedBlockingScheduleToNode diffs against live
-    // Technitium state and skips setConfig when nothing changed).
-    // Built-in mode calls individual add-per-domain APIs with no diff, so
-    // skip as before to avoid redundant per-domain requests.
+    // A mode change must not share one state row between unfinished Advanced
+    // Blocking cleanup and newly applied built-in entries.
+    if (
+      !dryRun &&
+      shouldBeActive &&
+      schedule.targetType === "built-in" &&
+      this.schedulesService
+        .listTrackedTargets()
+        .some(
+          (entry) =>
+            entry.scheduleId === schedule.id &&
+            this.hasManagedState(schedule.id, entry.nodeId),
+        )
+    ) {
+      return {
+        scheduleId: schedule.id,
+        scheduleName: schedule.name,
+        nodeId,
+        action: "skipped",
+        reason: "deferred-advanced-blocking-cleanup",
+      };
+    }
+
+    // Advanced Blocking rechecks live state for drift and Domain Group edits.
+    // Built-in mode has no diff, so skip redundant per-domain requests.
     if (
       shouldBeActive &&
       isCurrentlyApplied &&
@@ -795,6 +826,14 @@ export class DnsSchedulesEvaluatorService
 
     try {
       if (shouldBeActive) {
+        const recovering =
+          schedule.targetType !== "built-in" &&
+          this.schedulesService
+            .listPendingRecovery()
+            .some(
+              (entry) =>
+                entry.scheduleId === schedule.id && entry.nodeId === nodeId,
+            );
         const changed = await this.applyScheduleToNode(
           schedule,
           nodeId,
@@ -828,14 +867,14 @@ export class DnsSchedulesEvaluatorService
           this.resetDriftState(schedule.id, nodeId);
         }
         const cacheFlush =
-          changed && schedule.flushCacheOnChange
+          (changed || recovering) && schedule.flushCacheOnChange
             ? await this.flushAdmittedCaches(
                 schedule,
                 flushNodeIds,
                 skippedFlushNodeIds,
               )
             : undefined;
-        if (!isCurrentlyApplied || changed) {
+        if (!isCurrentlyApplied || changed || recovering) {
           return {
             scheduleId: schedule.id,
             scheduleName: schedule.name,
@@ -1025,14 +1064,12 @@ export class DnsSchedulesEvaluatorService
       // cluster have legacy state rows for this schedule.
       const skipWrite =
         seenWriteTargets.has(resolved.writeTarget) &&
-        this.schedulesService.listManagedEntries(schedule.id, entry.nodeId)
-          .length === 0;
+        !this.hasManagedState(schedule.id, entry.nodeId);
       try {
         if (!skipWrite) {
           if (
             schedule.targetType === "built-in" &&
-            this.schedulesService.listManagedEntries(schedule.id, entry.nodeId)
-              .length === 0
+            !this.hasManagedState(schedule.id, entry.nodeId)
           ) {
             await this.removeBuiltInScheduleFromNode(
               schedule,
@@ -1363,7 +1400,8 @@ export class DnsSchedulesEvaluatorService
     );
 
     let removalTuples: AppliedEntryTuple[];
-    if (tracked.length > 0) {
+    // A recorded empty set is not legacy state: there is nothing to remove.
+    if (this.hasManagedState(schedule.id, trackingNodeId)) {
       removalTuples = tracked.map((t) => ({
         advancedBlockingGroupName: t.advancedBlockingGroupName,
         action: t.action,

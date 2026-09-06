@@ -21,6 +21,8 @@ export class DnsScheduleRecoveryFixture {
   };
   writes = 0;
   builtInActions: string[] = [];
+  cacheFlushes: string[] = [];
+  configuredNodeIds = ["primary", "other"];
   reads = 0;
   fault: "before-write" | "after-write" | "read" | undefined;
   available = true;
@@ -50,10 +52,12 @@ export class DnsScheduleRecoveryFixture {
     const transport = {
       getScheduleTokenStatus: () => ({ valid: true }),
       listNodes: () =>
-        Promise.resolve([
-          { id: "primary", baseUrl: "https://primary.invalid" },
-          { id: "other", baseUrl: "https://other.invalid" },
-        ]),
+        Promise.resolve(
+          this.configuredNodeIds.map((id) => ({
+            id,
+            baseUrl: `https://${id}.invalid`,
+          })),
+        ),
       resolveClusterWriteTargets: () =>
         Promise.resolve({
           perCandidate: this.available ? this.targets : new Map(),
@@ -62,6 +66,10 @@ export class DnsScheduleRecoveryFixture {
         nodeId: string,
         request: { url: string; body?: string },
       ) => {
+        if (request.url === "/api/cache/delete") {
+          this.cacheFlushes.push(nodeId);
+          return { status: "ok" };
+        }
         if (/^\/api\/(allowed|blocked)\/(add|delete)$/.test(request.url)) {
           this.builtInActions.push(request.url);
           return { status: "ok" };
