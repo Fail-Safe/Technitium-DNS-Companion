@@ -58,6 +58,22 @@ All notable changes to this project will be documented in this file.
   cross-cluster token rejection, per-group automation admission, isolated
   failures, Primary outage behavior, and bounded recovery revalidation.
 
+## [1.11.1] - 2026-09-09
+
+### Security
+
+- Update `qs` to 6.16.0 to address array-limit bypass and attacker-controlled
+  `isBuffer` denial-of-service vulnerabilities.
+- Update `multer` to 2.3.0 to fix file descriptor leaks from aborted disk-backed
+  multipart uploads.
+- Update build and lint dependencies `browserslist` to 4.28.9 and
+  `@humanfs/node` to 0.16.8 to address unsafe custom statistics handling and
+  symlink-following file copies.
+- Update Nodemailer to 9.1.1 to address address parsing, recipient validation,
+  and content access-control vulnerabilities.
+- Update `js-yaml`, `brace-expansion`, `nanoid`, Sharp, and the Vitest toolchain
+  to patched versions identified by the release dependency audit.
+
 ### Documentation
 
 - Published a user-facing DNS Logs performance overview connecting the
@@ -415,7 +431,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- DNS Schedules: eager `TECHNITIUM_SCHEDULE_TOKEN` validation at startup. The token is now probed against the configured nodes during boot (not just lazily on first UI request) so missing `Apps: Modify` permission, missing `Cache: Delete` permission, an invalid token, or a transient connectivity issue surfaces as a `WARN [TechnitiumService] TECHNITIUM_SCHEDULE_TOKEN …` line in the boot log instead of when the next schedule fires hours later.
+- DNS Schedules: eager `TECHNITIUM_SCHEDULE_TOKEN` validation at startup. The token is now probed against the configured nodes during boot (not just lazily on first UI request) so missing `Apps: Modify` permission, missing `Cache: Modify` permission, an invalid token, or a transient connectivity issue surfaces as a `WARN [TechnitiumService] TECHNITIUM_SCHEDULE_TOKEN …` line in the boot log instead of when the next schedule fires hours later.
 - SQLite query-logs nightly maintenance: one-time `auto_vacuum=INCREMENTAL` migration on first boot (one full `VACUUM` to switch modes — fast on small DBs, may take 30s–2min on multi-GB DBs), then a daily timer at ~3:30 AM ± 10 min local time that runs `PRAGMA wal_checkpoint(TRUNCATE)` + `PRAGMA incremental_vacuum(1000)`. Without this, retention prunes never returned freed pages to the OS and the WAL could grow unbounded behind long-held read transactions. Gated by `QUERY_LOG_SQLITE_AUTO_VACUUM_MIGRATION` (default `true`) so operators with very large existing DBs can defer the migration. `companion.sqlite` gets a smaller treatment: `PRAGMA optimize` on graceful shutdown to keep query plans fresh.
 
 ### Changed
@@ -448,7 +464,7 @@ All notable changes to this project will be documented in this file.
 - DNS Schedules: optional cache flush on window activate and deactivate, ensuring DNS resolvers pick up changes immediately without waiting for TTL expiry.
 - DNS Schedules: email notifications when blocked domains are queried during an active window — configurable recipients, per-schedule debounce interval, and an optional custom message prepended to alert emails. Set `notifyMessageOnly` to send only the custom message body (no technical details).
 - DNS Schedules: Clone button on each schedule card — creates a disabled "Copy of {name}" draft pre-filled with the source schedule's settings, then opens it for editing.
-- DNS Schedules: schedule token status now reports `hasCacheDelete` permission so the UI can surface a clear error when the token lacks cache-flush capability.
+- DNS Schedules: schedule token status now reports `hasCacheModify` permission so the UI can surface a clear error when the token lacks cache-flush capability.
 
 ### Changed
 
