@@ -2,6 +2,9 @@
 
 --8<-- "README.md"
 
+See [DNS schedule recovery](features/DNS_SCHEDULE_RECOVERY.md) for retry behavior
+after an uncertain Advanced Blocking write.
+
 ## Screenshots
 
 We auto-switch to light/dark variants based on your theme.

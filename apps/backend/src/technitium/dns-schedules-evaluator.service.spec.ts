@@ -1,6 +1,38 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 import { DnsSchedulesEvaluatorService } from "./dns-schedules-evaluator.service";
+import type { DnsScheduleManagedEntry } from "./dns-schedules.types";
 import { DnsSchedule } from "./dns-schedules.types";
+
+function recoveryStorageMock(
+  listAppliedEntries: jest.Mock,
+  setAppliedEntries: jest.Mock,
+  clearAppliedEntries: jest.Mock,
+  markApplied = jest.fn(),
+  markRemoved = jest.fn(),
+) {
+  return {
+    listManagedEntries: listAppliedEntries,
+    listPendingRecovery: () => [],
+    getPendingRecovery: () => undefined,
+    hasCapturedEntries: () => listAppliedEntries().length > 0,
+    prepareRecovery: jest.fn(),
+    finalizeRecovery: jest.fn(
+      (
+        id: string,
+        nodeId: string,
+        entries: DnsScheduleManagedEntry[] | null,
+      ) => {
+        if (entries === null) {
+          clearAppliedEntries(id, nodeId);
+          markRemoved(id, nodeId);
+        } else {
+          setAppliedEntries(id, nodeId, entries);
+          markApplied(id, nodeId);
+        }
+      },
+    ),
+  };
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -325,6 +357,13 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
     const clearAppliedEntries = jest.fn();
     const service = new DnsSchedulesEvaluatorService(
       {
+        ...recoveryStorageMock(
+          listAppliedEntries,
+          setAppliedEntries,
+          clearAppliedEntries,
+          markApplied,
+          markRemoved,
+        ),
         isApplied,
         markApplied,
         markRemoved,
@@ -616,6 +655,13 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
     });
     const service = new DnsSchedulesEvaluatorService(
       {
+        ...recoveryStorageMock(
+          listAppliedEntries,
+          setAppliedEntries,
+          clearAppliedEntries,
+          markApplied,
+          markRemoved,
+        ),
         isApplied,
         markApplied,
         markRemoved,
@@ -692,7 +738,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
     expect(clearAppliedEntries).toHaveBeenCalledWith("test-id", "nodeB");
   });
 
-  it("active window migrates legacy state aliases onto the canonical write target", async () => {
+  it("active window retains alias entries until their cleanup completes", async () => {
     const { service, markApplied, markRemoved, setAppliedEntries } =
       makeService({
         appliedNodeIds: ["nodeB"],
@@ -741,7 +787,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
       reason: "already-applied",
     });
     expect(markApplied).toHaveBeenCalledWith("test-id", "nodeA");
-    expect(markRemoved).toHaveBeenCalledWith("test-id", "nodeB");
+    expect(markRemoved).not.toHaveBeenCalledWith("test-id", "nodeB");
     expect(setAppliedEntries).toHaveBeenCalledWith("test-id", "nodeA", [
       {
         advancedBlockingGroupName: "GroupA",
@@ -769,7 +815,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
         removeAdvancedBlockingScheduleFromNode: (
           s: DnsSchedule,
           n: string,
-          protectedTupleKeys: Set<string>,
+          protectedTupleOwners: Map<string, string>,
         ) => Promise<void>;
       }
     ).removeAdvancedBlockingScheduleFromNode(
@@ -780,7 +826,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
         domainGroupNames: [],
       }),
       "nodeA",
-      new Set(["GroupA\0block\0youtube.com"]),
+      new Map([["GroupA\0block\0youtube.com", "other-source"]]),
     );
 
     expect(setConfigWithAuth).not.toHaveBeenCalled();
@@ -1019,6 +1065,12 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
     const clearAppliedEntries = jest.fn();
     const service = new DnsSchedulesEvaluatorService(
       {
+        ...recoveryStorageMock(
+          listAppliedEntries,
+          setAppliedEntries,
+          clearAppliedEntries,
+        ),
+        isApplied: () => (options.trackedEntries?.length ?? 0) > 0,
         listAppliedEntries,
         setAppliedEntries,
         clearAppliedEntries,
@@ -1288,9 +1340,8 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
       expect(nextConfig.groups[0].blocked.sort()).toEqual(
         ["googlevideo.com", "youtube.com"].sort(),
       );
-      // Tracking write skipped — prev already matches desired, so no SQL
-      // churn just because we had to do a live re-add.
-      expect(setAppliedEntries).not.toHaveBeenCalled();
+      // A live write is prepared and finalized atomically, including tracking.
+      expect(setAppliedEntries).toHaveBeenCalledTimes(1);
     });
 
     it("does not duplicate when desired tuples are already live", async () => {

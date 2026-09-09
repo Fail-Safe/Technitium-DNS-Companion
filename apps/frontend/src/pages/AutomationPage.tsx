@@ -100,7 +100,9 @@ type DnsScheduleRunResult =
 function isDeferredRunResult(result: DnsScheduleRunResult): boolean {
   return (
     result.action === "skipped" &&
-    (result.reason?.startsWith("deferred-") ?? false)
+    result.reason !== "already-applied" &&
+    result.reason !== "already-inactive" &&
+    !(result.reason?.startsWith("dry-run-would-") ?? false)
   );
 }
 
@@ -110,10 +112,27 @@ function shouldDisplayRunResult(result: DnsScheduleRunResult): boolean {
 
 function formatRunResultDetail(result: DnsScheduleRunResult): string {
   const detail = result.error ?? result.reason ?? "";
+  if (detail === "no-validated-primary") return "No validated Primary is available.";
+  if (detail === "node-not-configured") return "The selected node is no longer configured.";
+  if (detail === "no-configured-nodes") return "No DNS nodes are configured.";
+  if (detail === "deferred-advanced-blocking-cleanup") return "Waiting for Advanced Blocking cleanup before switching to built-in mode.";
   return detail.replace(
     /^deferred-node-unreachable:\s*/,
     "Deferred until node is reachable: ",
   );
+}
+
+function getIncompleteRunDetail(result: RunDnsScheduleEvaluatorResponse): string | undefined {
+  const deferred = result.results.filter(isDeferredRunResult);
+  const pending = result.pendingRecoveryCount ?? 0;
+  if (result.errored === 0 && pending === 0 && deferred.length === 0) return;
+  const issues: string[] = [];
+  if (result.errored) issues.push(`${result.errored} error${result.errored === 1 ? "" : "s"}`);
+  if (pending) issues.push(`${pending} awaiting recovery`);
+  if (deferred.length) issues.push(`${deferred.length} deferred target${deferred.length === 1 ? "" : "s"}`);
+  // The result table contains every target and reason; keep the toast short.
+  const detail = deferred.length ? ` ${formatRunResultDetail(deferred[0])}` : "";
+  return `${issues.join(", ")}.${detail}`;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -2944,12 +2963,15 @@ export function AutomationPage() {
       const result = (await res.json()) as RunDnsScheduleEvaluatorResponse;
       setLastRunResult(result);
       setShowRunResult(true);
+      const incomplete = getIncompleteRunDetail(result);
       pushToast({
-        message: dryRun
+        message: incomplete
+          ? `Evaluator incomplete: ${incomplete}`
+          : dryRun
           ? `Dry run complete: ${result.evaluatedSchedules} source(s) evaluated.`
           : `Evaluator ran: ${result.applied} applied, ${result.removed} removed.`,
-        tone: "success",
-        timeout: 4000,
+        tone: incomplete ? "error" : "success",
+        timeout: incomplete ? 6000 : 4000,
       });
       await Promise.all([refreshEvaluatorStatus(), refreshAppliedState()]);
     } catch (e) {
@@ -2977,6 +2999,10 @@ export function AutomationPage() {
     setLastRunResult(result);
     setShowRunResult(true);
     await Promise.all([refreshEvaluatorStatus(), refreshAppliedState()]);
+    const incomplete = getIncompleteRunDetail(result);
+    if (incomplete) {
+      throw new Error(`Saved, but DNS changes are incomplete: ${incomplete}`);
+    }
   };
 
   // ── Derived ──────────────────────────────────────────────────────────────
@@ -3157,6 +3183,9 @@ export function AutomationPage() {
             <span>
               Last run:{" "}
               <strong>{formatLocalDateTime(evaluatorStatus.lastRunAt)}</strong>
+            </span>
+            <span className={evaluatorStatus.pendingRecoveryCount > 0 ? "log-alerts__warn" : undefined}>
+              DNS changes awaiting recovery: <strong>{evaluatorStatus.pendingRecoveryCount ?? 0}</strong>
             </span>
             {evaluatorStatus.lastRunError && (
               <span className="log-alerts__warn">
@@ -3885,7 +3914,7 @@ export function AutomationPage() {
       <ConfirmModal
         isOpen={deleteConfirmSchedule !== null}
         title="Delete schedule"
-        message={`Delete "${deleteConfirmSchedule?.name}"? This will not immediately remove applied entries from Advanced Blocking — wait for the evaluator to deactivate them, or remove them manually.`}
+        message={`Delete "${deleteConfirmSchedule?.name}"? DNS cleanup must finish before deletion.`}
         confirmLabel="Delete"
         variant="danger"
         onConfirm={() => void executeDeleteSchedule()}
@@ -3895,7 +3924,7 @@ export function AutomationPage() {
       <ConfirmModal
         isOpen={deleteConfirmOverride !== null}
         title="Delete temporary override"
-        message={`Delete "${deleteConfirmOverride?.name}"? Active overrides must be ended before deletion so their applied entries can be removed cleanly.`}
+        message={`Delete "${deleteConfirmOverride?.name}"? End the override and wait for DNS cleanup before deletion.`}
         confirmLabel="Delete"
         variant="danger"
         onConfirm={() => void executeDeleteOverride()}

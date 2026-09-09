@@ -13,6 +13,7 @@ import type {
   DnsSchedule,
   DnsScheduleApplicationResult,
   DnsScheduleEvaluatorStatus,
+  DnsScheduleManagedEntry as AppliedEntryTuple,
   RunDnsScheduleEvaluatorResponse,
 } from "./dns-schedules.types";
 import { DnsTemporaryOverridesService } from "./dns-temporary-overrides.service";
@@ -20,17 +21,6 @@ import type { DnsTemporaryOverride } from "./dns-temporary-overrides.types";
 import { LogAlertsEmailService } from "./log-alerts-email.service";
 import { LogAlertsRulesService } from "./log-alerts-rules.service";
 import { TechnitiumService } from "./technitium.service";
-
-/**
- * Identity of a single thing the evaluator has written to (or wants to
- * write to) an Advanced Blocking config: a (group, action, domain) triple.
- * Used by the apply pass's diff against the per-entry tracking table.
- */
-type AppliedEntryTuple = {
-  advancedBlockingGroupName: string;
-  action: "block" | "allow";
-  domain: string;
-};
 
 type ClusterWriteOperation = {
   writeTarget: string;
@@ -97,6 +87,21 @@ export class DnsSchedulesEvaluatorService
   private readonly logger = new Logger(DnsSchedulesEvaluatorService.name);
   private timer: NodeJS.Timeout | null = null;
   private running = false;
+  private evaluationDone: Promise<void> | null = null;
+  private finishEvaluation: (() => void) | undefined;
+
+  private startEvaluation(): void {
+    this.running = true;
+    this.evaluationDone = new Promise((resolve) => {
+      this.finishEvaluation = resolve;
+    });
+  }
+
+  private endEvaluation(): void {
+    this.running = false;
+    this.finishEvaluation?.();
+    this.evaluationDone = null;
+  }
 
   private enabled =
     (process.env.DNS_SCHEDULES_EVALUATOR_ENABLED ?? "true").toLowerCase() !==
@@ -217,6 +222,7 @@ export class DnsSchedulesEvaluatorService
     return {
       enabled: this.enabled,
       running: this.running,
+      pendingRecoveryCount: this.schedulesService.listPendingRecovery().length,
       intervalMs: this.intervalMs,
       tokenReady:
         this.technitiumService.getScheduleTokenStatus().valid === true,
@@ -264,7 +270,7 @@ export class DnsSchedulesEvaluatorService
       );
     }
 
-    this.running = true;
+    this.startEvaluation();
     this.lastRunAt = new Date().toISOString();
     this.lastRunError = undefined;
 
@@ -308,10 +314,18 @@ export class DnsSchedulesEvaluatorService
         );
 
       const results: DnsScheduleApplicationResult[] = [];
-      const activeDesiredTupleKeys = this.getActiveDesiredTupleKeys(
-        activeSources,
-        now,
-      );
+      const protectedOwners = (nodeId: string, excludeId?: string) =>
+        this.getActiveDesiredTupleOwners(
+          activeSources.filter(
+            (source) =>
+              source.schedule.id !== excludeId &&
+              (source.schedule.nodeIds.length
+                ? source.schedule.nodeIds
+                : allNodeIds
+              ).some((id) => perCandidate.get(id)?.writeTarget === nodeId),
+          ),
+          now,
+        );
 
       // ── Cleanup pass: remove stale state for disabled/deleted schedules ──
       // Handles schedules that were disabled while their window was open, or
@@ -334,19 +348,46 @@ export class DnsSchedulesEvaluatorService
           activeSources.map((s) => s.schedule.id),
         );
         const staleEntries = this.schedulesService
-          .listAppliedState()
-          .filter((e) => {
-            const s = allSourcesById.get(e.scheduleId);
-            return !s || !activeSourceIds.has(e.scheduleId);
+          .listTrackedTargets()
+          .filter((entry) => {
+            const source = activeSources.find(
+              (source) => source.schedule.id === entry.scheduleId,
+            );
+            if (
+              !source ||
+              (!source.alwaysActive &&
+                !this.isWindowActive(source.schedule, now))
+            )
+              return true;
+            const writeTarget = perCandidate.get(entry.nodeId)?.writeTarget;
+            const selected = source.schedule.nodeIds.length
+              ? source.schedule.nodeIds
+              : allNodeIds;
+            const hasManagedState = this.hasManagedState(
+              entry.scheduleId,
+              entry.nodeId,
+            );
+            return (
+              !selected.some(
+                (id) => perCandidate.get(id)?.writeTarget === writeTarget,
+              ) ||
+              (hasManagedState &&
+                (source.schedule.targetType === "built-in" ||
+                  entry.nodeId !== writeTarget))
+            );
           });
 
         for (const entry of staleEntries) {
           const schedule = allSourcesById.get(entry.scheduleId);
           if (!schedule) {
-            // Schedule deleted — clear state only, no AB entries to remove.
-            if (!options.dryRun) {
-              this.schedulesService.markRemoved(entry.scheduleId, entry.nodeId);
-            }
+            results.push({
+              scheduleId: entry.scheduleId,
+              scheduleName: entry.scheduleId,
+              nodeId: entry.nodeId,
+              action: "error",
+              error:
+                "DNS source is missing; retained cleanup records require review.",
+            });
             continue;
           }
           if (options.dryRun) {
@@ -375,12 +416,20 @@ export class DnsSchedulesEvaluatorService
             continue;
           }
           try {
-            await this.removeScheduleFromNode(
-              schedule,
-              resolved.writeTarget,
-              activeDesiredTupleKeys,
-            );
-            this.schedulesService.markRemoved(schedule.id, entry.nodeId);
+            if (
+              this.hasManagedState(schedule.id, entry.nodeId) ||
+              schedule.targetType === "advanced-blocking"
+            ) {
+              await this.removeAdvancedBlockingScheduleFromNode(
+                schedule,
+                resolved.writeTarget,
+                protectedOwners(resolved.writeTarget),
+                entry.nodeId,
+              );
+            } else {
+              await this.removeScheduleFromNode(schedule, resolved.writeTarget);
+              this.schedulesService.markRemoved(schedule.id, entry.nodeId);
+            }
             if (schedule.flushCacheOnChange) {
               for (const flushNodeId of resolved.flushNodes) {
                 await this.flushDomainsCache(schedule, flushNodeId);
@@ -433,10 +482,20 @@ export class DnsSchedulesEvaluatorService
 
       for (const source of activeSources) {
         const schedule = source.schedule;
+        const sourceActive =
+          source.alwaysActive || this.isWindowActive(schedule, now);
         const candidateNodeIds =
-          schedule.nodeIds.length > 0
-            ? schedule.nodeIds.filter((id) => allNodeIds.includes(id))
-            : allNodeIds;
+          schedule.nodeIds.length > 0 ? schedule.nodeIds : allNodeIds;
+
+        if (candidateNodeIds.length === 0) {
+          results.push({
+            scheduleId: schedule.id,
+            scheduleName: schedule.name,
+            nodeId: "",
+            action: "skipped",
+            reason: sourceActive ? "no-configured-nodes" : "already-inactive",
+          });
+        }
 
         // Collapse candidates to unique write targets. In a cluster, multiple
         // candidate secondaries map to the same Primary — dedupe so we write
@@ -451,7 +510,11 @@ export class DnsSchedulesEvaluatorService
               scheduleName: schedule.name,
               nodeId: candidateId,
               action: "skipped",
-              reason: resolved?.reason ?? "no-validated-primary",
+              reason: !sourceActive
+                ? "already-inactive"
+                : !allNodeIds.includes(candidateId)
+                  ? "node-not-configured"
+                  : (resolved?.reason ?? "no-validated-primary"),
             });
             continue;
           }
@@ -479,7 +542,7 @@ export class DnsSchedulesEvaluatorService
             now,
             options.dryRun,
             source.alwaysActive,
-            activeDesiredTupleKeys,
+            protectedOwners(op.writeTarget, schedule.id),
           );
           results.push(result);
         }
@@ -508,6 +571,8 @@ export class DnsSchedulesEvaluatorService
         removed,
         skipped,
         errored,
+        pendingRecoveryCount:
+          this.schedulesService.listPendingRecovery().length,
       };
 
       this.lastSuccessfulRunAt = response.triggeredAt;
@@ -522,7 +587,7 @@ export class DnsSchedulesEvaluatorService
         error instanceof Error ? error.message : "Unknown evaluator error.";
       throw error;
     } finally {
-      this.running = false;
+      this.endEvaluation();
     }
   }
 
@@ -555,20 +620,43 @@ export class DnsSchedulesEvaluatorService
     return [...stateNodeIds];
   }
 
-  private getActiveDesiredTupleKeys(
+  private getActiveDesiredTupleOwners(
     activeSources: ActiveOverrideSource[],
     now: Date,
-  ): Set<string> {
-    const keys = new Set<string>();
+  ): Map<string, string> {
+    const owners = new Map<string, string>();
     for (const source of activeSources) {
       if (!source.alwaysActive && !this.isWindowActive(source.schedule, now)) {
         continue;
       }
       for (const tuple of this.getDesiredTuples(source.schedule)) {
-        keys.add(tupleKey(tuple));
+        owners.set(tupleKey(tuple), source.schedule.id);
       }
     }
-    return keys;
+    return owners;
+  }
+
+  private retainSharedEntries(
+    nodeId: string,
+    entries: AppliedEntryTuple[],
+    owners: Map<string, string>,
+  ): void {
+    const byOwner = new Map<string, AppliedEntryTuple[]>();
+    for (const entry of entries) {
+      const owner = owners.get(tupleKey(entry));
+      if (!owner) continue;
+      const retained = byOwner.get(owner) ?? [];
+      retained.push(entry);
+      byOwner.set(owner, retained);
+    }
+    for (const [owner, shared] of byOwner) {
+      const tracked = new Set(
+        this.schedulesService.listManagedEntries(owner, nodeId).map(tupleKey),
+      );
+      const missing = shared.filter((entry) => !tracked.has(tupleKey(entry)));
+      if (missing.length)
+        this.schedulesService.prepareRecovery(owner, nodeId, missing);
+    }
   }
 
   private getDesiredTuples(schedule: DnsSchedule): AppliedEntryTuple[] {
@@ -613,21 +701,19 @@ export class DnsSchedulesEvaluatorService
     };
   }
 
-  private clearStateRows(scheduleId: string, stateNodeIds: string[]): void {
-    for (const stateNodeId of stateNodeIds) {
-      this.schedulesService.markRemoved(scheduleId, stateNodeId);
-      this.schedulesService.clearAppliedEntries(scheduleId, stateNodeId);
-      this.resetDriftState(scheduleId, stateNodeId);
-    }
+  private hasManagedState(scheduleId: string, nodeId: string): boolean {
+    return (
+      this.schedulesService.getPendingRecovery(scheduleId, nodeId) !==
+        undefined ||
+      this.schedulesService.listAppliedEntries(scheduleId, nodeId).length > 0 ||
+      this.schedulesService.hasCapturedEntries(scheduleId, nodeId)
+    );
   }
 
-  private clearLegacyStateRows(
-    scheduleId: string,
-    canonicalNodeId: string,
-    stateNodeIds: string[],
-  ): void {
+  private clearStateRows(scheduleId: string, stateNodeIds: string[]): void {
     for (const stateNodeId of stateNodeIds) {
-      if (stateNodeId === canonicalNodeId) continue;
+      // Keep cleanup evidence when a previous attempt failed.
+      if (this.hasManagedState(scheduleId, stateNodeId)) continue;
       this.schedulesService.markRemoved(scheduleId, stateNodeId);
       this.schedulesService.clearAppliedEntries(scheduleId, stateNodeId);
       this.resetDriftState(scheduleId, stateNodeId);
@@ -643,7 +729,7 @@ export class DnsSchedulesEvaluatorService
     now: Date,
     dryRun: boolean,
     alwaysActive = false,
-    protectedTupleKeys: Set<string> = new Set(),
+    protectedTupleOwners: Map<string, string> = new Map(),
   ): Promise<DnsScheduleApplicationResult> {
     const shouldBeActive = alwaysActive || this.isWindowActive(schedule, now);
     const isCurrentlyApplied = stateNodeIds.some((stateNodeId) =>
@@ -661,12 +747,31 @@ export class DnsSchedulesEvaluatorService
       };
     }
 
-    // Window active and already applied. For advanced-blocking schedules,
-    // fall through to re-apply so any DG entry additions since the last apply
-    // are picked up (applyAdvancedBlockingScheduleToNode diffs against live
-    // Technitium state and skips setConfig when nothing changed).
-    // Built-in mode calls individual add-per-domain APIs with no diff, so
-    // skip as before to avoid redundant per-domain requests.
+    // A mode change must not share one state row between unfinished Advanced
+    // Blocking cleanup and newly applied built-in entries.
+    if (
+      !dryRun &&
+      shouldBeActive &&
+      schedule.targetType === "built-in" &&
+      this.schedulesService
+        .listTrackedTargets()
+        .some(
+          (entry) =>
+            entry.scheduleId === schedule.id &&
+            this.hasManagedState(schedule.id, entry.nodeId),
+        )
+    ) {
+      return {
+        scheduleId: schedule.id,
+        scheduleName: schedule.name,
+        nodeId,
+        action: "skipped",
+        reason: "deferred-advanced-blocking-cleanup",
+      };
+    }
+
+    // Advanced Blocking rechecks live state for drift and Domain Group edits.
+    // Built-in mode has no diff, so skip redundant per-domain requests.
     if (
       shouldBeActive &&
       isCurrentlyApplied &&
@@ -696,10 +801,22 @@ export class DnsSchedulesEvaluatorService
 
     try {
       if (shouldBeActive) {
-        const changed = await this.applyScheduleToNode(schedule, nodeId);
-        if (!isCurrentlyApplied) {
+        const recovering =
+          schedule.targetType !== "built-in" &&
+          this.schedulesService.getPendingRecovery(schedule.id, nodeId) !==
+            undefined;
+        const changed = await this.applyScheduleToNode(
+          schedule,
+          nodeId,
+          protectedTupleOwners,
+        );
+        if (schedule.targetType === "built-in")
           this.schedulesService.markApplied(schedule.id, nodeId);
-          this.clearLegacyStateRows(schedule.id, nodeId, stateNodeIds);
+        this.clearStateRows(
+          schedule.id,
+          stateNodeIds.filter((id) => id !== nodeId),
+        );
+        if (!isCurrentlyApplied) {
           const modeDetail =
             schedule.targetType === "built-in"
               ? "mode=built-in"
@@ -711,8 +828,6 @@ export class DnsSchedulesEvaluatorService
           // next window cycle starts clean.
           this.resetDriftState(schedule.id, nodeId);
         } else if (changed) {
-          this.schedulesService.markApplied(schedule.id, nodeId);
-          this.clearLegacyStateRows(schedule.id, nodeId, stateNodeIds);
           this.logger.log(
             `Re-applied schedule "${schedule.name}" to node "${nodeId}" — DG entries updated.`,
           );
@@ -721,21 +836,19 @@ export class DnsSchedulesEvaluatorService
           // the count crosses the threshold (caller-configurable).
           this.recordDriftTick(schedule, nodeId);
         } else {
-          this.schedulesService.markApplied(schedule.id, nodeId);
-          this.clearLegacyStateRows(schedule.id, nodeId, stateNodeIds);
           // changed=false after a re-apply means the AB config already has
           // everything we want. Drift episode (if any) has resolved.
           this.resetDriftState(schedule.id, nodeId);
         }
         const cacheFlush =
-          changed && schedule.flushCacheOnChange
+          (changed || recovering) && schedule.flushCacheOnChange
             ? await this.flushAdmittedCaches(
                 schedule,
                 flushNodeIds,
                 skippedFlushNodeIds,
               )
             : undefined;
-        if (!isCurrentlyApplied || changed) {
+        if (!isCurrentlyApplied || changed || recovering) {
           return {
             scheduleId: schedule.id,
             scheduleName: schedule.name,
@@ -752,7 +865,11 @@ export class DnsSchedulesEvaluatorService
           reason: "already-applied",
         };
       } else {
-        await this.removeScheduleFromNode(schedule, nodeId, protectedTupleKeys);
+        await this.removeScheduleFromNode(
+          schedule,
+          nodeId,
+          protectedTupleOwners,
+        );
         this.clearStateRows(schedule.id, stateNodeIds);
         this.logger.log(
           `Removed schedule "${schedule.name}" from node "${nodeId}".`,
@@ -777,7 +894,11 @@ export class DnsSchedulesEvaluatorService
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error.";
-      if (isNodeReachabilityError(message)) {
+      if (
+        isNodeReachabilityError(message) &&
+        this.schedulesService.getPendingRecovery(schedule.id, nodeId) ===
+          undefined
+      ) {
         this.logger.warn(
           `Deferred ${shouldBeActive ? "apply" : "remove"} for schedule "${schedule.name}" on node "${nodeId}": ${message}`,
         );
@@ -822,12 +943,17 @@ export class DnsSchedulesEvaluatorService
   private async applyScheduleToNode(
     schedule: DnsSchedule,
     nodeId: string,
+    protectedTupleOwners: Map<string, string> = new Map(),
   ): Promise<boolean> {
     if (schedule.targetType === "built-in") {
       await this.applyBuiltInScheduleToNode(schedule, nodeId);
       return true;
     } else {
-      return this.applyAdvancedBlockingScheduleToNode(schedule, nodeId);
+      return this.applyAdvancedBlockingScheduleToNode(
+        schedule,
+        nodeId,
+        protectedTupleOwners,
+      );
     }
   }
 
@@ -838,8 +964,24 @@ export class DnsSchedulesEvaluatorService
    * failures are logged as warnings and never thrown.
    */
   async deactivateScheduleIfApplied(schedule: DnsSchedule): Promise<void> {
+    while (this.evaluationDone) await this.evaluationDone;
+    this.startEvaluation();
+    try {
+      const latest = this.schedulesService
+        .listSchedules()
+        .find((source) => source.id === schedule.id);
+      if (latest?.enabled) return;
+      await this.deactivateTrackedSchedule(latest ?? schedule);
+    } finally {
+      this.endEvaluation();
+    }
+  }
+
+  private async deactivateTrackedSchedule(
+    schedule: DnsSchedule,
+  ): Promise<void> {
     const applied = this.schedulesService
-      .listAppliedState()
+      .listTrackedTargets()
       .filter((e) => e.scheduleId === schedule.id);
     if (applied.length === 0) return;
 
@@ -858,30 +1000,27 @@ export class DnsSchedulesEvaluatorService
     });
     const { perCandidate } =
       await this.technitiumService.resolveClusterWriteTargets(
-        appliedNodeIds,
+        [...new Set([...appliedNodeIds, ...allNodes.map((node) => node.id)])],
         allNodes,
       );
     const now = new Date();
-    const protectedTupleKeys = this.getActiveDesiredTupleKeys(
-      [
-        ...this.schedulesService
-          .listSchedules()
-          .filter((s) => s.enabled && s.id !== schedule.id)
-          .map((activeSchedule) => ({
-            schedule: activeSchedule,
-            alwaysActive: false,
-            linkedAlertRulePrefix: "__schedule" as const,
-          })),
-        ...(this.temporaryOverridesService
-          ?.listActiveOverrides(now)
-          .map((override) => ({
-            schedule: this.temporaryOverrideToSchedule(override),
-            alwaysActive: true,
-            linkedAlertRulePrefix: "__temporary-override" as const,
-          })) ?? []),
-      ],
-      now,
-    );
+    const activeSources: ActiveOverrideSource[] = [
+      ...this.schedulesService
+        .listSchedules()
+        .filter((s) => s.enabled && s.id !== schedule.id)
+        .map((activeSchedule) => ({
+          schedule: activeSchedule,
+          alwaysActive: false,
+          linkedAlertRulePrefix: "__schedule" as const,
+        })),
+      ...(this.temporaryOverridesService
+        ?.listActiveOverrides(now)
+        .map((override) => ({
+          schedule: this.temporaryOverrideToSchedule(override),
+          alwaysActive: true,
+          linkedAlertRulePrefix: "__temporary-override" as const,
+        })) ?? []),
+    ];
 
     const seenWriteTargets = new Set<string>();
     for (const entry of applied) {
@@ -894,16 +1033,40 @@ export class DnsSchedulesEvaluatorService
       }
       // Skip duplicate Primary writes when multiple secondaries of the same
       // cluster have legacy state rows for this schedule.
-      const skipWrite = seenWriteTargets.has(resolved.writeTarget);
-      seenWriteTargets.add(resolved.writeTarget);
+      const skipWrite =
+        seenWriteTargets.has(resolved.writeTarget) &&
+        !this.hasManagedState(schedule.id, entry.nodeId);
       try {
         if (!skipWrite) {
-          await this.removeScheduleFromNode(
-            schedule,
-            resolved.writeTarget,
-            protectedTupleKeys,
-          );
+          if (
+            schedule.targetType === "built-in" &&
+            !this.hasManagedState(schedule.id, entry.nodeId)
+          ) {
+            await this.removeBuiltInScheduleFromNode(
+              schedule,
+              resolved.writeTarget,
+            );
+          } else
+            await this.removeAdvancedBlockingScheduleFromNode(
+              schedule,
+              resolved.writeTarget,
+              this.getActiveDesiredTupleOwners(
+                activeSources.filter((source) =>
+                  (source.schedule.nodeIds.length
+                    ? source.schedule.nodeIds
+                    : allNodes.map((node) => node.id)
+                  ).some(
+                    (id) =>
+                      perCandidate.get(id)?.writeTarget ===
+                      resolved.writeTarget,
+                  ),
+                ),
+                now,
+              ),
+              entry.nodeId,
+            );
         }
+        seenWriteTargets.add(resolved.writeTarget);
         this.schedulesService.markRemoved(schedule.id, entry.nodeId);
         if (!skipWrite && schedule.flushCacheOnChange) {
           for (const flushNodeId of resolved.flushNodes) {
@@ -923,7 +1086,7 @@ export class DnsSchedulesEvaluatorService
   private async removeScheduleFromNode(
     schedule: DnsSchedule,
     nodeId: string,
-    protectedTupleKeys: Set<string> = new Set(),
+    protectedTupleOwners: Map<string, string> = new Map(),
   ): Promise<void> {
     if (schedule.targetType === "built-in") {
       await this.removeBuiltInScheduleFromNode(schedule, nodeId);
@@ -931,7 +1094,7 @@ export class DnsSchedulesEvaluatorService
       await this.removeAdvancedBlockingScheduleFromNode(
         schedule,
         nodeId,
-        protectedTupleKeys,
+        protectedTupleOwners,
       );
     }
   }
@@ -997,6 +1160,7 @@ export class DnsSchedulesEvaluatorService
   private async applyAdvancedBlockingScheduleToNode(
     schedule: DnsSchedule,
     nodeId: string,
+    protectedTupleOwners: Map<string, string> = new Map(),
   ): Promise<boolean> {
     const snapshot = await this.advancedBlockingService.getSnapshotWithAuth(
       nodeId,
@@ -1023,37 +1187,24 @@ export class DnsSchedulesEvaluatorService
 
     // Desired state: every (group, action, domain) tuple the schedule
     // currently resolves to.
-    const resolvedEntries = this.resolveDomainEntries(schedule);
-    const desired = new Map<string, AppliedEntryTuple>();
-    for (const groupName of schedule.advancedBlockingGroupNames) {
-      for (const domain of resolvedEntries) {
-        const tuple: AppliedEntryTuple = {
-          advancedBlockingGroupName: groupName,
-          action: schedule.action,
-          domain,
-        };
-        desired.set(tupleKey(tuple), tuple);
-      }
-    }
+    const desired = new Map(
+      this.getDesiredTuples(schedule).map((entry) => [tupleKey(entry), entry]),
+    );
 
-    // Previous state: what we tracked on the last successful apply.
-    const prev = this.schedulesService.listAppliedEntries(schedule.id, nodeId);
-    const prevByKey = new Map<string, AppliedEntryTuple>();
-    for (const e of prev) {
-      const tuple: AppliedEntryTuple = {
-        advancedBlockingGroupName: e.advancedBlockingGroupName,
-        action: e.action,
-        domain: e.domain,
-      };
-      prevByKey.set(tupleKey(tuple), tuple);
-    }
+    // Include entries from writes whose outcomes are still uncertain.
+    const prevByKey = new Map(
+      this.schedulesService
+        .listManagedEntries(schedule.id, nodeId)
+        .map((entry) => [tupleKey(entry), entry]),
+    );
 
     // Removals: anything we tracked but no longer want (prev \ desired).
     // A definition change (group swap, action flip, etc.) surfaces here as
     // the cleanup of the now-stale tuple.
     const toRemove: AppliedEntryTuple[] = [];
     for (const [key, tuple] of prevByKey) {
-      if (!desired.has(key)) toRemove.push(tuple);
+      if (!desired.has(key) && !protectedTupleOwners.has(key))
+        toRemove.push(tuple);
     }
 
     // Additions: anything desired that's not currently in LIVE state,
@@ -1146,25 +1297,37 @@ export class DnsSchedulesEvaluatorService
       }
     }
 
-    if (changed) {
-      await this.advancedBlockingService.setConfigWithAuth(
-        nodeId,
-        { ...config, groups: updatedGroups },
-        "schedule",
-      );
-    }
-
-    // Commit tracking ONLY when the desired set actually differs from prev.
-    // We deliberately do NOT gate this on toAdd: toAdd is computed against
-    // LIVE state (for self-healing re-adds when another schedule removed
-    // shared tuples), but tracking represents "what this schedule wants
-    // applied" which is desired === prev as long as the schedule's
-    // definition hasn't changed. Re-writing identical tracking rows on
-    // every tick would burn SQLite WAL for nothing.
     const trackingUnchanged =
-      toRemove.length === 0 && prevByKey.size === desired.size;
-    if (!trackingUnchanged) {
-      this.schedulesService.setAppliedEntries(schedule.id, nodeId, [
+      prevByKey.size === desired.size &&
+      [...prevByKey.keys()].every((key) => desired.has(key));
+    const needsFinalization =
+      changed ||
+      !trackingUnchanged ||
+      !this.schedulesService.isApplied(schedule.id, nodeId) ||
+      !this.schedulesService.hasCapturedEntries(schedule.id, nodeId) ||
+      this.schedulesService.getPendingRecovery(schedule.id, nodeId) !==
+        undefined;
+    if (needsFinalization) {
+      // Transfer cleanup responsibility before retiring shared entries.
+      this.retainSharedEntries(
+        nodeId,
+        [...prevByKey.values()].filter(
+          (entry) => !desired.has(tupleKey(entry)),
+        ),
+        protectedTupleOwners,
+      );
+      this.schedulesService.prepareRecovery(schedule.id, nodeId, [
+        ...desired.values(),
+      ]);
+      if (changed) {
+        await this.advancedBlockingService.setConfigWithAuth(
+          nodeId,
+          { ...config, groups: updatedGroups },
+          "schedule",
+          snapshot.configRevision,
+        );
+      }
+      this.schedulesService.finalizeRecovery(schedule.id, nodeId, [
         ...desired.values(),
       ]);
     }
@@ -1175,7 +1338,8 @@ export class DnsSchedulesEvaluatorService
   private async removeAdvancedBlockingScheduleFromNode(
     schedule: DnsSchedule,
     nodeId: string,
-    protectedTupleKeys: Set<string> = new Set(),
+    protectedTupleOwners: Map<string, string> = new Map(),
+    trackingNodeId = nodeId,
   ): Promise<void> {
     // Primary source of truth is the per-entry tracking table: it correctly
     // describes what we wrote even after the schedule's definition has
@@ -1187,13 +1351,14 @@ export class DnsSchedulesEvaluatorService
     // tuples from the current definition matches the OLD remove behavior —
     // imperfect when the definition changed before the upgrade, but strictly
     // better than silently leaking entries forever.
-    const tracked = this.schedulesService.listAppliedEntries(
+    const tracked = this.schedulesService.listManagedEntries(
       schedule.id,
-      nodeId,
+      trackingNodeId,
     );
 
     let removalTuples: AppliedEntryTuple[];
-    if (tracked.length > 0) {
+    // A recorded empty set is not legacy state: there is nothing to remove.
+    if (this.hasManagedState(schedule.id, trackingNodeId)) {
       removalTuples = tracked.map((t) => ({
         advancedBlockingGroupName: t.advancedBlockingGroupName,
         action: t.action,
@@ -1213,7 +1378,13 @@ export class DnsSchedulesEvaluatorService
         }
       }
       if (removalTuples.length === 0) {
-        // Nothing tracked AND nothing resolvable — truly nothing to remove.
+        if (this.schedulesService.isApplied(schedule.id, trackingNodeId)) {
+          this.schedulesService.finalizeRecovery(
+            schedule.id,
+            trackingNodeId,
+            null,
+          );
+        }
         return;
       }
       this.logger.log(
@@ -1221,11 +1392,12 @@ export class DnsSchedulesEvaluatorService
       );
     }
 
+    this.retainSharedEntries(nodeId, removalTuples, protectedTupleOwners);
     removalTuples = removalTuples.filter(
-      (tuple) => !protectedTupleKeys.has(tupleKey(tuple)),
+      (tuple) => !protectedTupleOwners.has(tupleKey(tuple)),
     );
     if (removalTuples.length === 0) {
-      this.schedulesService.clearAppliedEntries(schedule.id, nodeId);
+      this.schedulesService.finalizeRecovery(schedule.id, trackingNodeId, null);
       return;
     }
 
@@ -1292,18 +1464,24 @@ export class DnsSchedulesEvaluatorService
       }
     }
 
+    this.schedulesService.prepareRecovery(
+      schedule.id,
+      trackingNodeId,
+      removalTuples,
+    );
     if (changed) {
       await this.advancedBlockingService.setConfigWithAuth(
         nodeId,
         { ...config, groups: updatedGroups },
         "schedule",
+        snapshot.configRevision,
       );
     }
 
     // Clear tracking only after a successful write (or no-op write). On
     // failure we throw above and the caller skips markRemoved + this clear,
     // so the next tick can retry from the same prev-tracked baseline.
-    this.schedulesService.clearAppliedEntries(schedule.id, nodeId);
+    this.schedulesService.finalizeRecovery(schedule.id, trackingNodeId, null);
   }
 
   /**
