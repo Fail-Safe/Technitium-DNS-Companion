@@ -705,7 +705,8 @@ export class DnsSchedulesEvaluatorService
     return (
       this.schedulesService.getPendingRecovery(scheduleId, nodeId) !==
         undefined ||
-      this.schedulesService.listAppliedEntries(scheduleId, nodeId).length > 0
+      this.schedulesService.listAppliedEntries(scheduleId, nodeId).length > 0 ||
+      this.schedulesService.hasCapturedEntries(scheduleId, nodeId)
     );
   }
 
@@ -1303,6 +1304,7 @@ export class DnsSchedulesEvaluatorService
       changed ||
       !trackingUnchanged ||
       !this.schedulesService.isApplied(schedule.id, nodeId) ||
+      !this.schedulesService.hasCapturedEntries(schedule.id, nodeId) ||
       this.schedulesService.getPendingRecovery(schedule.id, nodeId) !==
         undefined;
     if (needsFinalization) {

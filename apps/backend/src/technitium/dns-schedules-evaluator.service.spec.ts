@@ -14,6 +14,7 @@ function recoveryStorageMock(
     listManagedEntries: listAppliedEntries,
     listPendingRecovery: () => [],
     getPendingRecovery: () => undefined,
+    hasCapturedEntries: () => listAppliedEntries().length > 0,
     prepareRecovery: jest.fn(),
     finalizeRecovery: jest.fn(
       (

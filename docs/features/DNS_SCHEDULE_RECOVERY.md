@@ -38,6 +38,12 @@ deselected sources remove their recorded entries. Shared entries transfer to
 another active source's cleanup records before the retiring source clears its
 tracking. Cleanup includes pending and entry-only records without applied state.
 
+Successful applies also record that their entries were captured, even when a
+Domain Group was empty. This marker survives restart, so disabling the source
+does not remove entries added to that group after the empty capture. Existing
+applied rows without a capture marker or tracked entries retain legacy cleanup
+behavior until a successful active evaluation records their current entries.
+
 Recovery attempts requested cache flushes even when another configuration write
 is unnecessary. Flushing remains best-effort and does not block finalization.
 

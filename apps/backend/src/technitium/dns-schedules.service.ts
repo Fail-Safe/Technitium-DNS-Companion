@@ -339,6 +339,18 @@ export class DnsSchedulesService implements OnModuleInit {
     ).run(scheduleId, nodeId);
   }
 
+  /** Whether an Advanced Blocking apply captured entries, including an empty set. */
+  hasCapturedEntries(scheduleId: string, nodeId: string): boolean {
+    return (
+      this.getDb()
+        .prepare(
+          `SELECT 1 FROM dns_schedule_state
+           WHERE schedule_id = ? AND node_id = ? AND entries_captured = 1`,
+        )
+        .get(scheduleId, nodeId) !== undefined
+    );
+  }
+
   // ── Per-entry tracking (orphan prevention) ─────────────────────────────────
 
   /**
@@ -542,7 +554,15 @@ export class DnsSchedulesService implements OnModuleInit {
     this.inTransaction(() => {
       this.replaceAppliedEntries(scheduleId, nodeId, entries ?? []);
       if (entries === null) this.markRemoved(scheduleId, nodeId);
-      else this.markApplied(scheduleId, nodeId);
+      else {
+        this.markApplied(scheduleId, nodeId);
+        this.getDb()
+          .prepare(
+            `UPDATE dns_schedule_state SET entries_captured = 1
+             WHERE schedule_id = ? AND node_id = ?`,
+          )
+          .run(scheduleId, nodeId);
+      }
       this.getDb()
         .prepare(
           "DELETE FROM dns_schedule_pending_recovery WHERE schedule_id = ? AND node_id = ?",
@@ -663,6 +683,7 @@ export class DnsSchedulesService implements OnModuleInit {
         schedule_id TEXT NOT NULL,
         node_id TEXT NOT NULL,
         applied_at TEXT NOT NULL,
+        entries_captured INTEGER NOT NULL DEFAULT 0 CHECK (entries_captured IN (0, 1)),
         PRIMARY KEY (schedule_id, node_id)
       );
 
@@ -693,6 +714,7 @@ export class DnsSchedulesService implements OnModuleInit {
     `);
     // Migrations for existing deployments — swallow errors when already applied.
     for (const migration of [
+      `ALTER TABLE dns_schedule_state ADD COLUMN entries_captured INTEGER NOT NULL DEFAULT 0 CHECK (entries_captured IN (0, 1))`,
       `ALTER TABLE dns_schedules ADD COLUMN domain_group_names_json TEXT NOT NULL DEFAULT '[]'`,
       `ALTER TABLE dns_schedules ADD COLUMN flush_cache_on_change INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE dns_schedules ADD COLUMN notify_emails_json TEXT NOT NULL DEFAULT '[]'`,

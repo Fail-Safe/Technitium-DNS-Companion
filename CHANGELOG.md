@@ -43,6 +43,8 @@ All notable changes to this project will be documented in this file.
   the DNS Overrides page, and deletion waits for cleanup.
   Mode changes wait for old cleanup, recovered applies honor cache flushing,
   and unresolved targets are reported as incomplete.
+  Completed empty captures survive restart, preventing cleanup from removing
+  entries added to a Domain Group after an empty activation.
 - Schedule apply and removal now pass the Advanced Blocking snapshot revision,
   preventing detected stale configuration writes from overwriting other edits.
 - Cluster role matching accepts the plural `clusterNodes[].ipAddresses` shape

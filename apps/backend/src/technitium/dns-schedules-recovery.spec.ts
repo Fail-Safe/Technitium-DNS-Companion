@@ -19,6 +19,152 @@ describe("durable schedule recovery", () => {
     jest.useRealTimers();
   });
 
+  it.each(["schedule", "override"] as const)(
+    "preserves entries added after a completed empty %s capture and reopen",
+    async (kind) => {
+      f.create(kind);
+      if (kind === "schedule") {
+        f.schedules.updateSchedule(f.source.id, {
+          ...f.source,
+          domainEntries: [],
+          domainGroupNames: ["dynamic-set"],
+        });
+      } else {
+        const override = f.overrides.listOverrides()[0];
+        f.overrides.updateOverride(override.id, {
+          ...override,
+          domainEntries: [],
+          domainGroupNames: ["dynamic-set"],
+        });
+      }
+      f.config.groups[0].allowed.push("outside.test");
+      await f.evaluator.runNow(false);
+      expect(f.writes).toBe(0);
+      expect(f.schedules.listPendingRecovery()).toEqual([]);
+      expect(f.schedules.listAppliedState()).toHaveLength(1);
+      f.reopen();
+      f.groupEntries = ["outside.test"];
+      if (kind === "schedule")
+        f.schedules.setScheduleEnabled(f.source.id, false);
+      else f.overrides.setOverrideEnabled(f.source.id, false);
+      await f.evaluator.runNow(false);
+      expect(f.config.groups[0].allowed).toEqual([
+        "unrelated.test",
+        "outside.test",
+      ]);
+      expect(f.writes).toBe(0);
+      expect(f.schedules.listTrackedTargets()).toEqual([]);
+    },
+  );
+
+  it("preserves a completed empty capture after abrupt process exit", async () => {
+    f.close();
+    const configPath = join(dir, "dns.json");
+    const child = spawnSync(
+      process.execPath,
+      [
+        "-r",
+        require.resolve("ts-node/register/transpile-only"),
+        resolve(
+          __dirname,
+          "../../test/fixtures/dns-schedules-recovery-exit.cjs",
+        ),
+        f.dbPath,
+        configPath,
+        "empty-finalized",
+      ],
+      {
+        env: {
+          ...process.env,
+          TS_NODE_PROJECT: resolve(__dirname, "../../tsconfig.json"),
+        },
+        timeout: 15_000,
+        encoding: "utf8",
+      },
+    );
+    f.open();
+    expect({ status: child.status, error: child.error?.message }).toEqual({
+      status: 71,
+      error: undefined,
+    });
+    f.config = JSON.parse(readFileSync(configPath, "utf8")) as typeof f.config;
+    const override = f.overrides.listOverrides()[0];
+    expect(f.schedules.listPendingRecovery()).toEqual([]);
+    expect(f.schedules.listAppliedState()).toHaveLength(1);
+    f.groupEntries = ["outside.test"];
+    f.overrides.setOverrideEnabled(override.id, false);
+    await f.evaluator.runNow(false);
+    expect(f.config.groups[0].allowed).toEqual([
+      "unrelated.test",
+      "outside.test",
+    ]);
+    expect(f.writes).toBe(0);
+    expect(f.schedules.listTrackedTargets()).toEqual([]);
+  });
+
+  it("recaptures an active legacy empty state before later cleanup", async () => {
+    f.create();
+    const override = f.overrides.listOverrides()[0];
+    f.overrides.updateOverride(override.id, {
+      ...override,
+      domainEntries: [],
+      domainGroupNames: ["dynamic-set"],
+    });
+    f.schedules.markApplied(override.id, "primary");
+    f.config.groups[0].allowed.push("outside.test");
+    await f.evaluator.runNow(false);
+    f.reopen();
+    f.groupEntries = ["outside.test"];
+    f.overrides.setOverrideEnabled(override.id, false);
+    await f.evaluator.runNow(false);
+    expect(f.config.groups[0].allowed).toEqual([
+      "unrelated.test",
+      "outside.test",
+    ]);
+    expect(f.writes).toBe(0);
+    expect(f.schedules.listTrackedTargets()).toEqual([]);
+  });
+
+  it("preserves legacy cleanup when upgrading an uncaptured applied state", async () => {
+    f.create();
+    f.config.groups[0].allowed.push("managed.test");
+    f.schedules.markApplied(f.source.id, "primary");
+    f.db.exec("ALTER TABLE dns_schedule_state DROP COLUMN entries_captured");
+    f.reopen();
+    expect(f.schedules.hasCapturedEntries(f.source.id, "primary")).toBe(false);
+    f.expire();
+    await f.evaluator.runNow(false);
+    expect(f.config.groups[0].allowed).toEqual(["unrelated.test"]);
+    expect(f.writes).toBe(1);
+    expect(f.schedules.listTrackedTargets()).toEqual([]);
+  });
+
+  it("rolls back the capture marker with failed finalization", () => {
+    f.create();
+    f.schedules.prepareRecovery(f.source.id, "primary", []);
+    f.db.exec(`CREATE TRIGGER fail_capture BEFORE UPDATE OF entries_captured
+      ON dns_schedule_state BEGIN SELECT RAISE(ABORT, 'capture failed'); END`);
+    expect(() =>
+      f.schedules.finalizeRecovery(f.source.id, "primary", []),
+    ).toThrow("capture failed");
+    f.reopen();
+    expect(f.schedules.hasCapturedEntries(f.source.id, "primary")).toBe(false);
+    expect(f.schedules.listAppliedState()).toEqual([]);
+    expect(
+      f.schedules.getPendingRecovery(f.source.id, "primary")?.entries,
+    ).toEqual([]);
+  });
+
+  it("does not mark built-in applied state as an Advanced Blocking capture", () => {
+    f.create("schedule");
+    f.schedules.updateSchedule(f.source.id, {
+      ...f.source,
+      targetType: "built-in",
+    });
+    f.schedules.markApplied(f.source.id, "primary");
+    expect(f.schedules.hasCapturedEntries(f.source.id, "primary")).toBe(false);
+  });
+
   it.each(["expiry", "definition edit"])(
     "retains shared cleanup if the surviving source cannot read DNS after %s",
     async (retirement) => {
