@@ -222,7 +222,7 @@ jobs:
             BUILD_REVISION=${{ github.sha }}
             BUILD_CHANNEL=${{ steps.build-channel.outputs.channel }}
           cache-from: ${{ inputs.no_cache && '' || 'type=gha' }}
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
           platforms: linux/amd64,linux/arm64
 
       - name: Verify promoted beta tags
