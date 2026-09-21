@@ -38,6 +38,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- DNS Logs preserves the current refresh interval or explicit pause when switching to Paginated mode.
 - Schedules and temporary overrides retain Advanced Blocking cleanup records
   across uncertain writes, expiry, and restart. Pending recovery is visible on
   the DNS Overrides page, and deletion waits for cleanup.

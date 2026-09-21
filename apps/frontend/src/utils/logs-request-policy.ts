@@ -10,7 +10,7 @@ export function refreshSecondsForDisplayMode(
   tailDefaultRefreshSeconds: number,
 ): number {
   if (displayMode === "paginated") {
-    return 0;
+    return currentRefreshSeconds;
   }
 
   return currentRefreshSeconds > 0

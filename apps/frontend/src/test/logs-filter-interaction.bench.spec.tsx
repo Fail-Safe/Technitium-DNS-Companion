@@ -134,7 +134,7 @@ describeBenchmarks("DNS Logs filter interaction benchmark", () => {
     expect(result.controlledAfter).toEqual({
       cancelledRequestsRoutedThroughWorkbox: 0,
       admittedRapidPageRequests: 1,
-      paginatedAutomaticRefreshes: 0,
+      paginatedAutomaticRefreshes: 10,
     });
   });
 });
