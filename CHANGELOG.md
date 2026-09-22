@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-09-22
+
 ### Added
 
 - Added explicit node groups and strict per-group trusted-SSO, background, and
@@ -38,6 +40,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- Optional build-cache export failures no longer fail successful container publication.
 - DNS Logs preserves the current refresh interval or explicit pause when switching to Paginated mode.
 - Schedules and temporary overrides retain Advanced Blocking cleanup records
   across uncertain writes, expiry, and restart. Pending recovery is visible on
@@ -817,7 +820,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.11.1...v1.12.0
 [1.9.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.8.2...v1.9.0
 [1.5.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.1...v1.5.0
