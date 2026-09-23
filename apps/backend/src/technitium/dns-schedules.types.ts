@@ -1,3 +1,5 @@
+import type { GroupCredentialStatusEnvelope } from "../auth/auth.types";
+
 export type DnsScheduleAction = "block" | "allow";
 export type DnsScheduleTargetType = "advanced-blocking" | "built-in";
 
@@ -122,7 +124,7 @@ export interface DnsSchedulesStorageStatus {
 
 export interface DnsScheduleTokenStatus {
   /**
-   * Whether TECHNITIUM_SCHEDULE_TOKEN is set in the environment.
+   * Whether a scalar or per-group schedule automation credential is configured.
    */
   configured: boolean;
   /**
@@ -137,13 +139,15 @@ export interface DnsScheduleTokenStatus {
    */
   hasAppsModify: boolean | null;
   /**
-   * Whether the token has Cache: Modify permission needed to flush DNS cache.
+   * Whether the token has Cache: Delete permission needed to flush DNS cache.
    * null when not yet validated.
    */
-  hasCacheModify: boolean | null;
+  hasCacheDelete: boolean | null;
+  groups?: GroupCredentialStatusEnvelope;
 }
 
 export interface DnsScheduleEvaluatorStatus {
+  pendingRecoveryCount: number;
   enabled: boolean;
   running: boolean;
   intervalMs: number;
@@ -164,6 +168,10 @@ export interface DnsScheduleApplicationResult {
   action: "applied" | "removed" | "skipped" | "error";
   reason?: string;
   error?: string;
+  cacheFlush?: {
+    flushedNodeIds: string[];
+    skippedNodeIds: string[];
+  };
 }
 
 export interface RunDnsScheduleEvaluatorRequest {
@@ -171,6 +179,7 @@ export interface RunDnsScheduleEvaluatorRequest {
 }
 
 export interface RunDnsScheduleEvaluatorResponse {
+  pendingRecoveryCount: number;
   dryRun: boolean;
   triggeredAt: string;
   evaluatedSchedules: number;
@@ -202,4 +211,17 @@ export interface DnsScheduleAppliedEntry {
   action: DnsScheduleAction;
   domain: string;
   appliedAt: string;
+}
+
+/** Exact entries whose DNS write may need reconciliation. */
+export interface DnsScheduleManagedEntry {
+  advancedBlockingGroupName: string;
+  action: DnsScheduleAction;
+  domain: string;
+}
+
+export interface DnsSchedulePendingRecovery {
+  scheduleId: string;
+  nodeId: string;
+  entries: DnsScheduleManagedEntry[];
 }

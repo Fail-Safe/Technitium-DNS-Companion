@@ -269,24 +269,34 @@ export class DnsTemporaryOverridesService implements OnModuleInit {
 
   deleteOverride(id: string): { deleted: true; overrideId: string } {
     const db = this.getDb();
-    const activeState = db
-      .prepare(`SELECT 1 FROM dns_schedule_state WHERE schedule_id = ? LIMIT 1`)
-      .get(id);
-    if (activeState) {
-      throw new BadRequestException(
-        "End the temporary override before deleting it.",
-      );
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const table of [
+        "dns_schedule_state",
+        "dns_schedule_applied_entries",
+        "dns_schedule_pending_recovery",
+      ]) {
+        if (
+          db
+            .prepare(`SELECT 1 FROM ${table} WHERE schedule_id = ? LIMIT 1`)
+            .get(id)
+        ) {
+          throw new BadRequestException(
+            "End the temporary override and wait for DNS cleanup before deleting it.",
+          );
+        }
+      }
+      const result = db
+        .prepare("DELETE FROM dns_temporary_overrides WHERE id = ?")
+        .run(id);
+      if (Number(result.changes ?? 0) === 0)
+        throw new NotFoundException("Temporary override not found.");
+      db.exec("COMMIT");
+      return { deleted: true, overrideId: id };
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
     }
-    db.prepare(
-      `DELETE FROM dns_schedule_applied_entries WHERE schedule_id = ?`,
-    ).run(id);
-    const result = db
-      .prepare(`DELETE FROM dns_temporary_overrides WHERE id = ?`)
-      .run(id);
-    if ((result.changes ?? 0) === 0) {
-      throw new NotFoundException("Temporary override not found.");
-    }
-    return { deleted: true, overrideId: id };
   }
 
   private mapRow(row: DnsTemporaryOverrideRow): DnsTemporaryOverride {

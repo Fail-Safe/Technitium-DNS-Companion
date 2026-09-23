@@ -12,6 +12,7 @@ import {
   Post,
   Query,
   Res,
+  ServiceUnavailableException,
   UseInterceptors,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
@@ -52,6 +53,35 @@ export class TechnitiumController {
     private readonly advancedBlockingService: AdvancedBlockingService,
     private readonly dnsFilteringSnapshotService: DnsFilteringSnapshotService,
   ) {}
+
+  private requireWritePlan(
+    perCandidate: Map<
+      string,
+      {
+        writeTarget?: string;
+        flushNodes: string[];
+        skippedFlushNodes?: string[];
+        reason?: string;
+      }
+    >,
+    nodeId: string,
+  ): {
+    writeTarget: string;
+    flushNodes: string[];
+    skippedFlushNodes: string[];
+  } {
+    const plan = perCandidate.get(nodeId);
+    if (!plan?.writeTarget) {
+      throw new ServiceUnavailableException(
+        plan?.reason ?? "No validated Primary is available for this group.",
+      );
+    }
+    return {
+      writeTarget: plan.writeTarget,
+      flushNodes: plan.flushNodes,
+      skippedFlushNodes: plan.skippedFlushNodes ?? [],
+    };
+  }
 
   @Get("logs/storage")
   getQueryLogStorageStatus() {
@@ -549,7 +579,7 @@ export class TechnitiumController {
   async getAdvancedBlockingRawConfig(@Param("nodeId") nodeId: string) {
     const { perCandidate } =
       await this.technitiumService.resolveClusterWriteTargets([nodeId]);
-    const writeNodeId = perCandidate.get(nodeId)?.writeTarget ?? nodeId;
+    const writeNodeId = this.requireWritePlan(perCandidate, nodeId).writeTarget;
     return this.advancedBlockingService.getRawConfig(writeNodeId);
   }
 
@@ -570,7 +600,7 @@ export class TechnitiumController {
 
     const { perCandidate } =
       await this.technitiumService.resolveClusterWriteTargets([nodeId]);
-    const writeNodeId = perCandidate.get(nodeId)?.writeTarget ?? nodeId;
+    const writeNodeId = this.requireWritePlan(perCandidate, nodeId).writeTarget;
 
     try {
       await this.dnsFilteringSnapshotService.saveSnapshot(
@@ -609,7 +639,7 @@ export class TechnitiumController {
 
     const { perCandidate } =
       await this.technitiumService.resolveClusterWriteTargets([nodeId]);
-    const writeNodeId = perCandidate.get(nodeId)?.writeTarget ?? nodeId;
+    const writeNodeId = this.requireWritePlan(perCandidate, nodeId).writeTarget;
     return this.advancedBlockingService.mutateDomainComment(writeNodeId, body);
   }
 
@@ -629,9 +659,9 @@ export class TechnitiumController {
 
     const { perCandidate } =
       await this.technitiumService.resolveClusterWriteTargets([nodeId]);
-    const writePlan = perCandidate.get(nodeId);
-    const writeNodeId = writePlan?.writeTarget ?? nodeId;
-    const flushNodeIds = writePlan?.flushNodes ?? [writeNodeId];
+    const writePlan = this.requireWritePlan(perCandidate, nodeId);
+    const writeNodeId = writePlan.writeTarget;
+    const flushNodeIds = writePlan.flushNodes;
 
     // Best-effort automatic snapshot for rollback before applying changes.
     // Do not block the save if snapshot creation fails.
@@ -640,6 +670,12 @@ export class TechnitiumController {
     const snapshotNote = requestNote.length > 0 ? requestNote : undefined;
     const cacheDomain =
       typeof body.cacheDomain === "string" ? body.cacheDomain.trim() : "";
+    const cacheFlush = cacheDomain
+      ? {
+          flushedNodeIds: [] as string[],
+          skippedNodeIds: [...writePlan.skippedFlushNodes],
+        }
+      : undefined;
 
     try {
       await this.dnsFilteringSnapshotService.saveSnapshot(
@@ -671,7 +707,9 @@ export class TechnitiumController {
               url: "/api/cache/delete",
               params: { domain: cacheDomain },
             });
+            cacheFlush?.flushedNodeIds.push(flushNodeId);
           } catch (error) {
+            cacheFlush?.skippedNodeIds.push(flushNodeId);
             this.logger.warn(
               `Failed to invalidate cached domain ${cacheDomain} on node ${flushNodeId} after Advanced Blocking save: ${error instanceof Error ? error.message : String(error)}`,
             );
@@ -680,7 +718,10 @@ export class TechnitiumController {
       );
     }
 
-    return snapshot;
+    return {
+      ...snapshot,
+      ...(cacheFlush ? { cacheFlush } : {}),
+    };
   }
 
   @Post(":nodeId/dhcp/scopes/:scopeName/clone")

@@ -9,6 +9,59 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-09-22
+
+### Added
+
+- Added explicit node groups and strict per-group trusted-SSO, background, and
+  schedule credential maps for managing independent Technitium clusters in one
+  Companion deployment.
+
+### Security
+
+- Isolated topology discovery, Primary write routing, PTR/DHCP enrichment,
+  cache flushing, retries, and operation-specific node admission by group.
+  Returning nodes must revalidate token ownership, permissions, membership,
+  and topology before first use.
+
+### Changed
+
+- Beta container publication is now an explicit, environment-gated promotion
+  from `next` or `release/*`. The rolling `:next` integration image can advance
+  without replacing a beta candidate under active soak testing.
+- Source-revision container tags are channel-qualified for beta and stable
+  rebuilds, and publication fails closed if an immutable source tag already
+  exists instead of silently replacing it with a different digest.
+- DNS Logs SQLite rows, hostname backfill, known clients, and per-client
+  deduplication now include the source group, preventing identical private IPs
+  in different sites from being combined.
+- Cache flush authorization now checks Technitium `Cache: Delete` and reports
+  partial or skipped physical members without cross-group fallback.
+
+### Fixed
+
+- Optional build-cache export failures no longer fail successful container publication.
+- DNS Logs preserves the current refresh interval or explicit pause when switching to Paginated mode.
+- Schedules and temporary overrides retain Advanced Blocking cleanup records
+  across uncertain writes, expiry, and restart. Pending recovery is visible on
+  the DNS Overrides page, and deletion waits for cleanup.
+  Mode changes wait for old cleanup, recovered applies honor cache flushing,
+  and unresolved targets are reported as incomplete.
+  Completed empty captures survive restart, preventing cleanup from removing
+  entries added to a Domain Group after an empty activation.
+- Schedule apply and removal now pass the Advanced Blocking snapshot revision,
+  preventing detected stale configuration writes from overwriting other edits.
+- Cluster role matching accepts the plural `clusterNodes[].ipAddresses` shape
+  returned by Technitium v15 and matches automation probes by each node's
+  self-reported cluster DNS name when configured aliases or origins differ.
+
+### Testing
+
+- Added an opt-in Docker acceptance harness that provisions two independent
+  real Technitium Primary/Secondary clusters and verifies trusted-SSO subsets,
+  cross-cluster token rejection, per-group automation admission, isolated
+  failures, Primary outage behavior, and bounded recovery revalidation.
+
 ## [1.11.1] - 2026-09-09
 
 ### Security
@@ -767,7 +820,8 @@ All notable changes to this project will be documented in this file.
 
 - Initial public release of Technitium DNS Companion with responsive React frontend, NestJS backend, and multi-node Technitium DNS management.
 
-[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.11.1...v1.12.0
 [1.9.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.8.2...v1.9.0
 [1.5.1]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/Fail-Safe/Technitium-DNS-Companion/compare/v1.4.1...v1.5.0

@@ -52,6 +52,11 @@ export class AuthSessionService implements OnModuleDestroy {
     options?: {
       authSource?: AuthSession["authSource"];
       technitiumUser?: string;
+      verifiedUsernamesByGroup?: Record<string, string>;
+      groupCredentials?: AuthSession["groupCredentials"];
+      pendingTokensByNodeId?: Record<string, string>;
+      credentialUsernamesByGroup?: Record<string, string>;
+      topologyDomainsByGroup?: Record<string, string>;
       maxSessionsForUser?: number;
     },
   ): AuthSession {
@@ -65,11 +70,29 @@ export class AuthSessionService implements OnModuleDestroy {
 
     const id = randomUUID();
     const now = Date.now();
+    const authSource = options?.authSource ?? "password";
+    const technitiumUser =
+      options?.technitiumUser ?? (authSource === "password" ? user : undefined);
     const session: AuthSession = {
       id,
       user,
-      authSource: options?.authSource ?? "password",
-      technitiumUser: options?.technitiumUser ?? user,
+      authSource,
+      ...(technitiumUser ? { technitiumUser } : {}),
+      ...(options?.verifiedUsernamesByGroup
+        ? { verifiedUsernamesByGroup: options.verifiedUsernamesByGroup }
+        : {}),
+      ...(options?.groupCredentials
+        ? { groupCredentials: options.groupCredentials }
+        : {}),
+      ...(options?.pendingTokensByNodeId
+        ? { pendingTokensByNodeId: options.pendingTokensByNodeId }
+        : {}),
+      ...(options?.credentialUsernamesByGroup
+        ? { credentialUsernamesByGroup: options.credentialUsernamesByGroup }
+        : {}),
+      ...(options?.topologyDomainsByGroup
+        ? { topologyDomainsByGroup: options.topologyDomainsByGroup }
+        : {}),
       createdAt: new Date(now).toISOString(),
       lastSeenAt: now,
       tokensByNodeId,

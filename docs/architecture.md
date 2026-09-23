@@ -17,6 +17,8 @@ A mobile-friendly web interface for managing multiple Technitium DNS servers. Vi
 - Proxies requests to multiple Technitium DNS nodes (no state storage)
 - Caches query logs for 30 seconds to improve performance
 - Aggregates data from multiple nodes (combined logs, zone comparison, DHCP scopes)
+- Treats each declared node group as an independent credential, topology, and
+  private-address namespace
 - Loads node credentials from environment variables at startup
 
 ### Modules
@@ -68,6 +70,10 @@ TECHNITIUM_NODES=node1,node2
 # Required - Base URL per node
 TECHNITIUM_NODE1_BASE_URL=http://192.168.1.10:5380
 TECHNITIUM_NODE2_BASE_URL=http://192.168.1.11:5380
+
+# Required on every node when one Companion manages independent clusters
+TECHNITIUM_NODE1_GROUP=site-a
+TECHNITIUM_NODE2_GROUP=site-b
 
 # Preferred (interactive UI): Session auth (v1.4+: required)
 # - Users log in with their Technitium credentials.

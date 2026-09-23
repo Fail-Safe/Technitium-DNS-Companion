@@ -33,6 +33,7 @@ import { SplitHorizonPtrStateService } from "./split-horizon-ptr/split-horizon-p
 import { SplitHorizonPtrController } from "./split-horizon-ptr/split-horizon-ptr.controller";
 import { SplitHorizonPtrService } from "./split-horizon-ptr/split-horizon-ptr.service";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
+import { loadTechnitiumNodeConfigs } from "./technitium-config";
 import { TechnitiumController } from "./technitium.controller";
 import { TechnitiumService } from "./technitium.service";
 import { TechnitiumNodeConfig } from "./technitium.types";
@@ -93,62 +94,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
           return [];
         }
 
-        const rawNodes = process.env.TECHNITIUM_NODES;
-        if (!rawNodes) {
-          logger.warn(
-            "No Technitium DNS nodes configured via TECHNITIUM_NODES",
-          );
-          return [];
-        }
-
-        const ids = rawNodes
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean);
-
-        const configs: TechnitiumNodeConfig[] = [];
-
-        for (const id of ids) {
-          const sanitizedKey = id.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
-          const name = process.env[`TECHNITIUM_${sanitizedKey}_NAME`];
-          const baseUrl = process.env[`TECHNITIUM_${sanitizedKey}_BASE_URL`];
-          // Legacy env-token mode uses per-node tokens only (Technitium DNS < v14 / migration).
-          const token = process.env[`TECHNITIUM_${sanitizedKey}_TOKEN`];
-          const queryLoggerAppName =
-            process.env[`TECHNITIUM_${sanitizedKey}_QUERY_LOGGER_APP_NAME`];
-          const queryLoggerClassPath =
-            process.env[`TECHNITIUM_${sanitizedKey}_QUERY_LOGGER_CLASS_PATH`];
-
-          if (!baseUrl) {
-            logger.warn(
-              `Skipping node "${id}" because TECHNITIUM_${sanitizedKey}_BASE_URL is not set.`,
-            );
-            continue;
-          }
-
-          if (!token) {
-            logger.warn(
-              `Node "${id}" has no env token configured; it will require user login sessions for interactive access (v1.4+).`,
-            );
-          }
-
-          configs.push({
-            id,
-            name: name || id, // Use name if provided, otherwise fall back to id
-            baseUrl,
-            token: token ?? "",
-            queryLoggerAppName,
-            queryLoggerClassPath,
-          });
-        }
-
-        if (configs.length === 0) {
-          logger.warn(
-            "Technitium DNS configuration contained node ids but none were fully configured.",
-          );
-        }
-
-        return configs;
+        return loadTechnitiumNodeConfigs(process.env, logger);
       },
     },
   ],

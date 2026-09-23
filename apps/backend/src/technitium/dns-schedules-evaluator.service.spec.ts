@@ -1,6 +1,38 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 import { DnsSchedulesEvaluatorService } from "./dns-schedules-evaluator.service";
+import type { DnsScheduleManagedEntry } from "./dns-schedules.types";
 import { DnsSchedule } from "./dns-schedules.types";
+
+function recoveryStorageMock(
+  listAppliedEntries: jest.Mock,
+  setAppliedEntries: jest.Mock,
+  clearAppliedEntries: jest.Mock,
+  markApplied = jest.fn(),
+  markRemoved = jest.fn(),
+) {
+  return {
+    listManagedEntries: listAppliedEntries,
+    listPendingRecovery: () => [],
+    getPendingRecovery: () => undefined,
+    hasCapturedEntries: () => listAppliedEntries().length > 0,
+    prepareRecovery: jest.fn(),
+    finalizeRecovery: jest.fn(
+      (
+        id: string,
+        nodeId: string,
+        entries: DnsScheduleManagedEntry[] | null,
+      ) => {
+        if (entries === null) {
+          clearAppliedEntries(id, nodeId);
+          markRemoved(id, nodeId);
+        } else {
+          setAppliedEntries(id, nodeId, entries);
+          markApplied(id, nodeId);
+        }
+      },
+    ),
+  };
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -325,6 +357,13 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
     const clearAppliedEntries = jest.fn();
     const service = new DnsSchedulesEvaluatorService(
       {
+        ...recoveryStorageMock(
+          listAppliedEntries,
+          setAppliedEntries,
+          clearAppliedEntries,
+          markApplied,
+          markRemoved,
+        ),
         isApplied,
         markApplied,
         markRemoved,
@@ -420,6 +459,7 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
           s: DnsSchedule,
           n: string,
           flushNodeIds: string[],
+          skippedFlushNodeIds: string[],
           stateNodeIds: string[],
           now: Date,
           dryRun: boolean,
@@ -429,6 +469,7 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
       makeSchedule({ startTime: "09:00", endTime: "17:00", timezone: "UTC" }),
       "nodeA",
       ["nodeA"],
+      [],
       ["nodeA"],
       utcDate(2024, 1, 15, 12, 0),
       false,
@@ -463,6 +504,7 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
           s: DnsSchedule,
           n: string,
           flushNodeIds: string[],
+          skippedFlushNodeIds: string[],
           stateNodeIds: string[],
           now: Date,
           dryRun: boolean,
@@ -472,6 +514,7 @@ describe("DnsSchedulesEvaluatorService — snapshot-error handling", () => {
       makeSchedule({ startTime: "09:00", endTime: "17:00", timezone: "UTC" }),
       "nodeA",
       ["nodeA"],
+      [],
       ["nodeA"],
       utcDate(2024, 1, 15, 18, 0),
       false,
@@ -612,6 +655,13 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
     });
     const service = new DnsSchedulesEvaluatorService(
       {
+        ...recoveryStorageMock(
+          listAppliedEntries,
+          setAppliedEntries,
+          clearAppliedEntries,
+          markApplied,
+          markRemoved,
+        ),
         isApplied,
         markApplied,
         markRemoved,
@@ -654,6 +704,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
           s: DnsSchedule,
           n: string,
           flushNodeIds: string[],
+          skippedFlushNodeIds: string[],
           stateNodeIds: string[],
           now: Date,
           dryRun: boolean,
@@ -671,6 +722,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
       }),
       "nodeA",
       ["nodeA", "nodeB", "nodeC"],
+      [],
       ["nodeA", "nodeB"],
       new Date("2026-06-25T00:15:00.000Z"),
       false,
@@ -686,7 +738,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
     expect(clearAppliedEntries).toHaveBeenCalledWith("test-id", "nodeB");
   });
 
-  it("active window migrates legacy state aliases onto the canonical write target", async () => {
+  it("active window retains alias entries until their cleanup completes", async () => {
     const { service, markApplied, markRemoved, setAppliedEntries } =
       makeService({
         appliedNodeIds: ["nodeB"],
@@ -706,6 +758,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
           s: DnsSchedule,
           n: string,
           flushNodeIds: string[],
+          skippedFlushNodeIds: string[],
           stateNodeIds: string[],
           now: Date,
           dryRun: boolean,
@@ -723,6 +776,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
       }),
       "nodeA",
       ["nodeA", "nodeB", "nodeC"],
+      [],
       ["nodeA", "nodeB"],
       new Date("2026-06-25T01:15:00.000Z"),
       false,
@@ -733,7 +787,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
       reason: "already-applied",
     });
     expect(markApplied).toHaveBeenCalledWith("test-id", "nodeA");
-    expect(markRemoved).toHaveBeenCalledWith("test-id", "nodeB");
+    expect(markRemoved).not.toHaveBeenCalledWith("test-id", "nodeB");
     expect(setAppliedEntries).toHaveBeenCalledWith("test-id", "nodeA", [
       {
         advancedBlockingGroupName: "GroupA",
@@ -761,7 +815,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
         removeAdvancedBlockingScheduleFromNode: (
           s: DnsSchedule,
           n: string,
-          protectedTupleKeys: Set<string>,
+          protectedTupleOwners: Map<string, string>,
         ) => Promise<void>;
       }
     ).removeAdvancedBlockingScheduleFromNode(
@@ -772,7 +826,7 @@ describe("DnsSchedulesEvaluatorService — cluster state aliases", () => {
         domainGroupNames: [],
       }),
       "nodeA",
-      new Set(["GroupA\0block\0youtube.com"]),
+      new Map([["GroupA\0block\0youtube.com", "other-source"]]),
     );
 
     expect(setConfigWithAuth).not.toHaveBeenCalled();
@@ -1011,6 +1065,12 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
     const clearAppliedEntries = jest.fn();
     const service = new DnsSchedulesEvaluatorService(
       {
+        ...recoveryStorageMock(
+          listAppliedEntries,
+          setAppliedEntries,
+          clearAppliedEntries,
+        ),
+        isApplied: () => (options.trackedEntries?.length ?? 0) > 0,
         listAppliedEntries,
         setAppliedEntries,
         clearAppliedEntries,
@@ -1280,9 +1340,8 @@ describe("DnsSchedulesEvaluatorService — orphan prevention", () => {
       expect(nextConfig.groups[0].blocked.sort()).toEqual(
         ["googlevideo.com", "youtube.com"].sort(),
       );
-      // Tracking write skipped — prev already matches desired, so no SQL
-      // churn just because we had to do a live re-add.
-      expect(setAppliedEntries).not.toHaveBeenCalled();
+      // A live write is prepared and finalized atomically, including tracking.
+      expect(setAppliedEntries).toHaveBeenCalledTimes(1);
     });
 
     it("does not duplicate when desired tuples are already live", async () => {
@@ -1591,5 +1650,40 @@ describe("DnsSchedulesEvaluatorService — temporary override alert window", () 
         enabled: true,
       }),
     );
+  });
+});
+
+describe("DnsSchedulesEvaluatorService — cache flush admission results", () => {
+  it("reports admitted successes and unavailable or unauthorized members separately", async () => {
+    const service = new DnsSchedulesEvaluatorService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const internal = service as unknown as {
+      flushDomainsCache: jest.Mock<Promise<boolean>, [DnsSchedule, string]>;
+      flushAdmittedCaches: (
+        schedule: DnsSchedule,
+        admitted: string[],
+        skipped: string[],
+      ) => Promise<{ flushedNodeIds: string[]; skippedNodeIds: string[] }>;
+    };
+    internal.flushDomainsCache = jest
+      .fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    await expect(
+      internal.flushAdmittedCaches(
+        makeSchedule({ flushCacheOnChange: true }),
+        ["primary", "secondary-a"],
+        ["secondary-b"],
+      ),
+    ).resolves.toEqual({
+      flushedNodeIds: ["primary"],
+      skippedNodeIds: ["secondary-b", "secondary-a"],
+    });
   });
 });

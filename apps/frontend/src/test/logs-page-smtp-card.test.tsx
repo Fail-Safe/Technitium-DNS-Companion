@@ -651,22 +651,32 @@ describe("LogsPage SMTP card", () => {
     });
   });
 
-  it("pauses automatic refresh when entering paginated mode", async () => {
-    technitiumStateMock.loadQueryLogStorageStatus.mockResolvedValue({
-      enabled: true,
-      ready: true,
-      retentionHours: 72,
-      pollIntervalMs: 10000,
-    });
+  it.each([false, true])(
+    "preserves refresh when entering paginated mode (paused: %s)",
+    async (paused) => {
+      technitiumStateMock.loadQueryLogStorageStatus.mockResolvedValue({
+        enabled: true,
+        ready: true,
+        retentionHours: 72,
+        pollIntervalMs: 10000,
+      });
 
-    render(<LogsPage />);
-    fireEvent.click(screen.getByRole("button", { name: /Paginated/i }));
+      render(<LogsPage />);
+      if (paused) {
+        fireEvent.click(screen.getByRole("button", { name: /Live \(/i }));
+      }
+      fireEvent.click(screen.getByRole("button", { name: /Paginated/i }));
 
-    await waitFor(() => {
-      expect(technitiumStateMock.loadStoredCombinedLogs).toHaveBeenCalled();
-    });
-    expect(screen.getByRole("button", { name: /Paused/i })).toBeInTheDocument();
-  });
+      await waitFor(() => {
+        expect(technitiumStateMock.loadStoredCombinedLogs).toHaveBeenCalled();
+      });
+      expect(
+        screen.getByRole("button", {
+          name: paused ? /Paused/i : /Auto-refresh/i,
+        }),
+      ).toBeInTheDocument();
+    },
+  );
 
   it("disables paginated navigation during a subsequent refresh", async () => {
     const now = new Date().toISOString();

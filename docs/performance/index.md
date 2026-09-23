@@ -56,12 +56,13 @@ for the controlled method, anonymized deployment observations, and raw results.
 
 DNS Logs requests bypass the PWA runtime cache so browser cancellation reaches
 the network path. Paginated navigation is serialized while a request is active,
-and automatic refresh pauses when entering Paginated mode.
+and entering Paginated preserves the selected refresh interval or explicit pause.
 
 Controlled tests removed all ten modeled cancelled requests that previously
 continued through the service worker, admitted one request instead of five
-rapid page selections, and produced no automatic refreshes during a 30-second
-paginated dwell.
+rapid page selections. The historical v1.11.0 test also produced no automatic
+refreshes during a 30-second paginated dwell; current behavior preserves polling
+when it is enabled.
 
 In production-derived captures of the v1.10.1 behavior and the v1.11.0
 implementation, completed backend requests fell from 25.5 to 7.8 per minute, a

@@ -6,8 +6,30 @@ export interface TechnitiumNodeConfig {
   name?: string;
   baseUrl: string;
   token: string;
+  groupId: string;
   queryLoggerAppName?: string;
   queryLoggerClassPath?: string;
+}
+
+export interface TechnitiumSessionPermission {
+  canView?: boolean;
+  canModify?: boolean;
+  canDelete?: boolean;
+}
+
+export interface TechnitiumCredentialProbe {
+  username: string;
+  permissions: Record<string, TechnitiumSessionPermission | undefined>;
+  clusterInitialized: boolean;
+  clusterDomain?: string;
+  dnsServerDomain?: string;
+  clusterNodes: Array<{
+    name?: string;
+    url?: string;
+    ipAddress?: string;
+    ipAddresses?: string[];
+    type?: "Primary" | "Secondary";
+  }>;
 }
 
 export interface TechnitiumClusterState {
@@ -29,6 +51,7 @@ export interface TechnitiumNodeSummary {
   id: string;
   name?: string;
   baseUrl: string;
+  groupId: string;
   hasAdvancedBlocking?: boolean;
   clusterState?: TechnitiumClusterState;
   isPrimary?: boolean; // True if this node is the Primary in the cluster
@@ -198,6 +221,7 @@ export interface TechnitiumQueryLogEntry {
   qclass?: string;
   answer?: string;
   responseRtt?: number;
+  groupId?: string;
 }
 
 export interface TechnitiumQueryLogPage {
@@ -239,6 +263,7 @@ export interface TechnitiumDashboardStatsData {
 export interface TechnitiumCombinedQueryLogEntry extends TechnitiumQueryLogEntry {
   nodeId: string;
   baseUrl: string;
+  groupId: string;
 }
 
 export interface TechnitiumCombinedNodeLogSnapshot {

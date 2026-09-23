@@ -22,6 +22,8 @@ These measurements quantify request admission, not SQLite execution speed. They 
 
 Raw measurements are available in [dns-logs-browser-request-results.csv](./dns-logs-browser-request-results.csv).
 
+**Current behavior:** Switching to Paginated preserves the selected refresh interval, including an explicit pause. The v1.11.0 measurements below retain their historical pause-on-switch policy; the current controlled test models ten refresh opportunities during a 30-second dwell at a three-second interval. Request cancellation and serialized navigation remain in place.
+
 ## Production HAR baseline (v1.10.1 behavior)
 
 The v1.10.1-behavior capture came from a production-test build backed by an anonymized deployment database. The capture observed 101 seconds of Combined Stored browsing with 200 rows per page and domain-plus-client deduplication enabled. It included filter changes, automatic refreshes, and navigation through deep pages.
@@ -79,7 +81,7 @@ Prev, Next, and page-jump controls are disabled for both initial `loading` and s
 
 ### 3. Paginated refresh policy
 
-Switching from Live Tail to Paginated mode now pauses the three-second refresh timer. Users can explicitly resume it, but historical browsing no longer inherits high-frequency polling from Tail mode.
+In v1.11.0, switching from Live Tail to Paginated paused the three-second refresh timer. The current policy preserves the selected interval or explicit pause when entering Paginated. Entering Live Tail still resumes its default interval if refresh was paused.
 
 ## Reproduction
 

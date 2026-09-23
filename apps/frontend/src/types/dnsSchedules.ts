@@ -1,3 +1,5 @@
+import type { GroupCredentialStatusEnvelope } from "./auth";
+
 export type DnsScheduleAction = "block" | "allow";
 export type DnsScheduleTargetType = "advanced-blocking" | "built-in";
 
@@ -77,10 +79,12 @@ export interface DnsScheduleTokenStatus {
   username?: string;
   reason?: string;
   hasAppsModify: boolean | null;
-  hasCacheModify: boolean | null;
+  hasCacheDelete: boolean | null;
+  groups?: GroupCredentialStatusEnvelope;
 }
 
 export interface DnsScheduleEvaluatorStatus {
+  pendingRecoveryCount: number;
   enabled: boolean;
   running: boolean;
   intervalMs: number;
@@ -101,9 +105,14 @@ export interface DnsScheduleApplicationResult {
   action: "applied" | "removed" | "skipped" | "error";
   reason?: string;
   error?: string;
+  cacheFlush?: {
+    flushedNodeIds: string[];
+    skippedNodeIds: string[];
+  };
 }
 
 export interface RunDnsScheduleEvaluatorResponse {
+  pendingRecoveryCount: number;
   dryRun: boolean;
   triggeredAt: string;
   evaluatedSchedules: number;

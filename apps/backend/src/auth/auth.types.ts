@@ -4,9 +4,53 @@ export interface AuthSession {
   lastSeenAt: number;
   user: string;
   authSource: "password" | "trusted-sso";
-  technitiumUser: string;
+  technitiumUser?: string;
+  verifiedUsernamesByGroup?: Record<string, string>;
+  groupCredentials?: GroupCredentialStatusEnvelope;
   tokensByNodeId: Record<string, string>;
+  /** Server-only recovery state; never copied into an auth response DTO. */
+  pendingTokensByNodeId?: Record<string, string>;
+  credentialUsernamesByGroup?: Record<string, string>;
+  topologyDomainsByGroup?: Record<string, string>;
+  nodeRetryAfterByNodeId?: Record<string, number>;
+  nodeRetryAttemptsByNodeId?: Record<string, number>;
   nodeAuthStatesByNodeId?: Record<string, AuthNodeSessionState>;
+}
+
+export type GroupCredentialState =
+  | "ready"
+  | "degraded"
+  | "unreachable"
+  | "failed"
+  | "not-authorized";
+
+export interface GroupCredentialStatus {
+  groupId: string;
+  state: GroupCredentialState;
+  verifiedUsername?: string;
+  authenticatedNodeIds: string[];
+  unreachableNodeIds: string[];
+  failedNodeIds: string[];
+  admittedNodeIds: {
+    interactive: string[];
+    ptrRead: string[];
+    dhcpRead: string[];
+    primaryConfigWrite: string[];
+    cacheFlush: string[];
+  };
+  capabilities: {
+    ptrRead: boolean;
+    dhcpRead: boolean;
+    primaryConfigWrite: boolean;
+    cacheFlush: boolean;
+  };
+  reason?: string;
+}
+
+export interface GroupCredentialStatusEnvelope {
+  anyReady: boolean;
+  allReady: boolean;
+  groups: GroupCredentialStatus[];
 }
 
 export type TrustedSsoError =
@@ -71,6 +115,8 @@ export interface AuthMeResponseDto {
   user?: string;
   authSource?: AuthSession["authSource"];
   technitiumUser?: string;
+  verifiedUsernamesByGroup?: Record<string, string>;
+  groupCredentials?: GroupCredentialStatusEnvelope;
   nodeIds?: string[];
   unreachableNodeIds?: string[];
   failedNodeIds?: string[];
@@ -90,5 +136,6 @@ export interface AuthMeResponseDto {
     username?: string;
     reason?: string;
     tooPrivilegedSections?: string[];
+    groups?: GroupCredentialStatusEnvelope;
   };
 }

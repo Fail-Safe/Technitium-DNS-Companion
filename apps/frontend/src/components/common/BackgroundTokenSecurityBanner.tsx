@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import type { GroupCredentialStatusEnvelope } from "../../types/auth";
 import "./BackgroundTokenSecurityBanner.css";
 
 export type BackgroundPtrTokenValidationSummary = {
@@ -11,6 +12,7 @@ export type BackgroundPtrTokenValidationSummary = {
   tooPrivilegedSections?: string[];
   /** True when the failure was a transient connectivity error rather than a permission/security issue. */
   transient?: boolean;
+  groups?: GroupCredentialStatusEnvelope;
 };
 
 export function BackgroundTokenSecurityBanner({

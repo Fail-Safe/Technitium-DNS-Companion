@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { useAuth } from "../../context/useAuth";
 import { BackgroundTokenSecurityBanner } from "../common/BackgroundTokenSecurityBanner";
 import { NodeSessionExpiredBanner } from "../common/NodeSessionExpiredBanner";
+import { GroupCredentialStatusBanner } from "../common/GroupCredentialStatusBanner";
 import { TransportSecurityBanner } from "../common/TransportSecurityBanner";
 import { Header } from "./Header";
 
@@ -25,6 +26,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
         configuredNodeIds={status?.configuredNodeIds}
         nodeIds={status?.nodeIds}
         unreachableNodeIds={status?.unreachableNodeIds}
+        groupCredentials={status?.groupCredentials}
+      />
+      <GroupCredentialStatusBanner credentials={status?.groupCredentials} />
+      <GroupCredentialStatusBanner
+        credentials={status?.backgroundPtrToken?.groups}
+        title="Background credential groups need attention"
       />
       <TransportSecurityBanner
         sessionAuthEnabled={status?.sessionAuthEnabled}

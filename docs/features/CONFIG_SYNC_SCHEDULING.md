@@ -18,6 +18,12 @@ CONFIG_SYNC_INTERVAL_MINUTES=60
 CONFIG_SYNC_NOTIFY_EMAILS=admin@example.com,ops@example.com
 ```
 
+The scalar token is supported only in implicit single-group deployments. For
+explicit node groups, configure `TECHNITIUM_SCHEDULE_TOKEN_MAP_FILE` using the
+strict group-map schema in
+[Session Auth and Background Token Guide](./SESSION_AUTH_AND_TOKEN_MIGRATION.md).
+Only mapped groups are eligible for reads or writes.
+
 The schedule token requires `Apps: Modify`. Use a dedicated automation user and
 do not reuse an administrator token.
 

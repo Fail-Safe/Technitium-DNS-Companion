@@ -9,18 +9,40 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { isIP } from "node:net";
 import type { Request } from "express";
-import { parseTree } from "jsonc-parser";
-import type { Node as JsonNode, ParseError } from "jsonc-parser";
 import { TECHNITIUM_NODES_TOKEN } from "../technitium/technitium.constants";
+import {
+  configuredGroupIds,
+  hasImplicitNodeGrouping,
+  INTERNAL_DEFAULT_GROUP_ID,
+  nodeGroupId,
+} from "../technitium/technitium-config";
 import { TechnitiumService } from "../technitium/technitium.service";
-import type { TechnitiumNodeConfig } from "../technitium/technitium.types";
+import type {
+  TechnitiumCredentialProbe,
+  TechnitiumNodeConfig,
+} from "../technitium/technitium.types";
 import { getEnvOrFile } from "../utils/env-file";
 import { AuthRequestContext } from "./auth-request-context";
 import { AuthSessionService } from "./auth-session.service";
+import {
+  assertExactKeys,
+  isValidIdentity,
+  parseGroupCredential,
+  readStrictJsonFile,
+  requireObject,
+} from "./credential-map";
+import {
+  buildGroupCredentialEnvelope,
+  emptyAdmissions,
+  notAuthorizedGroupStatus,
+  singularVerifiedUsername,
+} from "./group-credentials";
+import type { GroupCredential } from "./group-credentials";
 import type {
+  GroupCredentialStatus,
+  GroupCredentialStatusEnvelope,
   AuthNodeSessionState,
   AuthSession,
   TrustedSsoRequestClassification,
@@ -32,11 +54,8 @@ const DEFAULT_SECRET_HEADER = "x-trusted-proxy-secret";
 const FAILURE_COOLDOWN_MS = 5_000;
 const MAX_SESSIONS_PER_IDENTITY = 8;
 const HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
-const IDENTITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._@+-]{0,254}$/;
-
 interface TrustedSsoIdentityMapping {
-  username: string;
-  token: string;
+  groups: Map<string, GroupCredential>;
 }
 
 interface TrustedSsoConfig {
@@ -58,7 +77,9 @@ interface ParsedCidr {
 interface TrustedSsoValidation {
   mapping: TrustedSsoIdentityMapping;
   nodeAuthStatesByNodeId: Record<string, AuthNodeSessionState>;
-  authenticatedNodeIds: string[];
+  groupCredentials: GroupCredentialStatusEnvelope;
+  verifiedUsernamesByGroup: Record<string, string>;
+  topologyDomainsByGroup: Record<string, string>;
 }
 
 export interface TrustedSsoLoginResult {
@@ -119,7 +140,7 @@ export class TrustedSsoService {
     const suppliedSecret = this.readSingleHeader(req, this.config.secretHeader);
     if (
       !identity ||
-      !IDENTITY_PATTERN.test(identity) ||
+      !isValidIdentity(identity) ||
       !suppliedSecret ||
       !this.secretMatches(suppliedSecret)
     ) {
@@ -221,11 +242,24 @@ export class TrustedSsoService {
     }
 
     const validation = await validationPromise;
-    const tokensByNodeId = Object.fromEntries(
-      validation.authenticatedNodeIds.map((nodeId) => [
-        nodeId,
-        validation.mapping.token,
-      ]),
+    const tokensByNodeId: Record<string, string> = {};
+    const pendingTokensByNodeId: Record<string, string> = {};
+    const credentialUsernamesByGroup: Record<string, string> = {};
+    for (const group of validation.groupCredentials.groups) {
+      const credential = validation.mapping.groups.get(group.groupId);
+      if (!credential) continue;
+      credentialUsernamesByGroup[group.groupId] = credential.username;
+      for (const nodeId of group.admittedNodeIds.interactive) {
+        tokensByNodeId[nodeId] = credential.token;
+      }
+      if (group.state === "degraded" || group.state === "unreachable") {
+        for (const nodeId of group.unreachableNodeIds) {
+          pendingTokensByNodeId[nodeId] = credential.token;
+        }
+      }
+    }
+    const technitiumUser = singularVerifiedUsername(
+      validation.verifiedUsernamesByGroup,
     );
     const session = this.sessionService.create(
       classification.identity,
@@ -233,7 +267,12 @@ export class TrustedSsoService {
       validation.nodeAuthStatesByNodeId,
       {
         authSource: "trusted-sso",
-        technitiumUser: validation.mapping.username,
+        technitiumUser,
+        verifiedUsernamesByGroup: validation.verifiedUsernamesByGroup,
+        groupCredentials: validation.groupCredentials,
+        pendingTokensByNodeId,
+        credentialUsernamesByGroup,
+        topologyDomainsByGroup: validation.topologyDomainsByGroup,
         maxSessionsForUser: MAX_SESSIONS_PER_IDENTITY,
       },
     );
@@ -243,7 +282,10 @@ export class TrustedSsoService {
       response: {
         authenticated: true,
         nodes: this.nodeConfigs.map((node) => {
-          const state = validation.nodeAuthStatesByNodeId[node.id];
+          const state = validation.nodeAuthStatesByNodeId[node.id] ?? {
+            status: "failed" as const,
+            error: "SSO identity is not authorized for this node group",
+          };
           return {
             nodeId: node.id,
             success: state.status === "authenticated",
@@ -258,27 +300,77 @@ export class TrustedSsoService {
   private async validateMapping(
     mapping: TrustedSsoIdentityMapping,
   ): Promise<TrustedSsoValidation> {
+    const statuses: GroupCredentialStatus[] = [];
+    const nodeAuthStatesByNodeId: Record<string, AuthNodeSessionState> = {};
+    const verifiedUsernamesByGroup: Record<string, string> = {};
+    const topologyDomainsByGroup: Record<string, string> = {};
+
+    for (const groupId of configuredGroupIds(this.nodeConfigs)) {
+      const credential = mapping.groups.get(groupId);
+      if (!credential) {
+        statuses.push(notAuthorizedGroupStatus(groupId));
+        continue;
+      }
+      const groupNodes = this.nodeConfigs.filter(
+        (node) => nodeGroupId(node) === groupId,
+      );
+      const status = await this.validateGroupCredential(
+        groupId,
+        groupNodes,
+        credential,
+        nodeAuthStatesByNodeId,
+        topologyDomainsByGroup,
+      );
+      statuses.push(status);
+      if (status.verifiedUsername) {
+        verifiedUsernamesByGroup[groupId] = status.verifiedUsername;
+      }
+    }
+
+    const groupCredentials = buildGroupCredentialEnvelope(statuses);
+    if (!groupCredentials.anyReady) {
+      if (statuses.some((status) => status.state === "failed")) {
+        throw new UnauthorizedException({
+          message: "Trusted SSO token validation failed",
+          groups: statuses.map(({ groupId, state, reason }) => ({
+            groupId,
+            state,
+            reason,
+          })),
+        });
+      }
+      throw new ServiceUnavailableException(
+        "No authorized Technitium group has usable validated nodes",
+      );
+    }
+    return {
+      mapping,
+      nodeAuthStatesByNodeId,
+      groupCredentials,
+      verifiedUsernamesByGroup,
+      topologyDomainsByGroup,
+    };
+  }
+
+  private async validateGroupCredential(
+    groupId: string,
+    nodes: TechnitiumNodeConfig[],
+    credential: GroupCredential,
+    nodeStates: Record<string, AuthNodeSessionState>,
+    topologyDomainsByGroup: Record<string, string>,
+  ): Promise<GroupCredentialStatus> {
     const results = await Promise.all(
-      this.nodeConfigs.map(async (node) => {
+      nodes.map(async (node) => {
         try {
-          const tokenOwner =
+          const probe =
             await this.technitiumService.validateExplicitSessionToken(
               node.id,
-              mapping.token,
+              credential.token,
             );
-          if (tokenOwner.username !== mapping.username) {
-            return {
-              nodeId: node.id,
-              state: {
-                status: "failed" as const,
-                error: "Mapped token owner does not match configured username",
-              },
-            };
+          if (probe.username !== credential.username) {
+            throw new UnauthorizedException("Mapped token owner mismatch");
           }
-          return {
-            nodeId: node.id,
-            state: { status: "authenticated" as const },
-          };
+          return { node, probe };
         } catch (error) {
           const unreachable =
             error instanceof HttpException &&
@@ -286,47 +378,164 @@ export class TrustedSsoService {
               HttpStatus.SERVICE_UNAVAILABLE,
               HttpStatus.GATEWAY_TIMEOUT,
             ].includes(error.getStatus());
-          return {
-            nodeId: node.id,
-            state: {
-              status: unreachable
-                ? ("unreachable" as const)
-                : ("failed" as const),
-              error: unreachable
-                ? "Technitium node is unreachable"
-                : "Mapped token validation failed",
-            },
+          const state: AuthNodeSessionState = {
+            status: unreachable ? "unreachable" : "failed",
+            error: unreachable
+              ? "Technitium node is unreachable"
+              : "Mapped token validation failed",
           };
+          nodeStates[node.id] = state;
+          return { node, state };
         }
       }),
     );
-
-    const nodeAuthStatesByNodeId = Object.fromEntries(
-      results.map(({ nodeId, state }) => [nodeId, state]),
+    const successful = results.filter(
+      (
+        result,
+      ): result is {
+        node: TechnitiumNodeConfig;
+        probe: TechnitiumCredentialProbe;
+      } => "probe" in result,
     );
-    const failed = results.filter(({ state }) => state.status === "failed");
-    if (failed.length > 0) {
-      throw new UnauthorizedException({
-        message: "Trusted SSO token validation failed",
-        nodes: failed.map(({ nodeId, state }) => ({
-          nodeId,
-          success: false,
-          authState: state.status,
-          error: state.error,
-        })),
-      });
+    const unreachableNodeIds = results.flatMap((result) =>
+      result.state?.status === "unreachable" ? [result.node.id] : [],
+    );
+    const failedNodeIds = results.flatMap((result) =>
+      result.state?.status === "failed" ? [result.node.id] : [],
+    );
+
+    const topologyFailure = this.getTopologyFailure(nodes, successful);
+    if (topologyFailure || failedNodeIds.length > 0) {
+      for (const { node } of successful) {
+        nodeStates[node.id] = {
+          status: "failed",
+          error: topologyFailure ?? "Group credential validation failed",
+        };
+      }
+      return {
+        groupId,
+        state: "failed",
+        authenticatedNodeIds: [],
+        unreachableNodeIds,
+        failedNodeIds: [
+          ...new Set([
+            ...failedNodeIds,
+            ...successful.map(({ node }) => node.id),
+          ]),
+        ],
+        admittedNodeIds: emptyAdmissions(),
+        capabilities: {
+          ptrRead: false,
+          dhcpRead: false,
+          primaryConfigWrite: false,
+          cacheFlush: false,
+        },
+        reason:
+          topologyFailure ?? "Mapped token validation failed for this group.",
+      };
     }
 
-    const authenticatedNodeIds = results
-      .filter(({ state }) => state.status === "authenticated")
-      .map(({ nodeId }) => nodeId);
-    if (authenticatedNodeIds.length === 0) {
-      throw new ServiceUnavailableException(
-        "No configured Technitium node is currently reachable",
-      );
-    }
+    const topologyDomain = successful.find(
+      ({ probe }) => probe.clusterInitialized && probe.clusterDomain,
+    )?.probe.clusterDomain;
+    if (topologyDomain) topologyDomainsByGroup[groupId] = topologyDomain;
 
-    return { mapping, nodeAuthStatesByNodeId, authenticatedNodeIds };
+    const admitted = emptyAdmissions();
+    for (const { node, probe } of successful) {
+      nodeStates[node.id] = { status: "authenticated" };
+      admitted.interactive.push(node.id);
+      if (probe.permissions?.["DnsClient"]?.canView === true) {
+        admitted.ptrRead.push(node.id);
+      }
+      if (probe.permissions?.["DhcpServer"]?.canView === true) {
+        admitted.dhcpRead.push(node.id);
+      }
+      const role = this.getConfiguredNodeRole(node, probe);
+      if (
+        probe.permissions?.["Apps"]?.canModify === true &&
+        (role === "Primary" || !probe.clusterInitialized)
+      ) {
+        admitted.primaryConfigWrite.push(node.id);
+      }
+      if (probe.permissions?.["Cache"]?.canDelete === true) {
+        admitted.cacheFlush.push(node.id);
+      }
+    }
+    const state: GroupCredentialStatus["state"] =
+      successful.length === 0
+        ? "unreachable"
+        : unreachableNodeIds.length > 0
+          ? "degraded"
+          : "ready";
+    return {
+      groupId,
+      state,
+      verifiedUsername: successful.length > 0 ? credential.username : undefined,
+      authenticatedNodeIds: successful.map(({ node }) => node.id),
+      unreachableNodeIds,
+      failedNodeIds: [],
+      admittedNodeIds: admitted,
+      capabilities: {
+        ptrRead: admitted.ptrRead.length > 0,
+        dhcpRead: admitted.dhcpRead.length > 0,
+        primaryConfigWrite: admitted.primaryConfigWrite.length > 0,
+        cacheFlush: admitted.cacheFlush.length > 0,
+      },
+      ...(state === "unreachable"
+        ? { reason: "Every configured node in this group is unreachable." }
+        : {}),
+    };
+  }
+
+  private getTopologyFailure(
+    nodes: TechnitiumNodeConfig[],
+    successful: Array<{
+      node: TechnitiumNodeConfig;
+      probe: TechnitiumCredentialProbe;
+    }>,
+  ): string | undefined {
+    if (hasImplicitNodeGrouping(this.nodeConfigs)) return undefined;
+    const domains = new Set(
+      successful
+        .filter(({ probe }) => probe.clusterInitialized)
+        .map(({ probe }) => probe.clusterDomain ?? ""),
+    );
+    if (domains.size > 1) {
+      return "Configured group members reported different cluster topology.";
+    }
+    if (
+      nodes.length > 1 &&
+      successful.some(({ probe }) => !probe.clusterInitialized)
+    ) {
+      return "A multi-node group contains a node that is not in the declared cluster.";
+    }
+    if (
+      successful.some(
+        ({ node, probe }) =>
+          probe.clusterInitialized && !this.getConfiguredNodeRole(node, probe),
+      )
+    ) {
+      return "A configured node could not be matched to its declared group topology.";
+    }
+    return undefined;
+  }
+
+  private getConfiguredNodeRole(
+    node: TechnitiumNodeConfig,
+    probe: TechnitiumCredentialProbe,
+  ): "Primary" | "Secondary" | undefined {
+    if (!probe.clusterInitialized) return undefined;
+    const origin = safeOrigin(node.baseUrl);
+    return (probe.clusterNodes ?? []).find((member) => {
+      if (
+        probe.dnsServerDomain &&
+        member.name?.toLowerCase() === probe.dnsServerDomain.toLowerCase()
+      )
+        return true;
+      if (member.name === node.id || member.name?.startsWith(`${node.id}.`))
+        return true;
+      return origin !== undefined && safeOrigin(member.url) === origin;
+    })?.type;
   }
 
   private isManualLoginAllowed(req: Request): boolean {
@@ -436,21 +645,13 @@ export class TrustedSsoService {
   }
 
   private loadTokenMap(path: string): Map<string, TrustedSsoIdentityMapping> {
-    let parsed: unknown;
-    try {
-      const source = readFileSync(path, "utf8");
-      assertStrictJson(source);
-      parsed = JSON.parse(source) as unknown;
-    } catch {
-      throw new Error(
-        "TRUSTED_SSO_TOKEN_MAP_FILE must reference a readable, valid JSON file.",
-      );
-    }
-
-    const root = requireObject(parsed, "token map");
+    const root = requireObject(
+      readStrictJsonFile(path, "TRUSTED_SSO_TOKEN_MAP_FILE"),
+      "Trusted SSO token map",
+    );
     assertExactKeys(root, ["version", "identities"], "token map");
-    if (root.version !== 1) {
-      throw new Error("Trusted SSO token map version must be 1.");
+    if (root.version !== 1 && root.version !== 2) {
+      throw new Error("Trusted SSO token map version must be 1 or 2.");
     }
     const identities = requireObject(root.identities, "token map identities");
     if (Object.keys(identities).length === 0) {
@@ -467,63 +668,54 @@ export class TrustedSsoService {
 
     const mappings = new Map<string, TrustedSsoIdentityMapping>();
     for (const [identity, value] of Object.entries(identities)) {
-      if (!IDENTITY_PATTERN.test(identity)) {
+      if (!isValidIdentity(identity)) {
         throw new Error(
           `Trusted SSO token map contains a malformed identity key.`,
         );
       }
-      const entry = requireObject(value, `identity mapping for ${identity}`);
-      assertExactKeys(
-        entry,
-        ["username", "token"],
-        `identity mapping for ${identity}`,
-      );
-      if (
-        typeof entry.username !== "string" ||
-        !IDENTITY_PATTERN.test(entry.username)
-      ) {
-        throw new Error(`Trusted SSO mapping has an invalid username.`);
+      if (root.version === 1) {
+        if (!hasImplicitNodeGrouping(this.nodeConfigs)) {
+          throw new Error(
+            "Trusted SSO token map version 1 is valid only with implicit single-group node configuration.",
+          );
+        }
+        mappings.set(identity, {
+          groups: new Map([
+            [
+              INTERNAL_DEFAULT_GROUP_ID,
+              parseGroupCredential(value, "Trusted SSO identity mapping"),
+            ],
+          ]),
+        });
+        continue;
       }
-      if (typeof entry.token !== "string" || entry.token.length === 0) {
+
+      const entry = requireObject(value, "Trusted SSO identity mapping");
+      assertExactKeys(entry, ["groups"], "Trusted SSO identity mapping");
+      const rawGroups = requireObject(
+        entry.groups,
+        "Trusted SSO identity groups",
+      );
+      if (Object.keys(rawGroups).length === 0) {
         throw new Error(
-          "Trusted SSO mapping contains an empty or invalid cluster API token.",
+          "Trusted SSO identities must authorize at least one group.",
         );
       }
-      mappings.set(identity, {
-        username: entry.username,
-        token: entry.token,
-      });
+      const knownGroups = new Set(configuredGroupIds(this.nodeConfigs));
+      const groups = new Map<string, GroupCredential>();
+      for (const [groupId, groupValue] of Object.entries(rawGroups)) {
+        if (!knownGroups.has(groupId)) {
+          throw new Error("Trusted SSO token map contains an unknown group.");
+        }
+        groups.set(
+          groupId,
+          parseGroupCredential(groupValue, "Trusted SSO group mapping"),
+        );
+      }
+      mappings.set(identity, { groups });
     }
     return mappings;
   }
-}
-
-function assertStrictJson(source: string): void {
-  const errors: ParseError[] = [];
-  const root = parseTree(source, errors, {
-    allowTrailingComma: false,
-    disallowComments: true,
-  });
-  if (!root || errors.length > 0) {
-    throw new Error("Invalid JSON");
-  }
-
-  const walk = (node: JsonNode): void => {
-    if (node.type === "object") {
-      const keys = new Set<string>();
-      for (const property of node.children ?? []) {
-        const key = property.children?.[0]?.value as unknown;
-        if (typeof key !== "string" || keys.has(key)) {
-          throw new Error("Duplicate JSON object key");
-        }
-        keys.add(key);
-      }
-    }
-    for (const child of node.children ?? []) {
-      walk(child);
-    }
-  };
-  walk(root);
 }
 
 function readBoolean(name: string, defaultValue: boolean): boolean {
@@ -571,26 +763,12 @@ function parseLogoutUrl(raw: string | undefined): string | undefined {
   );
 }
 
-function requireObject(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`Trusted SSO ${label} must be a JSON object.`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function assertExactKeys(
-  object: Record<string, unknown>,
-  allowed: string[],
-  label: string,
-): void {
-  const unexpected = Object.keys(object).filter(
-    (key) => !allowed.includes(key),
-  );
-  const missing = allowed.filter((key) => !(key in object));
-  if (unexpected.length > 0 || missing.length > 0) {
-    throw new Error(
-      `Trusted SSO ${label} has an invalid schema (missing: ${missing.join(", ") || "none"}; unexpected: ${unexpected.join(", ") || "none"}).`,
-    );
+function safeOrigin(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    return new URL(value).origin.toLowerCase();
+  } catch {
+    return undefined;
   }
 }
 

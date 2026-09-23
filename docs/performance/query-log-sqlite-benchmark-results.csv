@@ -1,21 +1,21 @@
-id,query,baseline_ms,planner_stats_ms,distinct_count_ms,status_index_ms,dedup_rewrite_ms,dedup_adaptive_ms
-1,"Recent unfiltered page 1, dedup off",0.03,0.03,0.03,0.03,0.03,0.03
-2,"Recent unfiltered page 1, dedup on",2980,2930,3170,3130,142,136
-3,"Domain substring youtube, dedup off",0.06,0.06,0.06,0.06,0.05,0.06
-4,"Domain substring youtube, dedup on",739,749,799,757,415,798
-5,"Client substring phone, dedup off",0.08,0.08,0.07,0.08,0.06,0.06
-6,"Qtype AAAA equality, dedup off",0.03,0.03,0.03,0.03,0.03,0.03
-7,"Blocked page 1, dedup off",0.12,0.13,0.18,0.03,0.03,0.03
-8,"Domain google plus qtype A, dedup on",458,256,259,261,562,271
-9,"Deep pagination offset 2500, dedup on",2920,3020,3120,3100,148,145
-10,"Window-scoped total count",14,14,15,14,15,14
-11,"Rare domain substring iphone, dedup off",15,12,15,13,13,15
-12,"No-match substring, dedup off",1340,1330,1350,1400,1390,1500
-13,"Per-node window-scoped count",6,6,6,7,6,6
-14,"Dotted domain google.com, dedup on",164,160,174,169,206,171
-15,"Client substring phone, dedup on",709,700,754,763,439,728
-16,"Client substring guest, dedup on",244,259,267,260,261,264
-17,"Unique-domain count",1680,54,5,5,5,5
-18,"Blocked window-scoped count",1300,1340,1370,2,2,2
-19,"Recent one-hour page 1, dedup on",37,34,35,33,36,36
-20,"Recent page 1, dedup per client",3250,3190,3420,3350,198,196
+id,query,baseline_ms,planner_stats_ms,distinct_count_ms,status_index_ms,dedup_rewrite_ms,dedup_adaptive_ms,group_id_migration_ms
+1,"Recent unfiltered page 1, dedup off",0.03,0.03,0.03,0.03,0.03,0.03,0.03
+2,"Recent unfiltered page 1, dedup on",2980,2930,3170,3130,142,136,147
+3,"Domain substring youtube, dedup off",0.06,0.06,0.06,0.06,0.05,0.06,0.07
+4,"Domain substring youtube, dedup on",739,749,799,757,415,798,736
+5,"Client substring phone, dedup off",0.08,0.08,0.07,0.08,0.06,0.06,0.06
+6,"Qtype AAAA equality, dedup off",0.03,0.03,0.03,0.03,0.03,0.03,0.03
+7,"Blocked page 1, dedup off",0.12,0.13,0.18,0.03,0.03,0.03,0.03
+8,"Domain google plus qtype A, dedup on",458,256,259,261,562,271,231
+9,"Deep pagination offset 2500, dedup on",2920,3020,3120,3100,148,145,139
+10,"Window-scoped total count",14,14,15,14,15,14,13
+11,"Rare domain substring iphone, dedup off",15,12,15,13,13,15,10
+12,"No-match substring, dedup off",1340,1330,1350,1400,1390,1500,1250
+13,"Per-node window-scoped count",6,6,6,7,6,6,5
+14,"Dotted domain google.com, dedup on",164,160,174,169,206,171,152
+15,"Client substring phone, dedup on",709,700,754,763,439,728,630
+16,"Client substring guest, dedup on",244,259,267,260,261,264,228
+17,"Unique-domain count",1680,54,5,5,5,5,4
+18,"Blocked window-scoped count",1300,1340,1370,2,2,2,2
+19,"Recent one-hour page 1, dedup on",37,34,35,33,36,36,53
+20,"Recent page 1, dedup per client",3250,3190,3420,3350,198,196,226

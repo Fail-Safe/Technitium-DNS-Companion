@@ -329,6 +329,12 @@ describe("TrustedSsoService", () => {
     expect(result.session.nodeAuthStatesByNodeId?.nodeB.status).toBe(
       "unreachable",
     );
+    expect(result.session.pendingTokensByNodeId).toEqual({
+      nodeB: "cluster-token",
+    });
+    expect(result.session.credentialUsernamesByGroup).toEqual({
+      __default__: "alice",
+    });
   });
 
   it("fails the whole login on invalid tokens or owner mismatch", async () => {
@@ -374,5 +380,100 @@ describe("TrustedSsoService", () => {
       status: HttpStatus.TOO_MANY_REQUESTS,
     });
     expect(validate).toHaveBeenCalledTimes(2);
+  });
+
+  it("authorizes a v2 identity for a subset of explicit groups", async () => {
+    const mapPath = writeMap({
+      version: 2,
+      identities: {
+        "alice@example.test": {
+          groups: {
+            "site-a": { username: "alice-a", token: "site-a-token" },
+          },
+        },
+      },
+    });
+    enable({ TRUSTED_SSO_TOKEN_MAP_FILE: mapPath });
+    const explicitNodes: TechnitiumNodeConfig[] = [
+      { ...nodes[0], groupId: "site-a" },
+      { ...nodes[1], groupId: "site-b" },
+    ];
+    const validate = jest.fn().mockResolvedValue({
+      username: "alice-a",
+      permissions: {
+        DnsClient: { canView: true },
+        DhcpServer: { canView: true },
+      },
+      clusterInitialized: false,
+      clusterNodes: [],
+    });
+    const sessions = new AuthSessionService();
+    sessionServices.push(sessions);
+    const service = new TrustedSsoService(
+      explicitNodes,
+      {
+        validateExplicitSessionToken: validate,
+      } as unknown as TechnitiumService,
+      sessions,
+    );
+
+    const result = await service.loginForRequest(
+      makeRequest({ identity: "alice@example.test", secret: SECRET }),
+    );
+    expect(result.session.tokensByNodeId).toEqual({ nodeA: "site-a-token" });
+    expect(result.session.verifiedUsernamesByGroup).toEqual({
+      "site-a": "alice-a",
+    });
+    expect(result.session.groupCredentials).toMatchObject({
+      anyReady: true,
+      allReady: true,
+      groups: [
+        { groupId: "site-a", state: "ready" },
+        { groupId: "site-b", state: "not-authorized" },
+      ],
+    });
+    expect(validate).toHaveBeenCalledTimes(1);
+    expect(validate).toHaveBeenCalledWith("nodeA", "site-a-token");
+  });
+
+  it("rejects unknown v2 groups and duplicate JSON keys at startup", () => {
+    enable({
+      TRUSTED_SSO_TOKEN_MAP_FILE: writeMap({
+        version: 2,
+        identities: {
+          "alice@example.test": {
+            groups: {
+              unknown: { username: "alice", token: "token" },
+            },
+          },
+        },
+      }),
+    });
+    const explicitNodes: TechnitiumNodeConfig[] = [
+      { ...nodes[0], groupId: "site-a" },
+    ];
+    expect(
+      () =>
+        new TrustedSsoService(
+          explicitNodes,
+          {} as TechnitiumService,
+          new AuthSessionService(),
+        ),
+    ).toThrow(/unknown group/);
+
+    const duplicatePath = join(TEST_DIR, `map-${fileIndex++}.json`);
+    writeFileSync(
+      duplicatePath,
+      '{"version":2,"identities":{"alice@example.test":{"groups":{"site-a":{"username":"alice","token":"one"},"site-a":{"username":"alice","token":"two"}}}}}',
+    );
+    process.env.TRUSTED_SSO_TOKEN_MAP_FILE = duplicatePath;
+    expect(
+      () =>
+        new TrustedSsoService(
+          explicitNodes,
+          {} as TechnitiumService,
+          new AuthSessionService(),
+        ),
+    ).toThrow(/readable, valid JSON/);
   });
 });

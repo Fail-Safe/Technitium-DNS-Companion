@@ -12,9 +12,10 @@ describe("DNS Logs request policy", () => {
     expect(isLogsRequestBusy("error")).toBe(false);
   });
 
-  it("pauses refresh when entering paginated mode", () => {
-    expect(refreshSecondsForDisplayMode("paginated", 3, 3)).toBe(0);
-    expect(refreshSecondsForDisplayMode("paginated", 30, 3)).toBe(0);
+  it("preserves the active interval or explicit pause when entering paginated mode", () => {
+    expect(refreshSecondsForDisplayMode("paginated", 0, 3)).toBe(0);
+    expect(refreshSecondsForDisplayMode("paginated", 3, 3)).toBe(3);
+    expect(refreshSecondsForDisplayMode("paginated", 30, 3)).toBe(30);
   });
 
   it("preserves or restores refresh when entering Tail mode", () => {

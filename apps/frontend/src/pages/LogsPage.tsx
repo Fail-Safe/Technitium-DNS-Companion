@@ -1859,7 +1859,7 @@ export function LogsPage() {
   const [activeTab, setActiveTab] = useState<"logs" | "alerts">("logs");
   const [availableAbGroups, setAvailableAbGroups] = useState<string[]>([]);
   const [knownClients, setKnownClients] = useState<
-    { ip: string; hostname?: string }[]
+    { groupId: string; ip: string; hostname?: string }[]
   >([]);
 
   const isAdvancedBlockingActive =
@@ -4697,12 +4697,12 @@ export function LogsPage() {
   const blockWriteNodeLabel = blockWriteNodeId
     ? (nodeMap.get(blockWriteNodeId)?.name ?? blockWriteNodeId)
     : "";
-  const advancedBlockingPrimaryNode = nodes.find(
+  const advancedBlockingPrimaryNodes = nodes.filter(
     (node) => node.isPrimary === true,
   );
-  const advancedBlockingPrimaryLabel = advancedBlockingPrimaryNode
-    ? advancedBlockingPrimaryNode.name || advancedBlockingPrimaryNode.id
-    : "";
+  const advancedBlockingPrimaryLabel = advancedBlockingPrimaryNodes
+    .map((node) => node.name || node.id)
+    .join(", ");
   const isBlockedEntry = blockDialog
     ? isEntryBlocked(blockDialog.entry)
     : false;
@@ -5839,6 +5839,7 @@ export function LogsPage() {
               ...entry,
               nodeId: selectedNodeId,
               baseUrl: nodeInfo?.baseUrl ?? "",
+              groupId: entry.groupId ?? nodeInfo?.groupId ?? "__default__",
             }));
 
           if (displayMode === "tail") {
@@ -5977,6 +5978,7 @@ export function LogsPage() {
         ...entry,
         nodeId: selectedNodeId,
         baseUrl: nodeInfo?.baseUrl ?? "",
+        groupId: entry.groupId ?? nodeInfo?.groupId ?? "__default__",
       }));
     }
 
@@ -6411,6 +6413,7 @@ export function LogsPage() {
         const response = await apiFetch("/nodes/known-clients");
         if (response.ok) {
           const data = (await response.json()) as {
+            groupId: string;
             ip: string;
             hostname?: string;
           }[];
@@ -7203,18 +7206,20 @@ export function LogsPage() {
                       }
                     />
                     <datalist id="log-alert-rule-client-datalist">
-                      {knownClients.map(({ ip, hostname }) =>
+                      {knownClients.map(({ groupId, ip, hostname }) =>
                         hostname ? (
-                          <>
-                            <option key={`${ip}-name`} value={hostname}>
-                              {hostname} ({ip})
+                          <React.Fragment key={`${groupId}-${ip}`}>
+                            <option value={hostname}>
+                              {hostname} ({ip}, {groupId})
                             </option>
-                            <option key={`${ip}-ip`} value={ip}>
-                              {ip} ({hostname})
+                            <option value={ip}>
+                              {ip} ({hostname}, {groupId})
                             </option>
-                          </>
+                          </React.Fragment>
                         ) : (
-                          <option key={ip} value={ip} />
+                          <option key={`${groupId}-${ip}`} value={ip}>
+                            {ip} ({groupId})
+                          </option>
                         ),
                       )}
                     </datalist>
@@ -8948,7 +8953,7 @@ export function LogsPage() {
                             {selectedDomains.size !== 1 ? "s" : ""}
                           </strong>{" "}
                           in Advanced Blocking groups
-                          {advancedBlockingPrimaryNode
+                          {advancedBlockingPrimaryNodes.length > 0
                             ? ` through ${advancedBlockingPrimaryLabel}.`
                             : " across all nodes."}
                         </p>

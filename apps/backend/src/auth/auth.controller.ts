@@ -80,6 +80,8 @@ export class AuthController {
       user: session.user,
       authSource: session.authSource,
       technitiumUser: session.technitiumUser,
+      verifiedUsernamesByGroup: session.verifiedUsernamesByGroup,
+      groupCredentials: session.groupCredentials,
       nodeIds: Object.keys(session.tokensByNodeId),
       unreachableNodeIds,
       failedNodeIds,

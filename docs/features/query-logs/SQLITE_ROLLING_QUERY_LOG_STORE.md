@@ -59,13 +59,22 @@ The stored endpoints accept the same query filter shape used elsewhere in the Lo
 - On a timer (`QUERY_LOG_SQLITE_POLL_INTERVAL_MS`), it polls each configured node for recent query logs.
 - It deduplicates inserts (so overlap polling is safe) and keeps only a rolling window (`QUERY_LOG_SQLITE_RETENTION_HOURS`).
 - A small overlap (`QUERY_LOG_SQLITE_OVERLAP_SECONDS`) is used to reduce the risk of missing entries between polls.
+- Each row stores the source node's `groupId`. Existing databases add this
+  column idempotently and synchronize it from the current node configuration.
+- DHCP/PTR enrichment and hostname backfill use `(groupId, normalized IP)`, so
+  the same private address in independent sites cannot acquire another site's
+  hostname.
 
 ## Query performance and maintenance
 
 - SQLite runs in WAL mode with a 64 MiB page cache and up to 256 MiB of memory-mapped I/O.
 - Planner statistics are refreshed when the long-lived connection opens and during daily maintenance.
 - Status counts use a `(blockedRank, ts)` covering index.
-- Unfiltered domain and per-client deduplication share a priority index. Requests with entry filters retain their filter-aware window-function path.
+- Unfiltered domain and per-client deduplication share a priority index.
+  Per-client mode partitions by `(domain, groupId, client IP)`: replicated
+  rows inside one cluster collapse, while identical private IPs in different
+  groups remain distinct. Requests with entry filters retain their
+  filter-aware window-function path.
 - Stored-page hostname enrichment uses persisted names and local caches only; browsing SQLite never waits for live DHCP nodes.
 - Background hostname collection discovers enabled DHCP scopes every five minutes and requests leases only from active DHCP nodes.
 - Daily maintenance truncates the WAL and incrementally reclaims free pages created by rolling retention.
@@ -78,7 +87,10 @@ See [Query Log SQLite Performance Iterations](../../performance/QUERY_LOG_SQLITE
 
 Background timers do **not** have an interactive user session token. The SQLite ingester therefore runs using **background auth mode**, which requires a configured background token:
 
-- Set `TECHNITIUM_BACKGROUND_TOKEN` to a **least-privilege** Technitium token that can read query logs.
+- In implicit single-group mode, set `TECHNITIUM_BACKGROUND_TOKEN` to a
+  **least-privilege** Technitium token that can read query logs.
+- In explicit grouped mode, use `TECHNITIUM_BACKGROUND_TOKEN_MAP_FILE` and
+  include only groups whose logs should be ingested.
 - Without `TECHNITIUM_BACKGROUND_TOKEN`, the SQLite DB can still open (status may show `ready: true`), but ingestion will fail with auth errors and the store will not stay up to date.
 
 ## Configuration (env vars)

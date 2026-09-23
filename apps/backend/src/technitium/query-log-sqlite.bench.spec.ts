@@ -84,9 +84,21 @@ const START_MS = NOW_MS - WINDOW_MS;
 const UNIQUE_DOMAINS = 5_000;
 const ZIPF_EXPONENT = 1.1; // standard DNS popularity distribution
 const NODES = [
-  { id: "nodeA", baseUrl: "https://nodeA.example.com:53443" },
-  { id: "nodeB", baseUrl: "https://nodeB.example.com:53443" },
-  { id: "nodeC", baseUrl: "https://nodeC.example.com:53443" },
+  {
+    id: "nodeA",
+    baseUrl: "https://nodeA.example.com:53443",
+    groupId: "site-a",
+  },
+  {
+    id: "nodeB",
+    baseUrl: "https://nodeB.example.com:53443",
+    groupId: "site-a",
+  },
+  {
+    id: "nodeC",
+    baseUrl: "https://nodeC.example.com:53443",
+    groupId: "site-b",
+  },
 ];
 const CLIENTS: Array<{ ip: string; name: string }> = [
   { ip: "10.0.1.10", name: "parent-laptop" },
@@ -245,6 +257,7 @@ function generateSyntheticDb(path: string, rowCount: number): void {
     `CREATE TABLE IF NOT EXISTS query_log_entries (
       nodeId TEXT NOT NULL,
       baseUrl TEXT NOT NULL,
+      groupId TEXT NOT NULL DEFAULT '__default__',
       ts INTEGER NOT NULL,
       timestamp TEXT NOT NULL,
       qname TEXT,
@@ -268,6 +281,7 @@ function generateSyntheticDb(path: string, rowCount: number): void {
   for (const idx of [
     "CREATE INDEX IF NOT EXISTS idx_query_log_ts ON query_log_entries(ts)",
     "CREATE INDEX IF NOT EXISTS idx_query_log_node_ts ON query_log_entries(nodeId, ts)",
+    "CREATE INDEX IF NOT EXISTS idx_query_log_group_ts ON query_log_entries(groupId, ts)",
     "CREATE INDEX IF NOT EXISTS idx_query_log_qnameLc_ts ON query_log_entries(qnameLc, ts)",
     "CREATE INDEX IF NOT EXISTS idx_query_log_clientIpLc_ts ON query_log_entries(clientIpLc, ts)",
     "CREATE INDEX IF NOT EXISTS idx_query_log_clientNameLc_ts ON query_log_entries(clientNameLc, ts)",
@@ -284,7 +298,7 @@ function generateSyntheticDb(path: string, rowCount: number): void {
 
   const insert = db.prepare(
     `INSERT OR IGNORE INTO query_log_entries (
-      nodeId, baseUrl, ts, timestamp,
+      nodeId, baseUrl, groupId, ts, timestamp,
       qname, qnameLc,
       clientIpAddress, clientIpLc,
       clientName, clientNameLc,
@@ -292,7 +306,7 @@ function generateSyntheticDb(path: string, rowCount: number): void {
       blockedRank, aRank,
       entryHash, data
     ) VALUES (
-      ?, ?, ?, ?,
+      ?, ?, ?, ?, ?,
       ?, ?,
       ?, ?,
       ?, ?,
@@ -353,6 +367,7 @@ function generateSyntheticDb(path: string, rowCount: number): void {
         insert.run(
           node.id,
           node.baseUrl,
+          node.groupId,
           ts,
           iso,
           qname,
@@ -424,6 +439,7 @@ function applyBenchmarkStage(db: DatabaseSync): void {
       CREATE INDEX IF NOT EXISTS idx_query_log_dedup_rank
       ON query_log_entries(
         qnameLc,
+        groupId,
         clientIpLc,
         blockedRank DESC,
         aRank DESC,
@@ -474,7 +490,7 @@ function buildQueryCases(): QueryCase[] {
 
   const buildDedupPageSql = (
     whereSql: string,
-    partition: "qnameLc" | "qnameLc, clientIpLc" = "qnameLc",
+    partition: "qnameLc" | "qnameLc, groupId, clientIpLc" = "qnameLc",
     offset = 0,
     hasEntryFilters = false,
   ): string => {
@@ -670,7 +686,7 @@ function buildQueryCases(): QueryCase[] {
     },
     {
       name: "20 recent page 1 (dedup per client)",
-      sql: buildDedupPageSql(tsClause, "qnameLc, clientIpLc"),
+      sql: buildDedupPageSql(tsClause, "qnameLc, groupId, clientIpLc"),
       params: [...tsParams],
     },
   ];

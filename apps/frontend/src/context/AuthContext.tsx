@@ -9,6 +9,7 @@ import {
 } from "../config";
 import { AuthContext } from "./authContextInstance";
 import { redirectToTrustedSsoLogout } from "../utils/trustedSso";
+import type { GroupCredentialStatusEnvelope } from "../types/auth";
 
 export type AuthStatus = {
   sessionAuthEnabled?: boolean;
@@ -16,6 +17,8 @@ export type AuthStatus = {
   user?: string;
   authSource?: "password" | "trusted-sso";
   technitiumUser?: string;
+  verifiedUsernamesByGroup?: Record<string, string>;
+  groupCredentials?: GroupCredentialStatusEnvelope;
   nodeIds?: string[];
   unreachableNodeIds?: string[];
   failedNodeIds?: string[];
