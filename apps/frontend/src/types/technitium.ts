@@ -30,6 +30,8 @@ export interface TechnitiumClusterState {
   dnsServerDomain?: string;
   type?: "Primary" | "Secondary" | "Standalone";
   health?: "Connected" | "Unreachable" | "Self";
+  /** False only when Companion could not validate this group's topology. */
+  topologyKnown?: boolean;
 }
 
 export interface TechnitiumClusterSettings {

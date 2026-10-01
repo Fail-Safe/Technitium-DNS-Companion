@@ -785,8 +785,7 @@ export class TechnitiumController {
       }
 
       if (Object.keys(overrides).length > 0) {
-        payload.overrides =
-          overrides as TechnitiumUpdateDhcpScopeRequest["overrides"];
+        payload.overrides = overrides;
       }
     }
 

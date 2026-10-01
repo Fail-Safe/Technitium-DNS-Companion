@@ -94,6 +94,7 @@ import type {
     ZoneSnapshotRestoreOptions,
     ZoneSnapshotRestoreResult,
 } from "../types/zoneSnapshots";
+import type { AdvancedBlockingPauseStatus } from "../types/advancedBlockingPause";
 import type { AuthStatus } from "./AuthContext";
 import { TechnitiumContext } from "./technitiumContextInstance";
 import { useOptionalAuth } from "./useAuth";
@@ -137,6 +138,10 @@ export interface TechnitiumState {
     rawConfig: string,
     configRevision: string,
   ) => Promise<AdvancedBlockingRawConfig>;
+  advancedBlockingPause?: AdvancedBlockingPauseStatus;
+  reloadAdvancedBlockingPause: () => Promise<void>;
+  pauseAdvancedBlocking: (minutes: number) => Promise<AdvancedBlockingPauseStatus>;
+  resumeAdvancedBlocking: () => Promise<AdvancedBlockingPauseStatus>;
   mutateAdvancedBlockingComment: (
     nodeId: string,
     mutation: AdvancedBlockingCommentMutationRequest,
@@ -549,6 +554,7 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   const [builtInBlockingError, setBuiltInBlockingError] = useState<
     string | undefined
   >();
+  const [advancedBlockingPause, setAdvancedBlockingPause] = useState<AdvancedBlockingPauseStatus>();
   const [blockingStatus, setBlockingStatus] = useState<
     BlockingStatusOverview | undefined
   >();
@@ -2901,6 +2907,44 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
   );
 
   // ========================================
+  // Advanced Blocking Pause Callbacks
+  const reloadAdvancedBlockingPause = useCallback(async () => {
+    const response = await apiFetch("/advanced-blocking/pause");
+    if (!response.ok) {
+      throw new Error(
+        `Failed to load Advanced Blocking pause state (${response.status})`,
+      );
+    }
+    setAdvancedBlockingPause(
+      (await response.json()) as AdvancedBlockingPauseStatus,
+    );
+  }, []);
+
+  const pauseAdvancedBlocking = useCallback(async (minutes: number) => {
+    const response = await apiFetch("/advanced-blocking/pause", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ minutes }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to pause Advanced Blocking (${response.status})`);
+    }
+    const status = (await response.json()) as AdvancedBlockingPauseStatus;
+    setAdvancedBlockingPause(status);
+    return status;
+  }, []);
+
+  const resumeAdvancedBlocking = useCallback(async () => {
+    const response = await apiFetch("/advanced-blocking/pause/resume", {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to resume Advanced Blocking (${response.status})`);
+    }
+    const status = (await response.json()) as AdvancedBlockingPauseStatus;
+    setAdvancedBlockingPause(status);
+    return status;
+  }, []);
   // Built-in Blocking Callbacks
   // ========================================
 
@@ -3196,6 +3240,10 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       loadAdvancedBlockingRawConfig,
       saveAdvancedBlockingRawConfig,
       mutateAdvancedBlockingComment,
+      advancedBlockingPause,
+      reloadAdvancedBlockingPause,
+      pauseAdvancedBlocking,
+      resumeAdvancedBlocking,
       // Built-in Blocking
       builtInBlocking,
       loadingBuiltInBlocking,
@@ -3285,6 +3333,10 @@ export function TechnitiumProvider({ children }: { children: ReactNode }) {
       loadAdvancedBlockingRawConfig,
       saveAdvancedBlockingRawConfig,
       mutateAdvancedBlockingComment,
+      advancedBlockingPause,
+      reloadAdvancedBlockingPause,
+      pauseAdvancedBlocking,
+      resumeAdvancedBlocking,
       // Built-in Blocking
       builtInBlocking,
       loadingBuiltInBlocking,

@@ -6,6 +6,7 @@ import type { Response as SupertestResponse } from "supertest";
 import request from "supertest";
 import { App } from "supertest/types";
 
+import { AdvancedBlockingPauseStateService } from "../src/technitium/advanced-blocking-pause-state.service";
 import { DnsFilteringSnapshotService } from "../src/technitium/dns-filtering-snapshot.service";
 import { TechnitiumService } from "../src/technitium/technitium.service";
 import { AppModule } from "./../src/app.module";
@@ -18,6 +19,7 @@ import {
 describe("Advanced Blocking save/get round-trip (e2e)", () => {
   let app: INestApplication<App>;
   let sessionCookie: string;
+  let storedConfigByNode: Map<string, string | null>;
 
   const getBlockingAnswerTtl = (res: SupertestResponse): unknown => {
     const body = res.body as unknown;
@@ -31,7 +33,19 @@ describe("Advanced Blocking save/get round-trip (e2e)", () => {
     process.env.CACHE_DIR =
       process.env.CACHE_DIR || join(os.tmpdir(), "tdc-cache-test");
 
-    const storedConfigByNode = new Map<string, string | null>();
+    // Successful edits start from an installed app's readable configuration.
+    storedConfigByNode = new Map([
+      [
+        "node1",
+        JSON.stringify({
+          enableBlocking: true,
+          blockingAnswerTtl: 60,
+          localEndPointGroupMap: {},
+          networkGroupMap: {},
+          groups: [],
+        }),
+      ],
+    ]);
 
     type ExecuteActionRequest = {
       url?: unknown;
@@ -115,6 +129,92 @@ describe("Advanced Blocking save/get round-trip (e2e)", () => {
   afterEach(async () => {
     await app.close();
   });
+
+  it.each([
+    "Cluster topology is unavailable, so a current Primary could not be validated.",
+    "The standalone node is not admitted for configuration writes.",
+  ])("reports schedule admission failure as HTTP 503: %s", async (reason) => {
+    const tech = app.get(TechnitiumService);
+    jest
+      .mocked(tech.resolveClusterWriteTargets)
+      .mockImplementation((_ids, _summaries, options) =>
+        Promise.resolve({
+          perCandidate: new Map([
+            [
+              "node1",
+              options?.authMode === "schedule"
+                ? { flushNodes: [], reason }
+                : { writeTarget: "node1", flushNodes: ["node1"] },
+            ],
+          ]),
+          writeTargets: options?.authMode === "schedule" ? [] : ["node1"],
+        }),
+      );
+    const original = storedConfigByNode.get("node1");
+
+    await withE2eAuth(
+      request(app.getHttpServer()).post("/api/advanced-blocking/pause"),
+      sessionCookie,
+    )
+      .send({ minutes: 5 })
+      .expect(503)
+      .expect((res: SupertestResponse) => {
+        expect(res.body).toMatchObject({
+          statusCode: 503,
+          message: expect.stringContaining(reason),
+        });
+        expect(res.body).toMatchObject({
+          message: expect.stringContaining("TECHNITIUM_SCHEDULE_TOKEN"),
+        });
+        expect(res.body).toMatchObject({
+          message: expect.stringContaining("Apps: Modify"),
+        });
+      });
+
+    expect(
+      jest
+        .mocked(tech.executeAction)
+        .mock.calls.filter(
+          ([, action]) => action.url === "/api/apps/config/set",
+        ),
+    ).toHaveLength(0);
+    expect(storedConfigByNode.get("node1")).toBe(original);
+    expect(app.get(AdvancedBlockingPauseStateService).list()).toEqual([]);
+  });
+
+  it.each([null, ""])(
+    "refuses to save when the remote config is %p without writing",
+    async (remoteConfig) => {
+      storedConfigByNode.set("node1", remoteConfig);
+
+      await withE2eAuth(
+        request(app.getHttpServer()).post("/api/nodes/node1/advanced-blocking"),
+        sessionCookie,
+      )
+        .send({
+          config: {
+            enableBlocking: true,
+            blockingAnswerTtl: 123,
+            localEndPointGroupMap: {},
+            networkGroupMap: {},
+            groups: [],
+          },
+        })
+        .expect((res: SupertestResponse) => {
+          expect(res.status).toBeGreaterThanOrEqual(400);
+        });
+
+      const executeAction = jest.mocked(
+        app.get(TechnitiumService).executeAction,
+      );
+      expect(
+        executeAction.mock.calls.filter(
+          ([, action]) => action.url === "/api/apps/config/set",
+        ),
+      ).toHaveLength(0);
+      expect(storedConfigByNode.get("node1")).toBe(remoteConfig);
+    },
+  );
 
   it("preserves blockingAnswerTtl across save -> fetch", async () => {
     const config = {

@@ -35,7 +35,6 @@ import type {
   UnifiedExportAbGroup,
   UnifiedExportDg,
   UnifiedExportData,
-  UnifiedImportDomainGroupsMode,
   UnifiedImportDomainsMode,
   UnifiedImportRequest,
   UnifiedImportResult,
@@ -1471,6 +1470,7 @@ export class DomainGroupsService implements OnModuleInit {
             await this.advancedBlockingService.setConfig(
               summary.id,
               nextConfig,
+              snapshot.configRevision,
             );
           }
           // Update tracking after successful setConfig (or immediately if no changes).
@@ -1750,9 +1750,8 @@ export class DomainGroupsService implements OnModuleInit {
       }
     }
 
-    const domainsMode = input.domainsMode as UnifiedImportDomainsMode;
-    const domainGroupsMode =
-      input.domainGroupsMode as UnifiedImportDomainGroupsMode;
+    const domainsMode = input.domainsMode;
+    const domainGroupsMode = input.domainGroupsMode;
     const data = (input.data ?? {}) as UnifiedImportRequest["data"];
 
     const result: UnifiedImportResult = {
@@ -1792,7 +1791,11 @@ export class DomainGroupsService implements OnModuleInit {
             data.groups,
             domainsMode,
           );
-          await this.advancedBlockingService.setConfig(nodeId, newConfig);
+          await this.advancedBlockingService.setConfig(
+            nodeId,
+            newConfig,
+            snapshot.configRevision,
+          );
           result.domains.groupsUpdated = updatedGroups;
           result.domains.groupsSkipped = skippedGroups;
         }
@@ -1845,10 +1848,7 @@ export class DomainGroupsService implements OnModuleInit {
         continue;
       }
 
-      const dg = rawDg as {
-        description?: string;
-        entries?: Array<{ value: string; type?: string; note?: string }>;
-      };
+      const dg = rawDg;
       const description =
         typeof dg.description === "string" && dg.description.trim()
           ? dg.description.trim()

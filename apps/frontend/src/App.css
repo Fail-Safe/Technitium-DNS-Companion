@@ -1268,6 +1268,46 @@ body {
   transform: rotate(180deg);
 }
 
+.app-header__pause--error,
+.app-header__pause--error:hover:not(:disabled) {
+  color: var(--color-danger-text);
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger);
+}
+
+.advanced-blocking-recovery {
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--color-warning);
+  border-radius: 0.75rem;
+  background: var(--color-warning-bg);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.advanced-blocking-recovery--error {
+  border-color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.advanced-blocking-recovery p {
+  margin: 0.5rem 0;
+}
+
+.advanced-blocking-recovery ul {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.app-header__pause-note {
+  margin: 0;
+  padding: 0.5rem;
+  max-width: min(18rem, 75vw);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
 .app-header__pause-menu {
   position: absolute;
   top: calc(100% + 0.5rem);

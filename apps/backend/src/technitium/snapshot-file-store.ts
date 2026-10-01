@@ -82,7 +82,7 @@ export abstract class SnapshotFileStore<
         origin: snapshot.metadata.origin ?? "manual",
         pinned: snapshot.metadata.pinned ?? false,
       },
-    } as TSnapshot;
+    };
   }
 
   protected async ensureNodeDir(nodeId: string): Promise<void> {

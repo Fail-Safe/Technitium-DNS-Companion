@@ -1,6 +1,9 @@
 import { HttpModule } from "@nestjs/axios";
 import { Logger, Module } from "@nestjs/common";
 import { ThrottlerModule } from "@nestjs/throttler";
+import { AdvancedBlockingPauseController } from "./advanced-blocking-pause.controller";
+import { AdvancedBlockingPauseService } from "./advanced-blocking-pause.service";
+import { AdvancedBlockingPauseStateService } from "./advanced-blocking-pause-state.service";
 import { AdvancedBlockingController } from "./advanced-blocking.controller";
 import { AdvancedBlockingService } from "./advanced-blocking.service";
 import { BuiltInBlockingController } from "./built-in-blocking.controller";
@@ -56,7 +59,9 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
     TechnitiumService,
     CompanionDbService,
     QueryLogSqliteService,
+    AdvancedBlockingPauseStateService,
     AdvancedBlockingService,
+    AdvancedBlockingPauseService,
     BuiltInBlockingService,
     DhcpDnsSyncService,
     DhcpDnsSyncStateService,
@@ -100,6 +105,7 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
   ],
   controllers: [
     TechnitiumController,
+    AdvancedBlockingPauseController,
     AdvancedBlockingController,
     BuiltInBlockingController,
     DomainGroupsController,
@@ -113,7 +119,9 @@ import { ZoneSnapshotService } from "./zone-snapshot.service";
   ],
   exports: [
     TechnitiumService,
+    AdvancedBlockingPauseStateService,
     AdvancedBlockingService,
+    AdvancedBlockingPauseService,
     BuiltInBlockingService,
     SplitHorizonPtrService,
     DomainListCacheService,

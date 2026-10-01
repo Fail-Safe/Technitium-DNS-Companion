@@ -311,6 +311,7 @@ export class DnsSchedulesEvaluatorService
         await this.technitiumService.resolveClusterWriteTargets(
           allNodeIds,
           allNodes,
+          { authMode: "schedule" },
         );
 
       const results: DnsScheduleApplicationResult[] = [];
@@ -1002,6 +1003,7 @@ export class DnsSchedulesEvaluatorService
       await this.technitiumService.resolveClusterWriteTargets(
         [...new Set([...appliedNodeIds, ...allNodes.map((node) => node.id)])],
         allNodes,
+        { authMode: "schedule" },
       );
     const now = new Date();
     const activeSources: ActiveOverrideSource[] = [

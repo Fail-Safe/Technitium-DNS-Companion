@@ -1,4 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
+import { AdvancedBlockingPauseService } from "./advanced-blocking-pause.service";
+import { AdvancedBlockingPauseStateService } from "./advanced-blocking-pause-state.service";
 import { AdvancedBlockingService } from "./advanced-blocking.service";
 import { DnsSchedulesEvaluatorService } from "./dns-schedules-evaluator.service";
 import { DnsSchedulesService } from "./dns-schedules.service";
@@ -6,9 +8,13 @@ import { DnsTemporaryOverridesService } from "./dns-temporary-overrides.service"
 
 describe("schedule configuration revisions", () => {
   let db: DatabaseSync;
+  let pauseState: AdvancedBlockingPauseStateService;
   let schedules: DnsSchedulesService;
   let overrides: DnsTemporaryOverridesService;
   let evaluator: DnsSchedulesEvaluatorService;
+  let pause: AdvancedBlockingPauseService;
+  let blocking: AdvancedBlockingService;
+  let writtenConfigs: Array<{ enableBlocking: boolean; allowed: string[] }>;
   let config: {
     enableBlocking: boolean;
     blockListUrlUpdateIntervalHours: number;
@@ -29,6 +35,7 @@ describe("schedule configuration revisions", () => {
     overrides = new DnsTemporaryOverridesService(owner as never);
     overrides.onModuleInit();
     reads = writes = 0;
+    writtenConfigs = [];
     editOnRead = -1;
     config = {
       enableBlocking: true,
@@ -36,6 +43,7 @@ describe("schedule configuration revisions", () => {
       groups: [{ name: "test", allowed: [], blocked: [] }],
     };
     const transport = {
+      assertSessionConfigWriteTargets: () => Promise.resolve(),
       listNodes: () =>
         Promise.resolve([{ id: "primary", baseUrl: "https://dns.invalid" }]),
       resolveClusterWriteTargets: () =>
@@ -65,10 +73,21 @@ describe("schedule configuration revisions", () => {
         config = JSON.parse(
           new URLSearchParams(request.body).get("config")!,
         ) as typeof config;
+        writtenConfigs.push({
+          enableBlocking: config.enableBlocking,
+          allowed: [...config.groups[0].allowed],
+        });
         return Promise.resolve({ status: "ok" });
       },
     };
-    const blocking = new AdvancedBlockingService(transport as never);
+    pauseState = new AdvancedBlockingPauseStateService(owner as never);
+    pauseState.onModuleInit();
+    blocking = new AdvancedBlockingService(
+      transport as never,
+      undefined,
+      undefined,
+      pauseState,
+    );
     evaluator = new DnsSchedulesEvaluatorService(
       schedules,
       blocking,
@@ -77,6 +96,12 @@ describe("schedule configuration revisions", () => {
       { listRules: () => [] } as never,
       undefined,
       overrides,
+    );
+    pause = new AdvancedBlockingPauseService(
+      pauseState,
+      blocking,
+      evaluator,
+      transport as never,
     );
     sourceId = overrides.createOverride({
       name: "Test",
@@ -125,6 +150,21 @@ describe("schedule configuration revisions", () => {
     expect(schedules.listAppliedEntries(sourceId, "primary")).toEqual([]);
   });
 
+  it("removes expired Temporary Override rules before restoring the paused root", async () => {
+    pauseState.beginPause("node:primary", "primary", "2026-09-05T13:00:00Z");
+    await blocking.activatePauseRoot("primary", "schedule");
+    await evaluator.runNow(false);
+    expect(config.groups[0].allowed).toEqual(["example.test"]);
+    expect(config.enableBlocking).toBe(false);
+    jest.setSystemTime(new Date("2026-09-05T12:06:00Z"));
+    await pause.resumeNow();
+    expect(writtenConfigs.slice(-2)).toEqual([
+      { enableBlocking: false, allowed: [] },
+      { enableBlocking: true, allowed: [] },
+    ]);
+    expect(pauseState.list()).toEqual([]);
+  });
+
   it("accepts matching revisions and avoids unchanged writes", async () => {
     expect((await evaluator.runNow(false)).errored).toBe(0);
     expect(writes).toBe(1);
@@ -133,6 +173,19 @@ describe("schedule configuration revisions", () => {
     jest.setSystemTime(new Date("2026-09-05T12:06:00Z"));
     await evaluator.runNow(false);
     expect(writes).toBe(2);
+    expect(config.groups[0].allowed).toEqual([]);
+  });
+
+  it("keeps Temporary Override apply and expiry writes behind a pause-owned root", async () => {
+    pauseState.beginPause("node:primary", "primary", "2026-09-05T13:00:00Z");
+    pauseState.captureOriginal("node:primary", "primary", true, true);
+    pauseState.activate("node:primary", "primary", true, true);
+    expect((await evaluator.runNow(false)).errored).toBe(0);
+    expect(config.enableBlocking).toBe(false);
+    expect(config.groups[0].allowed).toEqual(["example.test"]);
+    jest.setSystemTime(new Date("2026-09-05T12:06:00Z"));
+    expect((await evaluator.runNow(false)).errored).toBe(0);
+    expect(config.enableBlocking).toBe(false);
     expect(config.groups[0].allowed).toEqual([]);
   });
 });

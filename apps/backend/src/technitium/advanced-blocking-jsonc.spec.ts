@@ -6,6 +6,7 @@ import {
   mutateAdvancedBlockingDomainComment,
   parseAdvancedBlockingJsonc,
   patchAdvancedBlockingJsonc,
+  patchAdvancedBlockingRootEnableBlocking,
 } from "./advanced-blocking-jsonc";
 import type {
   AdvancedBlockingConfig,
@@ -641,6 +642,24 @@ describe("Advanced Blocking JSONC", () => {
     expect(updated).toContain("/* new gamma rationale */");
     expect(parseAdvancedBlockingJsonc(updated)).toMatchObject({
       groups: [{ blocked: ["beta.example", "gamma.example"] }],
+    });
+  });
+  it("patches only the root pause flag and can restore an absent flag", () => {
+    const live = `{
+  // retain this manually edited list
+  "groups": [{ "name": "default", "blocked": ["live.example"] }]
+}`;
+
+    const paused = patchAdvancedBlockingRootEnableBlocking(live, false);
+    expect(parseAdvancedBlockingJsonc(paused)).toMatchObject({
+      enableBlocking: false,
+      groups: [{ blocked: ["live.example"] }],
+    });
+    expect(paused).toContain("retain this manually edited list");
+
+    const resumed = patchAdvancedBlockingRootEnableBlocking(paused, undefined);
+    expect(parseAdvancedBlockingJsonc(resumed)).toEqual({
+      groups: [{ name: "default", blocked: ["live.example"] }],
     });
   });
 });

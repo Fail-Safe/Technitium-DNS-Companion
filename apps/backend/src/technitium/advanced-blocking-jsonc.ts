@@ -90,6 +90,22 @@ export function calculateAdvancedBlockingConfigRevision(
   return createHash("sha256").update(rawConfig).digest("hex");
 }
 
+/** Patch only the pause-owned root switch while preserving JSONC formatting/comments. */
+export function patchAdvancedBlockingRootEnableBlocking(
+  rawConfig: string,
+  enableBlocking: boolean | undefined,
+): string {
+  const parsed = parseAdvancedBlockingJsonc(rawConfig);
+  if (!isRecord(parsed)) {
+    throw new Error("Advanced Blocking config payload was not an object.");
+  }
+  return reconcileOptionalProperty(
+    rawConfig,
+    ["enableBlocking"],
+    enableBlocking,
+  );
+}
+
 export function patchAdvancedBlockingJsonc(
   rawConfig: string,
   desiredConfig: AdvancedBlockingConfig,

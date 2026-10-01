@@ -657,7 +657,7 @@ describe("TechnitiumService request (session auth)", () => {
 
     const requestSpy = jest
       .spyOn(axios, "request")
-      .mockResolvedValue({ data: { status: "ok" } } as never);
+      .mockResolvedValue({ data: { status: "ok" } });
     const node = {
       id: "node1",
       name: "Node 1",
@@ -701,7 +701,7 @@ describe("TechnitiumService request (session auth)", () => {
       })
       .mockResolvedValueOnce({
         data: { status: "ok", info: { version: "14.2" } },
-      } as never);
+      });
 
     const result = await AuthRequestContext.run({ session }, () =>
       new TechnitiumService([node], new DhcpSnapshotService()).getNodeStatus(
@@ -735,7 +735,7 @@ describe("TechnitiumService request (session auth)", () => {
     } satisfies TechnitiumNodeConfig;
     const requestSpy = jest.spyOn(axios, "request").mockResolvedValue({
       data: { server: "server1", status: "ok" },
-    } as never);
+    });
     service = new TechnitiumService([node], new DhcpSnapshotService());
 
     const result = await AuthRequestContext.run({ session }, () =>
@@ -837,7 +837,7 @@ describe("TechnitiumService request (session auth)", () => {
         status: "error",
         errorMessage: "DNS server failed to resolve localhost.",
       },
-    } as never);
+    });
     service = new TechnitiumService([node], new DhcpSnapshotService());
 
     const result = await AuthRequestContext.run({ session }, () =>
@@ -898,7 +898,7 @@ describe("TechnitiumService request (session auth)", () => {
 
     jest
       .spyOn(axios, "request")
-      .mockResolvedValue({ data: { status: "invalid-token" } } as never);
+      .mockResolvedValue({ data: { status: "invalid-token" } });
 
     const node = {
       id: "node1",
@@ -1203,8 +1203,13 @@ describe("TechnitiumService — resolveClusterWriteTargets", () => {
             initialized: true,
             domain: opts.domain,
             type: opts.primary ? "Primary" : "Secondary",
+            topologyKnown: true,
           }
-        : { initialized: false, type: "Standalone" },
+        : {
+            initialized: false,
+            type: "Standalone",
+            topologyKnown: true,
+          },
       isPrimary: !!opts.primary,
     };
   }
@@ -1224,6 +1229,37 @@ describe("TechnitiumService — resolveClusterWriteTargets", () => {
     });
   });
 
+  it("rejects strict writes without an explicit topology marker", async () => {
+    const nodes: TechnitiumNodeSummary[] = [
+      {
+        id: "dns1",
+        baseUrl: "https://dns1.test",
+        groupId: "__default__",
+        clusterState: { initialized: false, type: "Standalone" },
+        isPrimary: false,
+      },
+    ];
+
+    const result = await service.resolveClusterWriteTargets(["dns1"], nodes, {
+      requireValidatedPrimary: true,
+    });
+
+    expect(result.writeTargets).toEqual([]);
+    expect(result.perCandidate.get("dns1")).toMatchObject({
+      reason: expect.stringContaining("topology is unavailable"),
+    });
+  });
+
+  it("rejects unknown nodes for strict writes", async () => {
+    const result = await service.resolveClusterWriteTargets(["ghost"], [], {
+      requireValidatedPrimary: true,
+    });
+
+    expect(result.writeTargets).toEqual([]);
+    expect(result.perCandidate.get("ghost")).toMatchObject({
+      reason: expect.stringContaining("not a validated member"),
+    });
+  });
   it("collapses a 3-node cluster to a single Primary write target with all nodes as flush targets", async () => {
     const nodes = [
       summary("nodeA", { domain: "example.com", primary: true }),
@@ -1286,7 +1322,7 @@ describe("TechnitiumService — resolveClusterWriteTargets", () => {
     const warnSpy = jest.fn();
     (service as unknown as { logger: { warn: jest.Mock } }).logger = {
       warn: warnSpy,
-    } as never;
+    };
 
     const { perCandidate, writeTargets } =
       await service.resolveClusterWriteTargets(["x", "y"], nodes);
@@ -1429,6 +1465,164 @@ describe("TechnitiumService — resolveClusterWriteTargets", () => {
     expect(result.perCandidate.get("secondary")?.writeTarget).toBeUndefined();
     expect(result.perCandidate.get("secondary")?.reason).toContain(
       "no reachable, validated, admitted Primary",
+    );
+  });
+  it("uses schedule admission when resolving inside an interactive request", async () => {
+    const configs: TechnitiumNodeConfig[] = [
+      {
+        id: "dns1",
+        baseUrl: "https://dns1.test",
+        token: "",
+        groupId: "cluster",
+      },
+      {
+        id: "dns2",
+        baseUrl: "https://dns2.test",
+        token: "",
+        groupId: "cluster",
+      },
+    ];
+    service.onModuleDestroy();
+    service = new TechnitiumService(configs, new DhcpSnapshotService());
+    const admitted = (nodeIds: string[]) => ({
+      anyReady: true,
+      allReady: true,
+      groups: [
+        {
+          groupId: "cluster",
+          state: "ready" as const,
+          authenticatedNodeIds: nodeIds,
+          unreachableNodeIds: [],
+          failedNodeIds: [],
+          admittedNodeIds: {
+            interactive: nodeIds,
+            ptrRead: nodeIds,
+            dhcpRead: nodeIds,
+            primaryConfigWrite: nodeIds,
+            cacheFlush: nodeIds,
+          },
+          capabilities: {
+            ptrRead: true,
+            dhcpRead: true,
+            primaryConfigWrite: true,
+            cacheFlush: true,
+          },
+        },
+      ],
+    });
+    (
+      service as unknown as { scheduleGroupCredentials: unknown }
+    ).scheduleGroupCredentials = admitted(["dns1"]);
+    const session: AuthSession = {
+      id: "trusted-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      authSource: "trusted-sso",
+      tokensByNodeId: {},
+      groupCredentials: admitted(["dns2"]),
+    };
+    const summaries = [
+      summary("dns1", {
+        domain: "cluster.example",
+        groupId: "cluster",
+        primary: true,
+      }),
+      summary("dns2", { domain: "cluster.example", groupId: "cluster" }),
+    ];
+
+    const result = await AuthRequestContext.run({ session }, () =>
+      service.resolveClusterWriteTargets(["dns2"], summaries, {
+        requireValidatedPrimary: true,
+        authMode: "schedule",
+      }),
+    );
+
+    expect(result.perCandidate.get("dns2")?.writeTarget).toBe("dns1");
+  });
+
+  it("accepts a password session only after probing Apps: Modify on the exact Primary", async () => {
+    const config: TechnitiumNodeConfig = {
+      id: "dns1",
+      baseUrl: "https://dns1.test",
+      token: "",
+      groupId: "cluster",
+    };
+    service.onModuleDestroy();
+    service = new TechnitiumService([config], new DhcpSnapshotService());
+    const probe = jest
+      .spyOn(service, "validateExplicitSessionToken")
+      .mockResolvedValue({
+        username: "admin",
+        permissions: { Apps: { canModify: true } },
+        clusterInitialized: true,
+        dnsServerDomain: "dns1",
+        clusterNodes: [
+          { name: "dns1", url: "https://dns1.test", type: "Primary" },
+        ],
+      });
+    const session: AuthSession = {
+      id: "password-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      authSource: "password",
+      tokensByNodeId: { dns1: "redacted" },
+    };
+
+    await AuthRequestContext.run({ session }, () =>
+      service.assertSessionConfigWriteTargets(["dns1"]),
+    );
+
+    expect(probe).toHaveBeenCalledWith("dns1", "redacted");
+  });
+
+  it("accepts a trusted session admitted for the exact Primary", async () => {
+    const config: TechnitiumNodeConfig = {
+      id: "dns1",
+      baseUrl: "https://dns1.test",
+      token: "",
+      groupId: "cluster",
+    };
+    service.onModuleDestroy();
+    service = new TechnitiumService([config], new DhcpSnapshotService());
+    const session: AuthSession = {
+      id: "trusted-session",
+      createdAt: new Date().toISOString(),
+      lastSeenAt: Date.now(),
+      user: "admin",
+      authSource: "trusted-sso",
+      tokensByNodeId: {},
+      groupCredentials: {
+        anyReady: true,
+        allReady: true,
+        groups: [
+          {
+            groupId: "cluster",
+            state: "ready",
+            authenticatedNodeIds: ["dns1"],
+            unreachableNodeIds: [],
+            failedNodeIds: [],
+            admittedNodeIds: {
+              interactive: ["dns1"],
+              ptrRead: ["dns1"],
+              dhcpRead: ["dns1"],
+              primaryConfigWrite: ["dns1"],
+              cacheFlush: ["dns1"],
+            },
+            capabilities: {
+              ptrRead: true,
+              dhcpRead: true,
+              primaryConfigWrite: true,
+              cacheFlush: true,
+            },
+          },
+        ],
+      },
+    };
+
+    await AuthRequestContext.run({ session }, () =>
+      service.assertSessionConfigWriteTargets(["dns1"]),
     );
   });
 });
@@ -1733,6 +1927,104 @@ describe("TechnitiumService — cluster probe failover", () => {
       expect.objectContaining({ id: "site-a-primary", isPrimary: true }),
       expect.objectContaining({ id: "site-a-secondary", isPrimary: false }),
     ]);
+  });
+  it("fails closed for strict writes when every cluster probe fails", async () => {
+    const nodes: TechnitiumNodeConfig[] = [
+      { id: "dns1", baseUrl: "https://dns1.test", token: "token" },
+      { id: "dns2", baseUrl: "https://dns2.test", token: "token" },
+    ];
+    service = new TechnitiumService(nodes, new DhcpSnapshotService());
+    const internals = service as unknown as { request: jest.Mock };
+    internals.request = jest.fn().mockRejectedValue(new Error("unreachable"));
+
+    const summaries = await service.listNodes({ authMode: "schedule" });
+    const result = await service.resolveClusterWriteTargets(
+      ["dns1", "dns2"],
+      summaries,
+      { requireValidatedPrimary: true, authMode: "schedule" },
+    );
+
+    expect(summaries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "dns1",
+          clusterState: expect.objectContaining({ topologyKnown: false }),
+        }),
+      ]),
+    );
+    expect(result.writeTargets).toEqual([]);
+    expect(result.perCandidate.get("dns1")?.writeTarget).toBeUndefined();
+  });
+
+  it("allows a strict write for a probe-confirmed standalone node", async () => {
+    const nodes: TechnitiumNodeConfig[] = [
+      { id: "dns1", baseUrl: "https://dns1.test", token: "token" },
+    ];
+    service = new TechnitiumService(nodes, new DhcpSnapshotService());
+    const internals = service as unknown as { request: jest.Mock };
+    internals.request = jest.fn().mockResolvedValue({
+      status: "ok",
+      info: { clusterInitialized: false },
+    });
+
+    const summaries = await service.listNodes({ authMode: "schedule" });
+    const result = await service.resolveClusterWriteTargets(
+      ["dns1"],
+      summaries,
+      { requireValidatedPrimary: true, authMode: "schedule" },
+    );
+
+    expect(summaries[0].clusterState?.topologyKnown).toBe(true);
+    expect(result.perCandidate.get("dns1")?.writeTarget).toBe("dns1");
+  });
+
+  it("uses the newly validated Primary on a later strict resolution", async () => {
+    const nodes: TechnitiumNodeConfig[] = [
+      { id: "dns1", baseUrl: "https://dns1.test", token: "token" },
+      { id: "dns2", baseUrl: "https://dns2.test", token: "token" },
+    ];
+    service = new TechnitiumService(nodes, new DhcpSnapshotService());
+    const internals = service as unknown as { request: jest.Mock };
+    const topology = (primary: "dns1" | "dns2") => ({
+      status: "ok",
+      info: {
+        clusterInitialized: true,
+        clusterDomain: "cluster.test",
+        clusterNodes: ["dns1", "dns2"].map((id) => ({
+          id: id === "dns1" ? 1 : 2,
+          name: id,
+          url: `https://${id}.test`,
+          type: id === primary ? "Primary" : "Secondary",
+          state: "Connected",
+        })),
+      },
+    });
+    internals.request = jest
+      .fn()
+      .mockResolvedValueOnce(topology("dns1"))
+      .mockResolvedValue(topology("dns2"));
+
+    const first = await service.listNodes({ authMode: "schedule" });
+    const firstPlan = await service.resolveClusterWriteTargets(
+      ["dns2"],
+      first,
+      {
+        requireValidatedPrimary: true,
+        authMode: "schedule",
+      },
+    );
+    const second = await service.listNodes({ authMode: "schedule" });
+    const secondPlan = await service.resolveClusterWriteTargets(
+      ["dns1"],
+      second,
+      {
+        requireValidatedPrimary: true,
+        authMode: "schedule",
+      },
+    );
+
+    expect(firstPlan.perCandidate.get("dns2")?.writeTarget).toBe("dns1");
+    expect(secondPlan.perCandidate.get("dns1")?.writeTarget).toBe("dns2");
   });
 });
 

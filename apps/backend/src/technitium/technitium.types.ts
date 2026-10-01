@@ -19,6 +19,7 @@ export interface TechnitiumSessionPermission {
 
 export interface TechnitiumCredentialProbe {
   username: string;
+  topologyKnown?: boolean;
   permissions: Record<string, TechnitiumSessionPermission | undefined>;
   clusterInitialized: boolean;
   clusterDomain?: string;
@@ -38,6 +39,8 @@ export interface TechnitiumClusterState {
   dnsServerDomain?: string;
   type?: "Primary" | "Secondary" | "Standalone";
   health?: "Connected" | "Unreachable" | "Self";
+  /** False only when Companion could not validate this group's topology. */
+  topologyKnown?: boolean;
 }
 
 export interface TechnitiumClusterSettings {

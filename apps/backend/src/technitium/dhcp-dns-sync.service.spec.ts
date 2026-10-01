@@ -6,8 +6,6 @@ import type {
   TechnitiumDhcpLease,
   TechnitiumDhcpScope,
   TechnitiumNodeSummary,
-  TechnitiumZoneRecord,
-  TechnitiumZoneSummary,
 } from "./technitium.types";
 
 type TechnitiumServiceMock = jest.Mocked<
@@ -71,11 +69,11 @@ describe("DhcpDnsSyncService", () => {
       fetchedAt: "2026-06-27T00:00:00.000Z",
       data: {
         zones: [
-          { name: "example.test", type: "Primary" } as TechnitiumZoneSummary,
+          { name: "example.test", type: "Primary" },
           {
             name: "2.0.192.in-addr.arpa",
             type: "Primary",
-          } as TechnitiumZoneSummary,
+          },
         ],
       },
     });
@@ -84,7 +82,7 @@ describe("DhcpDnsSyncService", () => {
         nodeId: "primary-node",
         fetchedAt: "2026-06-27T00:00:00.000Z",
         data: {
-          zone: { name: zoneName } as TechnitiumZoneSummary,
+          zone: { name: zoneName },
           records: [],
         },
       }),
@@ -183,7 +181,7 @@ describe("DhcpDnsSyncService", () => {
         nodeId: "primary-node",
         fetchedAt: "2026-06-27T00:00:00.000Z",
         data: {
-          zone: { name: zoneName } as TechnitiumZoneSummary,
+          zone: { name: zoneName },
           records:
             zoneName === "example.test"
               ? [
@@ -191,7 +189,7 @@ describe("DhcpDnsSyncService", () => {
                     name: "dhcp-client.example.test",
                     type: "A",
                     rData: { ipAddress: "192.0.2.200" },
-                  } as TechnitiumZoneRecord,
+                  },
                 ]
               : [],
         },

@@ -16,6 +16,7 @@ import * as https from "https";
 import { promisify } from "util";
 import { AuthRequestContext } from "../auth/auth-request-context";
 import { loadAutomationCredentialMap } from "../auth/credential-map";
+import { buildScheduleGroupStatus } from "./schedule-credential-status";
 import {
   buildGroupCredentialEnvelope,
   emptyAdmissions,
@@ -30,6 +31,7 @@ import type {
 } from "../auth/auth.types";
 import { getEnvOrFile } from "../utils/env-file";
 import { DhcpSnapshotService } from "./dhcp-snapshot.service";
+import { unwrapApiResponse } from "./technitium-api-response";
 import { TECHNITIUM_NODES_TOKEN } from "./technitium.constants";
 import {
   configuredGroupIds,
@@ -687,6 +689,11 @@ export class TechnitiumService {
     return this.nodeConfigs.map((node) => node.id);
   }
 
+  getConfiguredNodeGroupId(nodeId: string): string | undefined {
+    const node = this.nodeConfigs.find((item) => item.id === nodeId);
+    return node ? nodeGroupId(node) : undefined;
+  }
+
   async validateExplicitSessionToken(
     nodeId: string,
     token: string,
@@ -730,6 +737,7 @@ export class TechnitiumService {
     const info = sessionInfo.info ?? {};
     return {
       username,
+      topologyKnown: typeof info.clusterInitialized === "boolean",
       permissions: info.permissions ?? {},
       clusterInitialized: info.clusterInitialized === true,
       clusterDomain: info.clusterDomain,
@@ -932,13 +940,58 @@ export class TechnitiumService {
 
             if (
               response.status === "ok" &&
-              !response.info?.clusterInitialized
+              response.info?.clusterInitialized === false
             ) {
               sharedClusterInfoByGroup.set(groupId, { initialized: false });
               break;
             }
-            if (response.status === "ok" && response.info?.clusterInitialized) {
+            if (
+              response.status === "ok" &&
+              response.info?.clusterInitialized === true
+            ) {
               const clusterNodes = response.info.clusterNodes || [];
+              if (authMode === "schedule") {
+                const role = this.getCredentialProbeNodeRole(probeNode, {
+                  username: "",
+                  permissions: {},
+                  clusterInitialized: true,
+                  clusterDomain: response.info.clusterDomain,
+                  dnsServerDomain: response.info.dnsServerDomain,
+                  clusterNodes,
+                });
+                if (
+                  role !== "Primary" ||
+                  !response.info.clusterDomain ||
+                  clusterNodes.filter((member) => member.type === "Primary")
+                    .length !== 1
+                ) {
+                  this.invalidateSchedulePrimaryAdmission(groupId);
+                  continue;
+                }
+                const group = this.scheduleGroupCredentials?.groups.find(
+                  (item) => item.groupId === groupId,
+                );
+                if (
+                  group &&
+                  !group.admittedNodeIds.primaryConfigWrite.includes(
+                    probeNode.id,
+                  )
+                ) {
+                  // Topology may promote an already authenticated Secondary.
+                  // Revalidate the credential on that exact new Primary.
+                  this.scheduleTokenValidation = { validated: false };
+                  await this.validateScheduleToken();
+                  const refreshed = this.scheduleGroupCredentials?.groups.find(
+                    (item) => item.groupId === groupId,
+                  );
+                  if (
+                    !refreshed?.admittedNodeIds.primaryConfigWrite.includes(
+                      probeNode.id,
+                    )
+                  )
+                    continue;
+                }
+              }
               sharedClusterInfoByGroup.set(groupId, {
                 initialized: true,
                 domain: response.info.clusterDomain,
@@ -984,7 +1037,13 @@ export class TechnitiumService {
               name: name || id,
               baseUrl,
               groupId: configuredGroupId,
-              clusterState: { initialized: false, type: "Standalone" as const },
+              // A false initialized value is safe for strict writes only after
+              // a successful probe confirmed that this group is standalone.
+              clusterState: {
+                initialized: false,
+                type: "Standalone" as const,
+                topologyKnown: sharedClusterInfo !== null,
+              },
               isPrimary: false,
             };
           }
@@ -1128,6 +1187,7 @@ export class TechnitiumService {
               dnsServerDomain: clusterNode?.name || id,
               type: nodeType,
               health: "Connected" as const,
+              topologyKnown: true,
             },
             isPrimary: nodeType === "Primary",
           };
@@ -1145,6 +1205,7 @@ export class TechnitiumService {
               initialized: false,
               type: "Standalone" as const,
               health: "Unreachable" as const,
+              topologyKnown: false,
             },
             isPrimary: false,
           };
@@ -1180,6 +1241,10 @@ export class TechnitiumService {
   async resolveClusterWriteTargets(
     candidateNodeIds: string[],
     summaries?: TechnitiumNodeSummary[],
+    options?: {
+      requireValidatedPrimary?: boolean;
+      authMode?: "session" | "schedule";
+    },
   ): Promise<{
     perCandidate: Map<
       string,
@@ -1192,14 +1257,24 @@ export class TechnitiumService {
     >;
     writeTargets: string[];
   }> {
-    const nodes = summaries ?? (await this.listNodes());
+    const nodes =
+      summaries ??
+      (await this.listNodes(
+        options?.authMode ? { authMode: options.authMode } : undefined,
+      ));
     const byId = new Map(nodes.map((s) => [s.id, s]));
 
     const primaryByGroup = new Map<string, TechnitiumNodeSummary>();
     const clusterMembers = new Map<string, string[]>();
     const skippedClusterMembers = new Map<string, string[]>();
-    let admittedWriteNodeIds = this.getAdmittedNodeIds("primaryConfigWrite");
-    let admittedFlushNodeIds = this.getAdmittedNodeIds("cacheFlush");
+    let admittedWriteNodeIds = this.getAdmittedNodeIds(
+      "primaryConfigWrite",
+      options?.authMode,
+    );
+    let admittedFlushNodeIds = this.getAdmittedNodeIds(
+      "cacheFlush",
+      options?.authMode,
+    );
     if (this.nodeConfigs.length === 0) {
       admittedWriteNodeIds = new Set(nodes.map((node) => node.id));
       admittedFlushNodeIds = new Set(nodes.map((node) => node.id));
@@ -1240,6 +1315,14 @@ export class TechnitiumService {
       // Unknown node: pass through — legacy behavior, will error at request time
       // if truly invalid. Callers can decide what to do with the result.
       if (!summary) {
+        if (options?.requireValidatedPrimary) {
+          perCandidate.set(nodeId, {
+            flushNodes: [],
+            reason:
+              "The requested node is not a validated member with confirmed topology.",
+          });
+          continue;
+        }
         if (this.nodeConfigs.length === 0) {
           perCandidate.set(nodeId, {
             writeTarget: nodeId,
@@ -1269,6 +1352,33 @@ export class TechnitiumService {
       const clustered = summary.clusterState?.initialized === true;
       const groupId = summary.groupId ?? INTERNAL_DEFAULT_GROUP_ID;
 
+      if (options?.requireValidatedPrimary) {
+        if (summary.clusterState?.topologyKnown !== true) {
+          perCandidate.set(nodeId, {
+            flushNodes: [],
+            reason:
+              "Cluster topology is unavailable, so a current Primary could not be validated.",
+          });
+          continue;
+        }
+        if (!clustered && summary.clusterState?.initialized !== false) {
+          perCandidate.set(nodeId, {
+            flushNodes: [],
+            reason:
+              "Cluster topology is incomplete, so a current Primary could not be validated.",
+          });
+          continue;
+        }
+        if (clustered && !domain) {
+          perCandidate.set(nodeId, {
+            flushNodes: [],
+            reason:
+              "Cluster topology is incomplete, so a current Primary could not be validated.",
+          });
+          continue;
+        }
+      }
+
       if (!clustered || !domain) {
         // Standalone — self-write, self-flush.
         if (admittedWriteNodeIds.has(nodeId)) {
@@ -1296,8 +1406,9 @@ export class TechnitiumService {
         // node's cluster has no node marked Primary in our summaries).
         // Fall back to direct write so we make progress; warn once.
         if (
-          this.nodeConfigs.length === 0 ||
-          hasImplicitNodeGrouping(this.nodeConfigs)
+          !options?.requireValidatedPrimary &&
+          (this.nodeConfigs.length === 0 ||
+            hasImplicitNodeGrouping(this.nodeConfigs))
         ) {
           this.logger.warn(
             `Cluster "${domain}" has no discoverable Primary — falling back to direct write on "${nodeId}" in implicit legacy mode.`,
@@ -1338,9 +1449,19 @@ export class TechnitiumService {
 
   private getAdmittedNodeIds(
     role: keyof GroupCredentialStatus["admittedNodeIds"],
+    authMode?: "session" | "schedule",
   ): Set<string> {
-    const session = AuthRequestContext.getSession();
-    const envelope = session?.groupCredentials ?? this.scheduleGroupCredentials;
+    // A schedule resolution inside an interactive request must never inherit
+    // session admission. The target selected here is the one the unattended
+    // credential will mutate.
+    const session =
+      authMode === "schedule" ? undefined : AuthRequestContext.getSession();
+    const envelope =
+      authMode === "schedule"
+        ? this.scheduleGroupCredentials
+        : session
+          ? session.groupCredentials
+          : this.scheduleGroupCredentials;
     if (envelope) {
       return new Set(
         envelope.groups.flatMap((group) => group.admittedNodeIds[role]),
@@ -3099,9 +3220,11 @@ export class TechnitiumService {
           .map(({ probe }) => probe.clusterDomain ?? ""),
       );
       const topologyMismatch =
-        !hasImplicitNodeGrouping(this.nodeConfigs) &&
+        (role === "schedule" || !hasImplicitNodeGrouping(this.nodeConfigs)) &&
         (reportedTopologyDomains.size > 1 ||
           (nodes.length > 1 &&
+            (!hasImplicitNodeGrouping(this.nodeConfigs) ||
+              successful.some(({ probe }) => probe.clusterInitialized)) &&
             successful.some(({ probe }) => !probe.clusterInitialized)) ||
           successful.some(
             ({ node, probe }) =>
@@ -3121,10 +3244,10 @@ export class TechnitiumService {
                 permission?.canDelete === true,
             ) ||
             probe.permissions["Administration"]?.canView === true
-          : probe.permissions["Apps"]?.canModify !== true,
+          : false,
       );
       if (
-        failedNodeIds.length > 0 ||
+        (role === "background" && failedNodeIds.length > 0) ||
         topologyMismatch ||
         ownerMismatch ||
         permissionMismatch
@@ -3165,6 +3288,20 @@ export class TechnitiumService {
       )?.probe.clusterDomain;
       if (topologyDomain) {
         topologyDomains.set(groupId, topologyDomain);
+      }
+
+      if (role === "schedule") {
+        statuses.push(
+          buildScheduleGroupStatus(
+            groupId,
+            nodes,
+            successful,
+            unreachableNodeIds,
+            failedNodeIds,
+            (node, probe) => this.getCredentialProbeNodeRole(node, probe),
+          ),
+        );
+        continue;
       }
 
       const admitted = emptyAdmissions();
@@ -3371,7 +3508,7 @@ export class TechnitiumService {
           );
 
           const data = this.unwrapApiResponse<TechnitiumPtrLookupResult>(
-            envelope as unknown as TechnitiumApiResponse<TechnitiumPtrLookupResult>,
+            envelope,
             candidate.id,
             "PTR lookup",
           );
@@ -5634,19 +5771,16 @@ export class TechnitiumService {
         }
 
         const sourceScopeDetail =
-          sourceScopeDetails.get(scopeName.toLowerCase()) ||
-          (sourceScope as unknown as import("./technitium.types").TechnitiumDhcpScope);
+          sourceScopeDetails.get(scopeName.toLowerCase()) || sourceScope;
 
         const scopeDiff = targetScopeDetails
           ? this.compareDhcpScopes(sourceScopeDetail, targetScopeDetails, {
               ignoreOfferDelayTime: shouldPreserveOfferDelayTime,
             })
           : existingTargetScope
-            ? this.compareDhcpScopes(
-                sourceScopeDetail,
-                existingTargetScope as unknown as import("./technitium.types").TechnitiumDhcpScope,
-                { ignoreOfferDelayTime: shouldPreserveOfferDelayTime },
-              )
+            ? this.compareDhcpScopes(sourceScopeDetail, existingTargetScope, {
+                ignoreOfferDelayTime: shouldPreserveOfferDelayTime,
+              })
             : undefined;
 
         // Apply strategy
@@ -6178,11 +6312,11 @@ export class TechnitiumService {
       for (const field of fieldsToCompare) {
         if (
           !this.areZoneValuesEqual(
-            baselineNormalized[field as ZoneComparisonField],
-            currentNormalized[field as ZoneComparisonField],
+            baselineNormalized[field],
+            currentNormalized[field],
           )
         ) {
-          differences.add(field as ZoneComparisonField);
+          differences.add(field);
         }
       }
     }
@@ -6223,7 +6357,7 @@ export class TechnitiumService {
       );
     }
 
-    return result as Record<ZoneComparisonField, unknown>;
+    return result;
   }
 
   private normalizeStringArray(values: string[] | null | undefined): string[] {
@@ -6486,6 +6620,46 @@ export class TechnitiumService {
     const group = current?.groups.find((item) => item.groupId === groupId);
     if (!current || !group) return;
 
+    if (
+      authMode === "schedule" &&
+      group.primaryCredential?.state === "ready" &&
+      group.primaryCredential.nodeId !== node.id
+    ) {
+      // Node-local Secondary rejection cannot revoke a validated Primary.
+      group.authenticatedNodeIds = group.authenticatedNodeIds.filter(
+        (id) => id !== node.id,
+      );
+      group.unreachableNodeIds = group.unreachableNodeIds.filter(
+        (id) => id !== node.id,
+      );
+      if (!group.failedNodeIds.includes(node.id))
+        group.failedNodeIds.push(node.id);
+      for (const ids of Object.values(group.admittedNodeIds)) {
+        const index = ids.indexOf(node.id);
+        if (index >= 0) ids.splice(index, 1);
+      }
+      group.state = "degraded";
+      group.failoverCoverage = "partial";
+      group.secondaryCredentialUnavailableNodeIds = [
+        ...new Set([
+          ...(group.secondaryCredentialUnavailableNodeIds ?? []),
+          node.id,
+        ]),
+      ];
+      group.capabilities.cacheFlush =
+        group.admittedNodeIds.cacheFlush.length > 0;
+      group.capabilities.ptrRead = group.admittedNodeIds.ptrRead.length > 0;
+      group.capabilities.dhcpRead = group.admittedNodeIds.dhcpRead.length > 0;
+      group.reason =
+        "Primary credential is ready; a Secondary credential is unavailable. Unattended failover coverage is partial.";
+      this.updateAutomationCredentialSummary(authMode, current);
+      return;
+    }
+
+    if (authMode === "schedule") {
+      group.primaryCredential = { state: "unavailable" };
+      group.failoverCoverage = "none";
+    }
     const groupNodeIds = this.nodeConfigs
       .filter((candidate) => nodeGroupId(candidate) === groupId)
       .map((candidate) => candidate.id);
@@ -6509,6 +6683,20 @@ export class TechnitiumService {
     }
 
     this.updateAutomationCredentialSummary(authMode, current);
+  }
+
+  private invalidateSchedulePrimaryAdmission(groupId: string): void {
+    const current = this.scheduleGroupCredentials;
+    const group = current?.groups.find((item) => item.groupId === groupId);
+    if (!current || !group) return;
+    group.admittedNodeIds.primaryConfigWrite = [];
+    group.capabilities.primaryConfigWrite = false;
+    group.primaryCredential = { state: "unavailable" };
+    group.failoverCoverage = "none";
+    group.state = "failed";
+    group.reason =
+      "The current Primary is not authenticated for schedule writes. Configure a token issued by the current Primary and revalidate DNS Schedules credentials; node-local scalar/group tokens do not provide unattended failover.";
+    this.updateAutomationCredentialSummary("schedule", current);
   }
 
   private updateAutomationCredentialSummary(
@@ -6588,6 +6776,20 @@ export class TechnitiumService {
       primaryConfigWrite: group.admittedNodeIds.primaryConfigWrite.length > 0,
       cacheFlush: group.admittedNodeIds.cacheFlush.length > 0,
     };
+    if (authMode === "schedule") {
+      if (group.primaryCredential?.nodeId === node.id) {
+        group.primaryCredential = { state: "unavailable" };
+        group.failoverCoverage = "none";
+      } else if (group.primaryCredential?.state === "ready") {
+        group.failoverCoverage = "partial";
+        group.secondaryCredentialUnavailableNodeIds = [
+          ...new Set([
+            ...(group.secondaryCredentialUnavailableNodeIds ?? []),
+            node.id,
+          ]),
+        ];
+      }
+    }
     group.state =
       group.authenticatedNodeIds.length > 0 ? "degraded" : "unreachable";
     group.reason = "One or more group members are awaiting revalidation.";
@@ -6621,6 +6823,131 @@ export class TechnitiumService {
     return "interactive";
   }
 
+  /**
+   * Verify that the request session, rather than an unattended credential, is
+   * admitted for Apps: Modify on every effective configuration write target.
+   */
+  async assertSessionConfigWriteAccess(
+    candidateNodeIds: string[],
+  ): Promise<void> {
+    const session = AuthRequestContext.getSession();
+    if (!session) {
+      throw new ForbiddenException(
+        "Apps: Modify permission could not be verified for this session.",
+      );
+    }
+    const credentials = session.groupCredentials;
+    if (!credentials && session.authSource !== "password") {
+      throw new ForbiddenException(
+        "Apps: Modify permission could not be verified for this session.",
+      );
+    }
+    const summaries = await this.listNodes({ authMode: "session" });
+    const { perCandidate } = await this.resolveClusterWriteTargets(
+      candidateNodeIds,
+      summaries,
+    );
+    for (const nodeId of candidateNodeIds) {
+      const writeTarget = perCandidate.get(nodeId)?.writeTarget;
+      const config = writeTarget
+        ? this.nodeConfigs.find((item) => item.id === writeTarget)
+        : undefined;
+      if (!writeTarget || !config) {
+        throw new ForbiddenException(
+          `Technitium node "${nodeId}" is not verified for Apps: Modify in this session.`,
+        );
+      }
+      if (!credentials) {
+        // Password logins do not have a mapped credential envelope. Probe the
+        // actual token that will be used for this resolved write endpoint;
+        // schedule credentials are never considered on this interactive path.
+        const token = session.tokensByNodeId[writeTarget];
+        if (!token) {
+          throw new ForbiddenException(
+            `Technitium node "${nodeId}" has no session token for its write target.`,
+          );
+        }
+        const probe = await this.validateExplicitSessionToken(
+          writeTarget,
+          token,
+        );
+        const role = this.getCredentialProbeNodeRole(config, probe);
+        if (
+          probe.permissions["Apps"]?.canModify !== true ||
+          (probe.clusterInitialized && role !== "Primary")
+        ) {
+          throw new ForbiddenException(
+            `Technitium node "${nodeId}" is not verified for Apps: Modify in this session.`,
+          );
+        }
+        continue;
+      }
+      const group = credentials.groups.find(
+        (item) => item.groupId === nodeGroupId(config),
+      );
+      if (
+        group?.state !== "ready" ||
+        group.capabilities.primaryConfigWrite !== true ||
+        !group.admittedNodeIds.primaryConfigWrite.includes(writeTarget)
+      ) {
+        throw new ForbiddenException(
+          `Technitium node "${nodeId}" is not verified for Apps: Modify in this session.`,
+        );
+      }
+    }
+  }
+  /** Verify Apps: Modify for already-resolved effective write targets. */
+  async assertSessionConfigWriteTargets(
+    writeTargetNodeIds: string[],
+  ): Promise<void> {
+    const session = AuthRequestContext.getSession();
+    const credentials = session?.groupCredentials;
+    if (!session || (!credentials && session.authSource !== "password")) {
+      throw new ForbiddenException(
+        "Apps: Modify permission could not be verified for this session.",
+      );
+    }
+    for (const writeTarget of new Set(writeTargetNodeIds)) {
+      const config = this.nodeConfigs.find((item) => item.id === writeTarget);
+      if (!config)
+        throw new ForbiddenException(
+          `Technitium node "${writeTarget}" is not verified for Apps: Modify in this session.`,
+        );
+      if (!credentials) {
+        const token = session.tokensByNodeId[writeTarget];
+        if (!token)
+          throw new ForbiddenException(
+            "Apps: Modify permission could not be verified for this session.",
+          );
+        const probe = await this.validateExplicitSessionToken(
+          writeTarget,
+          token,
+        );
+        const role = this.getCredentialProbeNodeRole(config, probe);
+        if (
+          probe.permissions["Apps"]?.canModify !== true ||
+          (probe.clusterInitialized && role !== "Primary")
+        ) {
+          throw new ForbiddenException(
+            `Technitium node "${writeTarget}" is not verified for Apps: Modify in this session.`,
+          );
+        }
+        continue;
+      }
+      const group = credentials.groups.find(
+        (item) => item.groupId === nodeGroupId(config),
+      );
+      if (
+        group?.state !== "ready" ||
+        group.capabilities.primaryConfigWrite !== true ||
+        !group.admittedNodeIds.primaryConfigWrite.includes(writeTarget)
+      ) {
+        throw new ForbiddenException(
+          `Technitium node "${writeTarget}" is not verified for Apps: Modify in this session.`,
+        );
+      }
+    }
+  }
   private assertSessionNodeAdmitted(
     session: ReturnType<typeof AuthRequestContext.getSession>,
     node: TechnitiumNodeConfig,
@@ -6820,6 +7147,39 @@ export class TechnitiumService {
       throw new ForbiddenException(
         `${authMode === "background" ? "Background" : "Schedule"} credential is not admitted for ${role} on node "${node.id}".`,
       );
+    }
+    if (authMode === "schedule" && role === "primaryConfigWrite") {
+      const credential = this.scheduleCredentials.credentialsByGroup.get(
+        nodeGroupId(node),
+      );
+      try {
+        if (!credential) throw new Error("Missing schedule credential");
+        const probe = await this.validateExplicitSessionToken(
+          node.id,
+          credential.token,
+        );
+        const currentRole = this.getCredentialProbeNodeRole(node, probe);
+        if (
+          probe.permissions["Apps"]?.canModify !== true ||
+          probe.topologyKnown !== true ||
+          (group.verifiedUsername &&
+            probe.username !== group.verifiedUsername) ||
+          (probe.clusterInitialized &&
+            (currentRole !== "Primary" ||
+              !probe.clusterDomain ||
+              probe.clusterDomain !==
+                this.scheduleTopologyDomainsByGroup.get(nodeGroupId(node)) ||
+              probe.clusterNodes.filter((member) => member.type === "Primary")
+                .length !== 1))
+        ) {
+          throw new Error("Current Primary credential could not be confirmed");
+        }
+      } catch {
+        this.invalidateSchedulePrimaryAdmission(nodeGroupId(node));
+        throw new ServiceUnavailableException(
+          `Schedule writes require a valid token with Apps: Modify on the exact current Primary ("${node.id}"). Configure a token issued by the current Primary and revalidate DNS Schedules credentials.`,
+        );
+      }
     }
   }
 
@@ -7885,32 +8245,7 @@ export class TechnitiumService {
     nodeId: string,
     context: string,
   ): T {
-    if (!envelope) {
-      throw new ServiceUnavailableException(
-        `Technitium DNS node "${nodeId}" returned no data while fetching ${context}.`,
-      );
-    }
-
-    if (envelope.status !== "ok") {
-      if (envelope.status === "invalid-token") {
-        throw new UnauthorizedException(
-          `Technitium DNS node "${nodeId}" rejected ${context}: invalid token.`,
-        );
-      }
-      const detail =
-        envelope.errorMessage ?? envelope.innerErrorMessage ?? "unknown error";
-      throw new ServiceUnavailableException(
-        `Technitium DNS node "${nodeId}" rejected ${context}: ${detail}.`,
-      );
-    }
-
-    if (envelope.response === undefined) {
-      throw new ServiceUnavailableException(
-        `Technitium DNS node "${nodeId}" did not include a response payload for ${context}.`,
-      );
-    }
-
-    return envelope.response;
+    return unwrapApiResponse(envelope, nodeId, context);
   }
 
   private normalizeAxiosError(

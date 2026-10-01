@@ -9,6 +9,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Timed Advanced Blocking pause through the existing header controls, with duration
+  presets, countdown, extension, Resume now, and durable recovery across browser
+  closure and Companion restarts. Built-in Blocking retains its native timer.
+- Persistent recovery warnings show the affected targets and causes when Advanced
+  Blocking restoration fails or remains unconfirmed beyond expiry.
+
+### Changed
+
+- Advanced Blocking configuration writers share per-target serialization, preserve
+  pause-owned root state, and require confirmed standalone or current Primary
+  topology. Unconfirmed routing prevents writes and returns an actionable error.
+- Schedule credentials valid on the current Primary remain usable for Primary-only
+  writes when a Secondary rejects the token or is unreachable. Status distinguishes
+  current write readiness from failover coverage; node-local tokens still require
+  credential updates after a Primary change.
+
+### Fixed
+
+- Deduplicated Nest common so API errors retain their intended HTTP status and
+  message instead of becoming generic HTTP 500 responses.
+
 ## [1.12.0] - 2026-09-22
 
 ### Added

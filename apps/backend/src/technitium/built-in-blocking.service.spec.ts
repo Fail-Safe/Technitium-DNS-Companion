@@ -1,5 +1,4 @@
 import { BuiltInBlockingService } from "./built-in-blocking.service";
-import type { TechnitiumApiResponse } from "./technitium.types";
 import type { TechnitiumService } from "./technitium.service";
 
 describe("BuiltInBlockingService - export parsing", () => {
@@ -18,7 +17,7 @@ describe("BuiltInBlockingService - export parsing", () => {
       .mockImplementation((_nodeId: string, options: { url: string }) => {
         if (options.url === "/api/blocked/export") {
           // Export endpoint returns plain text
-          return exportPayload as unknown as TechnitiumApiResponse<string>;
+          return exportPayload;
         }
         throw new Error(`Unexpected URL: ${options.url}`);
       });

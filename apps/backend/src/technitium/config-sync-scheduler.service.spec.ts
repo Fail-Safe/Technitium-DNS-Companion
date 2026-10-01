@@ -35,7 +35,7 @@ describe("ConfigSyncSchedulerService", () => {
 
   function createService() {
     const advancedBlockingService = {
-      getSnapshotWithAuth: jest.fn(),
+      getConfigSyncSnapshot: jest.fn(),
       setConfigWithAuth: jest.fn(),
     };
     const snapshotService = { saveSnapshot: jest.fn() };
@@ -69,7 +69,7 @@ describe("ConfigSyncSchedulerService", () => {
   it("skips converged targets and snapshots divergent targets before syncing", async () => {
     const { service, advancedBlockingService, snapshotService, emailService } =
       createService();
-    advancedBlockingService.getSnapshotWithAuth
+    advancedBlockingService.getConfigSyncSnapshot
       .mockResolvedValueOnce(nodeSnapshot("primary", sourceConfig))
       .mockResolvedValueOnce(nodeSnapshot("secondary-a", sourceConfig))
       .mockResolvedValueOnce(nodeSnapshot("secondary-b", targetConfig));
@@ -94,6 +94,7 @@ describe("ConfigSyncSchedulerService", () => {
       "secondary-b",
       sourceConfig,
       "schedule",
+      undefined,
     );
     expect(emailService.sendConfigSyncFailureAlert).not.toHaveBeenCalled();
   });
@@ -101,7 +102,7 @@ describe("ConfigSyncSchedulerService", () => {
   it("sends one failure alert until a successful run resets suppression", async () => {
     const { service, advancedBlockingService, emailService } = createService();
     const setFailureRun = () => {
-      advancedBlockingService.getSnapshotWithAuth
+      advancedBlockingService.getConfigSyncSnapshot
         .mockResolvedValueOnce(nodeSnapshot("primary", sourceConfig))
         .mockRejectedValueOnce(new Error("secondary unavailable"))
         .mockResolvedValueOnce(nodeSnapshot("secondary-b", sourceConfig));
@@ -113,7 +114,7 @@ describe("ConfigSyncSchedulerService", () => {
     await service.runNow();
     expect(emailService.sendConfigSyncFailureAlert).toHaveBeenCalledTimes(1);
 
-    advancedBlockingService.getSnapshotWithAuth
+    advancedBlockingService.getConfigSyncSnapshot
       .mockResolvedValueOnce(nodeSnapshot("primary", sourceConfig))
       .mockResolvedValueOnce(nodeSnapshot("secondary-a", sourceConfig))
       .mockResolvedValueOnce(nodeSnapshot("secondary-b", sourceConfig));
@@ -126,7 +127,7 @@ describe("ConfigSyncSchedulerService", () => {
 
   it("records and alerts when the source cannot be read", async () => {
     const { service, advancedBlockingService, emailService } = createService();
-    advancedBlockingService.getSnapshotWithAuth.mockRejectedValue(
+    advancedBlockingService.getConfigSyncSnapshot.mockRejectedValue(
       new Error("source unavailable"),
     );
 

@@ -130,9 +130,8 @@ export class ConfigSyncSchedulerService
     let source: AdvancedBlockingSnapshot;
 
     try {
-      source = await this.advancedBlockingService.getSnapshotWithAuth(
+      source = await this.advancedBlockingService.getConfigSyncSnapshot(
         this.sourceNodeId,
-        "schedule",
       );
     } catch (error) {
       return this.finalizeRun({
@@ -171,10 +170,10 @@ export class ConfigSyncSchedulerService
 
     for (const targetNodeId of this.targetNodeIds) {
       try {
-        const target = await this.advancedBlockingService.getSnapshotWithAuth(
-          targetNodeId,
-          "schedule",
-        );
+        const target =
+          await this.advancedBlockingService.getConfigSyncSnapshot(
+            targetNodeId,
+          );
 
         if (
           target.config &&
@@ -198,6 +197,7 @@ export class ConfigSyncSchedulerService
           targetNodeId,
           source.config,
           "schedule",
+          target.configRevision,
         );
         targets.push({ nodeId: targetNodeId, status: "synced" });
       } catch (error) {

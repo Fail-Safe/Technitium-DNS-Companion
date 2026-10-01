@@ -1942,7 +1942,7 @@ export class DomainListCacheService implements OnModuleInit, OnModuleDestroy {
         );
         return {
           status: response.status,
-          headers: response.headers as Record<string, unknown> | undefined,
+          headers: response.headers,
           data: response.data as string,
         };
       } catch (error) {

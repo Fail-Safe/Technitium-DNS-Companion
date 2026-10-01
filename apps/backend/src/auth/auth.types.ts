@@ -28,6 +28,10 @@ export interface GroupCredentialStatus {
   groupId: string;
   state: GroupCredentialState;
   verifiedUsername?: string;
+  /** Schedule-only diagnostics; no credentials are included. */
+  primaryCredential?: { state: "ready" | "unavailable"; nodeId?: string };
+  failoverCoverage?: "complete" | "partial" | "none";
+  secondaryCredentialUnavailableNodeIds?: string[];
   authenticatedNodeIds: string[];
   unreachableNodeIds: string[];
   failedNodeIds: string[];

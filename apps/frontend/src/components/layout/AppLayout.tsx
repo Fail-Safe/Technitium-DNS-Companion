@@ -6,6 +6,7 @@ import { NodeSessionExpiredBanner } from "../common/NodeSessionExpiredBanner";
 import { GroupCredentialStatusBanner } from "../common/GroupCredentialStatusBanner";
 import { TransportSecurityBanner } from "../common/TransportSecurityBanner";
 import { Header } from "./Header";
+import { AdvancedBlockingRecoveryBanner } from "./AdvancedBlockingRecoveryBanner";
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -14,8 +15,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const isWideRoute = WIDE_ROUTE_PREFIXES.some((prefix) =>
     location.pathname.startsWith(prefix),
   );
-  const mainClassName =
-    isWideRoute ? "app-content app-content--wide" : "app-content";
+  const mainClassName = isWideRoute
+    ? "app-content app-content--wide"
+    : "app-content";
 
   return (
     <div className="app-shell">
@@ -40,7 +42,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       <BackgroundTokenSecurityBanner
         backgroundPtrToken={status?.backgroundPtrToken}
       />
-      <main className={mainClassName}>{children}</main>
+      <main className={mainClassName}>
+        <AdvancedBlockingRecoveryBanner />
+        {children}
+      </main>
     </div>
   );
 }
